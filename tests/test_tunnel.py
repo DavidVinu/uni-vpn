@@ -2,7 +2,10 @@ import asyncio
 import logging
 import os
 import socket
+import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -23,6 +26,20 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(tn.classify_line("SAML authentication required")[0], "auth_failed")
         self.assertEqual(tn.classify_line("Server certificate verify failed")[0], "error")
         self.assertIsNone(tn.classify_line("Connected as 10.0.0.2"))
+
+    def test_wrong_password_and_input_required_share_message(self):
+        # Feststellung 6: ein falsches Passwort erzeugt bei --non-inter zuerst
+        # "User input required", dann "Failed to complete authentication".
+        # Beide Marker muessen dieselbe ehrliche Meldung liefern.
+        input_required = tn.classify_line("User input required in non-interactive mode")
+        auth_failed = tn.classify_line("Failed to complete authentication")
+        self.assertEqual(input_required[0], "auth_failed")
+        self.assertEqual(auth_failed[0], "auth_failed")
+        self.assertEqual(input_required[1], auth_failed[1])
+        self.assertIn("Passwort", input_required[1])
+        self.assertIn("uni-vpn password", input_required[1])
+        self.assertIn("OTP", input_required[1])
+        self.assertIn("uni-vpn log", input_required[1])
 
 
 class TunnelTests(unittest.IsolatedAsyncioTestCase):
@@ -78,7 +95,76 @@ class TunnelTests(unittest.IsolatedAsyncioTestCase):
         t = self.make()
         await t.start(b"x")
         self.assertFalse(await t.wait_ready(3))
+        self.assertEqual(t.classification[0], "auth_failed")
         self.assertIn("OTP", t.classification[1])
+        # Feststellung 6: dieselbe Zeilenfolge entsteht bei falschem Passwort.
+        self.assertIn("Passwort", t.classification[1])
+
+    def test_script_value_survives_sh_with_spaces_and_quote(self):
+        # Feststellung 5: openconnect fuehrt --script per /bin/sh -c aus.
+        base = Path(tempfile.mkdtemp()) / "mit leerzeichen"
+        base.mkdir()
+        wrapper = base / "o'proxy wrapper"
+        argfile = base / "args"
+        wrapper.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$@\" > '{argfile}'\n")
+        wrapper.chmod(0o755)
+        t = tn.Tunnel(self.cfg, FAKE, str(wrapper), self.log)
+        cmd = t.command(4321)
+        script = [a for a in cmd if a.startswith("--script=")][0][len("--script="):]
+        result = subprocess.run(["/bin/sh", "-c", script], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(argfile.read_text(), "4321\n")
+
+    def test_kill_wrapper_argv(self):
+        # Feststellung 4: Muster ohne fuehrenden Bindestrich, "--" vor dem Muster,
+        # nur eigene Prozesse, Rueckgabewert im Log.
+        t = self.make()
+        t.port = 4321
+        with mock.patch.object(tn.subprocess, "run") as run:
+            run.return_value = subprocess.CompletedProcess(args=[], returncode=1)
+            with self.assertLogs(self.log, "WARNING") as logs:
+                t._kill_wrapper()
+        run.assert_called_once_with(
+            ["pkill", "-9", "-U", str(os.getuid()), "-f", "--", "ocproxy -D 127.0.0.1:4321 "],
+            check=False,
+        )
+        self.assertTrue(any("1" in line and "pkill" in line for line in logs.output), logs.output)
+
+    def test_kill_wrapper_kills_port_holder(self):
+        # Feststellung 4: ein Prozess, dessen Kommandozeile wie der Wrapper-exec aussieht
+        # und der den Port haelt, muss nach _kill_wrapper() verschwunden sein.
+        port = tn.free_port()
+        code = (
+            "import socket, sys, time\n"
+            "s = socket.socket()\n"
+            "s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n"
+            "s.bind(('127.0.0.1', int(sys.argv[3].split(':')[1])))\n"
+            "s.listen(16)\n"
+            "while True:\n"
+            "    c, _ = s.accept()\n"
+            "    c.close()\n"
+        )
+        dummy = subprocess.Popen(
+            [sys.executable, "-c", code, "ocproxy", "-D", f"127.0.0.1:{port}", "-k", "30"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        try:
+            deadline = time.monotonic() + 3
+            while not tn.port_open(port) and time.monotonic() < deadline:
+                time.sleep(0.05)
+            self.assertTrue(tn.port_open(port), "Dummy haelt den Port nicht")
+            t = self.make()
+            t.port = port
+            t._kill_wrapper()
+            deadline = time.monotonic() + 2
+            while tn.port_open(port) and time.monotonic() < deadline:
+                time.sleep(0.05)
+            self.assertFalse(tn.port_open(port), "Port nach _kill_wrapper() noch offen")
+            self.assertEqual(dummy.wait(timeout=2), -9)
+        finally:
+            if dummy.poll() is None:
+                dummy.kill()
+                dummy.wait()
 
     async def test_ignore_sigterm_gets_killed(self):
         os.environ["FAKE_MODE"] = "ignore_sigterm"

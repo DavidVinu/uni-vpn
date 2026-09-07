@@ -6,6 +6,7 @@ import asyncio
 import collections
 import logging
 import os
+import shlex
 import signal
 import socket
 import subprocess
@@ -13,15 +14,22 @@ import time
 
 from .config import Config
 
+# Ein abgelehntes Passwort erzeugt bei --non-inter dieselbe Zeilenfolge wie eine echte
+# Zweitabfrage (Formular kommt erneut, stdin ist zu, "User input required", dann
+# "Failed to complete authentication"). Beide Marker bekommen daher eine Meldung.
+AUTH_REJECTED = (
+    "Anmeldung abgelehnt: Passwort pruefen (uni-vpn password). "
+    "Stimmt es, verlangt der Server eine zweite Eingabe (OTP), siehe uni-vpn log"
+)
+
 # (Teilstring in openconnect-Ausgabe, Zustand, Meldung). Erste Uebereinstimmung gewinnt.
 MARKERS: list[tuple[str, str, str]] = [
-    ("User input required in non-interactive mode", "auth_failed",
-     "Server verlangt eine weitere Eingabe (OTP?), Login nicht automatisierbar"),
+    ("User input required in non-interactive mode", "auth_failed", AUTH_REJECTED),
     ("Server asked us to run CSD", "auth_failed", "Server verlangt HostScan, uni-vpn braucht ein Update"),
     ("Cisco Secure Desktop", "auth_failed", "Server verlangt HostScan, uni-vpn braucht ein Update"),
     ("SAML", "auth_failed", "Login-Verfahren geaendert (SAML), uni-vpn braucht ein Update"),
     ("external browser", "auth_failed", "Login-Verfahren geaendert, uni-vpn braucht ein Update"),
-    ("Failed to complete authentication", "auth_failed", "Anmeldung abgelehnt: Passwort pruefen (uni-vpn password)"),
+    ("Failed to complete authentication", "auth_failed", AUTH_REJECTED),
     ("certificate", "error", "Zertifikatsproblem beim Server"),
 ]
 
@@ -79,7 +87,8 @@ class Tunnel:
             "--force-dpd=30",
             "--reconnect-timeout=60",
             "--script-tun",
-            f"--script={self.wrapper} {port}",
+            # openconnect fuehrt den Wert per /bin/sh -c aus, der Pfad darf Leerzeichen enthalten.
+            f"--script={shlex.quote(self.wrapper)} {port}",
             self.cfg.host,
         ]
 
@@ -159,9 +168,11 @@ class Tunnel:
         self._kill_wrapper()
 
     def _kill_wrapper(self) -> None:
-        pattern = f"-D 127.0.0.1:{self.port} "
+        # Muster ohne fuehrenden Bindestrich und hinter "--", sonst liest pkill es als Option.
+        pattern = f"ocproxy -D 127.0.0.1:{self.port} "
         self.log.warning("ocproxy haelt Port %s noch, pkill", self.port)
-        subprocess.run(["pkill", "-9", "-f", pattern], check=False)
+        result = subprocess.run(["pkill", "-9", "-U", str(os.getuid()), "-f", "--", pattern], check=False)
+        self.log.warning("pkill Exit %s (0 = getroffen, 1 = kein Treffer, 2 = Syntaxfehler)", result.returncode)
 
     def reconnect(self) -> None:
         if self.proc and not self.exited.is_set():
