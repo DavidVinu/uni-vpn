@@ -29,3 +29,5 @@ Ergebnisse mit Datum, openconnect-Version und Chrome/Firefox-Version unten eintr
 
 | Datum | Schritt | Ergebnis |
 |---|---|---|
+| 2026-09-07 | Vorabtest ohne Login (Daemon von Hand mit entpackten Paketen openconnect 9.12, ocproxy 1.60, libsecret-tools 0.21.4; Cisco-Client verbunden) | Daemon startet, Statusseite und `/status.json` antworten, SOCKS-Verbindung fuehrt zu `blocked: Cisco Secure Client ist verbunden`, curl bekommt sofort EOF. POST ohne Header, mit `Origin: null` und GET mit fremdem `Host` liefern 403. `uni-vpn doctor` meldet Ports gebunden, Daemon von Hand gestartet, Keyring ohne Passwort, Cisco verbunden. Log-Datei 0600. |
+| 2026-09-07 | CI (GitHub Actions, ubuntu-latest und macos-latest) | 145 Unit-Tests gruen auf beiden, darunter der echte macOS-Keychain-Roundtrip (`security` anlegen, lesen, ueberschreiben, loeschen), `plutil -lint` fuer das Plist, Installer-Trockenlauf, 17 Node-Tests. |
