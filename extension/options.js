@@ -14,6 +14,8 @@ async function save() {
   const socksPort = Number(el("socksPort").value);
   const httpPort = Number(el("httpPort").value);
   const result = el("result");
+  result.className = "";
+  result.textContent = "";
   const errors = parsed.errors.slice();
   for (const [name, port] of [["SOCKS-Port", socksPort], ["Status-Port", httpPort]]) {
     if (!Number.isInteger(port) || port < 1 || port > 65535) errors.push(name + " ist ungueltig");
@@ -24,16 +26,16 @@ async function save() {
     return;
   }
   // Firefox: Host-Permissions pro Domain anfragen (braucht die Nutzergeste dieses Klicks).
+  let denied = false;
   if (isFirefox && parsed.domains.length) {
     const origins = UniVpn.hostPatterns(parsed.domains);
-    const granted = await api.permissions.request({ origins });
-    if (!granted) {
-      result.className = "error";
-      result.textContent = "Ohne Freigabe fuer die Domains kann Firefox sie nicht umleiten.";
-    }
+    denied = !(await api.permissions.request({ origins }));
   }
   await api.storage.local.set({ domains: parsed.domains, socksPort, httpPort });
-  if (!(result.className === "error")) {
+  if (denied) {
+    result.className = "error";
+    result.textContent = "Ohne Freigabe fuer die Domains kann Firefox sie nicht umleiten.";
+  } else {
     result.className = "ok";
     result.textContent = "Gespeichert";
   }

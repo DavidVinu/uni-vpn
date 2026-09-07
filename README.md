@@ -7,6 +7,7 @@ dem Rechner bleibt unberuehrt.
 
 Unterstuetzt: Ubuntu 24.04 mit Google Chrome und Firefox (Snap). macOS 14+ auf Apple Silicon
 ist vorbereitet, aber noch nicht auf einem echten Mac getestet (siehe `docs/macos-test.md`).
+Alles andere kann funktionieren, kein Support.
 
 ## Installation
 
@@ -28,7 +29,9 @@ Schluss eine Selbstdiagnose. Danach die Extension laden:
   Ordner `~/uni-vpn/extension` waehlen.
 - Firefox: `about:debugging#/runtime/this-firefox`, "Temporaeres Add-on laden",
   `~/uni-vpn/extension/manifest.json` waehlen. Das haelt bis zum Neustart; eine signierte Version
-  folgt.
+  folgt. Firefox fragt zweimal nach: beim Speichern der Optionen die Freigabe fuer die gelisteten
+  Domains (bestaetigen), und in `about:addons` unter Uni VPN "In privaten Fenstern ausfuehren"
+  erlauben.
 
 Fertig. `https://sogo.uni-heidelberg.de` und `https://elearning-med.uni-heidelberg.de` laufen ab
 jetzt ueber die Uni, alles andere nicht. Weitere Domains stehen in den Optionen der Extension.
@@ -55,6 +58,8 @@ jetzt ueber die Uni, alles andere nicht. Weitere Domains stehen in den Optionen 
 | Popup: "Cisco Secure Client ist verbunden" | Cisco-Client aktiv | Cisco trennen, uni-vpn verbindet dann von selbst |
 | Popup: "Schluesselbund gesperrt" | Keyring nach Autologin nicht entsperrt | Abmelden und mit Passwort anmelden |
 | Popup: "Kein Netz oder Captive Portal" | WLAN-Anmeldeseite noch nicht bestaetigt | Anmeldeseite oeffnen, danach geht es von selbst weiter |
+| Popup: "Freigabe fuer die gelisteten Domains fehlt" | Firefox-Freigabe abgelehnt oder Domains ohne Optionen-Dialog geaendert | Knopf "Freigeben" im Popup klicken |
+| Popup: "In privaten Fenstern nicht aktiv" | Firefox erlaubt Add-ons in privaten Fenstern nicht von selbst | `about:addons`, Uni VPN, "In privaten Fenstern ausfuehren" erlauben |
 | Erste Seite nach laengerer Pause laedt nicht | Tunnelaufbau dauerte laenger als der Browser wartet | Seite neu laden |
 
 ## Was der Rechner davon merkt
