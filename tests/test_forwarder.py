@@ -73,6 +73,22 @@ class ForwarderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.fwd.active, 0)
         writer.close()
 
+    async def test_close_all_cancels_waiting_handlers(self):
+        gate = asyncio.Event()
+
+        async def blocked():
+            await gate.wait()
+            return self.echo_port
+
+        self.fwd.get_target = blocked
+        reader, writer = await asyncio.open_connection("127.0.0.1", self.fwd.port)
+        await asyncio.sleep(0.1)
+        self.assertEqual(self.fwd.active, 1)
+        await self.fwd.close_all()
+        self.assertEqual(self.fwd.active, 0)
+        self.assertEqual(await asyncio.wait_for(reader.read(10), 2), b"")
+        writer.close()
+
     async def test_halfclose_grace(self):
         reader, writer = await asyncio.open_connection("127.0.0.1", self.fwd.port)
         writer.write(b"abc")

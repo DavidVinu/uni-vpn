@@ -291,7 +291,7 @@ class Daemon:
                 if tunnel.stopped_by_us:
                     self.tunnel = None
                     self._set(State.idle, "Getrennt")
-                    return
+                    continue  # ein zwischenzeitliches request_connect greift ueber has_demand()
                 if not tunnel.exited.is_set():
                     await tunnel.stop(cfg.stop_grace)
                     state, message = State.error, "Verbindungsaufbau dauerte zu lange"
@@ -313,13 +313,16 @@ class Daemon:
             self.failures = 0
             self.log.info("Tunnel bereit nach %.1f s", (tunnel.ready_at or 0) - (tunnel.started_at or 0))
             self._set(State.connected, "Verbunden")
+            # Der Wunsch "jetzt verbinden" ist erfuellt. Ab hier zaehlt nur noch echte Nutzung,
+            # den Rest regelt der Leerlauf-Timer.
+            self.explicit = False
             self.note_activity()
             await tunnel.exited.wait()
             self.tunnel = None
             await self.forwarder.close_all()
             if tunnel.stopped_by_us:
                 self._set(State.idle, "Getrennt")
-                return
+                continue  # ein zwischenzeitliches request_connect greift ueber has_demand()
             message = tunnel.classification[1] if tunnel.classification else f"Tunnel abgebrochen (Exit {tunnel.returncode})"
             self.last_error = {"message": message, "at": time.time()}
             if not self.has_demand():
@@ -350,9 +353,14 @@ class Daemon:
             last_mono, last_wall = mono, wall
             if jump > 30:
                 self.log.info("Resume erkannt (Uhr sprang um %.0f s)", jump)
-                if self.tunnel:
-                    self.tunnel.reconnect()
+                tunnel = self.tunnel
+                if tunnel:
+                    # Sauber beenden statt SIGUSR2: der Zustandsautomat laeuft dann ueber
+                    # disconnecting -> idle und baut bei Bedarf neu auf.
+                    self.log.info("Resume erkannt, Tunnel wird neu aufgebaut")
+                    self._set(State.disconnecting, "Resume, Tunnel wird neu aufgebaut")
                     await self.forwarder.close_all()
+                    await tunnel.stop(self.cfg.stop_grace)
             if self.state == State.connected and self.tunnel and mono - self.last_activity > self.cfg.idle_minutes * 60:
                 self.log.info("Leerlauf seit %.0f s, Tunnel wird abgebaut", mono - self.last_activity)
                 self.explicit = False

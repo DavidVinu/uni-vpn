@@ -189,8 +189,9 @@ Abbau nach `idle_minutes` ohne Bytes, unabhaengig von offenen Verbindungen (WebS
 Long-Polling halten sonst ewig). Halb geschlossene Verbindungen: EOF einer Seite wird als
 `write_eof` weitergegeben, nach 60 s Nachfrist ohne Daten wird geschlossen.
 
-Resume-Erkennung: alle 5 s `time.monotonic()` gegen `time.time()`; Sprung > 30 s -> SIGUSR2
-an openconnect, alle Forwarder-Verbindungen schliessen, `connecting`.
+Resume-Erkennung: alle 5 s `time.monotonic()` gegen `time.time()`; Sprung > 30 s -> alle
+Forwarder-Verbindungen schliessen, Tunnel sauber beenden (`disconnecting` -> `idle`) und bei
+Bedarf ueber den normalen Zustandsautomaten neu aufbauen.
 
 ### 4.4 SOCKS-Forwarder
 

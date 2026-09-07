@@ -22,6 +22,7 @@ class Forwarder:
         self.rejected = 0
         self._server: asyncio.AbstractServer | None = None
         self._writers: set[asyncio.StreamWriter] = set()
+        self._waiting: set[asyncio.Task] = set()
 
     async def start(self) -> None:
         self._server = await asyncio.start_server(self._handle, self.host, self.port)
@@ -38,6 +39,13 @@ class Forwarder:
                 self.log.warning("Forwarder: Verbindungen nicht rechtzeitig geschlossen")
 
     async def close_all(self) -> None:
+        # Handler, die noch auf ein Ziel warten, zuerst abbrechen: sonst halten sie den
+        # Bedarf (active > 0) und stossen nach dem Trennen sofort einen Neuaufbau an.
+        waiting = list(self._waiting)
+        for task in waiting:
+            task.cancel()
+        if waiting:
+            await asyncio.wait(waiting, timeout=1)
         for writer in list(self._writers):
             writer.close()
         await asyncio.sleep(0)
@@ -47,7 +55,14 @@ class Forwarder:
         self._writers.add(writer)
         upstream_writer: asyncio.StreamWriter | None = None
         try:
-            target = await self.get_target()
+            task = asyncio.current_task()
+            self._waiting.add(task)
+            try:
+                target = await self.get_target()
+            except asyncio.CancelledError:
+                return
+            finally:
+                self._waiting.discard(task)
             if target is None:
                 self.rejected += 1
                 return

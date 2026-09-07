@@ -125,11 +125,39 @@ class ConnectTests(DaemonHarness):
         self.assertEqual(len(self.pw_lines()), 2)
         writer2.close()
 
+    async def test_disconnect_while_connecting_does_not_restart(self):
+        os.environ["FAKE_DELAY"] = "3"
+        d = await self.start_daemon()
+        reader, writer = await self.client()
+        await wait_state(d, dm.State.connecting)
+        await d.request_disconnect()
+        await wait_state(d, dm.State.idle)
+        self.assertEqual(await asyncio.wait_for(reader.read(10), 2), b"")
+        writer.close()
+        await asyncio.sleep(0.5)
+        self.assertEqual(d.state, dm.State.idle)
+        self.assertEqual(d.forwarder.active, 0)
+        self.assertEqual(len(self.pw_lines()), 1)
+
     async def test_explicit_connect_without_client(self):
         d = await self.start_daemon()
         await d.request_connect()
         await wait_state(d, dm.State.connected)
         self.assertEqual(len(self.pw_lines()), 1)
+        # Der Wunsch "jetzt verbinden" ist erfuellt, danach zaehlt nur noch echte Nutzung.
+        self.assertFalse(d.explicit)
+
+    async def test_connect_request_during_disconnecting_reconnects(self):
+        d = await self.start_daemon()
+        await d.request_connect()
+        await wait_state(d, dm.State.connected)
+        disconnect = asyncio.create_task(d.request_disconnect())
+        await asyncio.sleep(0)  # request_disconnect hat den Zustand gesetzt und wartet auf den Prozess
+        self.assertEqual(d.state, dm.State.disconnecting)
+        await d.request_connect()
+        await disconnect
+        await wait_state(d, dm.State.connected)
+        self.assertEqual(len(self.pw_lines()), 2)
 
 
 class IdleTests(DaemonHarness):
@@ -184,9 +212,12 @@ class FailureTests(DaemonHarness):
     async def test_tunnel_dies_with_demand_reconnects(self):
         os.environ["FAKE_MODE"] = "exit_after_ready"
         os.environ["FAKE_EXIT_AFTER"] = "0.4"
+        self.cfg.demand_window = 1.5  # Bedarf kommt aus der Nutzung, nicht aus request_connect
         d = await self.start_daemon()
-        await d.request_connect()
-        await wait_state(d, dm.State.connected)
+        reader, writer = await self.client()
+        writer.write(b"x")
+        await reader.readexactly(1)
+        self.assertEqual(d.state, dm.State.connected)
         deadline = time.monotonic() + 4
         while len(self.pw_lines()) < 2 and time.monotonic() < deadline:
             await asyncio.sleep(0.05)
@@ -277,9 +308,18 @@ class StatusTests(DaemonHarness):
 
     async def test_resume_triggers_reconnect(self):
         d = await self.start_daemon()
-        await d.request_connect()
-        await wait_state(d, dm.State.connected)
+        reader, writer = await self.client()
+        writer.write(b"x")
+        await reader.readexactly(1)
+        self.assertEqual(d.state, dm.State.connected)
         real_time = time.time
-        with mock.patch.object(dm.time, "time", lambda: real_time() + 120):
-            await asyncio.sleep(0.4)
-        self.assertTrue(any("SIGUSR2" in line for line in d.tunnel.stderr_tail))
+        with self.assertLogs("t", logging.INFO) as logs:
+            with mock.patch.object(dm.time, "time", lambda: real_time() + 120):
+                await asyncio.sleep(0.4)
+        self.assertTrue(any("Resume erkannt, Tunnel wird neu aufgebaut" in line for line in logs.output))
+        # Der alte Tunnel ist weg, die Browserverbindung wurde geschlossen ...
+        self.assertEqual(await asyncio.wait_for(reader.read(10), 3), b"")
+        writer.close()
+        # ... und weil noch Bedarf bestand, steht ein neuer Tunnel.
+        await wait_state(d, dm.State.connected)
+        self.assertEqual(len(self.pw_lines()), 2)
