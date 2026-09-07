@@ -64,6 +64,10 @@ COMMAND_TIMEOUT = 60
 
 
 def store_password(user: str, password: str, run=subprocess.run) -> None:
+    # Letzte Verteidigung: `security -i` liest zeilenweise Kommandos, openconnect
+    # --passwd-on-stdin genau eine Zeile. CLI und HTTP-API weisen das vorher ab.
+    if "\n" in password or "\r" in password:
+        raise KeyringError("Passwort darf keinen Zeilenumbruch enthalten")
     try:
         if pf.IS_MACOS:
             # Erst loeschen, dann neu anlegen: "-U" (Update) loest auf macOS einen

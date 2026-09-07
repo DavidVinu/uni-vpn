@@ -64,6 +64,21 @@ class StoreTests(unittest.TestCase):
         self.assertIn('add-generic-password -a "ab1" -s "uni-vpn" -T /usr/bin/security -w "a\\"b\\\\c"', script)
         self.assertNotIn(" -U ", script)
 
+    def test_store_rejects_newline_before_running_anything(self):
+        calls = []
+
+        def run(cmd, **kwargs):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+        for is_macos in (False, True):
+            for password in ("a\nb", "a\rb", 'pw"\ndelete-generic-password -s uni-vpn'):
+                with mock.patch.object(pf, "IS_MACOS", is_macos), \
+                     mock.patch.object(pf, "find_binary", return_value="/usr/bin/secret-tool"):
+                    with self.assertRaises(credentials.KeyringError, msg=repr(password)):
+                        credentials.store_password("ab1", password, run=run)
+        self.assertEqual(calls, [])
+
     def test_store_failure_raises(self):
         def run(cmd, **kwargs):
             return subprocess.CompletedProcess(cmd, 1, b"", b"kaputt")

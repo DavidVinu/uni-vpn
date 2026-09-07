@@ -5,9 +5,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 
 MAX_HEADER = 16 * 1024
 MAX_BODY = 64 * 1024
+
+# Nur dieses Muster darf in Access-Control-Allow-Origin zurueckgespiegelt werden.
+EXTENSION_ORIGIN = re.compile(r"(chrome|moz)-extension://[A-Za-z0-9-]+")
+CONTENT_LENGTH = re.compile(r"[0-9]+")
 
 STATUS_PAGE = """<!doctype html>
 <html lang="de"><head><meta charset="utf-8"><title>Uni VPN</title>
@@ -64,11 +69,17 @@ refresh(); setInterval(refresh, 2000);
 
 
 def allowed_origin(origin: str | None, port: int) -> bool:
-    if not origin or origin == "null":
+    # "null" (sandboxed iframe, data:-Seite) ist ein fremder Origin, kein fehlender.
+    if origin is None or origin == "":
         return True
     if origin == f"http://127.0.0.1:{port}":
         return True
-    return origin.startswith("chrome-extension://") or origin.startswith("moz-extension://")
+    return EXTENSION_ORIGIN.fullmatch(origin) is not None
+
+
+def allowed_host(host: str | None, port: int) -> bool:
+    """Schutz vor DNS-Rebinding: nur Loopback-Namen, sonst liest eine fremde Seite same-origin."""
+    return host in ("127.0.0.1", f"127.0.0.1:{port}", "localhost", f"localhost:{port}")
 
 
 class HttpApi:
@@ -110,7 +121,11 @@ class HttpApi:
             if ": " in line:
                 key, value = line.split(": ", 1)
                 headers[key.lower()] = value
-        length = int(headers.get("content-length", "0") or 0)
+        raw_length = headers.get("content-length", "0").strip() or "0"
+        if not CONTENT_LENGTH.fullmatch(raw_length):
+            await self._respond(writer, 400, "text/plain", b"ungueltige Content-Length", headers)
+            return
+        length = int(raw_length)
         body = b""
         if 0 < length <= MAX_BODY:
             try:
@@ -122,6 +137,9 @@ class HttpApi:
             await self._respond(writer, 413, "text/plain", b"zu gross", headers)
             return
         path = target.split("?", 1)[0]
+        if not allowed_host(headers.get("host"), self.port):
+            await self._respond(writer, 403, "text/plain", b"verboten", headers)
+            return
         try:
             status, ctype, payload = await self._route(method, path, headers, body)
         except Exception as exc:  # noqa: BLE001 - Statusseite darf nie sterben
@@ -135,7 +153,7 @@ class HttpApi:
         lines = [f"HTTP/1.1 {status} {reasons.get(status, 'Status')}",
                  f"Content-Type: {ctype}; charset=utf-8" if ctype.startswith("text/") else f"Content-Type: {ctype}",
                  f"Content-Length: {len(payload)}", "Cache-Control: no-store", "Connection: close",
-                 "X-Content-Type-Options: nosniff"]
+                 "X-Content-Type-Options: nosniff", "X-Frame-Options: DENY"]
         origin = request_headers.get("origin")
         if origin and allowed_origin(origin, self.port):
             lines += [f"Access-Control-Allow-Origin: {origin}", "Vary: Origin",
@@ -173,6 +191,8 @@ class HttpApi:
                 return 400, "text/plain", b"JSON mit 'password' erwartet"
             if not isinstance(password, str) or not password:
                 return 400, "text/plain", b"Passwort leer"
+            if "\n" in password or "\r" in password:
+                return 400, "text/plain", "Passwort darf keinen Zeilenumbruch enthalten".encode()
             try:
                 await self.daemon.set_password(password)
             except Exception as exc:  # noqa: BLE001 - Fehlertext geht an die Seite

@@ -8,6 +8,8 @@ import ctypes
 import fcntl
 import getpass
 import json
+import os
+import re
 import resource
 import signal
 import sys
@@ -110,6 +112,9 @@ def cmd_password(args) -> int:
     if not password:
         print("Kein Passwort eingegeben")
         return 2
+    if "\n" in password or "\r" in password:
+        print("Passwort darf keinen Zeilenumbruch enthalten")
+        return 2
     credentials.store_password(cfg.user, password)
     print("Passwort im Keyring abgelegt")
     try:
@@ -129,11 +134,42 @@ def cmd_log(args) -> int:
     return 0
 
 
+_PORT_LINE = re.compile(r"^\s*(socks_port|http_port)\s*=\s*([0-9]{1,5})\s*(#.*)?$")
+
+
+def _ports_from_broken_config(path: Path | None) -> dict[str, int]:
+    """Ports bestmoeglich aus einer fehlerhaften config.toml lesen.
+
+    Die Statusseite muss auch dann dort erreichbar sein, wo Browser und Extension sie
+    erwarten, sonst sieht niemand die Fehlermeldung mit der Zeilennummer.
+    """
+    try:
+        text = (path or config.default_path()).read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    ports: dict[str, int] = {}
+    for line in text.splitlines():
+        if line.strip().startswith("["):
+            break  # ab hier Tabellen wie [timing], keine Top-Level-Schluessel mehr
+        match = _PORT_LINE.match(line)
+        if match and 1 <= int(match.group(2)) <= 65535:
+            ports[match.group(1)] = int(match.group(2))
+    if len(ports) == 2 and ports["socks_port"] == ports["http_port"]:
+        return {}
+    return ports
+
+
+def install_signal_handlers(loop: asyncio.AbstractEventLoop, daemon) -> None:
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, daemon.stop)
+
+
 def cmd_daemon(args) -> int:
     from .daemon import Daemon
     from .logsetup import setup_logging
 
     harden()
+    os.umask(0o077)  # Lock-Datei, Log und alles Weitere nur fuer den Nutzer lesbar
     lock_path = pf.lock_file()
     lock_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     lock = open(lock_path, "w")  # noqa: SIM115 - bleibt bis zum Ende offen
@@ -147,16 +183,14 @@ def cmd_daemon(args) -> int:
     try:
         cfg = _load(args)
     except config.ConfigError as exc:
-        cfg = config.Config()
+        cfg = config.Config(**_ports_from_broken_config(Path(args.config) if args.config else None))
         config_error = str(exc)
         log.error("%s", exc)
     log.info("uni-vpn %s startet (SOCKS %s, Status %s)", __version__, cfg.socks_port, cfg.http_port)
 
     async def run() -> None:
         daemon = Daemon(cfg, log, config_error=config_error, log_tail=tail)
-        loop = asyncio.get_running_loop()
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(sig, daemon.stop)
+        install_signal_handlers(asyncio.get_running_loop(), daemon)
         await daemon.run()
 
     asyncio.run(run())
