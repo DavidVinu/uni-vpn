@@ -6,11 +6,13 @@ import getpass
 import os
 import subprocess
 import sys
+import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from . import config, credentials, doctor, service
 from . import platform as pf
+from .tunnel import port_open as _port_open
 
 INSTALLED_FILES = "installed-files.txt"
 EXTENSION_HINT = """
@@ -73,10 +75,28 @@ def _say(text: str) -> None:
     print(f"-> {text}")
 
 
+def wait_for_port(port: int, *, port_open=_port_open, timeout: float = 5.0, step: float = 0.25,
+                  sleep=None, clock=None) -> bool:
+    """Wartet, bis der Daemon nach dem Dienststart den Port gebunden hat. True, sobald er erreichbar ist."""
+    sleep = sleep or time.sleep
+    clock = clock or time.monotonic
+    deadline = clock() + timeout
+    while True:
+        if port_open(port):
+            return True
+        if clock() >= deadline:
+            return False
+        sleep(step)
+
+
 def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=service.install,
-          store=credentials.store_password, keyring_probe=doctor.keyring_state, run_doctor=True) -> int:
+          store=credentials.store_password, keyring_probe=doctor.keyring_state, run_doctor=True,
+          port_open=_port_open) -> int:
     dry = bool(getattr(args, "dry_run", False))
-    created: list[Path] = []
+
+    def created(path: Path) -> None:
+        # Sofort festhalten, damit ein Abbruch weiter unten nichts Unregistriertes hinterlaesst.
+        record([path])
 
     if sys.version_info < (3, 11):
         print(f"Python {sys.version_info.major}.{sys.version_info.minor} ist zu alt, mindestens 3.11 noetig")
@@ -113,7 +133,7 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
             cfg = config.Config(user=user)
         else:
             config.write_initial(cfg_path, user=user)
-            created.append(cfg_path)
+            created(cfg_path)
             cfg = config.load(cfg_path)
             _say(f"Konfiguration angelegt: {cfg_path}")
 
@@ -130,7 +150,7 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
             link.unlink()
         link.write_text(wrapper, encoding="utf-8")
         link.chmod(0o755)
-        created.append(link)
+        created(link)
         _say(f"Kommando angelegt: {link}")
         if str(link.parent) not in os.environ.get("PATH", "").split(os.pathsep):
             print(f"   Hinweis: {link.parent} ist nicht im PATH, neue Shell oeffnen oder Pfad ergaenzen")
@@ -139,12 +159,20 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
         openconnect = pf.find_binary("openconnect", cfg.openconnect) or "/usr/sbin/openconnect"
         new_file = ensure_apport_ignore(openconnect, dry_run=dry)
         if new_file:
-            created.append(new_file)
+            created(new_file)
         if not dry:
             _say("Crash-Reports fuer openconnect ausgeschlossen (~/.apport-ignore.xml)")
 
-    created += service_install(dry_run=dry)
+    try:
+        service_files = service_install(dry_run=dry)
+    except service.ServiceError as exc:
+        for path in exc.files:
+            created(path)
+        print(f"Dienst konnte nicht geladen werden: {exc}")
+        return 1
     if not dry:
+        for path in service_files:
+            created(path)
         _say("Dienst eingerichtet und gestartet")
 
     if pf.cisco_installed():
@@ -165,10 +193,9 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
             else:
                 print("   Kein Passwort eingegeben, spaeter: uni-vpn password")
 
-    if created and not dry:
-        record(created)
-
     if run_doctor and not dry:
+        # Der Dienst ist gestartet, aber der Daemon braucht einen Moment bis zum bind().
+        wait_for_port(cfg.http_port, port_open=port_open)
         print()
         print(doctor.format_checks(doctor.run_checks(cfg_path)))
     print(EXTENSION_HINT.format(ext=pf.repo_root() / "extension", port=cfg.http_port))

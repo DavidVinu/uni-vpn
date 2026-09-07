@@ -14,6 +14,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Python-Version
         run: python3 --version
+      - name: Syntax (compileall)
+        run: python3 -m compileall -q uni_vpn bin/uni-vpn tests
       - name: Unit-Tests
         run: python3 -m unittest discover -s tests -t . -v
       - name: Shell-Syntax

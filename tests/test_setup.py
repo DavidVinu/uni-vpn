@@ -8,6 +8,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
+from uni_vpn import doctor, service
 from uni_vpn import platform as pf
 from uni_vpn import setup
 
@@ -44,13 +45,13 @@ class SetupHarness(unittest.TestCase):
         base.update(kwargs)
         return argparse.Namespace(**base)
 
-    def run_setup(self, **kwargs):
+    def run_setup(self, service_install=None, run_doctor=False, port_open=lambda port: True, **kwargs):
         out = StringIO()
         with redirect_stdout(out):
             rc = setup.setup(self.args(**kwargs), input_fn=lambda prompt: "ab123", getpass_fn=lambda prompt: "pw",
-                             service_install=self.fake_service_install,
+                             service_install=service_install or self.fake_service_install,
                              store=lambda user, pw: self.stored.append((user, pw)),
-                             keyring_probe=lambda user: "missing", run_doctor=False)
+                             keyring_probe=lambda user: "missing", run_doctor=run_doctor, port_open=port_open)
         return rc, out.getvalue()
 
 
@@ -98,6 +99,58 @@ class SetupTests(SetupHarness):
             rc, out = self.run_setup()
         self.assertEqual(rc, 1)
         self.assertIn("openconnect", out)
+
+    def test_service_load_failure_reports_and_keeps_records(self):
+        unit = self.home / ".config" / "systemd" / "user" / "uni-vpn.service"
+
+        def broken_install(dry_run=False, run=None):
+            unit.parent.mkdir(parents=True, exist_ok=True)
+            unit.write_text("unit")
+            raise service.ServiceError("Failed to connect to bus: No medium found", files=[unit])
+
+        rc, out = self.run_setup(service_install=broken_install)
+        self.assertEqual(rc, 1)
+        self.assertIn("Dienst konnte nicht geladen werden: Failed to connect to bus", out)
+        self.assertNotIn("Traceback", out)
+        recorded = setup.recorded()
+        self.assertIn(self.home / ".config" / "uni-vpn" / "config.toml", recorded)
+        self.assertIn(self.home / ".local" / "bin" / "uni-vpn", recorded)
+        self.assertIn(setup.apport_ignore_path(), recorded)
+        self.assertIn(unit, recorded)
+
+    def test_service_failure_without_files_still_reports(self):
+        def broken_install(dry_run=False, run=None):
+            raise service.ServiceError("Bootstrap failed: 5: Input/output error")
+
+        rc, out = self.run_setup(service_install=broken_install)
+        self.assertEqual(rc, 1)
+        self.assertIn("Dienst konnte nicht geladen werden: Bootstrap failed", out)
+
+    def test_setup_waits_for_http_port_before_doctor(self):
+        seen = []
+        answers = iter([False, False, True])
+
+        def port_open(port):
+            seen.append(port)
+            return next(answers)
+
+        with mock.patch.object(doctor, "run_checks", return_value=[]) as checks, \
+             mock.patch.object(setup.time, "sleep") as sleep:
+            rc, _ = self.run_setup(user="ab123", run_doctor=True, port_open=port_open)
+        self.assertEqual(rc, 0)
+        self.assertEqual(seen, [1081, 1081, 1081])
+        self.assertEqual(sleep.call_count, 2)
+        sleep.assert_called_with(0.25)
+        checks.assert_called_once()
+
+    def test_wait_for_port_gives_up_after_timeout(self):
+        # Start 0.0, Frist 5.0: nach 1.0, 2.0 und 4.0 wird geschlafen, bei 5.5 aufgegeben.
+        clock = iter([0.0, 1.0, 2.0, 4.0, 5.5])
+        sleeps = []
+        ready = setup.wait_for_port(1081, port_open=lambda port: False, timeout=5, step=0.25,
+                                    sleep=sleeps.append, clock=lambda: next(clock))
+        self.assertFalse(ready)
+        self.assertEqual(sleeps, [0.25] * 3)
 
     def test_existing_password_not_asked_again(self):
         out = StringIO()

@@ -24,20 +24,22 @@ case "$(uname -s)" in
   Linux)
     PY=/usr/bin/python3
     if [ "$mode" = setup ]; then
-      missing=()
-      for p in openconnect ocproxy libsecret-tools; do
-        dpkg -s "$p" >/dev/null 2>&1 || missing+=("$p")
-      done
-      if [ ${#missing[@]} -gt 0 ]; then
-        if [ "$dry" = 1 ]; then
-          echo "-> wuerde installieren: ${missing[*]}"
-        elif command -v apt-get >/dev/null; then
-          echo "-> installiere ${missing[*]} (sudo fragt nach deinem Passwort)"
-          sudo apt-get install -y "${missing[@]}"
-        else
-          echo "Kein apt-get gefunden. Bitte selbst installieren: ${missing[*]}"
-          exit 1
+      if command -v dpkg >/dev/null && command -v apt-get >/dev/null; then
+        missing=()
+        for p in openconnect ocproxy libsecret-tools; do
+          dpkg -s "$p" >/dev/null 2>&1 || missing+=("$p")
+        done
+        if [ ${#missing[@]} -gt 0 ]; then
+          if [ "$dry" = 1 ]; then
+            echo "-> wuerde installieren: ${missing[*]}"
+          else
+            echo "-> installiere ${missing[*]} (sudo fragt nach deinem Passwort)"
+            sudo apt-get install -y "${missing[@]}"
+          fi
         fi
+      else
+        # Andere Distribution: setup prueft die Binaries selbst.
+        echo "-> kein dpkg/apt-get: Pakete bitte selbst installieren (openconnect, ocproxy, secret-tool)"
       fi
     fi
     ;;
