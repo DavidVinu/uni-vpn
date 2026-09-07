@@ -57,10 +57,12 @@ class StoreTests(unittest.TestCase):
 
         with mock.patch.object(pf, "IS_MACOS", True):
             credentials.store_password("ab1", 'a"b\\c', run=run)
-        cmd, kwargs = calls[0]
+        self.assertEqual(calls[0][0][:2], ["/usr/bin/security", "delete-generic-password"])
+        cmd, kwargs = calls[1]
         self.assertEqual(cmd, ["/usr/bin/security", "-i"])
         script = kwargs["input"].decode()
-        self.assertIn('add-generic-password -a "ab1" -s "uni-vpn" -T /usr/bin/security -U -w "a\\"b\\\\c"', script)
+        self.assertIn('add-generic-password -a "ab1" -s "uni-vpn" -T /usr/bin/security -w "a\\"b\\\\c"', script)
+        self.assertNotIn(" -U ", script)
 
     def test_store_failure_raises(self):
         def run(cmd, **kwargs):
@@ -119,7 +121,7 @@ class MacKeychainRoundtrip(unittest.IsolatedAsyncioTestCase):
         user = "uni-vpn-citest"
         self.store(user, "ci pass \"quoted\" \\ back")
         self.assertEqual(await credentials.get_password(user, 10), b'ci pass "quoted" \\ back')
-        self.store(user, "zweites")  # -U: Update statt Fehler
+        self.store(user, "zweites")  # Ueberschreiben = loeschen und neu anlegen
         self.assertEqual(await credentials.get_password(user, 10), b"zweites")
         self.assertTrue(credentials.delete_password(user))
         with self.assertRaises(credentials.PasswordMissing):

@@ -66,9 +66,12 @@ COMMAND_TIMEOUT = 60
 def store_password(user: str, password: str, run=subprocess.run) -> None:
     try:
         if pf.IS_MACOS:
+            # Erst loeschen, dann neu anlegen: "-U" (Update) loest auf macOS einen
+            # Bestaetigungsdialog aus, der ohne GUI ewig wartet (in CI gemessen).
+            delete_password(user, run=run)
             script = (
                 f'add-generic-password -a "{_quote_security(user)}" -s "{SERVICE}" '
-                f'-T {pf.SECURITY} -U -w "{_quote_security(password)}"\n'
+                f'-T {pf.SECURITY} -w "{_quote_security(password)}"\n'
             )
             result = run([pf.SECURITY, "-i"], input=script.encode(), capture_output=True, timeout=COMMAND_TIMEOUT)
         else:
