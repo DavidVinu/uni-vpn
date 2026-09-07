@@ -29,8 +29,13 @@ class Forwarder:
     async def stop(self) -> None:
         if self._server:
             self._server.close()
-            await self._server.wait_closed()
         await self.close_all()
+        if self._server:
+            # Ab Python 3.13 wartet wait_closed() auf alle Handler; die enden nach close_all().
+            try:
+                await asyncio.wait_for(self._server.wait_closed(), 5)
+            except asyncio.TimeoutError:
+                self.log.warning("Forwarder: Verbindungen nicht rechtzeitig geschlossen")
 
     async def close_all(self) -> None:
         for writer in list(self._writers):

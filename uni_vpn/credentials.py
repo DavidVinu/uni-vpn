@@ -59,16 +59,23 @@ def _quote_security(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
+# Ein Keyring-Dialog, den niemand sieht (Dienst ohne GUI, CI), darf nichts ewig blockieren.
+COMMAND_TIMEOUT = 60
+
+
 def store_password(user: str, password: str, run=subprocess.run) -> None:
-    if pf.IS_MACOS:
-        script = (
-            f'add-generic-password -a "{_quote_security(user)}" -s "{SERVICE}" '
-            f'-T {pf.SECURITY} -U -w "{_quote_security(password)}"\n'
-        )
-        result = run([pf.SECURITY, "-i"], input=script.encode(), capture_output=True)
-    else:
-        cmd = [_secret_tool(), "store", "--label", LABEL, "service", SERVICE, "user", user]
-        result = run(cmd, input=password.encode(), capture_output=True)
+    try:
+        if pf.IS_MACOS:
+            script = (
+                f'add-generic-password -a "{_quote_security(user)}" -s "{SERVICE}" '
+                f'-T {pf.SECURITY} -U -w "{_quote_security(password)}"\n'
+            )
+            result = run([pf.SECURITY, "-i"], input=script.encode(), capture_output=True, timeout=COMMAND_TIMEOUT)
+        else:
+            cmd = [_secret_tool(), "store", "--label", LABEL, "service", SERVICE, "user", user]
+            result = run(cmd, input=password.encode(), capture_output=True, timeout=COMMAND_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        raise KeyringError("Keine Antwort vom Schluesselbund (gesperrt oder Dialog wartet)") from None
     if result.returncode != 0:
         detail = (result.stderr or b"").decode(errors="replace").strip()
         raise KeyringError(f"Passwort konnte nicht abgelegt werden: {detail or result.returncode}")
@@ -79,5 +86,8 @@ def delete_password(user: str, run=subprocess.run) -> bool:
         cmd = [pf.SECURITY, "delete-generic-password", "-s", SERVICE, "-a", user]
     else:
         cmd = [_secret_tool(), "clear", "service", SERVICE, "user", user]
-    result = run(cmd, capture_output=True)
+    try:
+        result = run(cmd, capture_output=True, timeout=COMMAND_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return False
     return result.returncode == 0

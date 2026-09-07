@@ -78,29 +78,48 @@ class StoreTests(unittest.TestCase):
 
 @unittest.skipUnless(sys.platform == "darwin", "nur auf macOS")
 class MacKeychainRoundtrip(unittest.IsolatedAsyncioTestCase):
-    """Echter security-Roundtrip in einem Wegwerf-Keychain (auch auf CI-Runnern ohne GUI-Session)."""
+    """Echter security-Roundtrip in einem Wegwerf-Keychain (auch auf CI-Runnern ohne GUI-Session).
+
+    Jeder Schritt meldet sich auf stderr und hat ein Timeout, damit ein haengender
+    Keychain-Dialog den Lauf nicht stumm blockiert.
+    """
+
+    def sec(self, *args, check=True):
+        print(f"security {' '.join(args[:2])}", file=sys.stderr, flush=True)
+        return subprocess.run([pf.SECURITY, *args], capture_output=True, text=True, timeout=30, check=check)
 
     def setUp(self):
         import os
         self.keychain = f"/tmp/uni-vpn-test-{os.getpid()}.keychain-db"
-        self.old_default = subprocess.run([pf.SECURITY, "default-keychain", "-d", "user"], capture_output=True, text=True).stdout.strip().strip('"')
-        self.old_list = [line.strip().strip('"') for line in subprocess.run([pf.SECURITY, "list-keychains", "-d", "user"], capture_output=True, text=True).stdout.splitlines()]
-        subprocess.run([pf.SECURITY, "create-keychain", "-p", "ci", self.keychain], check=True)
-        subprocess.run([pf.SECURITY, "unlock-keychain", "-p", "ci", self.keychain], check=True)
-        subprocess.run([pf.SECURITY, "list-keychains", "-d", "user", "-s", self.keychain, *self.old_list], check=True)
-        subprocess.run([pf.SECURITY, "default-keychain", "-d", "user", "-s", self.keychain], check=True)
+        self.old_default = self.sec("default-keychain", "-d", "user", check=False).stdout.strip().strip('"')
+        self.old_list = [line.strip().strip('"') for line in self.sec("list-keychains", "-d", "user", check=False).stdout.splitlines()]
+        self.sec("create-keychain", "-p", "ci", self.keychain)
+        self.sec("unlock-keychain", "-p", "ci", self.keychain)
+        self.sec("set-keychain-settings", self.keychain)  # kein Auto-Lock
+        self.sec("list-keychains", "-d", "user", "-s", self.keychain, *self.old_list)
+        self.sec("default-keychain", "-d", "user", "-s", self.keychain)
 
     def tearDown(self):
         if self.old_default:
-            subprocess.run([pf.SECURITY, "default-keychain", "-d", "user", "-s", self.old_default])
-        subprocess.run([pf.SECURITY, "list-keychains", "-d", "user", "-s", *self.old_list])
-        subprocess.run([pf.SECURITY, "delete-keychain", self.keychain])
+            self.sec("default-keychain", "-d", "user", "-s", self.old_default, check=False)
+        self.sec("list-keychains", "-d", "user", "-s", *self.old_list, check=False)
+        self.sec("delete-keychain", self.keychain, check=False)
 
-    async def test_roundtrip(self):
+    def store(self, user, password):
+        print(f"store_password ({len(password)} Zeichen)", file=sys.stderr, flush=True)
+        credentials.store_password(user, password)
+
+    async def test_roundtrip_simple(self):
+        user = "uni-vpn-citest-simple"
+        self.store(user, "einfach123")
+        self.assertEqual(await credentials.get_password(user, 10), b"einfach123")
+        self.assertTrue(credentials.delete_password(user))
+
+    async def test_roundtrip_special_characters(self):
         user = "uni-vpn-citest"
-        credentials.store_password(user, "ci pass \"quoted\" \\ back")
+        self.store(user, "ci pass \"quoted\" \\ back")
         self.assertEqual(await credentials.get_password(user, 10), b'ci pass "quoted" \\ back')
-        credentials.store_password(user, "zweites")  # -U: Update statt Fehler
+        self.store(user, "zweites")  # -U: Update statt Fehler
         self.assertEqual(await credentials.get_password(user, 10), b"zweites")
         self.assertTrue(credentials.delete_password(user))
         with self.assertRaises(credentials.PasswordMissing):
