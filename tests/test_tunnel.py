@@ -41,6 +41,13 @@ class ClassifyTests(unittest.TestCase):
         self.assertIn("uni-vpn password", input_required[1])
         self.assertIn("uni-vpn log", input_required[1])
 
+    def test_invalid_soft_token_string_names_the_command(self):
+        # Echtes openconnect 9.12 bei kaputter Schluesseldatei: "Invalid base32 token string",
+        # dann "Soft token string is invalid", Exit 1 vor jedem Netzkontakt.
+        state, message = tn.classify_line("Soft token string is invalid")
+        self.assertEqual(state, "auth_failed")
+        self.assertIn("uni-vpn totp", message)
+
     def test_rejected_soft_token_names_the_second_factor(self):
         # openconnect probiert zwei Codes, dann "switching to manual entry"; danach folgen
         # "User input required" und "Failed to complete authentication". Der erste Treffer zaehlt.

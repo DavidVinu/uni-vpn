@@ -34,6 +34,7 @@ TOKEN_PREFIX = "totp-"
 # (Teilstring in openconnect-Ausgabe, Zustand, Meldung). Erste Uebereinstimmung gewinnt.
 MARKERS: list[tuple[str, str, str]] = [
     ("Server is rejecting the soft token", "auth_failed", TOTP_REJECTED),
+    ("Soft token string is invalid", "auth_failed", "TOTP-Schluessel unbrauchbar, neu eintragen (uni-vpn totp)"),
     ("User input required in non-interactive mode", "auth_failed", AUTH_REJECTED),
     ("Server asked us to run CSD", "auth_failed", "Server verlangt HostScan, uni-vpn braucht ein Update"),
     ("Cisco Secure Desktop", "auth_failed", "Server verlangt HostScan, uni-vpn braucht ein Update"),
