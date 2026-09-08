@@ -4,7 +4,8 @@
   "use strict";
 
   const DEFAULTS = {
-    domains: ["sogo.uni-heidelberg.de", "elearning-med.uni-heidelberg.de"],
+    // cip.dmed: elearning-med bindet von dort matomo.js ein, der Host ist nur im Uni-Netz erreichbar.
+    domains: ["sogo.uni-heidelberg.de", "elearning-med.uni-heidelberg.de", "cip.dmed.uni-heidelberg.de"],
     socksPort: 1080,
     httpPort: 1081,
     enabled: true,

@@ -341,7 +341,7 @@ der Optionen angefragt (Nutzergeste), Chrome braucht das fuer PAC nicht und frag
 
 Gemeinsam: Domain-Liste, `socks_port`, `http_port` und Schalter `enabled` liegen in
 `storage.local` (nicht `sync`, damit die Regel nie auf ein Geraet ohne Daemon wandert).
-Vorbelegung: `sogo.uni-heidelberg.de`, `elearning-med.uni-heidelberg.de`. Ein Eintrag gilt fuer
+Vorbelegung: `sogo.uni-heidelberg.de`, `elearning-med.uni-heidelberg.de`, `cip.dmed.uni-heidelberg.de` (Matomo-Skript von elearning-med, sonst wartet der Browser 136 s auf den Timeout). Ein Eintrag gilt fuer
 den Host und alle Subdomains; Matching ist `host == d || host.endsWith("." + d)`.
 
 Chrome: `background.js` setzt bei Start, bei `storage.onChanged` und bei `runtime.onInstalled`
@@ -456,3 +456,10 @@ CI (GitHub Actions): `ubuntu-latest` und `macos-latest`: Unit-Tests, `python -m 
 - Gleichzeitige Sessions desselben Kontos (Cisco-Client plus uni-vpn) sind nicht dokumentiert.
   Empfehlung im Readme: Cisco-Client nicht parallel verbinden, `AutoConnectOnStart` abschalten.
 - macOS ist bis zum Smoke-Test experimentell.
+- Durchsatz: etwa 450 KB/s je Verbindung durch ocproxy (lwIP, `TCP_WND` 64 KB, `TCP_MSS`
+  1024, gemessen 2026-09-08 bei 48 ms RTT; direkt 7,4 MB/s). Ohne eigenen ocproxy-Build nicht
+  aenderbar, fuer Mail und Moodle ausreichend, im Readme als Grenze genannt.
+- Seiten auf gelisteten Domains binden Ressourcen weiterer interner Uni-Hosts ein; ist so ein
+  Host nicht gelistet, wartet der Browser bis zum Verbindungs-Timeout (Chrome 136 s), bevor
+  die Seite als geladen gilt. Bekannte Faelle stehen in der Vorbelegung, das Readme erklaert
+  die Suche nach weiteren.

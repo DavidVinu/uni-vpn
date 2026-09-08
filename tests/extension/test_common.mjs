@@ -10,7 +10,9 @@ vm.runInThisContext(source);
 const U = globalThis.UniVpn;
 
 test("Defaults enthalten die beiden Uni-Domains", () => {
-  assert.deepEqual(U.DEFAULTS.domains, ["sogo.uni-heidelberg.de", "elearning-med.uni-heidelberg.de"]);
+  // cip.dmed: elearning-med bindet von dort matomo.js ein; ohne Tunnel wartet der Browser
+  // 136 s auf den Timeout, bevor die Seite als geladen gilt (gemessen 2026-09-08).
+  assert.deepEqual(U.DEFAULTS.domains, ["sogo.uni-heidelberg.de", "elearning-med.uni-heidelberg.de", "cip.dmed.uni-heidelberg.de"]);
   assert.equal(U.DEFAULTS.socksPort, 1080);
   assert.equal(U.DEFAULTS.httpPort, 1081);
   assert.equal(U.DEFAULTS.enabled, true);

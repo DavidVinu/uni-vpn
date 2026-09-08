@@ -34,7 +34,8 @@ ein und zeigt zum Schluss eine Selbstdiagnose. Danach die Extension laden:
   erlauben.
 
 Fertig. `https://sogo.uni-heidelberg.de` und `https://elearning-med.uni-heidelberg.de` laufen ab
-jetzt ueber die Uni, alles andere nicht. Weitere Domains stehen in den Optionen der Extension.
+jetzt ueber die Uni (dazu `cip.dmed.uni-heidelberg.de`, das elearning-med fuer seine Statistik
+einbindet), alles andere nicht. Weitere Domains stehen in den Optionen der Extension.
 
 ### Zweiter Faktor
 
@@ -76,6 +77,7 @@ KeePassXC beschreibt. Die App auf dem Handy bleibt daneben bestehen.
 | Popup: "Freigabe fuer die gelisteten Domains fehlt" | Firefox-Freigabe abgelehnt oder Domains ohne Optionen-Dialog geaendert | Knopf "Freigeben" im Popup klicken |
 | Popup: "In privaten Fenstern nicht aktiv" | Firefox erlaubt Add-ons in privaten Fenstern nicht von selbst | `about:addons`, Uni VPN, "In privaten Fenstern ausfuehren" erlauben |
 | Erste Seite nach laengerer Pause laedt nicht | Tunnelaufbau dauerte laenger als der Browser wartet | Seite neu laden |
+| Seite ist da, aber der Tab laedt minutenlang weiter | Die Seite bindet etwas von einem weiteren Uni-Host ein, der nicht in der Liste steht | In den Browser-Entwicklerwerkzeugen (Netzwerk) den Host mit `ERR_CONNECTION_TIMED_OUT` suchen und in den Optionen der Extension ergaenzen |
 | Popup: "Warte auf den naechsten Einmalcode" | Innerhalb von 30 s nach dem letzten Login darf derselbe Code nicht noch einmal benutzt werden | Nichts tun, geht von selbst weiter |
 
 ## Was der Rechner davon merkt
@@ -86,6 +88,9 @@ KeePassXC beschreibt. Die App auf dem Handy bleibt daneben bestehen.
   --socks5-hostname 127.0.0.1:1080`).
 - Keine Routen, kein DNS, kein Root nach der Installation. Sudo wird nur fuer `apt install`
   gebraucht.
+- Der Tunnel laeuft komplett im Nutzerkontext und schafft etwa 0,5 MB/s je Verbindung
+  (ocproxy, festes 64-KB-Fenster). Fuer Mail und Moodle reicht das, fuer grosse Downloads
+  ist der Cisco-Client schneller.
 - Passwort und TOTP-Schluessel liegen im GNOME-Keyring bzw. macOS-Schluesselbund, nirgends
   sonst. Waehrend des Verbindungsaufbaus liest openconnect den Schluessel aus einer nur fuer den
   Nutzer lesbaren Datei, die danach sofort geloescht wird. Der Rechner ist damit der zweite
