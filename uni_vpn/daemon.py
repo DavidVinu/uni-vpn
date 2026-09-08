@@ -33,6 +33,7 @@ class State(str, Enum):
 FINAL_STATES = {State.auth_failed, State.keyring}
 RETRY_STATES = {State.offline, State.blocked, State.error}
 OTP_STEP = 30  # Sekunden je Einmalcode (RFC 6238, wie openconnect)
+BLOCKED_MESSAGE = "Cisco Secure Client ist verbunden, uni-vpn pausiert"
 
 
 async def default_probe(host: str, timeout: float) -> bool:
@@ -86,6 +87,9 @@ class Daemon:
         # Der Server nimmt jeden Einmalcode nur einmal an (gemessen 2026-09-08: Neuaufbau 3 s
         # nach dem Login -> "Login failed"). Merken, in welchem Fenster zuletzt einer verbraucht wurde.
         self.last_otp_step: int | None = None
+        # Vom Ticker gesetzt, wenn Cisco bei stehendem Tunnel verbindet; die Aufbau-Schleife
+        # meldet dann `blocked` statt "Getrennt".
+        self.paused_by_cisco = False
         self.tunnel: Tunnel | None = None
         self.http = None
         self._loop_task: asyncio.Task | None = None
@@ -273,7 +277,7 @@ class Daemon:
         cfg = self.cfg
         while self.has_demand():
             if self.cisco_check():
-                self._set(State.blocked, "Cisco Secure Client ist verbunden, uni-vpn pausiert")
+                self._set(State.blocked, BLOCKED_MESSAGE)
                 await self._sleep(cfg.retry_interval)
                 continue
             if not await self.probe():
@@ -329,7 +333,7 @@ class Daemon:
             if not ready:
                 if tunnel.stopped_by_us:
                     self.tunnel = None
-                    self._set(State.idle, "Getrennt")
+                    self._after_stop()
                     continue  # ein zwischenzeitliches request_connect greift ueber has_demand()
                 if not tunnel.exited.is_set():
                     await tunnel.stop(cfg.stop_grace)
@@ -360,7 +364,7 @@ class Daemon:
             self.tunnel = None
             await self.forwarder.close_all()
             if tunnel.stopped_by_us:
-                self._set(State.idle, "Getrennt")
+                self._after_stop()
                 continue  # ein zwischenzeitliches request_connect greift ueber has_demand()
             message = tunnel.classification[1] if tunnel.classification else f"Tunnel abgebrochen (Exit {tunnel.returncode})"
             self.last_error = {"message": message, "at": time.time()}
@@ -370,8 +374,17 @@ class Daemon:
             self._set(State.error, message)
             if not await self._backoff():
                 break
-        if self.state in RETRY_STATES or self.state == State.connecting:
+        # `blocked` bleibt stehen, bis der Ticker Cisco als getrennt sieht: so erklaert das Popup
+        # weiter, warum nichts geht.
+        if self.state in (State.offline, State.error, State.connecting):
             self._set(State.idle, "Nicht verbunden")
+
+    def _after_stop(self) -> None:
+        if self.paused_by_cisco:
+            self.paused_by_cisco = False
+            self._set(State.blocked, BLOCKED_MESSAGE)
+        else:
+            self._set(State.idle, "Getrennt")
 
     def _otp_wait(self, now: float | None = None) -> float:
         """Sekunden bis zum naechsten Einmalcode-Fenster, 0 wenn der aktuelle Code noch unverbraucht ist."""
@@ -392,11 +405,25 @@ class Daemon:
 
     async def _ticker(self) -> None:
         last_mono, last_wall = time.monotonic(), time.time()
+        last_cisco = time.monotonic()
         while True:
             await asyncio.sleep(self.cfg.tick)
             mono, wall = time.monotonic(), time.time()
             jump = (wall - last_wall) - (mono - last_mono)
             last_mono, last_wall = mono, wall
+            if mono - last_cisco >= self.cfg.retry_interval and self.state in (State.connected, State.blocked):
+                last_cisco = mono
+                # Im Executor: "vpn state" auf macOS braucht 2 s und darf den Forwarder nicht anhalten.
+                cisco = await asyncio.get_running_loop().run_in_executor(None, self.cisco_check)
+                tunnel = self.tunnel
+                if cisco and self.state == State.connected and tunnel:
+                    self.log.info("Cisco Secure Client hat sich verbunden, Tunnel wird abgebaut")
+                    self.paused_by_cisco = True
+                    self._set(State.blocked, BLOCKED_MESSAGE)
+                    await self.forwarder.close_all()
+                    await tunnel.stop(self.cfg.stop_grace)
+                elif not cisco and self.state == State.blocked and (self._loop_task is None or self._loop_task.done()):
+                    self._set(State.idle, "Nicht verbunden")
             if jump > 30:
                 self.log.info("Resume erkannt (Uhr sprang um %.0f s)", jump)
                 tunnel = self.tunnel

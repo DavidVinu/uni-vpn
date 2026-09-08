@@ -362,6 +362,38 @@ class FailureTests(DaemonHarness):
         self.assertEqual(self.stored, ["neu"])
         await wait_state(d, dm.State.connected)
 
+    async def test_cisco_connecting_later_pauses_running_tunnel(self):
+        # Gemessen 2026-09-08: Cisco wurde bei stehendem Tunnel verbunden, uni-vpn lief weiter,
+        # weil die Pruefung nur beim Aufbau stattfand.
+        d = await self.start_daemon()
+        await d.request_connect()
+        await wait_state(d, dm.State.connected)
+        self.cisco = True
+        await wait_state(d, dm.State.blocked)
+        self.assertIn("Cisco", d.message)
+        deadline = time.monotonic() + 3
+        while d.tunnel is not None and time.monotonic() < deadline:
+            await asyncio.sleep(0.05)
+        self.assertIsNone(d.tunnel)
+        await asyncio.sleep(0.5)
+        self.assertEqual(d.state, dm.State.blocked, "ohne Bedarf bleibt blocked sichtbar")
+        self.assertEqual(len(self.pw_lines()), 1, "kein Neuaufbau, solange Cisco verbunden ist")
+        self.cisco = False
+        await wait_state(d, dm.State.idle)
+        await d.request_connect()
+        await wait_state(d, dm.State.connected)
+        self.assertEqual(len(self.pw_lines()), 2)
+
+    async def test_cisco_pause_closes_browser_connections(self):
+        d = await self.start_daemon()
+        reader, writer = await self.client()
+        writer.write(b"x")
+        await asyncio.wait_for(reader.readexactly(1), 4)
+        self.cisco = True
+        await wait_state(d, dm.State.blocked)
+        self.assertEqual(await asyncio.wait_for(reader.read(10), 3), b"")
+        writer.close()
+
     async def test_cisco_blocked_then_released(self):
         self.cisco = True
         d = await self.start_daemon()

@@ -149,7 +149,7 @@ RotatingFileHandler 1 MB x 3, Datei 0600. Lock-Datei `~/.config/uni-vpn/daemon.l
 |---|---|---|---|
 | `idle` | kein Tunnel, nichts gebraucht | loesen Aufbau aus, warten max 25 s | keine |
 | `offline` | TLS-Probe zum Host fehlgeschlagen (kein Netz, Captive Portal) | sofort schliessen | Probe alle 30 s solange Bedarf |
-| `blocked` | Cisco Secure Client ist verbunden | sofort schliessen | Pruefung alle 30 s solange Bedarf |
+| `blocked` | Cisco Secure Client ist verbunden | sofort schliessen | Pruefung alle 30 s solange Bedarf; ohne Bedarf bleibt `blocked` stehen, bis der Ticker Cisco als getrennt sieht |
 | `connecting` | openconnect laeuft, ocproxy-Port noch zu | warten max 25 s | Abbruch nach 45 s -> `error` |
 | `connected` | Tunnel steht | durchreichen | Leerlauf-Timer |
 | `disconnecting` | Abbau laeuft | warten, dann neuer Aufbau bei Bedarf | |
@@ -163,7 +163,10 @@ expliziter `connect`. Ohne Bedarf wird nach Prozessende nicht neu aufgebaut, son
 Aufbau, Schritt fuer Schritt:
 
 1. Cisco-Pruefung: `cscotun0` vorhanden (Linux) oder `/opt/cisco/secureclient/bin/vpn state`
-   meldet `Connected` -> `blocked`.
+   meldet `Connected` -> `blocked`. Dieselbe Pruefung laeuft alle 30 s auch bei stehendem
+   Tunnel (im Executor, weil `vpn state` auf macOS 2 s braucht): verbindet sich Cisco spaeter,
+   werden Browserverbindungen geschlossen, der Tunnel abgebaut und `blocked` gemeldet
+   (gemessen 2026-09-08: vorher lief uni-vpn einfach weiter).
 2. TLS-Probe: `ssl.create_default_context()`-Handshake auf `host:443`, 5 s -> sonst `offline`.
 3. Passwort: Keyring-Lookup mit 20 s Timeout. Exit 1 ohne Ausgabe -> `keyring` ("kein Passwort
    hinterlegt"), Timeout -> `keyring` ("Schluesselbund gesperrt"). Danach genauso der
