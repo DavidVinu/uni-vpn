@@ -150,6 +150,11 @@ class ConnectTests(DaemonHarness):
         d = await self.start_daemon()
         reader, writer = await self.client()
         await wait_state(d, dm.State.connecting)
+        # Erst trennen, wenn der Prozess das Passwort gelesen hat: `connecting` wird vor dem
+        # Start gesetzt, und auf dem macOS-Runner brauchte der Fake dafuer laenger als der Test.
+        deadline = time.monotonic() + 3
+        while len(self.pw_lines()) < 1 and time.monotonic() < deadline:
+            await asyncio.sleep(0.05)
         await d.request_disconnect()
         await wait_state(d, dm.State.idle)
         self.assertEqual(await asyncio.wait_for(reader.read(10), 2), b"")
