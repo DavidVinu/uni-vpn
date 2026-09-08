@@ -1,0 +1,12 @@
+#!/usr/bin/env python3
+"""Einstieg fuer uni-vpn. Findet das Paket relativ zu dieser Datei."""
+import os
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+sys.path.insert(0, ROOT)
+
+from uni_vpn.cli import main  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(main())

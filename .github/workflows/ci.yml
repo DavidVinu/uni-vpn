@@ -1,0 +1,32 @@
+name: CI
+on:
+  push:
+  pull_request:
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python-Version
+        run: python3 --version
+      - name: Syntax (compileall)
+        run: python3 -m compileall -q uni_vpn bin/uni-vpn tests
+      - name: Unit-Tests
+        run: python3 -m unittest discover -s tests -t . -v
+      - name: Shell-Syntax
+        run: bash -n install.sh
+      - name: Installer-Trockenlauf
+        run: ./install.sh --dry-run --user citest
+      - name: launchd-Plist pruefen
+        if: runner.os == 'macOS'
+        run: |
+          python3 - <<'EOF'
+          from uni_vpn import service
+          open("/tmp/uni-vpn.plist", "w").write(service.render_unit("/opt/homebrew/bin/python3", "/tmp/uni-vpn", "/tmp/logs", "/opt/homebrew"))
+          EOF
+          plutil -lint /tmp/uni-vpn.plist
