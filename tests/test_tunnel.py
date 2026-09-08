@@ -178,6 +178,15 @@ class TunnelTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(t.classification[0], "auth_failed")
         self.assertIn("Einmalcode", t.classification[1])
         self.assertNotIn("uni-vpn password", t.classification[1])
+        self.assertIsNotNone(t.otp_generated_at)
+        self.assertLess(abs(t.otp_generated_at - time.time()), 10)
+
+    async def test_otp_generated_at_is_none_without_token(self):
+        t = self.make()
+        await t.start(b"geheim")
+        self.assertTrue(await t.wait_ready(3))
+        await t.stop(2)
+        self.assertIsNone(t.otp_generated_at)
 
     def test_remove_stale_token_files(self):
         (self.token_dir / "totp-123").write_text("alt")

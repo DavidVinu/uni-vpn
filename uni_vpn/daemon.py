@@ -326,10 +326,13 @@ class Daemon:
             finally:
                 del password, totp
             self.connect_count += 1
+            # openconnect erzeugt den Code direkt nach dem Start; das Fenster gleich merken, denn
+            # der Leser der Ausgabe kann hinter der Portpruefung zurueckliegen (macOS-CI).
+            self.last_otp_step = int(time.time() // OTP_STEP)
 
             ready = await tunnel.wait_ready(cfg.ready_timeout)
-            if tunnel.classifier.otp_generated:
-                self.last_otp_step = int(time.time() // OTP_STEP)
+            if tunnel.otp_generated_at:
+                self.last_otp_step = int(tunnel.otp_generated_at // OTP_STEP)
             if not ready:
                 if tunnel.stopped_by_us:
                     self.tunnel = None

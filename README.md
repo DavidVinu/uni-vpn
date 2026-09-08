@@ -76,6 +76,7 @@ KeePassXC beschreibt. Die App auf dem Handy bleibt daneben bestehen.
 | Popup: "Kein Netz oder Captive Portal" | WLAN-Anmeldeseite noch nicht bestaetigt | Anmeldeseite oeffnen, danach geht es von selbst weiter |
 | Popup: "Freigabe fuer die gelisteten Domains fehlt" | Firefox-Freigabe abgelehnt oder Domains ohne Optionen-Dialog geaendert | Knopf "Freigeben" im Popup klicken |
 | Popup: "In privaten Fenstern nicht aktiv" | Firefox erlaubt Add-ons in privaten Fenstern nicht von selbst | `about:addons`, Uni VPN, "In privaten Fenstern ausfuehren" erlauben |
+| Firefox: Uni-Seite laedt kurz nach einer Stoerung ohne VPN | Firefox schickt Anfragen nach einem gescheiterten Proxy-Versuch 10 s lang direkt | Seite nach ein paar Sekunden neu laden |
 | Erste Seite nach laengerer Pause laedt nicht | Tunnelaufbau dauerte laenger als der Browser wartet | Seite neu laden |
 | Seite ist da, aber der Tab laedt minutenlang weiter | Die Seite bindet etwas von einem weiteren Uni-Host ein, der nicht in der Liste steht | In den Browser-Entwicklerwerkzeugen (Netzwerk) den Host mit `ERR_CONNECTION_TIMED_OUT` suchen und in den Optionen der Extension ergaenzen |
 | Popup: "Warte auf den naechsten Einmalcode" | Innerhalb von 30 s nach dem letzten Login darf derselbe Code nicht noch einmal benutzt werden | Nichts tun, geht von selbst weiter |

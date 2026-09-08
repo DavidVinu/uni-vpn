@@ -126,6 +126,7 @@ class Tunnel:
         self.stderr_tail: collections.deque[str] = collections.deque(maxlen=20)
         self.classifier = Classifier()
         self.classification: tuple[str, str] | None = None
+        self.otp_generated_at: float | None = None  # Wallclock, wenn openconnect einen Code erzeugt hat
         self.stopped_by_us = False
         self.started_at: float | None = None
         self.ready_at: float | None = None
@@ -214,6 +215,8 @@ class Tunnel:
             self.log.info("openconnect: %s", text)
             if self.classification is None:
                 self.classification = self.classifier.feed(text)
+            if self.classifier.otp_generated and self.otp_generated_at is None:
+                self.otp_generated_at = time.time()
         await self.proc.wait()
         self._remove_token_file()
         self.log.info("openconnect beendet, Exit %s", self.proc.returncode)
