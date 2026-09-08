@@ -160,7 +160,7 @@ _PORT_LINE = re.compile(r"^\s*(socks_port|http_port)\s*=\s*([0-9]{1,5})\s*(#.*)?
 def _ports_from_broken_config(path: Path | None) -> dict[str, int]:
     """Ports bestmoeglich aus einer fehlerhaften config.toml lesen.
 
-    Die Statusseite muss auch dann dort erreichbar sein, wo Browser und Extension sie
+    Die Statusseite muss auch dann dort erreichbar sein, wo Browser und Nutzer sie
     erwarten, sonst sieht niemand die Fehlermeldung mit der Zeilennummer.
     """
     try:

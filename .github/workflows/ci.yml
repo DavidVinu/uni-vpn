@@ -30,8 +30,3 @@ jobs:
           open("/tmp/uni-vpn.plist", "w").write(service.render_unit("/opt/homebrew/bin/python3", "/tmp/uni-vpn", "/tmp/logs", "/opt/homebrew"))
           EOF
           plutil -lint /tmp/uni-vpn.plist
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Extension-Tests
-        run: node --test "tests/extension/*.mjs"

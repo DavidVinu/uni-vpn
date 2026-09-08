@@ -35,6 +35,7 @@ class DoctorTests(unittest.TestCase):
             is_active=lambda: True,
             port_in_use=lambda port: True,
             keyring_probe=lambda user, kind="password": "present",
+            proxy_state=lambda port: "ok",
             cisco_installed=lambda: False,
             cisco_connected=lambda: False,
             api_get=lambda cfg, path: dict(STATUS),
@@ -171,6 +172,14 @@ class DoctorTests(unittest.TestCase):
             self.assertEqual(doctor.keyring_state("ab1"), "missing")
             self.assertEqual(doctor.keyring_state("ab1", kind="totp"), "missing")
         self.assertEqual(seen, [("ab1", "password"), ("ab1", "totp")])
+
+    def test_proxy_states(self):
+        for state, expected, needle in (("ok", "ok", "proxy.pac"), ("unset", "fail", "install.sh"),
+                                        ("foreign", "warn", "andere"), ("unavailable", "warn", "http://127.0.0.1:1081/proxy.pac")):
+            checks = doctor.run_checks(write_config(), **self.probes(proxy_state=lambda port, s=state: s))
+            check = self.by_name(checks, "Proxy-Regel")
+            self.assertEqual(check.status, expected, state)
+            self.assertIn(needle, check.detail, state)
 
     def test_cisco_connected_warns(self):
         checks = doctor.run_checks(write_config(), **self.probes(cisco_installed=lambda: True, cisco_connected=lambda: True))

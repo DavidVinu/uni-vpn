@@ -1,6 +1,8 @@
 # uni-vpn: Design
 
-Stand: 2026-09-07. Gilt fuer Etappe 1 (Backend) und Etappe 2 (Extension).
+Stand: 2026-09-08. Gilt fuer Etappe 1 (Backend) und Etappe 2 (Proxy-Regel im System). Die
+Extension aus der ersten Fassung wurde am 2026-09-08 nach dem E2E-Test gestrichen; die
+Rechercheergebnisse dazu in Abschnitt 2 bleiben als Begruendung stehen.
 
 ## 1. Ziel
 
@@ -85,16 +87,19 @@ Diese Punkte wurden gegen Doku, Quellcode oder direkt am Server geprueft und tra
 ## 3. Architektur
 
 ```
-Browser (Chrome oder Firefox)
-  Extension: Domain-Liste, Proxy-Regel, Popup mit Status
-      |  gelistete Domain -> SOCKS5 127.0.0.1:1080 (Hostname geht mit)
-      |  Status/Steuerung -> HTTP 127.0.0.1:1081
+Browser (Chrome oder Firefox), liest die Systemeinstellung "automatische Proxy-Konfiguration"
+      |  holt http://127.0.0.1:1081/proxy.pac: gelistete Domain -> SOCKS5 127.0.0.1:1080, sonst DIRECT
+      |  Status/Steuerung: Statusseite http://127.0.0.1:1081/
       v
 uni-vpn Daemon (Python, ein Prozess, User-Dienst)
   SOCKS-Forwarder 1080 ---> ocproxy (dynamischer Port) <--socketpair-- openconnect ---TLS---> Uni-ASA
-  HTTP 1081: /status.json, /api/connect, /api/disconnect, /api/password, Statusseite
+  HTTP 1081: /proxy.pac, /status.json, /api/connect, /api/disconnect, /api/password, /api/totp, /api/domains, Statusseite
   Zustandsautomat, Leerlauf-Timer, Keyring-Zugriff, Log
 ```
+
+Keine Browser-Extension (Entscheidung vom 2026-09-08 nach dem E2E-Test: Entwicklermodus, temporaere
+Add-ons, Signierung und Freigabe-Dialoge waren die groesste Reibung; die Proxy-Regel kommt
+jetzt als PAC ueber die Systemeinstellung, die beide Browser lesen).
 
 Alles laeuft ohne Root. Das System sieht keinen Tunnel, keine Routen, kein DNS. Nur Prozesse,
 die 127.0.0.1:1080 als SOCKS5-Proxy benutzen, gehen ueber die Uni.
@@ -239,16 +244,17 @@ keine Peer-UID-Pruefung (auf macOS unmoeglich, auf Einzelnutzer-Laptops ohne Nut
 
 | Route | Methode | Inhalt |
 |---|---|---|
-| `/` | GET | Statusseite: Zustand in Klartext, Knoepfe Verbinden/Trennen, Formulare "Passwort setzen" und "TOTP-Schluessel setzen" (mit Link zum MFA-Portal), letzte Logzeilen, Versions- und Portangaben. Deutsch, so kurz wie moeglich. |
-| `/status.json` | GET | `{"protocol": 1, "version", "state", "message", "since", "host", "user", "socks_port", "active_connections", "bytes_in", "bytes_out", "last_error", "log_tail": [...]}` |
+| `/` | GET | Statusseite: Zustand in Klartext, Knoepfe Verbinden/Trennen, Formulare "Passwort setzen", "TOTP-Schluessel setzen" (mit Link zum MFA-Portal) und "Domains", letzte Logzeilen, Versions- und Portangaben. Deutsch, so kurz wie moeglich. |
+| `/status.json` | GET | `{"protocol": 1, "version", "state", "message", "since", "host", "user", "socks_port", "active_connections", "bytes_in", "bytes_out", "last_error", "domains", "pac_url", "pac_refresh", "log_tail": [...]}` |
 | `/api/connect` | POST | Bedarf setzen, Aufbau starten (auch aus `auth_failed`, `keyring`, `error`) |
 | `/api/disconnect` | POST | Tunnel abbauen, Bedarf loeschen |
 | `/api/password` | POST | JSON `{"password": ...}` -> Keyring, danach Aufbau |
 | `/api/totp` | POST | JSON `{"secret": ...}` (otpauth-URL oder Base32) -> normalisiert in den Keyring, danach Aufbau; Antwort enthaelt den aktuellen Kontrollcode zum Vergleich mit der App |
+| `/proxy.pac` | GET | PAC-Datei aus der Domainliste (Abschnitt 5) |
+| `/api/domains` | POST | JSON `{"text": ...}` (eine Domain je Zeile) -> `domains.txt`, danach Nachladen der Regel im System; 400 mit Zeilennummern bei Fehlern |
 
-CSRF-Schutz: POST nur mit Header `X-Uni-VPN: 1` und Origin leer, `http://127.0.0.1:<port>`,
-`chrome-extension://*` oder `moz-extension://*`. Antworten tragen `Access-Control-Allow-Origin`
-fuer genau diese Origins. Passwort und Schluessel werden nie geloggt und nie in `/status.json`
+CSRF-Schutz: POST nur mit Header `X-Uni-VPN: 1` und Origin leer oder `http://127.0.0.1:<port>`.
+Antworten tragen `Access-Control-Allow-Origin` nur fuer diesen Origin. Passwort und Schluessel werden nie geloggt und nie in `/status.json`
 ausgegeben.
 
 ### 4.6 CLI
@@ -274,7 +280,7 @@ Prueft und meldet, ohne Geheimnisse auszugeben: Python-Version; openconnect und 
 gefunden (Pfad, Version); Config gueltig; Dienst geladen und aktiv; Ports 1080 und 1081
 gebunden (bei Belegung: welcher Prozess, per `ss -ltnp` bzw. `lsof`); Keyring-Roundtrip
 (Passwort und TOTP-Schluessel hinterlegt: ja/nein/gesperrt); Cisco-Client installiert und verbunden; Secret
-Service erreichbar (Linux); Browser gefunden (Chrome, Firefox) und Hinweis auf die Extension.
+Service erreichbar (Linux); Proxy-Regel im System (Abschnitt 5.3); Browser gefunden (Chrome, Firefox).
 Ausgabe ist zum Einfuegen in ein GitHub-Issue gedacht.
 
 ### 4.8 Plattformen
@@ -307,81 +313,47 @@ durchlaufen hat. CI laeuft auf einem GitHub-Actions-macOS-Runner (Unit-Tests, `p
   enger als der Cisco-Client (Full Tunnel fuer alle Prozesse) und wird im Readme genannt.
 - Kein Zertifikats-Pinning; Systemtruststore (GEANT ist in ca-certificates).
 
-## 5. Extension
+## 5. Proxy-Regel im System (PAC)
 
-Ein Ordner `extension/`, reines JavaScript ohne Bundler und ohne Minifier, ein Manifest fuer
-beide Browser.
+### 5.1 Regel
 
-### 5.1 Manifest
+`uni_vpn/pac.py` erzeugt aus der Domainliste eine PAC-Datei: `host == d || host.endsWith("." + d)`
+-> `SOCKS5 127.0.0.1:<socks_port>` (Chrome und Firefox loesen den Hostnamen dann ueber den
+Proxy auf), sonst `DIRECT`. Kein DIRECT-Fallback fuer gelistete Hosts. Der Daemon liefert sie
+unter `GET /proxy.pac` (`application/x-ns-proxy-autoconfig`, `Cache-Control: no-store`) und
+liest die Liste bei jeder Anfrage neu.
 
-```json
-{
-  "manifest_version": 3,
-  "name": "Uni VPN",
-  "version": "0.1.0",
-  "permissions": ["proxy", "storage"],
-  "host_permissions": ["http://127.0.0.1/*"],
-  "optional_host_permissions": ["<all_urls>"],
-  "background": { "scripts": ["background.js"], "service_worker": "background.js" },
-  "action": { "default_popup": "popup.html" },
-  "options_ui": { "page": "options.html" },
-  "key": "<Public Key fuer stabile Chrome-ID>",
-  "browser_specific_settings": {
-    "gecko": {
-      "id": "uni-vpn@davidvinu.de",
-      "strict_min_version": "140.0",
-      "data_collection_permissions": { "required": ["none"] }
-    }
-  }
-}
-```
+### 5.2 Domainliste
 
-`host_permissions` fuer 127.0.0.1 erlaubt den Status-Fetch. In Firefox werden pro gelisteter
-Domain `*://<domain>/*` und `*://*.<domain>/*` als optionale Host-Permission beim Speichern
-der Optionen angefragt (Nutzergeste), Chrome braucht das fuer PAC nicht und fragt nicht.
+`~/.config/uni-vpn/domains.txt`, eine Domain je Zeile, `#` leitet Kommentare ein, fuehrendes
+`*.` wird entfernt, Kleinschreibung, Duplikate fallen weg, Hostnamen werden geprueft (keine
+Schemata, Pfade, IPv6-Literale, mindestens zwei Labels). Fehlt die Datei, gilt die Vorbelegung
+`sogo.uni-heidelberg.de`, `elearning-med.uni-heidelberg.de`, `cip.dmed.uni-heidelberg.de`
+(Matomo-Skript von elearning-med, sonst wartet der Browser 136 s auf den Timeout). Aenderung
+ueber die Statusseite (`POST /api/domains`, Fehler mit Zeilennummer) oder mit einem Editor.
 
-### 5.2 Verhalten
+### 5.3 Eintrag im System
 
-Gemeinsam: Domain-Liste, `socks_port`, `http_port` und Schalter `enabled` liegen in
-`storage.local` (nicht `sync`, damit die Regel nie auf ein Geraet ohne Daemon wandert).
-Vorbelegung: `sogo.uni-heidelberg.de`, `elearning-med.uni-heidelberg.de`, `cip.dmed.uni-heidelberg.de` (Matomo-Skript von elearning-med, sonst wartet der Browser 136 s auf den Timeout). Ein Eintrag gilt fuer
-den Host und alle Subdomains; Matching ist `host == d || host.endsWith("." + d)`.
+`uni_vpn/sysproxy.py`:
 
-Chrome: `background.js` setzt bei Start, bei `storage.onChanged` und bei `runtime.onInstalled`
-per `chrome.proxy.settings.set({value: {mode: "pac_script", pacScript: {data}}, scope:
-"regular"})` eine PAC, die fuer gelistete Hosts `SOCKS5 127.0.0.1:<port>` und sonst `DIRECT`
-liefert, ohne DIRECT-Fallback fuer gelistete Hosts. Vor dem Setzen wird `proxy.settings.get`
-gelesen; ist `levelOfControl` nicht `controllable_by_this_extension` oder
-`controlled_by_this_extension`, zeigt das Popup eine Warnung. `enabled = false` ->
-`proxy.settings.clear`.
+| | Linux (GNOME) | macOS |
+|---|---|---|
+| Lesen | `gsettings get org.gnome.system.proxy mode` und `autoconfig-url` | `networksetup -listallnetworkservices`, je Dienst `-getautoproxyurl` |
+| Setzen | `autoconfig-url` auf die PAC-URL, `mode` auf `auto` | `-setautoproxyurl <Dienst> <URL>` fuer jeden aktiven Dienst (verlangt Admin-Rechte) |
+| Nachladen nach Listenaenderung | `autoconfig-url` mit `?v=<Zeit>` neu setzen; GNOME meldet die Aenderung, Chrome und Firefox holen die PAC neu | nicht automatisch, Statusseite sagt "Browser neu starten" |
+| Zuruecksetzen | gesicherte Werte aus `~/.config/uni-vpn/proxy-backup.json` | dito, `-setautoproxystate off` wenn vorher aus |
 
-Firefox: `browser.proxy.onRequest` wird synchron auf oberster Ebene registriert und gibt ein
-Promise zurueck, das erst nach dem Laden der Liste aufloest; fuer gelistete Hosts
-`{type: "socks", host: "127.0.0.1", port, proxyDNS: true}`, sonst `{type: "direct"}`. Kein
-Failover-Eintrag. Liste wird gecacht und per `storage.onChanged` aktualisiert. Der Listener
-wird mit Filter `<all_urls>` registriert; feuert er in Firefox ohne die Host-Permission
-`<all_urls>` nicht zuverlaessig fuer die gelisteten Domains (in der Umsetzung pruefen), wird
-`<all_urls>` beim ersten Speichern der Optionen angefragt statt der Domain-Muster.
+Der Installer sichert den vorherigen Zustand einmalig (ein zweiter Lauf ueberschreibt die
+Sicherung nicht), traegt die Regel ein und meldet, wenn er eine fremde Proxy-Einstellung ersetzt
+hat. Ohne GNOME- oder macOS-Proxyverwaltung (KDE, Xfce) nennt er die PAC-URL zum Eintragen im
+Browser; `uni-vpn doctor` prueft den Eintrag ("Proxy-Regel": ok, nicht gesetzt, fremd, keine
+Verwaltung).
 
-Popup: laedt `/status.json`, zeigt Zustand mit Farbe (grau idle/offline, gelb connecting,
-gruen connected, rot auth_failed/keyring/error, orange blocked) und `message`, Knoepfe
-Verbinden/Trennen, Link zur Statusseite und zu den Optionen. Fetch-Fehler -> "Daemon nicht
-erreichbar" mit Hinweis `uni-vpn doctor`. Weicht `socks_port` im Status vom eigenen Wert ab,
-wird er uebernommen. `protocol != 1` -> "Extension und Backend passen nicht zusammen".
-Firefox: Popup prueft `extension.isAllowedIncognitoAccess()` und `permissions.contains` fuer
-jede Domain und zeigt fehlende Freigaben rot mit Klick auf `permissions.request`.
-
-Optionen: Textarea Domain-Liste (eine pro Zeile, `#` Kommentar), Ports, Schalter aktiv.
-Speichern validiert Hostnamen (keine IPv6-Literale, keine Schemata, keine Pfade).
-
-### 5.3 Installation
-
-Chrome: `chrome://extensions`, Entwicklermodus, "Entpackte Erweiterung laden", Ordner
-`extension/` aus dem Repo. Update: `uni-vpn update`, dann Reload in `chrome://extensions`.
-Firefox: bis zur Signierung temporaer ueber `about:debugging`; danach signierte `.xpi` aus
-GitHub Releases (Etappe 3, unlisted-Signierung ueber AMO, kostenlos, `web-ext sign`, kein
-Source-Upload noetig, weil kein Bundler; `gecko.update_url` auf `updates.json` ueber GitHub
-Pages). Keine Chrome-Policies, keine `.crx`, kein `defaults write`, kein Native Messaging.
+Chrome liest die GNOME-Einstellung ueber GSettings, Firefox mit `network.proxy.type = 5`
+(Voreinstellung "Systemeinstellungen") ebenfalls. Beide holen die PAC beim Start und bei
+Aenderung der Einstellung. Firefox weicht nach einem gescheiterten Proxy-Verbindungsversuch fuer
+10 s auf DIRECT aus (`network.proxy.failover_direct`), Chrome meldet
+`ERR_PROXY_CONNECTION_FAILED`; beides steht im Readme.
 
 ## 6. Installer und Lebenszyklus
 
@@ -392,19 +364,20 @@ Pages). Keine Chrome-Policies, keine `.crx`, kein `defaults write`, kein Native 
   Hinweis, `brew install openconnect ocproxy python`; Python-Version pruefen; Uni-ID abfragen
   und `config.toml` schreiben, falls nicht vorhanden; `~/.local/bin/uni-vpn` verlinken;
   Dienst-Datei mit absoluten Pfaden schreiben und laden; Cisco-Client erkennen und
-  Hinweis geben (nichts ungefragt aendern); `uni-vpn password` aufrufen; `uni-vpn doctor`
-  ausfuehren; Browser-Schritte fuer die Extension ausgeben. Jede angelegte Datei kommt in
+  Hinweis geben (nichts ungefragt aendern); Proxy-Regel im System eintragen (Abschnitt 5.3);
+  Passwort und TOTP-Schluessel abfragen; `uni-vpn doctor` ausfuehren; auf die Statusseite und
+  den Browser-Neustart hinweisen. Jede angelegte Datei kommt in
   `~/.config/uni-vpn/installed-files.txt`.
-- `./install.sh --update` bzw. `uni-vpn update`: `git pull` im Repo, Dienst neu starten,
-  Hinweis auf Extension-Reload.
-- `./install.sh --uninstall`: Dienst stoppen und entfernen, Dateien aus der Liste loeschen,
-  Keyring-Eintrag mit Rueckfrage loeschen, sagen, was bleibt (apt/brew-Pakete, Extension im
-  Browser, Repo-Ordner).
+- `./install.sh --update` bzw. `uni-vpn update`: `git pull` im Repo, Dienst neu starten.
+- `./install.sh --uninstall`: Proxy-Einstellung zuruecksetzen, Dienst stoppen und entfernen,
+  Dateien aus der Liste loeschen, Keyring-Eintraege mit Rueckfrage loeschen, sagen, was bleibt
+  (apt/brew-Pakete, Repo-Ordner, Log).
 
-Support-Matrix im Readme: Ubuntu 24.04 mit Google Chrome (deb) und Firefox (Snap), macOS 14+
+Support-Matrix im Readme: Ubuntu 24.04 (GNOME) mit Google Chrome und Firefox, macOS 14+
 Apple Silicon mit Chrome und Firefox. Alles andere "kann funktionieren, kein Support".
-Erwartbare Dialoge (sudo, Keyring, macOS Anmeldeobjekte, Firefox-Freigaben) werden im Readme
-vorweggenommen. Fehlermeldungstabelle "Anzeige -> Ursache -> Loesung".
+Erwartbare Dialoge (sudo, Keyring, macOS Anmeldeobjekte und Admin-Passwort fuer die
+Proxy-Einstellung) werden im Readme vorweggenommen. Fehlermeldungstabelle "Anzeige -> Ursache
+-> Loesung".
 
 ## 7. Tests
 
@@ -433,13 +406,16 @@ liest, nach Verzoegerung auf dem per Argument uebergebenen Port lauscht und Byte
 12. Config-Fehler -> Daemon laeuft, Status meldet Zeile.
 13. Doppelstart -> Exit 0.
 
-Extension: PAC-Funktion und Matching mit Node gegen eine Hostliste; Manifest-Lint mit
-`web-ext lint` in CI, sobald verfuegbar.
+PAC und Systemproxy: Domainliste (Normalisierung, Fehler mit Zeilennummer, Datei-Roundtrip,
+Vorbelegung), PAC-Text und, wo `node` vorhanden ist, die Auswertung der PAC-Funktion gegen eine
+Hostliste; `sysproxy` mit abgefangenen `gsettings`- bzw. `networksetup`-Aufrufen (lesen,
+setzen, sichern, zuruecksetzen, Nachladen, Zustaende fuer den Doctor); HTTP `/proxy.pac` und
+`/api/domains`.
 
 End-to-End auf Linux (manuell, dokumentiert in `docs/e2e.md`): Cisco getrennt, `curl
---socks5-hostname 127.0.0.1:1080 https://ifconfig.me` liefert eine 129.206.x.x-Adresse,
-Statusseite zeigt `connected`, nach `idle_minutes` wieder `idle`, Chrome und Firefox laden
-`sogo.uni-heidelberg.de` ueber den Tunnel.
+--socks5-hostname 127.0.0.1:1080 https://ifconfig.me` liefert eine Uni-Adresse, Statusseite
+zeigt `connected`, nach `idle_minutes` wieder `idle`, Chrome und Firefox laden ueber die
+Systemeinstellung `sogo.uni-heidelberg.de` durch den Tunnel und `ifconfig.me` direkt.
 
 CI (GitHub Actions): `ubuntu-latest` und `macos-latest`: Unit-Tests, `python -m compileall`,
 `plutil -lint` fuer das Plist, `bash -n install.sh`, Installer-Trockenlauf (`--dry-run`).
@@ -447,8 +423,8 @@ CI (GitHub Actions): `ubuntu-latest` und `macos-latest`: Unit-Tests, `python -m 
 ## 8. Etappen
 
 1. Backend, Installer, Tests, Readme (Linux getestet, macOS ueber CI abgesichert).
-2. Extension (Chrome entpackt, Firefox temporaer), E2E in beiden Browsern.
-3. Verteilung: Firefox-Signierung mit `update_url`, macOS-Smoke-Test durch eine Person mit Mac.
+2. Proxy-Regel im System (PAC), E2E in beiden Browsern.
+3. macOS-Smoke-Test durch eine Person mit Mac.
 
 ## 9. Offene Punkte
 

@@ -8,7 +8,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import __version__, cli, config, credentials, service
+from . import __version__, cli, config, credentials, service, sysproxy
 from . import platform as pf
 from .tunnel import port_open
 
@@ -70,7 +70,7 @@ def port_owner(port: int, run=subprocess.run) -> str:
 
 def run_checks(cfg_path: Path | None = None, *,
                find_binary=pf.find_binary, is_active=service.is_active, port_in_use=port_open,
-               keyring_probe=keyring_state, cisco_installed=pf.cisco_installed,
+               keyring_probe=keyring_state, proxy_state=sysproxy.state, cisco_installed=pf.cisco_installed,
                cisco_connected=pf.cisco_connected, api_get=cli.api_get,
                python_version=sys.version_info, run=subprocess.run) -> list[Check]:
     checks: list[Check] = []
@@ -142,6 +142,14 @@ def run_checks(cfg_path: Path | None = None, *,
                    "locked": ("warn", "Schluesselbund gesperrt oder keine Antwort")}
         status, detail = mapping.get(state, ("fail", state.replace("error:", "Fehler: ")))
         checks.append(Check("Zweiter Faktor", status, detail))
+
+    url = sysproxy.pac_url(cfg.http_port)
+    proxy = proxy_state(cfg.http_port)
+    proxy_map = {"ok": ("ok", f"System liest {url}"),
+                 "unset": ("fail", "nicht im System eingetragen: install.sh erneut ausfuehren"),
+                 "foreign": ("warn", "eine andere Proxy-Einstellung ist aktiv, install.sh erneut ausfuehren ersetzt sie"),
+                 "unavailable": ("warn", f"keine GNOME- oder macOS-Proxyverwaltung; im Browser von Hand eintragen: {url}")}
+    checks.append(Check("Proxy-Regel", *proxy_map.get(proxy, ("warn", proxy))))
 
     if cisco_installed():
         connected = cisco_connected()

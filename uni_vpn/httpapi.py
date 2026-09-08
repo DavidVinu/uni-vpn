@@ -12,8 +12,6 @@ from . import totp
 MAX_HEADER = 16 * 1024
 MAX_BODY = 64 * 1024
 
-# Nur dieses Muster darf in Access-Control-Allow-Origin zurueckgespiegelt werden.
-EXTENSION_ORIGIN = re.compile(r"(chrome|moz)-extension://[A-Za-z0-9-]+")
 CONTENT_LENGTH = re.compile(r"[0-9]+")
 
 STATUS_PAGE = """<!doctype html>
@@ -31,6 +29,7 @@ button:disabled{opacity:.5;cursor:default}
 form{margin-top:1.5rem;padding-top:1rem;border-top:1px solid #ddd}
 input[type=password]{font:inherit;padding:.4rem;width:14rem}
 input#totp{width:100%;max-width:26rem}
+textarea{font:inherit;width:100%;max-width:26rem;padding:.4rem}
 pre{background:#eee;padding:.6rem;font-size:12px;max-height:16rem;overflow:auto;white-space:pre-wrap}
 small{color:#666}
 </style></head><body>
@@ -44,13 +43,19 @@ small{color:#666}
 <button type="submit">Speichern</button> <small id="totpmsg"></small><br>
 <small>Aus dem <a href="https://mfa.uni-heidelberg.de/" target="_blank" rel="noopener">MFA-Portal</a> (nur im Uni-Netz oder per VPN erreichbar):
 Soft-Token (zeitbasiert) einrichten, "Tokendetails einblenden", Text zwischen <code>secret=</code> und <code>&amp;issuer=</code> kopieren.</small></form>
+<form id="domform"><label>Domains, die ueber die Uni laufen (eine je Zeile, gilt auch fuer Subdomains):<br>
+<textarea id="domains" rows="5" spellcheck="false"></textarea></label><br>
+<button type="submit">Speichern</button> <small id="dommsg"></small></form>
 <details><summary>Log</summary><pre id="log"></pre></details>
 <script>
 const H = {"X-Uni-VPN": "1", "Content-Type": "application/json"};
+let domainsShown = false, pacRefresh = "auto";
 async function post(path, body) { return fetch(path, {method: "POST", headers: H, body: body ? JSON.stringify(body) : "{}"}); }
 async function refresh() {
   try {
     const s = await (await fetch("/status.json")).json();
+    pacRefresh = s.pac_refresh;
+    if (!domainsShown) { document.getElementById("domains").value = (s.domains || []).join("\n"); domainsShown = true; }
     document.getElementById("dot").className = "dot " + s.state;
     document.getElementById("msg").textContent = s.message;
     document.querySelector("#meta small").textContent =
@@ -69,6 +74,18 @@ document.getElementById("pwform").onsubmit = async (e) => {
   document.getElementById("pwmsg").textContent = r.ok ? "gespeichert" : "Fehler: " + (await r.text());
   document.getElementById("pw").value = "";
   refresh();
+};
+document.getElementById("domform").onsubmit = async (e) => {
+  e.preventDefault();
+  const r = await post("/api/domains", {text: document.getElementById("domains").value});
+  const msg = document.getElementById("dommsg");
+  if (r.ok) {
+    const d = await r.json();
+    document.getElementById("domains").value = d.domains.join("\n");
+    msg.textContent = pacRefresh === "auto" ? "gespeichert, Browser uebernehmen die Regel von selbst" : "gespeichert, Browser neu starten";
+  } else {
+    msg.textContent = "Fehler: " + (await r.text());
+  }
 };
 document.getElementById("totpform").onsubmit = async (e) => {
   e.preventDefault();
@@ -92,9 +109,7 @@ def allowed_origin(origin: str | None, port: int) -> bool:
     # "null" (sandboxed iframe, data:-Seite) ist ein fremder Origin, kein fehlender.
     if origin is None or origin == "":
         return True
-    if origin == f"http://127.0.0.1:{port}":
-        return True
-    return EXTENSION_ORIGIN.fullmatch(origin) is not None
+    return origin == f"http://127.0.0.1:{port}"
 
 
 def allowed_host(host: str | None, port: int) -> bool:
@@ -194,6 +209,8 @@ class HttpApi:
                 return 200, "text/html", STATUS_PAGE.encode()
             if path == "/status.json":
                 return 200, "application/json", json.dumps(self.daemon.status()).encode()
+            if path == "/proxy.pac":
+                return 200, "application/x-ns-proxy-autoconfig", self.daemon.pac().encode()
             return 404, "text/plain", b"nicht gefunden"
         if method != "POST":
             return 405, "text/plain", b"Methode nicht erlaubt"
@@ -217,6 +234,21 @@ class HttpApi:
                 await self.daemon.set_password(password)
             except Exception as exc:  # noqa: BLE001 - Fehlertext geht an die Seite
                 return 500, "text/plain", str(exc).encode()
+        elif path == "/api/domains":
+            try:
+                data = json.loads(body.decode("utf-8"))
+                text = data["text"]
+            except (ValueError, KeyError, TypeError, UnicodeDecodeError):
+                return 400, "text/plain", b"JSON mit 'text' erwartet"
+            if not isinstance(text, str):
+                return 400, "text/plain", b"Domains muessen Text sein"
+            try:
+                domains = await self.daemon.set_domains(text)
+            except ValueError as exc:
+                return 400, "text/plain", str(exc).encode()
+            except Exception as exc:  # noqa: BLE001 - Fehlertext geht an die Seite
+                return 500, "text/plain", str(exc).encode()
+            return 200, "application/json", json.dumps({"ok": True, "domains": domains}).encode()
         elif path == "/api/totp":
             try:
                 data = json.loads(body.decode("utf-8"))

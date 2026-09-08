@@ -10,7 +10,7 @@ import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from . import config, credentials, doctor, service, totp
+from . import config, credentials, doctor, service, sysproxy, totp
 from . import platform as pf
 from .tunnel import port_open as _port_open
 
@@ -18,12 +18,13 @@ INSTALLED_FILES = "installed-files.txt"
 TOTP_HINT = """   Zweiter Faktor: im MFA-Portal https://mfa.uni-heidelberg.de (nur im Uni-Netz oder per VPN erreichbar)
    unter "Soft-Token (zeitbasiert)" einen weiteren Token einrichten, "Tokendetails einblenden" und den
    Text zwischen secret= und &issuer= kopieren. Die App auf dem Handy bleibt als zweiter Token bestehen."""
-EXTENSION_HINT = """
-Browser-Extension einrichten:
-  Chrome:  chrome://extensions -> Entwicklermodus an -> "Entpackte Erweiterung laden" -> Ordner {ext}
-  Firefox: about:debugging#/runtime/this-firefox -> "Temporaeres Add-on laden" -> {ext}/manifest.json
-Statusseite: http://127.0.0.1:{port}/
+FINAL_HINT = """
+Statusseite (Zustand, Verbinden/Trennen, Domainliste): http://127.0.0.1:{port}/
+Offene Browser einmal neu starten, damit sie die Proxy-Regel lesen.
 """
+MANUAL_PROXY_HINT = """   Proxy-Regel konnte nicht automatisch eingetragen werden (keine GNOME- oder macOS-Proxyverwaltung gefunden).
+   Von Hand im Browser eintragen: Einstellungen -> Netzwerk/Proxy -> automatische Proxy-Konfiguration (PAC):
+   {url}"""
 
 
 def _records_path() -> Path:
@@ -94,7 +95,8 @@ def wait_for_port(port: int, *, port_open=_port_open, timeout: float = 5.0, step
 
 def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=service.install,
           store=credentials.store_password, store_totp=credentials.store_totp,
-          keyring_probe=doctor.keyring_state, run_doctor=True, port_open=_port_open) -> int:
+          keyring_probe=doctor.keyring_state, proxy_install=sysproxy.install, run_doctor=True,
+          port_open=_port_open) -> int:
     dry = bool(getattr(args, "dry_run", False))
 
     def created(path: Path) -> None:
@@ -178,6 +180,17 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
             created(path)
         _say("Dienst eingerichtet und gestartet")
 
+    if dry:
+        _say(f"wuerde die Proxy-Regel {sysproxy.pac_url(cfg.http_port)} im System eintragen (vorherige Einstellung wird gesichert)")
+    else:
+        result = proxy_install(cfg.http_port)
+        if result == "unavailable":
+            print(MANUAL_PROXY_HINT.format(url=sysproxy.pac_url(cfg.http_port)))
+        elif result == "replaced":
+            _say("Proxy-Regel im System eingetragen; eine vorhandene Proxy-Einstellung wurde ersetzt (gesichert, install.sh --uninstall stellt sie wieder her)")
+        else:
+            _say("Proxy-Regel im System eingetragen (Chrome und Firefox lesen sie von selbst)")
+
     if pf.cisco_installed():
         print("   Hinweis: Cisco Secure Client ist installiert. Nicht gleichzeitig verbinden; uni-vpn pausiert solange.")
         print("   Empfehlung: im Cisco-Client 'Beim Start automatisch verbinden' abschalten.")
@@ -217,12 +230,12 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
         wait_for_port(cfg.http_port, port_open=port_open)
         print()
         print(doctor.format_checks(doctor.run_checks(cfg_path)))
-    print(EXTENSION_HINT.format(ext=pf.repo_root() / "extension", port=cfg.http_port))
+    print(FINAL_HINT.format(port=cfg.http_port))
     return 0
 
 
 def uninstall(args, *, input_fn=input, service_uninstall=service.uninstall, delete=credentials.delete_password,
-              delete_totp=credentials.delete_totp) -> int:
+              delete_totp=credentials.delete_totp, proxy_uninstall=sysproxy.uninstall) -> int:
     dry = bool(getattr(args, "dry_run", False))
     user = None
     try:
@@ -230,10 +243,11 @@ def uninstall(args, *, input_fn=input, service_uninstall=service.uninstall, dele
     except config.ConfigError:
         pass
     if dry:
-        _say("wuerde Dienst entfernen und diese Dateien loeschen:")
+        _say("wuerde die Proxy-Regel aus dem System nehmen, den Dienst entfernen und diese Dateien loeschen:")
         for path in recorded():
             print(f"   {path}")
         return 0
+    _say("Proxy-Einstellung wiederhergestellt" if proxy_uninstall() else "Proxy-Einstellung war nicht von uni-vpn gesetzt")
     service_uninstall()
     _say("Dienst entfernt")
     for path in recorded():
@@ -251,8 +265,7 @@ def uninstall(args, *, input_fn=input, service_uninstall=service.uninstall, dele
         if answer in ("j", "ja", "y", "yes"):
             _say("Passwort geloescht" if delete(user) else "Passwort war nicht im Keyring")
             _say("TOTP-Schluessel geloescht" if delete_totp(user) else "TOTP-Schluessel war nicht im Keyring")
-    print("Bleibt bestehen: Pakete (openconnect, ocproxy), die Extension im Browser (dort entfernen), "
-          f"das Repo {pf.repo_root()} und das Log unter {pf.state_dir()}")
+    print(f"Bleibt bestehen: Pakete (openconnect, ocproxy), das Repo {pf.repo_root()} und das Log unter {pf.state_dir()}")
     return 0
 
 
@@ -267,5 +280,5 @@ def update(args, run=subprocess.run) -> int:
         print("git pull fehlgeschlagen")
         return result.returncode
     rc = service.control("restart", run=run)
-    print("Dienst neu gestartet. Extension: in chrome://extensions auf Aktualisieren klicken, Firefox neu laden.")
+    print("Dienst neu gestartet.")
     return rc

@@ -52,6 +52,8 @@ class DaemonHarness(unittest.IsolatedAsyncioTestCase):
         self.cisco = False
         self.stored = []
         self.stored_totp = []
+        self.refreshed = []
+        self.domains_path = tmp / "domains.txt"
         self.daemon = None
         self.task = None
 
@@ -70,6 +72,8 @@ class DaemonHarness(unittest.IsolatedAsyncioTestCase):
             return self.probe_result
 
         kwargs.setdefault("token_dir", self.token_dir)
+        kwargs.setdefault("domains_path", self.domains_path)
+        kwargs.setdefault("proxy_refresh", self.refreshed.append)
         self.daemon = dm.Daemon(
             self.cfg, logging.getLogger("t"),
             password_getter=getter, password_setter=self.stored.append,

@@ -11,7 +11,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Awaitable, Callable
 
-from . import PROTOCOL, __version__, credentials
+from . import PROTOCOL, __version__, credentials, pac, sysproxy
 from . import platform as pf
 from .config import Config
 from .forwarder import Forwarder
@@ -60,7 +60,9 @@ class Daemon:
                  config_error: str | None = None,
                  log_tail=None,
                  wrapper: str | None = None,
-                 token_dir: Path | None = None):
+                 token_dir: Path | None = None,
+                 domains_path: Path | None = None,
+                 proxy_refresh: Callable[[int], None] | None = None):
         self.cfg = cfg
         self.log = log or logging.getLogger("uni-vpn")
         self.password_getter = password_getter or (lambda: credentials.get_password(cfg.user, cfg.keyring_timeout))
@@ -68,6 +70,8 @@ class Daemon:
         self.totp_getter = totp_getter or (lambda: credentials.get_totp(cfg.user, cfg.keyring_timeout))
         self.totp_setter = totp_setter or (lambda token: credentials.store_totp(cfg.user, token))
         self.token_dir = token_dir or pf.state_dir()
+        self.domains_path = domains_path or pac.domains_path()
+        self.proxy_refresh = proxy_refresh or sysproxy.refresh
         self.probe = probe or (lambda: default_probe(cfg.host, cfg.probe_timeout))
         self.cisco_check = cisco_check or pf.cisco_connected
         self.tunnel_factory = tunnel_factory or self._make_tunnel
@@ -154,8 +158,23 @@ class Daemon:
             "bytes_out": self.forwarder.bytes_out,
             "connects": self.connect_count,
             "last_error": self.last_error,
+            "domains": pac.read_domains(self.domains_path),
+            "pac_url": sysproxy.pac_url(self.cfg.http_port),
+            "pac_refresh": "manual" if pf.IS_MACOS else "auto",
             "log_tail": list(self.log_tail)[-30:],
         }
+
+    def pac(self) -> str:
+        return pac.build_pac(pac.read_domains(self.domains_path), self.cfg.socks_port)
+
+    async def set_domains(self, text: str) -> list[str]:
+        domains, errors = pac.parse_domain_list(text)
+        if errors:
+            raise ValueError("\n".join(errors))
+        pac.write_domains(self.domains_path, domains)
+        self.log.info("Domainliste gespeichert: %s", ", ".join(domains) or "(leer)")
+        await asyncio.get_running_loop().run_in_executor(None, self.proxy_refresh, self.cfg.http_port)
+        return domains
 
     # --- Lebenszyklus -----------------------------------------------------
 

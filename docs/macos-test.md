@@ -13,8 +13,8 @@ Umgebung notieren: macOS-Version, Chip, Homebrew-Version, Chrome- und Firefox-Ve
    `state = running`.
 5. `curl -s --socks5-hostname 127.0.0.1:1080 https://ifconfig.me` liefert eine Uni-Adresse.
    Falls ein Schluesselbund-Dialog erscheint: "Immer erlauben" waehlen und notieren.
-6. Chrome: Extension entpackt laden, `https://sogo.uni-heidelberg.de` oeffnen, Popup gruen.
-7. Firefox: Add-on temporaer laden, dasselbe.
+6. Chrome neu starten, `https://sogo.uni-heidelberg.de` oeffnen, Statusseite `http://127.0.0.1:1081/` zeigt `connected`; `https://ifconfig.me` zeigt die normale Adresse. Systemeinstellungen > Netzwerk > WLAN > Details > Proxies: "Automatische Proxy-Konfiguration" zeigt auf `http://127.0.0.1:1081/proxy.pac`.
+7. Firefox neu starten (Einstellungen > Netzwerk: "Proxy-Einstellungen des Systems verwenden"), dasselbe.
 8. Bildschirm sperren, entsperren, Seite neu laden: geht es ohne Dialog?
 9. Neustart des Macs, Browser oeffnen, Seite laden: verbindet von selbst?
 10. `~/uni-vpn/install.sh --uninstall`: Dienst weg (`launchctl print` meldet Fehler), Dateien weg.

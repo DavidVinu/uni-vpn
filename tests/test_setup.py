@@ -29,6 +29,8 @@ class SetupHarness(unittest.TestCase):
         self.stored_totp = []
         self.installed = []
         self.keyring = {"password": "missing", "totp": "missing"}
+        self.proxy_calls = []
+        self.proxy_result = "ok"
 
     def tearDown(self):
         for p in (self.find, self.macos, self.home_patch, self.env):
@@ -50,6 +52,10 @@ class SetupHarness(unittest.TestCase):
     def answer(self, prompt):
         return "pw" if "Passwort" in prompt else "gezd gnbv gy3t qojq gezd gnbv gy3t qojq"
 
+    def fake_proxy_install(self, http_port):
+        self.proxy_calls.append(http_port)
+        return self.proxy_result
+
     def run_setup(self, service_install=None, run_doctor=False, port_open=lambda port: True, getpass_fn=None, **kwargs):
         out = StringIO()
         with redirect_stdout(out):
@@ -58,6 +64,7 @@ class SetupHarness(unittest.TestCase):
                              store=lambda user, pw: self.stored.append((user, pw)),
                              store_totp=lambda user, token: self.stored_totp.append((user, token)),
                              keyring_probe=lambda user, kind="password": self.keyring[kind],
+                             proxy_install=self.fake_proxy_install,
                              run_doctor=run_doctor, port_open=port_open)
         return rc, out.getvalue()
 
@@ -83,6 +90,23 @@ class SetupTests(SetupHarness):
         self.assertIn(self.installed[0], recorded)
         self.assertTrue(setup.apport_ignore_path().exists())
         self.assertIn("/usr/bin/openconnect", setup.apport_ignore_path().read_text())
+        self.assertEqual(self.proxy_calls, [1081])
+        self.assertIn("Proxy-Regel im System eingetragen", out)
+        self.assertNotIn("chrome://extensions", out)
+        self.assertIn("http://127.0.0.1:1081/", out)
+
+    def test_proxy_unavailable_prints_manual_pac_url(self):
+        self.proxy_result = "unavailable"
+        rc, out = self.run_setup(user="ab123")
+        self.assertEqual(rc, 0)
+        self.assertIn("http://127.0.0.1:1081/proxy.pac", out)
+        self.assertIn("Von Hand", out)
+
+    def test_proxy_replaced_is_mentioned(self):
+        self.proxy_result = "replaced"
+        rc, out = self.run_setup(user="ab123")
+        self.assertEqual(rc, 0)
+        self.assertIn("ersetzt", out)
 
     def test_setup_is_idempotent(self):
         self.run_setup()
@@ -98,6 +122,8 @@ class SetupTests(SetupHarness):
         self.assertEqual(self.stored_totp, [])
         self.assertIn("wuerde", out)
         self.assertIn("TOTP", out)
+        self.assertEqual(self.proxy_calls, [])
+        self.assertIn("Proxy", out)
 
     def test_totp_asked_alone_when_password_present(self):
         self.keyring["password"] = "present"
@@ -214,20 +240,24 @@ class UninstallTests(SetupHarness):
         deleted = []
         deleted_totp = []
         removed_service = []
+        proxy_restored = []
         out = StringIO()
         with redirect_stdout(out):
             rc = setup.uninstall(self.args(yes=True), input_fn=lambda p: "j",
                                  service_uninstall=lambda run=None: removed_service.append(True),
                                  delete=lambda user: deleted.append(user) or True,
-                                 delete_totp=lambda user: deleted_totp.append(user) or True)
+                                 delete_totp=lambda user: deleted_totp.append(user) or True,
+                                 proxy_uninstall=lambda: proxy_restored.append(True) or True)
         self.assertEqual(rc, 0)
         self.assertEqual(removed_service, [True])
         self.assertEqual(deleted, ["ab123"])
         self.assertEqual(deleted_totp, ["ab123"])
+        self.assertEqual(proxy_restored, [True])
+        self.assertIn("Proxy-Einstellung wiederhergestellt", out.getvalue())
+        self.assertNotIn("Extension", out.getvalue())
         self.assertFalse((self.home / ".config" / "uni-vpn" / "config.toml").exists())
         self.assertFalse((self.home / ".local" / "bin" / "uni-vpn").exists())
         self.assertFalse((self.home / ".config" / "uni-vpn" / setup.INSTALLED_FILES).exists())
-        self.assertIn("Extension", out.getvalue())
 
     def test_uninstall_keeps_keyring_when_declined(self):
         self.run_setup()
@@ -235,7 +265,8 @@ class UninstallTests(SetupHarness):
         with redirect_stdout(StringIO()):
             setup.uninstall(self.args(), input_fn=lambda p: "n", service_uninstall=lambda run=None: None,
                             delete=lambda user: deleted.append(user) or True,
-                            delete_totp=lambda user: deleted.append(("totp", user)) or True)
+                            delete_totp=lambda user: deleted.append(("totp", user)) or True,
+                            proxy_uninstall=lambda: True)
         self.assertEqual(deleted, [])
 
 

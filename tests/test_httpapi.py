@@ -2,7 +2,7 @@ import asyncio
 import json
 
 from uni_vpn import daemon as dm
-from uni_vpn import totp
+from uni_vpn import pac, totp
 from uni_vpn.httpapi import allowed_origin
 
 from tests.test_daemon import DaemonHarness, wait_state
@@ -31,8 +31,9 @@ class OriginTests(DaemonHarness):
     async def test_allowed_origin(self):
         self.assertTrue(allowed_origin(None, 1081))
         self.assertTrue(allowed_origin("http://127.0.0.1:1081", 1081))
-        self.assertTrue(allowed_origin("chrome-extension://abcdef", 1081))
-        self.assertTrue(allowed_origin("moz-extension://1234-5678", 1081))
+        # Ohne Extension gibt es keinen fremden Origin mehr, der POSTen darf.
+        self.assertFalse(allowed_origin("chrome-extension://abcdef", 1081))
+        self.assertFalse(allowed_origin("moz-extension://1234-5678", 1081))
         self.assertFalse(allowed_origin("https://evil.example", 1081))
         self.assertFalse(allowed_origin("http://127.0.0.1:9999", 1081))
         # "null" senden sandboxed iframes und data:-Seiten: kein vertrauenswuerdiger Origin.
@@ -139,19 +140,16 @@ class ApiTests(DaemonHarness):
         self.assertTrue(json.loads(payload)["ok"])
         await wait_state(d, dm.State.connected)
         status, _, _ = await http(self.cfg.http_port, "POST", "/api/disconnect",
-                                  {"X-Uni-VPN": "1", "Origin": "chrome-extension://abc"})
+                                  {"X-Uni-VPN": "1", "Origin": f"http://127.0.0.1:{self.cfg.http_port}"})
         self.assertEqual(status, 200)
         await wait_state(d, dm.State.idle)
 
-    async def test_extension_origin_gets_cors_header(self):
+    async def test_extension_origins_get_no_cors_header(self):
         await self.start_daemon()
-        status, hdrs, _ = await http(self.cfg.http_port, "GET", "/status.json", {"Origin": "moz-extension://x"})
-        self.assertEqual(status, 200)
-        self.assertEqual(hdrs["access-control-allow-origin"], "moz-extension://x")
-        status, hdrs, _ = await http(self.cfg.http_port, "OPTIONS", "/api/connect",
-                                     {"Origin": "chrome-extension://x", "Access-Control-Request-Method": "POST"})
-        self.assertEqual(status, 204)
-        self.assertIn("X-Uni-VPN", hdrs["access-control-allow-headers"])
+        for origin in ("moz-extension://x", "chrome-extension://x"):
+            status, hdrs, _ = await http(self.cfg.http_port, "GET", "/status.json", {"Origin": origin})
+            self.assertEqual(status, 200)
+            self.assertNotIn("access-control-allow-origin", hdrs)
 
     async def test_password_endpoint(self):
         d = await self.start_daemon()
@@ -234,3 +232,60 @@ class TotpEndpointTests(DaemonHarness):
         _, _, payload = await http(self.cfg.http_port, "GET", "/status.json")
         self.assertNotIn(b"GEZDGNBVGY3TQOJQ", payload)
         self.assertNotIn(b"geheim", payload)
+
+
+class PacTests(DaemonHarness):
+    HEADERS = {"X-Uni-VPN": "1", "Content-Type": "application/json"}
+
+    async def test_proxy_pac_serves_defaults_with_socks_port(self):
+        await self.start_daemon()
+        status, hdrs, payload = await http(self.cfg.http_port, "GET", "/proxy.pac")
+        self.assertEqual(status, 200)
+        self.assertEqual(hdrs["content-type"], "application/x-ns-proxy-autoconfig")
+        self.assertEqual(hdrs["cache-control"], "no-store")
+        text = payload.decode()
+        self.assertIn("FindProxyForURL", text)
+        for d in pac.DEFAULT_DOMAINS:
+            self.assertIn(d, text)
+        self.assertIn(f"SOCKS5 127.0.0.1:{self.cfg.socks_port}", text)
+
+    async def test_status_json_lists_domains_and_pac_url(self):
+        await self.start_daemon()
+        _, _, payload = await http(self.cfg.http_port, "GET", "/status.json")
+        data = json.loads(payload)
+        self.assertEqual(data["domains"], pac.DEFAULT_DOMAINS)
+        self.assertEqual(data["pac_url"], f"http://127.0.0.1:{self.cfg.http_port}/proxy.pac")
+
+    async def test_status_page_has_domain_form(self):
+        await self.start_daemon()
+        _, _, payload = await http(self.cfg.http_port, "GET", "/")
+        self.assertIn(b"/api/domains", payload)
+        self.assertIn(b'id="domains"', payload)
+        self.assertNotIn(b"Extension", payload)
+
+    async def test_domains_endpoint_writes_file_refreshes_proxy_and_updates_pac(self):
+        await self.start_daemon()
+        body = json.dumps({"text": "Example.ORG\n# Kommentar\nsogo.uni-heidelberg.de\n"}).encode()
+        status, _, payload = await http(self.cfg.http_port, "POST", "/api/domains", self.HEADERS, body)
+        self.assertEqual(status, 200, payload)
+        self.assertEqual(json.loads(payload)["domains"], ["example.org", "sogo.uni-heidelberg.de"])
+        self.assertEqual(pac.read_domains(self.domains_path), ["example.org", "sogo.uni-heidelberg.de"])
+        self.assertEqual(self.refreshed, [self.cfg.http_port])
+        _, _, payload = await http(self.cfg.http_port, "GET", "/proxy.pac")
+        self.assertIn(b"example.org", payload)
+        self.assertNotIn(b"elearning-med", payload)
+
+    async def test_domains_endpoint_rejects_invalid_lines_and_changes_nothing(self):
+        await self.start_daemon()
+        body = json.dumps({"text": "sogo.uni-heidelberg.de\nkaputt\n"}).encode()
+        status, _, payload = await http(self.cfg.http_port, "POST", "/api/domains", self.HEADERS, body)
+        self.assertEqual(status, 400)
+        self.assertIn(b"Zeile 2", payload)
+        self.assertFalse(self.domains_path.exists())
+        self.assertEqual(self.refreshed, [])
+
+    async def test_domains_endpoint_needs_csrf_header(self):
+        await self.start_daemon()
+        status, _, _ = await http(self.cfg.http_port, "POST", "/api/domains", {"Content-Type": "application/json"},
+                                  b'{"text": "example.org"}')
+        self.assertEqual(status, 403)

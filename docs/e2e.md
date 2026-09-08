@@ -14,18 +14,21 @@ Secure Client ist getrennt (`/opt/cisco/secureclient/bin/vpn state` zeigt `Disco
 5. Leerlauf: in `config.toml` voruebergehend `idle_minutes = 1` setzen, `uni-vpn service restart`,
    Schritt 2 wiederholen, nach etwa 60 s ohne Verkehr zeigt `uni-vpn status` wieder `idle`.
    Wert zuruecksetzen, Dienst neu starten.
-6. Chrome: Extension geladen, `https://sogo.uni-heidelberg.de/SOGo/so/` oeffnen. Popup zeigt
-   `connected`. `https://ifconfig.me` im selben Browser zeigt die normale Adresse (DIRECT).
-7. Firefox: dasselbe mit temporaer geladenem Add-on; in `about:addons` "In privaten Fenstern
-   ausfuehren" erlauben und pruefen, dass das Popup keine fehlenden Freigaben meldet.
-8. Falsches Passwort: `uni-vpn password` mit Unsinn, dann Seite laden: Popup zeigt "Anmeldung
-   abgelehnt", `uni-vpn log` zeigt genau einen Loginversuch. Richtiges Passwort setzen.
+6. Chrome (neu gestartet, ohne eigene Proxy-Einstellung): `https://sogo.uni-heidelberg.de/SOGo/so/`
+   oeffnen, Statusseite zeigt `connected`. `https://ifconfig.me` im selben Browser zeigt die
+   normale Adresse (DIRECT). `uni-vpn doctor` zeigt "Proxy-Regel: System liest ...".
+7. Firefox (neu gestartet, Netzwerk-Einstellungen auf "Proxy-Einstellungen des Systems
+   verwenden"): dasselbe. Auf der Statusseite eine Domain ergaenzen und pruefen, dass beide
+   Browser die neue Regel ohne Neustart uebernehmen.
+8. Falsches Passwort: `uni-vpn password` mit Unsinn, dann Seite laden: Statusseite zeigt
+   "Anmeldung abgelehnt", `uni-vpn log` zeigt genau einen Loginversuch. Richtiges Passwort setzen.
 8a. Falscher TOTP-Schluessel: `uni-vpn totp` mit einem beliebigen gueltigen Base32-Wert, dann
-    Seite laden: Popup zeigt "Einmalcode abgelehnt", `uni-vpn log` zeigt "Generating OATH TOTP
+    Seite laden: Statusseite zeigt "Einmalcode abgelehnt", `uni-vpn log` zeigt "Generating OATH TOTP
     token code" und danach "Login failed.", genau ein openconnect-Lauf. Richtigen Schluessel
     setzen. Im Zustandsordner (`~/.local/state/uni-vpn/`) liegt danach keine `totp-*`-Datei.
-9. Cisco: Cisco-Client verbinden, Seite laden: Popup zeigt "Cisco Secure Client ist verbunden".
-   Cisco trennen, Seite neu laden: verbindet von selbst.
+9. Cisco: bei stehendem Tunnel den Cisco-Client verbinden, bis 30 s warten: Statusseite zeigt
+   "Cisco Secure Client ist verbunden", Seite laden ergibt einen Proxy-Fehler. Cisco trennen,
+   bis 30 s warten, Seite neu laden: verbindet von selbst.
 10. Suspend/Resume: Laptop 1 Minute zuklappen, oeffnen, Seite laden. `uni-vpn log` zeigt
     "Resume erkannt".
 
