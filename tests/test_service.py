@@ -110,6 +110,20 @@ class InstallTests(unittest.TestCase):
             service.install(run=self.run_ok)
             self.assertNotIn("Environment=", unit.read_text())
 
+    def test_install_restarts_running_service_so_new_code_is_loaded(self):
+        # "enable --now" laesst einen laufenden Dienst unangetastet; nach einem Update oder
+        # erneutem install.sh lief sonst der alte Code weiter (gesehen 2026-09-08).
+        calls = []
+
+        def run(cmd, **kwargs):
+            calls.append(cmd)
+            return self.run_ok(cmd, **kwargs)
+
+        with mock.patch.object(pf, "IS_MACOS", False), mock.patch.object(Path, "home", return_value=self.home):
+            service.install(run=run)
+        self.assertIn(["systemctl", "--user", "enable", "--now", "uni-vpn"], calls)
+        self.assertEqual(calls[-1], ["systemctl", "--user", "restart", "uni-vpn"])
+
     def test_install_reports_failed_load(self):
         def run_fail(cmd, **kwargs):
             if cmd[:3] == ["systemctl", "--user", "daemon-reload"]:

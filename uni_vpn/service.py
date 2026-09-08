@@ -108,6 +108,8 @@ def install(dry_run: bool = False, run=subprocess.run) -> list[Path]:
     else:
         _run_checked(run, ["systemctl", "--user", "daemon-reload"], files)
         _run_checked(run, ["systemctl", "--user", "enable", "--now", UNIT], files)
+        # "enable --now" laesst einen laufenden Dienst stehen; nach install.sh soll der neue Code laufen.
+        _run_checked(run, ["systemctl", "--user", "restart", UNIT], files)
     return files
 
 

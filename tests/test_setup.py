@@ -8,7 +8,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from uni_vpn import doctor, service
+from uni_vpn import doctor, service, sysproxy
 from uni_vpn import platform as pf
 from uni_vpn import setup
 
@@ -31,6 +31,12 @@ class SetupHarness(unittest.TestCase):
         self.keyring = {"password": "missing", "totp": "missing"}
         self.proxy_calls = []
         self.proxy_result = "ok"
+        # Schutz: kein Test darf die echte Proxy-Einstellung des Rechners anfassen (passiert am
+        # 2026-09-08, als ein Test setup() ohne proxy_install aufrief).
+        for name in ("install", "uninstall", "refresh", "state", "current", "apply", "restore"):
+            patch = mock.patch.object(sysproxy, name, side_effect=AssertionError(f"sysproxy.{name} im Test aufgerufen"))
+            patch.start()
+            self.addCleanup(patch.stop)
 
     def tearDown(self):
         for p in (self.find, self.macos, self.home_patch, self.env):
@@ -228,7 +234,7 @@ class SetupTests(SetupHarness):
         with redirect_stdout(out):
             rc = setup.setup(self.args(user="ab123"), input_fn=lambda p: "x", getpass_fn=lambda p: (_ for _ in ()).throw(AssertionError("darf nicht fragen")),
                              service_install=self.fake_service_install, store=self.stored.append,
-                             store_totp=self.stored_totp.append,
+                             store_totp=self.stored_totp.append, proxy_install=self.fake_proxy_install,
                              keyring_probe=lambda user, kind="password": "present", run_doctor=False)
         self.assertEqual(rc, 0)
         self.assertIn("bereits im Keyring", out.getvalue())
