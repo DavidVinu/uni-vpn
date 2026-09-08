@@ -180,18 +180,26 @@ Aufbau, Schritt fuer Schritt:
    ```
    mit `start_new_session=True`, stdin=PIPE, stdout+stderr=PIPE. Passwort als bytes plus
    `\n` schreiben, stdin schliessen, Referenz loeschen. `uni-vpn-ocproxy` ist ein Wrapper mit
-   `exec ocproxy -D 127.0.0.1:<port> -k 30`, damit kein `sh` als Zwischenprozess bleibt.
+   `exec ocproxy -D 127.0.0.1:<port> -k 30`; der `--script`-Wert beginnt mit `exec`, weil
+   openconnect ihn per `/bin/sh -c` startet und dash sonst ein `sh` daneben stehen liesse.
    Der Schluessel steht nie in der Kommandozeile. Die Datei wird geloescht, sobald der Port
    offen ist, der Prozess endet oder der Daemon ihn stoppt; beim Daemon-Start werden
    uebrig gebliebene `totp-*`-Dateien entfernt.
 6. Bereitschaft: TCP-Connect-Probe auf den ocproxy-Port alle 250 ms, max 45 s. Sobald offen:
    `connected`. Wartende Client-Verbindungen werden durchgereicht; die Auth-Dauer wird geloggt.
-7. stderr zeilenweise lesen und auf Marker abbilden (erster Treffer zaehlt):
-   `Server is rejecting the soft token` -> `auth_failed` ("Einmalcode abgelehnt: Uhrzeit
-   pruefen, sonst uni-vpn totp"); `User input required in non-interactive mode` ->
-   `auth_failed` ("Anmeldung abgelehnt: Passwort pruefen; stimmt es, hat der Server etwas
-   Unbekanntes verlangt, siehe Log"); `Failed to complete authentication` -> dieselbe
-   Meldung; `Server asked us to run CSD` oder `Cisco Secure Desktop` ->
+7. stderr zeilenweise lesen und bewerten (erstes Urteil bleibt). Gemessen am 2026-09-08:
+   der ASA meldet ein falsches Passwort mit `Login failed.` vor der OTP-Abfrage, einen
+   falschen Einmalcode mit `Login failed.` nach `Generating OATH TOTP token code`; danach
+   zeigt er in beiden Faellen das Formular erneut, es folgen `User input required` und
+   `Failed to complete authentication`. Daher: `Login failed` ohne vorherige Code-Erzeugung
+   -> `auth_failed` ("Passwort pruefen, uni-vpn password"), mit -> `auth_failed`
+   ("Einmalcode abgelehnt: Uhrzeit pruefen, sonst uni-vpn totp"). Weitere Marker:
+   `Server is rejecting the soft token` (Server zeigt das OTP-Formular erneut) -> dieselbe
+   Einmalcode-Meldung; `Soft token string is invalid` -> `auth_failed` ("uni-vpn totp");
+   `User input required in non-interactive mode` ohne vorheriges `Login failed` ->
+   `auth_failed` ("Passwort pruefen; stimmt es, hat der Server etwas Unbekanntes verlangt,
+   siehe Log"); `Failed to complete authentication` -> dieselbe Meldung; `Server asked us to
+   run CSD` oder `Cisco Secure Desktop` ->
    `auth_failed` ("HostScan verlangt, Update noetig"); `SAML` oder `external browser` ->
    `auth_failed` ("Login-Verfahren geaendert"); `certificate` -> `error` ("Zertifikat").
    Die letzten 20 stderr-Zeilen werden im Status mitgefuehrt.
@@ -271,7 +279,7 @@ Ausgabe ist zum Einfuegen in ein GitHub-Issue gedacht.
 | Keyring | secret-tool (GNOME-Keyring oder KDE ksecretd ueber Secret Service) | security (Login-Schluesselbund) |
 | Autostart | `~/.config/systemd/user/uni-vpn.service`, `WantedBy=graphical-session.target`, `PartOf=graphical-session.target`, `Restart=always`, `RestartSec=5`, `StartLimitIntervalSec=0`, `LimitCORE=0` | `~/Library/LaunchAgents/de.davidvinu.uni-vpn.plist`, `RunAtLoad`, `KeepAlive`, `EnvironmentVariables.PATH` mit Brew-Prefix, Log nach `~/Library/Logs/uni-vpn/` |
 | Laden | `systemctl --user daemon-reload && systemctl --user enable --now uni-vpn` | `launchctl bootout gui/$UID <plist>; launchctl bootstrap gui/$UID <plist>` |
-| Cisco-Erkennung | `/sys/class/net/cscotun0` oder `vpn state` | `vpn state` |
+| Cisco-Erkennung | nur `/sys/class/net/cscotun0` (`vpn state` braucht 2,2 s je Aufruf) | `vpn state` |
 | Log | `~/.local/state/uni-vpn/` | `~/Library/Logs/uni-vpn/` |
 
 Kein Linger: der Dienst startet mit der grafischen Sitzung, dann ist der Keyring entsperrt.
@@ -437,9 +445,10 @@ CI (GitHub Actions): `ubuntu-latest` und `macos-latest`: Unit-Tests, `python -m 
 
 ## 9. Offene Punkte
 
-- Ob das OTP-Formular des URZ als `challenge` oder `secondary_password` kommt (beides fuellt
-  openconnect selbst), zeigt erst der erste echte Login. Ein anderes Formular meldet der Daemon
-  als `auth_failed` mit Hinweis auf das Log, in dem der Prompt-Text steht.
+- Das OTP-Formular des URZ kommt als Challenge nach dem Passwort ("Bitte zweiten Faktor
+  eingeben (OTP)"), openconnect fuellt es selbst (bestaetigt am 2026-09-08, Tunnel nach
+  1,5 s). Aendert das URZ das Formular, meldet der Daemon `auth_failed` mit Hinweis auf das
+  Log, in dem der Prompt-Text steht.
 - Gleichzeitige Sessions desselben Kontos (Cisco-Client plus uni-vpn) sind nicht dokumentiert.
   Empfehlung im Readme: Cisco-Client nicht parallel verbinden, `AutoConnectOnStart` abschalten.
 - macOS ist bis zum Smoke-Test experimentell.

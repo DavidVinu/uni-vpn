@@ -19,9 +19,9 @@ Secure Client ist getrennt (`/opt/cisco/secureclient/bin/vpn state` zeigt `Disco
 8. Falsches Passwort: `uni-vpn password` mit Unsinn, dann Seite laden: Popup zeigt "Anmeldung
    abgelehnt", `uni-vpn log` zeigt genau einen Loginversuch. Richtiges Passwort setzen.
 8a. Falscher TOTP-Schluessel: `uni-vpn totp` mit einem beliebigen gueltigen Base32-Wert, dann
-    Seite laden: Popup zeigt "Einmalcode abgelehnt", `uni-vpn log` zeigt "Server is rejecting
-    the soft token", keine Wiederholung. Richtigen Schluessel setzen. Im Zustandsordner
-    (`~/.local/state/uni-vpn/`) liegt danach keine `totp-*`-Datei.
+    Seite laden: Popup zeigt "Einmalcode abgelehnt", `uni-vpn log` zeigt "Generating OATH TOTP
+    token code" und danach "Login failed.", genau ein openconnect-Lauf. Richtigen Schluessel
+    setzen. Im Zustandsordner (`~/.local/state/uni-vpn/`) liegt danach keine `totp-*`-Datei.
 9. Cisco: Cisco-Client verbinden, Seite laden: Popup zeigt "Cisco Secure Client ist verbunden".
    Cisco trennen, Seite neu laden: verbindet von selbst.
 10. Suspend/Resume: Laptop 1 Minute zuklappen, oeffnen, Seite laden. `uni-vpn log` zeigt

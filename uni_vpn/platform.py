@@ -66,6 +66,10 @@ def cisco_installed() -> bool:
 def cisco_connected(run=subprocess.run, cscotun: Path = Path("/sys/class/net/cscotun0")) -> bool:
     if cscotun.exists():
         return True
+    if not IS_MACOS:
+        # Auf Linux legt der Cisco-Client bei Verbindung immer cscotun0 an. "vpn state"
+        # braucht 2,2 s (gemessen 2026-09-08) und wuerde jeden Aufbau verzoegern.
+        return False
     if not cisco_installed():
         return False
     try:

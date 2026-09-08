@@ -52,7 +52,15 @@ def main():
     delay = float(os.environ.get("FAKE_DELAY", "0.2"))
 
     if mode == "auth_fail":
+        # Falsches Passwort (gemessen 2026-09-08): "Login failed." kommt vor jeder OTP-Abfrage,
+        # dann zeigt der Server das Formular erneut und openconnect hat kein Passwort mehr.
         time.sleep(delay)
+        log("Bitte geben Sie ihren Benutzernamen und ihr Passwort ein.")
+        log("Login failed.")
+        log("Bitte geben Sie ihren Benutzernamen und ihr Passwort ein.")
+        log("Password:")
+        log("***")
+        log("User input required in non-interactive mode")
         log("Failed to complete authentication")
         sys.exit(1)
     if mode == "input_required":
@@ -60,8 +68,15 @@ def main():
         log("Failed to complete authentication")
         sys.exit(1)
     if mode == "totp_rejected":
-        log("Server is rejecting the soft token; switching to manual entry")
-        log("Bitte zweiten Faktor eingeben (OTP):***")
+        # Falscher Schluessel (gemessen 2026-09-08): das Passwort wurde angenommen, der Code
+        # abgelehnt; der Server schickt kein zweites OTP-Formular, sondern faengt von vorn an.
+        log("Bitte geben Sie ihren Benutzernamen und ihr Passwort ein.")
+        log("Bitte zweiten Faktor eingeben (OTP) / Please enter second factor (OTP).")
+        log("Generating OATH TOTP token code")
+        log("Login failed.")
+        log("Bitte geben Sie ihren Benutzernamen und ihr Passwort ein.")
+        log("Password:")
+        log("***")
         log("User input required in non-interactive mode")
         log("Failed to complete authentication")
         sys.exit(1)

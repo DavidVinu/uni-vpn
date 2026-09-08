@@ -49,13 +49,43 @@ class ClassifyTests(unittest.TestCase):
         self.assertIn("uni-vpn totp", message)
 
     def test_rejected_soft_token_names_the_second_factor(self):
-        # openconnect probiert zwei Codes, dann "switching to manual entry"; danach folgen
-        # "User input required" und "Failed to complete authentication". Der erste Treffer zaehlt.
+        # Falls ein Server das OTP-Formular erneut zeigt, probiert openconnect zwei Codes und
+        # meldet dann "switching to manual entry"; danach folgen "User input required" und
+        # "Failed to complete authentication". Der erste Treffer zaehlt.
         state, message = tn.classify_line("Server is rejecting the soft token; switching to manual entry")
         self.assertEqual(state, "auth_failed")
         self.assertIn("Einmalcode", message)
         self.assertIn("uni-vpn totp", message)
         self.assertIn("Uhrzeit", message)
+
+    def test_login_failed_before_otp_means_password(self):
+        # Gemessen am 2026-09-08: der ASA lehnt ein falsches Passwort ab, bevor er nach dem OTP fragt.
+        seq = tn.Classifier()
+        self.assertIsNone(seq.feed("Bitte geben Sie ihren Benutzernamen und ihr Passwort ein."))
+        state, message = seq.feed("Login failed.")
+        self.assertEqual(state, "auth_failed")
+        self.assertIn("Passwort", message)
+        self.assertIn("uni-vpn password", message)
+        self.assertNotIn("Einmalcode", message)
+
+    def test_login_failed_after_otp_means_second_factor(self):
+        # Gemessen am 2026-09-08: bei falschem Schluessel kommt erst die OTP-Abfrage, openconnect
+        # erzeugt den Code, dann "Login failed." und das Formular von vorn.
+        seq = tn.Classifier()
+        seq.feed("Bitte zweiten Faktor eingeben (OTP) / Please enter second factor (OTP).")
+        self.assertIsNone(seq.feed("Generating OATH TOTP token code"))
+        state, message = seq.feed("Login failed.")
+        self.assertEqual(state, "auth_failed")
+        self.assertIn("Einmalcode", message)
+        self.assertIn("uni-vpn totp", message)
+        self.assertNotIn("uni-vpn password", message)
+
+    def test_classifier_keeps_first_verdict(self):
+        seq = tn.Classifier()
+        seq.feed("Generating OATH TOTP token code")
+        first = seq.feed("Login failed.")
+        self.assertEqual(seq.feed("User input required in non-interactive mode"), first)
+        self.assertEqual(seq.verdict, first)
 
 
 class TunnelTests(unittest.IsolatedAsyncioTestCase):
@@ -88,7 +118,9 @@ class TunnelTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("--passwd-on-stdin", cmd)
         self.assertIn("--non-inter", cmd)
         self.assertIn("--no-dtls", cmd)
-        self.assertIn(f"--script={WRAPPER} 4321", cmd)
+        # "exec" davor: openconnect startet den Wert per /bin/sh -c, und dash liesse sonst
+        # ein sh neben ocproxy stehen (in der Prozessliste am 2026-09-08 gesehen).
+        self.assertIn(f"--script=exec {WRAPPER} 4321", cmd)
         self.assertEqual(cmd[-1], "vpn.example")
         self.assertNotIn("--dump-http-traffic", cmd)
         self.assertFalse([a for a in cmd if a.startswith("--token")])
@@ -145,6 +177,7 @@ class TunnelTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(t.returncode, 1)
         self.assertEqual(t.classification[0], "auth_failed")
         self.assertIn("Einmalcode", t.classification[1])
+        self.assertNotIn("uni-vpn password", t.classification[1])
 
     def test_remove_stale_token_files(self):
         (self.token_dir / "totp-123").write_text("alt")
@@ -175,6 +208,8 @@ class TunnelTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(t.exited.is_set())
         self.assertEqual(t.returncode, 1)
         self.assertEqual(t.classification[0], "auth_failed")
+        self.assertIn("uni-vpn password", t.classification[1])
+        self.assertNotIn("Einmalcode", t.classification[1])
         self.assertTrue(any("Failed to complete" in line for line in t.stderr_tail))
 
     async def test_input_required_message(self):

@@ -50,25 +50,38 @@ class CiscoTests(unittest.TestCase):
         iface.mkdir()
         self.assertTrue(pf.cisco_connected(run=lambda *a, **k: None, cscotun=iface))
 
-    def test_connected_via_vpn_state(self):
+    def test_connected_via_vpn_state_on_macos(self):
         def run(cmd, **kwargs):
             return subprocess.CompletedProcess(cmd, 0, stdout="  >> state: Connected\n  >> state: Unknown\n", stderr="")
 
-        with mock.patch.object(pf, "cisco_installed", return_value=True):
+        with mock.patch.object(pf, "cisco_installed", return_value=True), mock.patch.object(pf, "IS_MACOS", True):
             self.assertTrue(pf.cisco_connected(run=run, cscotun=Path("/nonexistent/cscotun0")))
+
+    def test_linux_never_asks_the_cisco_cli(self):
+        # "vpn state" braucht 2,2 s (gemessen 2026-09-08) und verzoegert jeden Aufbau; auf Linux
+        # legt der Cisco-Client bei Verbindung immer cscotun0 an, das reicht als Erkennung.
+        calls = []
+
+        def run(cmd, **kwargs):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, stdout="  >> state: Connected\n", stderr="")
+
+        with mock.patch.object(pf, "cisco_installed", return_value=True), mock.patch.object(pf, "IS_MACOS", False):
+            self.assertFalse(pf.cisco_connected(run=run, cscotun=Path("/nonexistent/cscotun0")))
+        self.assertEqual(calls, [])
 
     def test_not_connected(self):
         def run(cmd, **kwargs):
             return subprocess.CompletedProcess(cmd, 0, stdout="  >> state: Disconnected\n", stderr="")
 
-        with mock.patch.object(pf, "cisco_installed", return_value=True):
+        with mock.patch.object(pf, "cisco_installed", return_value=True), mock.patch.object(pf, "IS_MACOS", True):
             self.assertFalse(pf.cisco_connected(run=run, cscotun=Path("/nonexistent/cscotun0")))
-        with mock.patch.object(pf, "cisco_installed", return_value=False):
+        with mock.patch.object(pf, "cisco_installed", return_value=False), mock.patch.object(pf, "IS_MACOS", True):
             self.assertFalse(pf.cisco_connected(run=run, cscotun=Path("/nonexistent/cscotun0")))
 
     def test_vpn_state_failure_means_not_connected(self):
         def run(cmd, **kwargs):
             raise subprocess.TimeoutExpired(cmd, 5)
 
-        with mock.patch.object(pf, "cisco_installed", return_value=True):
+        with mock.patch.object(pf, "cisco_installed", return_value=True), mock.patch.object(pf, "IS_MACOS", True):
             self.assertFalse(pf.cisco_connected(run=run, cscotun=Path("/nonexistent/cscotun0")))

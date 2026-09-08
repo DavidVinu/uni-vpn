@@ -17,18 +17,22 @@ from pathlib import Path
 from . import platform as pf
 from .config import Config
 
-# Ein abgelehntes Passwort erzeugt bei --non-inter dieselbe Zeilenfolge wie eine unbekannte
-# Zweitabfrage (Formular kommt erneut, stdin ist zu, "User input required", dann
-# "Failed to complete authentication"). Beide Marker bekommen daher eine Meldung.
+# Gemessen am 2026-09-08 gegen vpn-ac: Der ASA lehnt ein falsches Passwort mit "Login failed."
+# ab, bevor er nach dem OTP fragt. Bei falschem Einmalcode kommt erst die OTP-Abfrage
+# ("Generating OATH TOTP token code"), dann "Login failed.". In beiden Faellen zeigt er das
+# Formular erneut, stdin ist zu, "User input required", dann "Failed to complete
+# authentication". Die Reihenfolge entscheidet also, welcher Faktor falsch war.
+PASSWORD_REJECTED = "Anmeldung abgelehnt: Passwort pruefen (uni-vpn password)"
+TOTP_REJECTED = (
+    "Einmalcode abgelehnt: Uhrzeit des Rechners pruefen, sonst TOTP-Schluessel neu eintragen (uni-vpn totp)"
+)
+# Ohne vorheriges "Login failed." hat der Server etwas verlangt, das uni-vpn nicht ausfuellen kann.
 AUTH_REJECTED = (
     "Anmeldung abgelehnt: Passwort pruefen (uni-vpn password). "
     "Stimmt es, hat der Server etwas verlangt, das uni-vpn nicht kennt, siehe uni-vpn log"
 )
-# openconnect probiert den aktuellen und den naechsten Code; lehnt der Server beide ab,
-# stimmt der Schluessel nicht oder die Uhr geht falsch.
-TOTP_REJECTED = (
-    "Einmalcode abgelehnt: Uhrzeit des Rechners pruefen, sonst TOTP-Schluessel neu eintragen (uni-vpn totp)"
-)
+OTP_GENERATED = "Generating OATH TOTP token code"
+LOGIN_FAILED = "Login failed"
 TOKEN_PREFIX = "totp-"
 
 # (Teilstring in openconnect-Ausgabe, Zustand, Meldung). Erste Uebereinstimmung gewinnt.
@@ -51,6 +55,26 @@ def classify_line(line: str) -> tuple[str, str] | None:
         if needle.lower() in lowered:
             return state, message
     return None
+
+
+class Classifier:
+    """Bewertet die openconnect-Ausgabe zeilenweise; das erste Urteil bleibt bestehen."""
+
+    def __init__(self) -> None:
+        self.otp_generated = False
+        self.verdict: tuple[str, str] | None = None
+
+    def feed(self, line: str) -> tuple[str, str] | None:
+        if self.verdict is not None:
+            return self.verdict
+        if OTP_GENERATED.lower() in line.lower():
+            self.otp_generated = True
+            return None
+        if LOGIN_FAILED.lower() in line.lower():
+            self.verdict = ("auth_failed", TOTP_REJECTED if self.otp_generated else PASSWORD_REJECTED)
+        else:
+            self.verdict = classify_line(line)
+        return self.verdict
 
 
 def remove_stale_token_files(directory: Path) -> int:
@@ -100,6 +124,7 @@ class Tunnel:
         self.proc: asyncio.subprocess.Process | None = None
         self.exited = asyncio.Event()
         self.stderr_tail: collections.deque[str] = collections.deque(maxlen=20)
+        self.classifier = Classifier()
         self.classification: tuple[str, str] | None = None
         self.stopped_by_us = False
         self.started_at: float | None = None
@@ -119,7 +144,8 @@ class Tunnel:
             "--reconnect-timeout=60",
             "--script-tun",
             # openconnect fuehrt den Wert per /bin/sh -c aus, der Pfad darf Leerzeichen enthalten.
-            f"--script={shlex.quote(self.wrapper)} {port}",
+            # "exec", damit dash kein sh neben ocproxy stehen laesst.
+            f"--script=exec {shlex.quote(self.wrapper)} {port}",
         ]
         if self.token_file:
             # Der Schluessel geht ueber eine 0600-Datei, nie ueber die Prozessliste. openconnect
@@ -187,7 +213,7 @@ class Tunnel:
             self.stderr_tail.append(text)
             self.log.info("openconnect: %s", text)
             if self.classification is None:
-                self.classification = classify_line(text)
+                self.classification = self.classifier.feed(text)
         await self.proc.wait()
         self._remove_token_file()
         self.log.info("openconnect beendet, Exit %s", self.proc.returncode)
