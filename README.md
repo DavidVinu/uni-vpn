@@ -60,7 +60,7 @@ Browser-Einstellungen unter Netzwerk/Proxy als PAC-URL eintragen, `uni-vpn docto
 | Verbinden / Trennen | Knopf auf der Statusseite |
 | Passwort aendern | Statusseite, Formular unten, oder `uni-vpn password` |
 | TOTP-Schluessel aendern | Statusseite, zweites Formular, oder `uni-vpn totp` |
-| Domains aendern | Statusseite, Feld "Domains", oder `~/.config/uni-vpn/domains.txt` (danach Browser neu starten) |
+| Domains aendern | Statusseite, Feld "Domains" (Chrome uebernimmt sofort, Firefox nach etwa 10 s; macOS: Browser neu starten), oder `~/.config/uni-vpn/domains.txt` und danach Browser neu starten |
 | Wenn etwas nicht geht | `uni-vpn doctor`, Ausgabe in ein Issue kopieren |
 | Aktualisieren | `uni-vpn update` |
 | Entfernen | `~/uni-vpn/install.sh --uninstall` (setzt die Proxy-Einstellung zurueck) |
@@ -81,6 +81,7 @@ Browser-Einstellungen unter Netzwerk/Proxy als PAC-URL eintragen, `uni-vpn docto
 | Erste Seite nach laengerer Pause laedt nicht | Tunnelaufbau dauerte laenger als der Browser wartet | Seite neu laden |
 | Seite ist da, aber der Tab laedt minutenlang weiter | Die Seite bindet etwas von einem weiteren Uni-Host ein, der nicht in der Liste steht | In den Browser-Entwicklerwerkzeugen (Netzwerk) den Host mit `ERR_CONNECTION_TIMED_OUT` suchen und auf der Statusseite ergaenzen |
 | Firefox: Uni-Seite laedt kurz nach einer Stoerung ohne VPN | Firefox schickt Anfragen nach einem gescheiterten Proxy-Versuch 10 s lang direkt | Seite nach ein paar Sekunden neu laden |
+| Firefox: "Server nicht gefunden" fuer einen Uni-Host, der in Chrome geht | Firefox loest Namen vor dem Proxy lokal auf; der Host existiert nur im Uni-DNS | `about:config`, `network.proxy.socks_remote_dns` auf `true` |
 
 ## Was der Rechner davon merkt
 

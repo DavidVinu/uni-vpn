@@ -351,7 +351,10 @@ Verwaltung).
 
 Chrome liest die GNOME-Einstellung ueber GSettings, Firefox mit `network.proxy.type = 5`
 (Voreinstellung "Systemeinstellungen") ebenfalls. Beide holen die PAC beim Start und bei
-Aenderung der Einstellung. Firefox weicht nach einem gescheiterten Proxy-Verbindungsversuch fuer
+Aenderung der Einstellung (gemessen 2026-09-08: Chrome sofort, Firefox nach etwa 10 s).
+Firefox loest Hostnamen bei PAC-SOCKS lokal auf (`network.proxy.socks_remote_dns` ist in
+Firefox 155 `false`); Hosts, die nur im Uni-DNS existieren, brauchen dort die Umstellung auf
+`true`, das Readme nennt sie. Chrome loest bei `SOCKS5` immer ueber den Proxy auf. Firefox weicht nach einem gescheiterten Proxy-Verbindungsversuch fuer
 10 s auf DIRECT aus (`network.proxy.failover_direct`), Chrome meldet
 `ERR_PROXY_CONNECTION_FAILED`; beides steht im Readme.
 
