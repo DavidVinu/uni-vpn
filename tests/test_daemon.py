@@ -33,6 +33,11 @@ class DaemonHarness(unittest.IsolatedAsyncioTestCase):
         self.env = mock.patch.dict(os.environ, {"FAKE_PASSWORD_FILE": str(self.pwfile), "FAKE_TOKEN_FILE": str(self.tokenfile),
                                                 "FAKE_MODE": "ok", "FAKE_DELAY": "0.2"})
         self.env.start()
+        # Die Tests bauen den Tunnel im Sekundentakt neu auf; das echte Warten auf das naechste
+        # Einmalcode-Fenster (bis 30 s) wuerde sie ausbremsen. Nur die OTP-Tests nutzen das Original.
+        self.real_otp_wait = dm.Daemon._otp_wait
+        self.otp_patch = mock.patch.object(dm.Daemon, "_otp_wait", return_value=0)
+        self.otp_patch.start()
         # ocproxy=FAKE: irgendein ausfuehrbarer Pfad reicht, der Fake startet den Wrapper nie.
         self.cfg = Config(
             user="u", host="vpn.example", openconnect=FAKE, ocproxy=FAKE,
@@ -79,6 +84,7 @@ class DaemonHarness(unittest.IsolatedAsyncioTestCase):
         if self.daemon:
             self.daemon.stop()
             await asyncio.wait_for(self.task, 5)
+        self.otp_patch.stop()
         self.env.stop()
 
     def pw_lines(self):
@@ -294,6 +300,40 @@ class FailureTests(DaemonHarness):
         self.assertIn("Einmalcode", d.message)
         await asyncio.sleep(0.5)
         self.assertEqual(len(self.pw_lines()), 1, "kein automatischer zweiter Versuch")
+
+    async def test_successful_login_records_otp_window(self):
+        d = await self.start_daemon()
+        before = int(time.time() // 30)
+        await d.request_connect()
+        await wait_state(d, dm.State.connected)
+        self.assertIn(d.last_otp_step, (before, before + 1))
+
+    async def test_otp_wait_only_within_same_window(self):
+        d = await self.start_daemon()
+        wait = self.real_otp_wait
+        self.assertEqual(wait(d, now=1000.0), 0)
+        d.last_otp_step = int(1000.0 // 30)  # Fenster 990..1020
+        self.assertAlmostEqual(wait(d, now=1000.0), 20.5, places=1)
+        self.assertAlmostEqual(wait(d, now=1019.0), 1.5, places=1)
+        self.assertEqual(wait(d, now=1020.0), 0)
+        self.assertEqual(wait(d, now=1100.0), 0)
+
+    async def test_reconnect_in_same_window_waits_for_next_code(self):
+        # Gemessen 2026-09-08: derselbe Einmalcode gilt nur einmal. Ein Neuaufbau 3 s nach dem
+        # Login scheiterte mit "Login failed". Der Daemon wartet deshalb das Fenster ab.
+        d = await self.start_daemon()
+        await d.request_connect()
+        await wait_state(d, dm.State.connected)
+        await d.request_disconnect()
+        await wait_state(d, dm.State.idle)
+        with mock.patch.object(d, "_otp_wait", return_value=0.8):
+            started = time.monotonic()
+            await d.request_connect()
+            await wait_state(d, dm.State.connecting)
+            self.assertIn("Einmalcode", d.message)
+            await wait_state(d, dm.State.connected)
+        self.assertGreaterEqual(time.monotonic() - started, 0.8)
+        self.assertEqual(len(self.pw_lines()), 2)
 
     async def test_stale_token_files_are_removed_at_start(self):
         (self.token_dir / "totp-alt").write_text("base32:ALT")

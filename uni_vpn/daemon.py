@@ -32,6 +32,7 @@ class State(str, Enum):
 
 FINAL_STATES = {State.auth_failed, State.keyring}
 RETRY_STATES = {State.offline, State.blocked, State.error}
+OTP_STEP = 30  # Sekunden je Einmalcode (RFC 6238, wie openconnect)
 
 
 async def default_probe(host: str, timeout: float) -> bool:
@@ -82,6 +83,9 @@ class Daemon:
         self.demand_until = 0.0
         self.last_activity = time.monotonic()
         self.connect_count = 0
+        # Der Server nimmt jeden Einmalcode nur einmal an (gemessen 2026-09-08: Neuaufbau 3 s
+        # nach dem Login -> "Login failed"). Merken, in welchem Fenster zuletzt einer verbraucht wurde.
+        self.last_otp_step: int | None = None
         self.tunnel: Tunnel | None = None
         self.http = None
         self._loop_task: asyncio.Task | None = None
@@ -299,6 +303,13 @@ class Daemon:
                 self._final(State.keyring, f"TOTP-Schluessel unlesbar: {exc}")
                 return
 
+            wait = self._otp_wait()
+            if wait:
+                self._set(State.connecting, "Warte auf den naechsten Einmalcode (bis zu 30 s)")
+                await self._sleep(wait)
+                if not self.has_demand():
+                    del password, totp
+                    continue
             self._set(State.connecting, "Verbindung wird aufgebaut")
             try:
                 tunnel = self.tunnel_factory()
@@ -313,6 +324,8 @@ class Daemon:
             self.connect_count += 1
 
             ready = await tunnel.wait_ready(cfg.ready_timeout)
+            if tunnel.classifier.otp_generated:
+                self.last_otp_step = int(time.time() // OTP_STEP)
             if not ready:
                 if tunnel.stopped_by_us:
                     self.tunnel = None
@@ -359,6 +372,13 @@ class Daemon:
                 break
         if self.state in RETRY_STATES or self.state == State.connecting:
             self._set(State.idle, "Nicht verbunden")
+
+    def _otp_wait(self, now: float | None = None) -> float:
+        """Sekunden bis zum naechsten Einmalcode-Fenster, 0 wenn der aktuelle Code noch unverbraucht ist."""
+        now = time.time() if now is None else now
+        if self.last_otp_step is None or int(now // OTP_STEP) != self.last_otp_step:
+            return 0
+        return OTP_STEP - now % OTP_STEP + 0.5
 
     async def _backoff(self) -> bool:
         delays = self.cfg.backoff

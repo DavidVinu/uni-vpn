@@ -96,6 +96,10 @@ def main():
     signal.signal(signal.SIGUSR2, lambda s, f: log("SIGUSR2 empfangen"))
 
     time.sleep(delay)
+    if token_path:
+        # Wie das echte openconnect beim Login mit --token-mode=totp (gemessen 2026-09-08).
+        log("Bitte zweiten Faktor eingeben (OTP) / Please enter second factor (OTP).")
+        log("Generating OATH TOTP token code")
     if token_path and os.environ.get("FAKE_TOKEN_FILE"):
         # openconnect liest die Datei erst beim Erzeugen des Codes, also nach dem Start.
         with open(token_path, encoding="utf-8") as handle, open(os.environ["FAKE_TOKEN_FILE"], "a", encoding="utf-8") as out:

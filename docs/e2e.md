@@ -9,6 +9,8 @@ Secure Client ist getrennt (`/opt/cisco/secureclient/bin/vpn state` zeigt `Disco
    `129.206.0.0/16` oder `147.142.0.0/16`. Dauer des ersten Aufrufs notieren (`time`).
 3. `uni-vpn status` zeigt `connected`, `uni-vpn log` enthaelt "Tunnel bereit nach X s".
 4. Statusseite `http://127.0.0.1:1081/` zeigt gruen, Knopf "Trennen" funktioniert, Zustand `idle`.
+4a. Direkt nach dem Trennen Schritt 2 wiederholen (im selben 30-s-Fenster wie der Login):
+    `uni-vpn status` zeigt kurz "Warte auf den naechsten Einmalcode", danach `connected`.
 5. Leerlauf: in `config.toml` voruebergehend `idle_minutes = 1` setzen, `uni-vpn service restart`,
    Schritt 2 wiederholen, nach etwa 60 s ohne Verkehr zeigt `uni-vpn status` wieder `idle`.
    Wert zuruecksetzen, Dienst neu starten.
@@ -35,3 +37,13 @@ Ergebnisse mit Datum, openconnect-Version und Chrome/Firefox-Version unten eintr
 |---|---|---|
 | 2026-09-07 | Vorabtest ohne Login (Daemon von Hand mit entpackten Paketen openconnect 9.12, ocproxy 1.60, libsecret-tools 0.21.4; Cisco-Client verbunden) | Daemon startet, Statusseite und `/status.json` antworten, SOCKS-Verbindung fuehrt zu `blocked: Cisco Secure Client ist verbunden`, curl bekommt sofort EOF. POST ohne Header, mit `Origin: null` und GET mit fremdem `Host` liefern 403. `uni-vpn doctor` meldet Ports gebunden, Daemon von Hand gestartet, Keyring ohne Passwort, Cisco verbunden. Log-Datei 0600. |
 | 2026-09-07 | CI (GitHub Actions, ubuntu-latest und macos-latest) | 145 Unit-Tests gruen auf beiden, darunter der echte macOS-Keychain-Roundtrip (`security` anlegen, lesen, ueberschreiben, loeschen), `plutil -lint` fuer das Plist, Installer-Trockenlauf, 17 Node-Tests. |
+| 2026-09-08 | 1 Doctor nach `install.sh` (openconnect 9.12-1ubuntu1.24.04.1, ocproxy 1.60, Ubuntu 24.04, Uni-ID bd346) | Alle Zeilen `[OK]`, darunter "Zweiter Faktor: TOTP-Schluessel hinterlegt". Der Installer hatte nach dem Passwort bereits verbunden. |
+| 2026-09-08 | Erster echter Login | Log: Formular Benutzername/Passwort, dann Challenge "Bitte zweiten Faktor eingeben (OTP)", "Generating OATH TOTP token code", CSTP connected. Tunnel bereit nach 1,5 s. Session-Ablauf laut Server nach 24 h. Zustandsordner enthaelt danach nur `daemon.log`; in der Prozessliste steht nur der Pfad der (bereits geloeschten) Schluesseldatei. |
+| 2026-09-08 | 2 curl ueber SOCKS | `https://ifconfig.me` liefert 147.142.12.203 (direkt: 212.47.181.7). `sogo.uni-heidelberg.de/SOGo/so/` und `elearning-med.uni-heidelberg.de/` antworten HTTP 200 in 0,2 s bzw. 0,4 s. |
+| 2026-09-08 | 4 Trennen per API, danach Aufbau bei Bedarf | `disconnecting` -> `idle` in 1 s (openconnect Exit 0 mit Logout). Erste SOCKS-Verbindung danach: Tunnel bereit nach 1,8 s, curl gesamt 6,5 s. Davon 2,2 s `vpn state` des Cisco-Clients; seitdem prueft Linux nur `cscotun0`. |
+| 2026-09-08 | 4a Neuaufbau im selben 30-s-Fenster | Zuerst gescheitert: Server lehnt den bereits benutzten Einmalcode mit "Login failed" ab. Nach dem Fix: "Warte auf den naechsten Einmalcode", 4 s spaeter Aufbau, curl gesamt 7,2 s, Adresse 147.142.45.220. |
+| 2026-09-08 | 5 Leerlauf (`idle_minutes = 1`) | "Leerlauf seit 63 s, Tunnel wird abgebaut", Zustand `idle`. Wert zurueckgesetzt. |
+| 2026-09-08 | 8 Falsches Passwort (Testkonto `e2etest` mit Unsinn, echte Eintraege unberuehrt) | Log: "Login failed." vor jeder OTP-Abfrage, Formular erneut, "User input required", genau ein openconnect-Lauf, Zustand `auth_failed`. Meldung nannte zunaechst beide Faktoren, seit dem Fix "Passwort pruefen (uni-vpn password)". |
+| 2026-09-08 | 8a Falscher TOTP-Schluessel | Log: OTP-Abfrage, "Generating OATH TOTP token code", dann "Login failed." und Formular von vorn; kein zweites OTP-Formular, also nie "Server is rejecting the soft token". Genau ein Lauf, keine `totp-*`-Datei. Nach dem Fix lautet die Meldung "Einmalcode abgelehnt ... (uni-vpn totp)". `uni-vpn connect` nach dem richtigen Schluessel verbindet wieder. |
+| 2026-09-08 | Prozessliste | Vor dem Fix blieb `/bin/sh -c .../uni-vpn-ocproxy <port>` neben ocproxy stehen (dash fuehrt den letzten Befehl nicht per exec aus). Mit `--script=exec ...` nur noch openconnect und ocproxy. |
+| 2026-09-08 | Unbedenklich | openconnect meldet einmalig "Failed to set vring #0 RX backend: Socket operation on non-socket" (vhost-net-Versuch bei `--script-tun`), ohne Auswirkung. |

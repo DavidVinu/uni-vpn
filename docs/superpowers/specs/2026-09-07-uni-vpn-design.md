@@ -170,6 +170,10 @@ Aufbau, Schritt fuer Schritt:
    TOTP-Schluessel (eigener Keyring-Eintrag `uni-vpn-totp`), fehlend -> `keyring` ("kein
    TOTP-Schluessel hinterlegt: uni-vpn totp"). Ohne beides startet openconnect nicht.
 4. Freien ocproxy-Port waehlen (bind 127.0.0.1:0, getsockname, close).
+4a. Einmalcode-Fenster: der Server nimmt jeden Code nur einmal an (gemessen 2026-09-08: ein
+    Neuaufbau 3 s nach dem Login scheiterte mit "Login failed"). Der Daemon merkt sich das
+    30-s-Fenster, in dem openconnect zuletzt einen Code erzeugt hat, und wartet im selben
+    Fenster bis zum naechsten (Zustand `connecting`, "Warte auf den naechsten Einmalcode").
 5. Start: TOTP-Schluessel in eine Datei `totp-*` (mkstemp, 0600) im Zustandsordner schreiben,
    dann
    ```
