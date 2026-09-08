@@ -34,7 +34,7 @@ class DoctorTests(unittest.TestCase):
             find_binary=lambda name, override=None: f"/usr/bin/{name}",
             is_active=lambda: True,
             port_in_use=lambda port: True,
-            keyring_probe=lambda user: "present",
+            keyring_probe=lambda user, kind="password": "present",
             cisco_installed=lambda: False,
             cisco_connected=lambda: False,
             api_get=lambda cfg, path: dict(STATUS),
@@ -147,8 +147,30 @@ class DoctorTests(unittest.TestCase):
 
     def test_keyring_states(self):
         for state, expected in (("missing", "fail"), ("locked", "warn"), ("error:kaputt", "fail"), ("present", "ok")):
-            checks = doctor.run_checks(write_config(), **self.probes(keyring_probe=lambda u, s=state: s))
+            checks = doctor.run_checks(write_config(), **self.probes(keyring_probe=lambda u, kind="password", s=state: s))
             self.assertEqual(self.by_name(checks, "Keyring").status, expected, state)
+            self.assertEqual(self.by_name(checks, "Zweiter Faktor").status, expected, state)
+
+    def test_second_factor_missing_names_command(self):
+        def probe(user, kind="password"):
+            return "missing" if kind == "totp" else "present"
+
+        checks = doctor.run_checks(write_config(), **self.probes(keyring_probe=probe))
+        self.assertEqual(self.by_name(checks, "Keyring").status, "ok")
+        self.assertEqual(self.by_name(checks, "Zweiter Faktor").status, "fail")
+        self.assertIn("uni-vpn totp", self.by_name(checks, "Zweiter Faktor").detail)
+
+    def test_keyring_state_probes_requested_kind(self):
+        seen = []
+
+        async def fake_get(user, kind, timeout):
+            seen.append((user, kind))
+            raise doctor.credentials.TotpMissing("x") if kind == "totp" else doctor.credentials.PasswordMissing("x")
+
+        with mock.patch.object(doctor.credentials, "get_secret", fake_get):
+            self.assertEqual(doctor.keyring_state("ab1"), "missing")
+            self.assertEqual(doctor.keyring_state("ab1", kind="totp"), "missing")
+        self.assertEqual(seen, [("ab1", "password"), ("ab1", "totp")])
 
     def test_cisco_connected_warns(self):
         checks = doctor.run_checks(write_config(), **self.probes(cisco_installed=lambda: True, cisco_connected=lambda: True))

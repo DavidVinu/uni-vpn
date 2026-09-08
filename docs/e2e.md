@@ -1,9 +1,9 @@
 # End-to-End-Test auf Linux
 
-Voraussetzungen: `install.sh` ist gelaufen, Cisco Secure Client ist getrennt
-(`/opt/cisco/secureclient/bin/vpn state` zeigt `Disconnected`).
+Voraussetzungen: `install.sh` ist gelaufen (Passwort und TOTP-Schluessel im Keyring), Cisco
+Secure Client ist getrennt (`/opt/cisco/secureclient/bin/vpn state` zeigt `Disconnected`).
 
-1. `uni-vpn doctor`: alles `[OK]`, Daemon `idle`.
+1. `uni-vpn doctor`: alles `[OK]` einschliesslich "Zweiter Faktor", Daemon `idle`.
 2. Tunnel ueber curl anstossen und Uni-Adresse pruefen:
    `curl -s --socks5-hostname 127.0.0.1:1080 https://ifconfig.me` liefert eine Adresse aus
    `129.206.0.0/16` oder `147.142.0.0/16`. Dauer des ersten Aufrufs notieren (`time`).
@@ -18,6 +18,10 @@ Voraussetzungen: `install.sh` ist gelaufen, Cisco Secure Client ist getrennt
    ausfuehren" erlauben und pruefen, dass das Popup keine fehlenden Freigaben meldet.
 8. Falsches Passwort: `uni-vpn password` mit Unsinn, dann Seite laden: Popup zeigt "Anmeldung
    abgelehnt", `uni-vpn log` zeigt genau einen Loginversuch. Richtiges Passwort setzen.
+8a. Falscher TOTP-Schluessel: `uni-vpn totp` mit einem beliebigen gueltigen Base32-Wert, dann
+    Seite laden: Popup zeigt "Einmalcode abgelehnt", `uni-vpn log` zeigt "Server is rejecting
+    the soft token", keine Wiederholung. Richtigen Schluessel setzen. Im Zustandsordner
+    (`~/.local/state/uni-vpn/`) liegt danach keine `totp-*`-Datei.
 9. Cisco: Cisco-Client verbinden, Seite laden: Popup zeigt "Cisco Secure Client ist verbunden".
    Cisco trennen, Seite neu laden: verbindet von selbst.
 10. Suspend/Resume: Laptop 1 Minute zuklappen, oeffnen, Seite laden. `uni-vpn log` zeigt

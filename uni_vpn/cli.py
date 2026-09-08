@@ -17,7 +17,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from . import __version__, config, credentials
+from . import __version__, config, credentials, totp
 from . import platform as pf
 
 
@@ -117,6 +117,26 @@ def cmd_password(args) -> int:
         return 2
     credentials.store_password(cfg.user, password)
     print("Passwort im Keyring abgelegt")
+    try:
+        api_post(cfg, "/api/connect")
+    except DaemonUnreachable:
+        pass
+    return 0
+
+
+def cmd_totp(args) -> int:
+    cfg = _load(args)
+    text = getpass.getpass(f"TOTP-Schluessel fuer {cfg.user} (otpauth-URL oder Base32, Eingabe bleibt unsichtbar): ")
+    if not text.strip():
+        print("Kein Schluessel eingegeben")
+        return 2
+    try:
+        token = totp.normalize(text)
+    except ValueError as exc:
+        print(str(exc))
+        return 2
+    credentials.store_totp(cfg.user, token)
+    print(f"TOTP-Schluessel im Keyring abgelegt. Kontrollcode jetzt: {totp.code(token)} (muss mit der App uebereinstimmen)")
     try:
         api_post(cfg, "/api/connect")
     except DaemonUnreachable:
@@ -242,6 +262,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("connect", help="Tunnel aufbauen").set_defaults(func=cmd_connect)
     sub.add_parser("disconnect", help="Tunnel abbauen").set_defaults(func=cmd_disconnect)
     sub.add_parser("password", help="Uni-Passwort im Keyring ablegen").set_defaults(func=cmd_password)
+    sub.add_parser("totp", help="TOTP-Schluessel (zweiter Faktor) im Keyring ablegen").set_defaults(func=cmd_totp)
     p = sub.add_parser("log", help="letzte Logzeilen")
     p.add_argument("-n", "--lines", type=int, default=200)
     p.set_defaults(func=cmd_log)

@@ -26,7 +26,9 @@ class SetupHarness(unittest.TestCase):
         self.find = mock.patch.object(pf, "find_binary", lambda name, override=None: f"/usr/bin/{name}")
         self.find.start()
         self.stored = []
+        self.stored_totp = []
         self.installed = []
+        self.keyring = {"password": "missing", "totp": "missing"}
 
     def tearDown(self):
         for p in (self.find, self.macos, self.home_patch, self.env):
@@ -45,13 +47,18 @@ class SetupHarness(unittest.TestCase):
         base.update(kwargs)
         return argparse.Namespace(**base)
 
-    def run_setup(self, service_install=None, run_doctor=False, port_open=lambda port: True, **kwargs):
+    def answer(self, prompt):
+        return "pw" if "Passwort" in prompt else "gezd gnbv gy3t qojq gezd gnbv gy3t qojq"
+
+    def run_setup(self, service_install=None, run_doctor=False, port_open=lambda port: True, getpass_fn=None, **kwargs):
         out = StringIO()
         with redirect_stdout(out):
-            rc = setup.setup(self.args(**kwargs), input_fn=lambda prompt: "ab123", getpass_fn=lambda prompt: "pw",
+            rc = setup.setup(self.args(**kwargs), input_fn=lambda prompt: "ab123", getpass_fn=getpass_fn or self.answer,
                              service_install=service_install or self.fake_service_install,
                              store=lambda user, pw: self.stored.append((user, pw)),
-                             keyring_probe=lambda user: "missing", run_doctor=run_doctor, port_open=port_open)
+                             store_totp=lambda user, token: self.stored_totp.append((user, token)),
+                             keyring_probe=lambda user, kind="password": self.keyring[kind],
+                             run_doctor=run_doctor, port_open=port_open)
         return rc, out.getvalue()
 
 
@@ -68,6 +75,8 @@ class SetupTests(SetupHarness):
         self.assertIn("bin/uni-vpn", link.read_text())
         self.assertTrue(os.access(link, os.X_OK))
         self.assertEqual(self.stored, [("ab123", "pw")])
+        self.assertEqual(self.stored_totp, [("ab123", "base32:GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")])
+        self.assertIn("Kontrollcode", out)
         recorded = setup.recorded()
         self.assertIn(cfg, recorded)
         self.assertIn(link, recorded)
@@ -86,7 +95,43 @@ class SetupTests(SetupHarness):
         self.assertEqual(rc, 0)
         self.assertFalse((self.home / ".config" / "uni-vpn").exists())
         self.assertEqual(self.stored, [])
+        self.assertEqual(self.stored_totp, [])
         self.assertIn("wuerde", out)
+        self.assertIn("TOTP", out)
+
+    def test_totp_asked_alone_when_password_present(self):
+        self.keyring["password"] = "present"
+        prompts = []
+
+        def ask(prompt):
+            prompts.append(prompt)
+            return self.answer(prompt)
+
+        rc, out = self.run_setup(user="ab123", getpass_fn=ask)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.stored, [])
+        self.assertEqual(len(prompts), 1)
+        self.assertIn("TOTP", prompts[0])
+        self.assertEqual(self.stored_totp, [("ab123", "base32:GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")])
+
+    def test_totp_hint_names_portal_before_asking(self):
+        rc, out = self.run_setup(user="ab123")
+        self.assertEqual(rc, 0)
+        self.assertIn("mfa.uni-heidelberg.de", out)
+        self.assertLess(out.index("mfa.uni-heidelberg.de"), out.index("Kontrollcode"))
+
+    def test_invalid_totp_input_is_reported_and_setup_continues(self):
+        rc, out = self.run_setup(user="ab123", getpass_fn=lambda p: "pw" if "Passwort" in p else "0189")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.stored_totp, [])
+        self.assertIn("Base32", out)
+        self.assertIn("uni-vpn totp", out)
+
+    def test_empty_totp_input_hints_at_later_command(self):
+        rc, out = self.run_setup(user="ab123", getpass_fn=lambda p: "pw" if "Passwort" in p else "")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.stored_totp, [])
+        self.assertIn("uni-vpn totp", out)
 
     def test_dry_run_tolerates_missing_binaries(self):
         with mock.patch.object(pf, "find_binary", lambda name, override=None: None):
@@ -152,28 +197,33 @@ class SetupTests(SetupHarness):
         self.assertFalse(ready)
         self.assertEqual(sleeps, [0.25] * 3)
 
-    def test_existing_password_not_asked_again(self):
+    def test_existing_secrets_not_asked_again(self):
         out = StringIO()
         with redirect_stdout(out):
             rc = setup.setup(self.args(user="ab123"), input_fn=lambda p: "x", getpass_fn=lambda p: (_ for _ in ()).throw(AssertionError("darf nicht fragen")),
                              service_install=self.fake_service_install, store=self.stored.append,
-                             keyring_probe=lambda user: "present", run_doctor=False)
+                             store_totp=self.stored_totp.append,
+                             keyring_probe=lambda user, kind="password": "present", run_doctor=False)
         self.assertEqual(rc, 0)
+        self.assertIn("bereits im Keyring", out.getvalue())
 
 
 class UninstallTests(SetupHarness):
     def test_uninstall_removes_recorded_files(self):
         self.run_setup()
         deleted = []
+        deleted_totp = []
         removed_service = []
         out = StringIO()
         with redirect_stdout(out):
             rc = setup.uninstall(self.args(yes=True), input_fn=lambda p: "j",
                                  service_uninstall=lambda run=None: removed_service.append(True),
-                                 delete=lambda user: deleted.append(user) or True)
+                                 delete=lambda user: deleted.append(user) or True,
+                                 delete_totp=lambda user: deleted_totp.append(user) or True)
         self.assertEqual(rc, 0)
         self.assertEqual(removed_service, [True])
         self.assertEqual(deleted, ["ab123"])
+        self.assertEqual(deleted_totp, ["ab123"])
         self.assertFalse((self.home / ".config" / "uni-vpn" / "config.toml").exists())
         self.assertFalse((self.home / ".local" / "bin" / "uni-vpn").exists())
         self.assertFalse((self.home / ".config" / "uni-vpn" / setup.INSTALLED_FILES).exists())
@@ -184,7 +234,8 @@ class UninstallTests(SetupHarness):
         deleted = []
         with redirect_stdout(StringIO()):
             setup.uninstall(self.args(), input_fn=lambda p: "n", service_uninstall=lambda run=None: None,
-                            delete=lambda user: deleted.append(user) or True)
+                            delete=lambda user: deleted.append(user) or True,
+                            delete_totp=lambda user: deleted.append(("totp", user)) or True)
         self.assertEqual(deleted, [])
 
 

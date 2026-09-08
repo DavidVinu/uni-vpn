@@ -10,11 +10,14 @@ import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from . import config, credentials, doctor, service
+from . import config, credentials, doctor, service, totp
 from . import platform as pf
 from .tunnel import port_open as _port_open
 
 INSTALLED_FILES = "installed-files.txt"
+TOTP_HINT = """   Zweiter Faktor: im MFA-Portal https://mfa.uni-heidelberg.de (nur im Uni-Netz oder per VPN erreichbar)
+   unter "Soft-Token (zeitbasiert)" einen weiteren Token einrichten, "Tokendetails einblenden" und den
+   Text zwischen secret= und &issuer= kopieren. Die App auf dem Handy bleibt als zweiter Token bestehen."""
 EXTENSION_HINT = """
 Browser-Extension einrichten:
   Chrome:  chrome://extensions -> Entwicklermodus an -> "Entpackte Erweiterung laden" -> Ordner {ext}
@@ -90,8 +93,8 @@ def wait_for_port(port: int, *, port_open=_port_open, timeout: float = 5.0, step
 
 
 def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=service.install,
-          store=credentials.store_password, keyring_probe=doctor.keyring_state, run_doctor=True,
-          port_open=_port_open) -> int:
+          store=credentials.store_password, store_totp=credentials.store_totp,
+          keyring_probe=doctor.keyring_state, run_doctor=True, port_open=_port_open) -> int:
     dry = bool(getattr(args, "dry_run", False))
 
     def created(path: Path) -> None:
@@ -180,7 +183,7 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
         print("   Empfehlung: im Cisco-Client 'Beim Start automatisch verbinden' abschalten.")
 
     if dry:
-        _say("wuerde nach dem Uni-Passwort fragen und es im Keyring ablegen")
+        _say("wuerde nach dem Uni-Passwort und dem TOTP-Schluessel fragen und beide im Keyring ablegen")
     else:
         state = keyring_probe(cfg.user)
         if state == "present":
@@ -192,6 +195,22 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
                 _say("Passwort im Keyring abgelegt")
             else:
                 print("   Kein Passwort eingegeben, spaeter: uni-vpn password")
+        state = keyring_probe(cfg.user, kind="totp")
+        if state == "present":
+            _say("TOTP-Schluessel ist bereits im Keyring")
+        else:
+            print(TOTP_HINT)
+            text = getpass_fn(f"TOTP-Schluessel fuer {cfg.user} (otpauth-URL oder Base32, Eingabe bleibt unsichtbar): ")
+            if not text.strip():
+                print("   Kein Schluessel eingegeben, spaeter: uni-vpn totp")
+            else:
+                try:
+                    token = totp.normalize(text)
+                except ValueError as exc:
+                    print(f"   {exc}. Spaeter erneut: uni-vpn totp")
+                else:
+                    store_totp(cfg.user, token)
+                    _say(f"TOTP-Schluessel im Keyring abgelegt. Kontrollcode jetzt: {totp.code(token)} (muss mit der App uebereinstimmen)")
 
     if run_doctor and not dry:
         # Der Dienst ist gestartet, aber der Daemon braucht einen Moment bis zum bind().
@@ -202,7 +221,8 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
     return 0
 
 
-def uninstall(args, *, input_fn=input, service_uninstall=service.uninstall, delete=credentials.delete_password) -> int:
+def uninstall(args, *, input_fn=input, service_uninstall=service.uninstall, delete=credentials.delete_password,
+              delete_totp=credentials.delete_totp) -> int:
     dry = bool(getattr(args, "dry_run", False))
     user = None
     try:
@@ -227,9 +247,10 @@ def uninstall(args, *, input_fn=input, service_uninstall=service.uninstall, dele
         if stale.exists():
             stale.unlink()
     if user:
-        answer = "j" if getattr(args, "yes", False) else input_fn(f"Passwort fuer {user} aus dem Keyring loeschen? [j/N] ").strip().lower()
+        answer = "j" if getattr(args, "yes", False) else input_fn(f"Passwort und TOTP-Schluessel fuer {user} aus dem Keyring loeschen? [j/N] ").strip().lower()
         if answer in ("j", "ja", "y", "yes"):
-            _say("Keyring-Eintrag geloescht" if delete(user) else "Keyring-Eintrag war nicht vorhanden")
+            _say("Passwort geloescht" if delete(user) else "Passwort war nicht im Keyring")
+            _say("TOTP-Schluessel geloescht" if delete_totp(user) else "TOTP-Schluessel war nicht im Keyring")
     print("Bleibt bestehen: Pakete (openconnect, ocproxy), die Extension im Browser (dort entfernen), "
           f"das Repo {pf.repo_root()} und das Log unter {pf.state_dir()}")
     return 0

@@ -25,8 +25,13 @@ async def wait_state(d, state, timeout=6):
 
 class DaemonHarness(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.pwfile = Path(tempfile.mkdtemp()) / "pw"
-        self.env = mock.patch.dict(os.environ, {"FAKE_PASSWORD_FILE": str(self.pwfile), "FAKE_MODE": "ok", "FAKE_DELAY": "0.2"})
+        tmp = Path(tempfile.mkdtemp())
+        self.pwfile = tmp / "pw"
+        self.tokenfile = tmp / "token"
+        self.token_dir = tmp / "state"
+        self.token_dir.mkdir()
+        self.env = mock.patch.dict(os.environ, {"FAKE_PASSWORD_FILE": str(self.pwfile), "FAKE_TOKEN_FILE": str(self.tokenfile),
+                                                "FAKE_MODE": "ok", "FAKE_DELAY": "0.2"})
         self.env.start()
         # ocproxy=FAKE: irgendein ausfuehrbarer Pfad reicht, der Fake startet den Wrapper nie.
         self.cfg = Config(
@@ -37,9 +42,11 @@ class DaemonHarness(unittest.IsolatedAsyncioTestCase):
             backoff=[0.1, 0.1],
         )
         self.password = b"geheim"
+        self.totp = b"base32:GEZDGNBVGY3TQOJQ"
         self.probe_result = True
         self.cisco = False
         self.stored = []
+        self.stored_totp = []
         self.daemon = None
         self.task = None
 
@@ -49,12 +56,19 @@ class DaemonHarness(unittest.IsolatedAsyncioTestCase):
                 raise self.password
             return self.password
 
+        async def totp_getter():
+            if isinstance(self.totp, Exception):
+                raise self.totp
+            return self.totp
+
         async def probe():
             return self.probe_result
 
+        kwargs.setdefault("token_dir", self.token_dir)
         self.daemon = dm.Daemon(
             self.cfg, logging.getLogger("t"),
             password_getter=getter, password_setter=self.stored.append,
+            totp_getter=totp_getter, totp_setter=self.stored_totp.append,
             probe=probe, cisco_check=lambda: self.cisco, **kwargs,
         )
         self.task = asyncio.create_task(self.daemon.run())
@@ -207,7 +221,7 @@ class FailureTests(DaemonHarness):
         d = await self.start_daemon()
         await d.request_connect()
         await wait_state(d, dm.State.auth_failed)
-        self.assertIn("OTP", d.message)
+        self.assertIn("uni-vpn log", d.message)
 
     async def test_tunnel_dies_with_demand_reconnects(self):
         os.environ["FAKE_MODE"] = "exit_after_ready"
@@ -246,6 +260,45 @@ class FailureTests(DaemonHarness):
         await wait_state(d, dm.State.keyring)
         self.assertIn("uni-vpn password", d.message)
         self.assertEqual(self.pw_lines(), [])
+
+    async def test_totp_secret_reaches_openconnect(self):
+        d = await self.start_daemon()
+        await d.request_connect()
+        await wait_state(d, dm.State.connected)
+        self.assertEqual(self.tokenfile.read_text().splitlines(), ["base32:GEZDGNBVGY3TQOJQ"])
+        self.assertEqual([p.name for p in self.token_dir.iterdir()], [])
+
+    async def test_totp_missing(self):
+        self.totp = credentials.TotpMissing("x")
+        d = await self.start_daemon()
+        await d.request_connect()
+        await wait_state(d, dm.State.keyring)
+        self.assertIn("uni-vpn totp", d.message)
+        self.assertEqual(self.pw_lines(), [], "ohne Schluessel darf openconnect nicht starten")
+
+    async def test_set_totp_stores_and_connects(self):
+        self.totp = credentials.TotpMissing("x")
+        d = await self.start_daemon()
+        await d.request_connect()
+        await wait_state(d, dm.State.keyring)
+        self.totp = b"base32:GEZDGNBVGY3TQOJQ"
+        await d.set_totp("base32:GEZDGNBVGY3TQOJQ")
+        self.assertEqual(self.stored_totp, ["base32:GEZDGNBVGY3TQOJQ"])
+        await wait_state(d, dm.State.connected)
+
+    async def test_rejected_totp_is_final_auth_failure(self):
+        os.environ["FAKE_MODE"] = "totp_rejected"
+        d = await self.start_daemon()
+        await d.request_connect()
+        await wait_state(d, dm.State.auth_failed)
+        self.assertIn("Einmalcode", d.message)
+        await asyncio.sleep(0.5)
+        self.assertEqual(len(self.pw_lines()), 1, "kein automatischer zweiter Versuch")
+
+    async def test_stale_token_files_are_removed_at_start(self):
+        (self.token_dir / "totp-alt").write_text("base32:ALT")
+        await self.start_daemon()
+        self.assertEqual([p.name for p in self.token_dir.iterdir()], [])
 
     async def test_keyring_locked(self):
         self.password = credentials.KeyringLocked("x")

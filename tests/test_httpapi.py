@@ -2,6 +2,7 @@ import asyncio
 import json
 
 from uni_vpn import daemon as dm
+from uni_vpn import totp
 from uni_vpn.httpapi import allowed_origin
 
 from tests.test_daemon import DaemonHarness, wait_state
@@ -180,3 +181,56 @@ class ApiTests(DaemonHarness):
             self.assertEqual(payload.decode(), "Passwort darf keinen Zeilenumbruch enthalten")
         self.assertEqual(self.stored, [])
         self.assertEqual(d.state, dm.State.idle)
+
+
+class TotpEndpointTests(DaemonHarness):
+    HEADERS = {"X-Uni-VPN": "1", "Content-Type": "application/json"}
+
+    async def test_status_page_has_totp_form(self):
+        await self.start_daemon()
+        _, _, payload = await http(self.cfg.http_port, "GET", "/")
+        self.assertIn(b"/api/totp", payload)
+        self.assertIn(b"mfa.uni-heidelberg.de", payload)
+
+    async def test_totp_endpoint_normalizes_stores_and_answers_with_check_code(self):
+        d = await self.start_daemon()
+        body = json.dumps({"secret": "gezd gnbv gy3t qojq gezd gnbv gy3t qojq"}).encode()
+        status, _, payload = await http(self.cfg.http_port, "POST", "/api/totp", self.HEADERS, body)
+        self.assertEqual(status, 200, payload)
+        data = json.loads(payload)
+        self.assertTrue(data["ok"])
+        self.assertEqual(self.stored_totp, ["base32:GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"])
+        self.assertEqual(data["code"], totp.code("base32:GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"))
+        await wait_state(d, dm.State.connected)
+
+    async def test_totp_endpoint_accepts_otpauth_uri(self):
+        await self.start_daemon()
+        body = json.dumps({"secret": "otpauth://totp/Uni:ab1?secret=GEZDGNBVGY3TQOJQ&issuer=Uni"}).encode()
+        status, _, _ = await http(self.cfg.http_port, "POST", "/api/totp", self.HEADERS, body)
+        self.assertEqual(status, 200)
+        self.assertEqual(self.stored_totp, ["base32:GEZDGNBVGY3TQOJQ"])
+
+    async def test_totp_endpoint_rejects_bad_input(self):
+        d = await self.start_daemon()
+        for body in (b"{nope", b'{"secret": ""}', b'{"secret": "0189"}', b'{"secret": "otpauth://hotp/x?secret=GEZDGNBVGY3TQOJQ"}',
+                     b'{"secret": 12}'):
+            status, _, payload = await http(self.cfg.http_port, "POST", "/api/totp", self.HEADERS, body)
+            self.assertEqual(status, 400, body)
+            self.assertTrue(payload, body)
+        self.assertEqual(self.stored_totp, [])
+        self.assertEqual(d.state, dm.State.idle)
+
+    async def test_totp_endpoint_needs_csrf_header(self):
+        await self.start_daemon()
+        status, _, _ = await http(self.cfg.http_port, "POST", "/api/totp", {"Content-Type": "application/json"},
+                                  b'{"secret": "GEZDGNBVGY3TQOJQ"}')
+        self.assertEqual(status, 403)
+        self.assertEqual(self.stored_totp, [])
+
+    async def test_status_never_leaks_secrets(self):
+        d = await self.start_daemon()
+        await d.request_connect()
+        await wait_state(d, dm.State.connected)
+        _, _, payload = await http(self.cfg.http_port, "GET", "/status.json")
+        self.assertNotIn(b"GEZDGNBVGY3TQOJQ", payload)
+        self.assertNotIn(b"geheim", payload)

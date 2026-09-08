@@ -32,6 +32,71 @@ class GetPasswordTests(unittest.IsolatedAsyncioTestCase):
             await credentials.get_password("u", 0.3, command=cmd)
 
 
+class TotpEntryTests(unittest.IsolatedAsyncioTestCase):
+    """Der TOTP-Schluessel liegt unter eigenem Dienstnamen, damit secret-tool ihn nie mit dem Passwort verwechselt."""
+
+    def test_lookup_commands_use_separate_service_names(self):
+        with mock.patch.object(pf, "IS_MACOS", False), mock.patch.object(pf, "find_binary", return_value="/usr/bin/secret-tool"):
+            self.assertEqual(credentials.lookup_command("ab1"),
+                             ["/usr/bin/secret-tool", "lookup", "service", "uni-vpn", "user", "ab1"])
+            self.assertEqual(credentials.lookup_command("ab1", kind="totp"),
+                             ["/usr/bin/secret-tool", "lookup", "service", "uni-vpn-totp", "user", "ab1"])
+        with mock.patch.object(pf, "IS_MACOS", True):
+            self.assertEqual(credentials.lookup_command("ab1", kind="totp"),
+                             ["/usr/bin/security", "find-generic-password", "-s", "uni-vpn-totp", "-a", "ab1", "-w"])
+
+    async def test_get_totp_returns_token(self):
+        cmd = [sys.executable, "-c", "import sys; sys.stdout.write('base32:GEZDGNBVGY3TQOJQ')"]
+        self.assertEqual(await credentials.get_totp("u", 2, command=cmd), b"base32:GEZDGNBVGY3TQOJQ")
+
+    async def test_get_totp_missing_is_its_own_error(self):
+        cmd = [sys.executable, "-c", "import sys; sys.exit(1)"]
+        with self.assertRaises(credentials.TotpMissing):
+            await credentials.get_totp("u", 2, command=cmd)
+        self.assertFalse(issubclass(credentials.TotpMissing, credentials.PasswordMissing))
+        self.assertTrue(issubclass(credentials.TotpMissing, credentials.SecretMissing))
+        self.assertTrue(issubclass(credentials.PasswordMissing, credentials.SecretMissing))
+
+    def test_store_totp_linux(self):
+        calls = []
+
+        def run(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+        with mock.patch.object(pf, "IS_MACOS", False), mock.patch.object(pf, "find_binary", return_value="/usr/bin/secret-tool"):
+            credentials.store_totp("ab1", "base32:GEZDGNBVGY3TQOJQ", run=run)
+        cmd, kwargs = calls[0]
+        self.assertEqual(cmd, ["/usr/bin/secret-tool", "store", "--label", "Uni VPN (zweiter Faktor)",
+                               "service", "uni-vpn-totp", "user", "ab1"])
+        self.assertEqual(kwargs["input"], b"base32:GEZDGNBVGY3TQOJQ")
+
+    def test_store_totp_macos_deletes_then_adds_under_own_service(self):
+        calls = []
+
+        def run(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+        with mock.patch.object(pf, "IS_MACOS", True):
+            credentials.store_totp("ab1", "base32:GEZDGNBVGY3TQOJQ", run=run)
+        self.assertEqual(calls[0][0], ["/usr/bin/security", "delete-generic-password", "-s", "uni-vpn-totp", "-a", "ab1"])
+        script = calls[1][1]["input"].decode()
+        self.assertIn('-s "uni-vpn-totp"', script)
+        self.assertIn('-w "base32:GEZDGNBVGY3TQOJQ"', script)
+
+    def test_delete_totp_uses_own_service(self):
+        calls = []
+
+        def run(cmd, **kwargs):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+        with mock.patch.object(pf, "IS_MACOS", False), mock.patch.object(pf, "find_binary", return_value="/usr/bin/secret-tool"):
+            self.assertTrue(credentials.delete_totp("ab1", run=run))
+        self.assertEqual(calls, [["/usr/bin/secret-tool", "clear", "service", "uni-vpn-totp", "user", "ab1"]])
+
+
 class StoreTests(unittest.TestCase):
     def test_linux_store_pipes_password_without_newline(self):
         calls = []
@@ -130,6 +195,18 @@ class MacKeychainRoundtrip(unittest.IsolatedAsyncioTestCase):
         user = "uni-vpn-citest-simple"
         self.store(user, "einfach123")
         self.assertEqual(await credentials.get_password(user, 10), b"einfach123")
+        self.assertTrue(credentials.delete_password(user))
+
+    async def test_roundtrip_totp_is_separate_entry(self):
+        user = "uni-vpn-citest-totp"
+        self.store(user, "passwort")
+        credentials.store_totp(user, "base32:GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")
+        self.assertEqual(await credentials.get_password(user, 10), b"passwort")
+        self.assertEqual(await credentials.get_totp(user, 10), b"base32:GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")
+        self.assertTrue(credentials.delete_totp(user))
+        with self.assertRaises(credentials.TotpMissing):
+            await credentials.get_totp(user, 10)
+        self.assertEqual(await credentials.get_password(user, 10), b"passwort")
         self.assertTrue(credentials.delete_password(user))
 
     async def test_roundtrip_special_characters(self):

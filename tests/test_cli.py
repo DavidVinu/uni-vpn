@@ -73,6 +73,30 @@ class ApiTests(DaemonHarness):
         self.assertEqual(stored, [("u", "pw1")])
         await wait_state(d, dm.State.connected)
 
+    async def test_totp_command_normalizes_stores_and_connects(self):
+        d = await self.start_daemon()
+        stored = []
+        out = io.StringIO()
+        with mock.patch.object(cli.getpass, "getpass", return_value="gezd gnbv gy3t qojq gezd gnbv gy3t qojq"), \
+             mock.patch.object(credentials, "store_totp", lambda user, token: stored.append((user, token))), \
+             redirect_stdout(out):
+            rc = await self.run_cli("totp")
+        self.assertEqual(rc, 0)
+        self.assertEqual(stored, [("u", "base32:GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")])
+        self.assertIn("Kontrollcode", out.getvalue())
+        self.assertRegex(out.getvalue(), r"[0-9]{6}")
+        self.assertNotIn("GEZDGNBVGY3TQOJQ", out.getvalue())
+        await wait_state(d, dm.State.connected)
+
+    async def test_totp_command_rejects_bad_input(self):
+        for text in ("", "0189", "otpauth://hotp/x?secret=GEZDGNBVGY3TQOJQ"):
+            out = io.StringIO()
+            with mock.patch.object(cli.getpass, "getpass", return_value=text), \
+                 mock.patch.object(credentials, "store_totp") as store, redirect_stdout(out):
+                self.assertEqual(cli.main(["--config", self.config_path(), "totp"]), 2, repr(text))
+            store.assert_not_called()
+            self.assertTrue(out.getvalue().strip(), repr(text))
+
     async def test_password_empty_rejected(self):
         with mock.patch.object(cli.getpass, "getpass", return_value=""), redirect_stdout(io.StringIO()):
             self.assertEqual(cli.main(["--config", self.config_path(), "password"]), 2)

@@ -7,6 +7,8 @@ import json
 import logging
 import re
 
+from . import totp
+
 MAX_HEADER = 16 * 1024
 MAX_BODY = 64 * 1024
 
@@ -28,6 +30,7 @@ button{font:inherit;padding:.45rem .9rem;margin-right:.5rem;border:1px solid #88
 button:disabled{opacity:.5;cursor:default}
 form{margin-top:1.5rem;padding-top:1rem;border-top:1px solid #ddd}
 input[type=password]{font:inherit;padding:.4rem;width:14rem}
+input#totp{width:100%;max-width:26rem}
 pre{background:#eee;padding:.6rem;font-size:12px;max-height:16rem;overflow:auto;white-space:pre-wrap}
 small{color:#666}
 </style></head><body>
@@ -37,6 +40,10 @@ small{color:#666}
 <div id="meta"><small></small></div>
 <form id="pwform"><label>Uni-Passwort im Keyring ablegen:<br><input type="password" id="pw" autocomplete="current-password"></label>
 <button type="submit">Speichern</button> <small id="pwmsg"></small></form>
+<form id="totpform"><label>TOTP-Schluessel (zweiter Faktor) im Keyring ablegen:<br><input type="password" id="totp" autocomplete="off" placeholder="otpauth://... oder Base32"></label>
+<button type="submit">Speichern</button> <small id="totpmsg"></small><br>
+<small>Aus dem <a href="https://mfa.uni-heidelberg.de/" target="_blank" rel="noopener">MFA-Portal</a> (nur im Uni-Netz oder per VPN erreichbar):
+Soft-Token (zeitbasiert) einrichten, "Tokendetails einblenden", Text zwischen <code>secret=</code> und <code>&amp;issuer=</code> kopieren.</small></form>
 <details><summary>Log</summary><pre id="log"></pre></details>
 <script>
 const H = {"X-Uni-VPN": "1", "Content-Type": "application/json"};
@@ -61,6 +68,19 @@ document.getElementById("pwform").onsubmit = async (e) => {
   const r = await post("/api/password", {password: document.getElementById("pw").value});
   document.getElementById("pwmsg").textContent = r.ok ? "gespeichert" : "Fehler: " + (await r.text());
   document.getElementById("pw").value = "";
+  refresh();
+};
+document.getElementById("totpform").onsubmit = async (e) => {
+  e.preventDefault();
+  const r = await post("/api/totp", {secret: document.getElementById("totp").value});
+  const msg = document.getElementById("totpmsg");
+  if (r.ok) {
+    const d = await r.json();
+    msg.textContent = "gespeichert, Kontrollcode " + d.code + " (muss mit der App uebereinstimmen)";
+  } else {
+    msg.textContent = "Fehler: " + (await r.text());
+  }
+  document.getElementById("totp").value = "";
   refresh();
 };
 refresh(); setInterval(refresh, 2000);
@@ -197,6 +217,24 @@ class HttpApi:
                 await self.daemon.set_password(password)
             except Exception as exc:  # noqa: BLE001 - Fehlertext geht an die Seite
                 return 500, "text/plain", str(exc).encode()
+        elif path == "/api/totp":
+            try:
+                data = json.loads(body.decode("utf-8"))
+                secret = data["secret"]
+            except (ValueError, KeyError, TypeError, UnicodeDecodeError):
+                return 400, "text/plain", b"JSON mit 'secret' erwartet"
+            if not isinstance(secret, str):
+                return 400, "text/plain", b"Schluessel muss Text sein"
+            try:
+                token = totp.normalize(secret)
+            except ValueError as exc:
+                return 400, "text/plain", str(exc).encode()
+            try:
+                await self.daemon.set_totp(token)
+            except Exception as exc:  # noqa: BLE001 - Fehlertext geht an die Seite
+                return 500, "text/plain", str(exc).encode()
+            payload = {"ok": True, "state": self.daemon.state.value, "code": totp.code(token)}
+            return 200, "application/json", json.dumps(payload).encode()
         else:
             return 404, "text/plain", b"nicht gefunden"
         return 200, "application/json", json.dumps({"ok": True, "state": self.daemon.state.value}).encode()

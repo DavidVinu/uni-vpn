@@ -7,7 +7,8 @@ Stand: 2026-09-07. Gilt fuer Etappe 1 (Backend) und Etappe 2 (Extension).
 Das Cisco-AnyConnect-VPN der Uni Heidelberg (ASA-Cluster hinter `vpn-ac.uni-heidelberg.de`)
 so betreiben, dass
 
-1. der Login unbeaufsichtigt laeuft (Passwort im OS-Keyring, keine Eingabe im Alltag),
+1. der Login unbeaufsichtigt laeuft (Passwort und TOTP-Schluessel im OS-Keyring, keine
+   Eingabe im Alltag),
 2. nur im Browser und nur fuer eine konfigurierbare Domain-Liste Traffic ueber die Uni geht,
 3. die VPN-Session erst beim ersten Aufruf einer gelisteten Domain entsteht und nach
    Leerlauf wieder abgebaut wird,
@@ -21,12 +22,21 @@ Full-Tunnel-Zwecke, Verteilung ueber Chrome Web Store.
 
 Diese Punkte wurden gegen Doku, Quellcode oder direkt am Server geprueft und tragen das Design:
 
-- Der Uni-Server (Tunnel-Group `DefaultWEBVPNGroup`) liefert ein Login-Formular mit genau zwei
-  Feldern, `username` und `password`. Kein OTP-Feld, keine Gruppenauswahl. Gemessen mit
-  `openconnect --authenticate --non-inter` ohne Zugangsdaten, Antwortzeit 0,2 s.
-  Die URZ-Doku nennt seit 12/2023 TOTP fuer den "zentralen Dienst"; das betrifft offenbar eine
-  andere Tunnel-Group. Der Daemon muss den Fall "Server verlangt weitere Eingabe" trotzdem als
-  eigenen Fehler erkennen, falls sich das aendert.
+- Der Uni-Server (Tunnel-Group `DefaultWEBVPNGroup`) liefert zuerst ein Login-Formular mit
+  `username` und `password` (gemessen mit `openconnect --authenticate --non-inter`). Nach dem
+  Passwort verlangt das URZ seit 15.12.2023 ein zeitbasiertes Einmalkennwort (TOTP, RFC 6238,
+  6 Ziffern, 30 s), Prompt "Bitte zweiten Faktor eingeben (OTP)". ASA-Session 24 h, Idle 30 min
+  (Cisco-Journal vom 2026-09-07).
+- openconnect erzeugt TOTP-Codes selbst (`--token-mode=totp --token-secret=@datei`, Format
+  `base32:...`, optional `sha256:`-Praefix) und fuellt sie in das Feld `secondary_password`
+  oder in ein Formular mit `auth_id="challenge"` (auth.c, 9.12). Es probiert den aktuellen und
+  den naechsten Code, danach "Server is rejecting the soft token; switching to manual entry".
+  Die Datei wird bei jeder Code-Erzeugung neu gelesen (main.c `lock_token`), muss also bis zum
+  fertigen Aufbau existieren. Eine `otpauth://`-URL akzeptiert openconnect nicht.
+- Das URZ dokumentiert selbst KeePassXC auf dem PC als Token und empfiehlt zwei Token pro
+  Nutzer. Das Self-Service-Portal https://mfa.uni-heidelberg.de (LinOTP, nur aus dem Uni-Netz
+  oder per VPN) zeigt unter "Tokendetails einblenden" den Schluessel als Text. Ein Schluessel
+  im OS-Keyring entspricht damit dem offiziell beschriebenen Desktop-Token.
 - `openconnect --script-tun --script ocproxy` braucht kein Root, kein tun-Device, aendert
   weder Routen noch DNS. ocproxy bindet ohne `-g` nur auf Loopback. Hostnamen werden per
   SOCKS5 im Tunnel aufgeloest (nur erster VPN-DNS-Server, nur IPv4, kein UDP).
@@ -143,8 +153,8 @@ RotatingFileHandler 1 MB x 3, Datei 0600. Lock-Datei `~/.config/uni-vpn/daemon.l
 | `connecting` | openconnect laeuft, ocproxy-Port noch zu | warten max 25 s | Abbruch nach 45 s -> `error` |
 | `connected` | Tunnel steht | durchreichen | Leerlauf-Timer |
 | `disconnecting` | Abbau laeuft | warten, dann neuer Aufbau bei Bedarf | |
-| `auth_failed` | Server hat Login abgelehnt oder mehr Eingabe verlangt | sofort schliessen | keine, bis `password` gesetzt oder `connect` ausgeloest |
-| `keyring` | Passwort fehlt oder Keyring gesperrt | sofort schliessen | keine, bis `password` oder `connect` |
+| `auth_failed` | Server hat Passwort oder Einmalcode abgelehnt oder etwas Unbekanntes verlangt | sofort schliessen | keine, bis `password`/`totp` gesetzt oder `connect` ausgeloest |
+| `keyring` | Passwort oder TOTP-Schluessel fehlt oder Keyring gesperrt | sofort schliessen | keine, bis `password`/`totp` oder `connect` |
 | `error` | Netz-/Serverfehler nach vorherigem Erfolg | sofort schliessen | Backoff 5, 10, 20, 40, 80 s, dann 5 min, mit Jitter, nur bei Bedarf |
 
 Bedarf = mindestens eine offene SOCKS-Verbindung oder Daten in den letzten 60 s oder ein
@@ -156,23 +166,32 @@ Aufbau, Schritt fuer Schritt:
    meldet `Connected` -> `blocked`.
 2. TLS-Probe: `ssl.create_default_context()`-Handshake auf `host:443`, 5 s -> sonst `offline`.
 3. Passwort: Keyring-Lookup mit 20 s Timeout. Exit 1 ohne Ausgabe -> `keyring` ("kein Passwort
-   hinterlegt"), Timeout -> `keyring` ("Schluesselbund gesperrt").
+   hinterlegt"), Timeout -> `keyring` ("Schluesselbund gesperrt"). Danach genauso der
+   TOTP-Schluessel (eigener Keyring-Eintrag `uni-vpn-totp`), fehlend -> `keyring` ("kein
+   TOTP-Schluessel hinterlegt: uni-vpn totp"). Ohne beides startet openconnect nicht.
 4. Freien ocproxy-Port waehlen (bind 127.0.0.1:0, getsockname, close).
-5. Start:
+5. Start: TOTP-Schluessel in eine Datei `totp-*` (mkstemp, 0600) im Zustandsordner schreiben,
+   dann
    ```
    openconnect --protocol=anyconnect --useragent <ua> --user <user>
      --passwd-on-stdin --non-inter --no-dtls --force-dpd 30 --reconnect-timeout 60
-     --script-tun --script "<abs>/uni-vpn-ocproxy <port>" <host>
+     --script-tun --script "<abs>/uni-vpn-ocproxy <port>"
+     --token-mode=totp --token-secret=@<datei> <host>
    ```
    mit `start_new_session=True`, stdin=PIPE, stdout+stderr=PIPE. Passwort als bytes plus
    `\n` schreiben, stdin schliessen, Referenz loeschen. `uni-vpn-ocproxy` ist ein Wrapper mit
    `exec ocproxy -D 127.0.0.1:<port> -k 30`, damit kein `sh` als Zwischenprozess bleibt.
+   Der Schluessel steht nie in der Kommandozeile. Die Datei wird geloescht, sobald der Port
+   offen ist, der Prozess endet oder der Daemon ihn stoppt; beim Daemon-Start werden
+   uebrig gebliebene `totp-*`-Dateien entfernt.
 6. Bereitschaft: TCP-Connect-Probe auf den ocproxy-Port alle 250 ms, max 45 s. Sobald offen:
    `connected`. Wartende Client-Verbindungen werden durchgereicht; die Auth-Dauer wird geloggt.
-7. stderr zeilenweise lesen und auf Marker abbilden:
-   `User input required in non-interactive mode` -> `auth_failed` ("Server verlangt weitere
-   Eingabe, vermutlich OTP"); `Failed to complete authentication` -> `auth_failed` ("Anmeldung
-   abgelehnt: Passwort pruefen"); `Server asked us to run CSD` oder `Cisco Secure Desktop` ->
+7. stderr zeilenweise lesen und auf Marker abbilden (erster Treffer zaehlt):
+   `Server is rejecting the soft token` -> `auth_failed` ("Einmalcode abgelehnt: Uhrzeit
+   pruefen, sonst uni-vpn totp"); `User input required in non-interactive mode` ->
+   `auth_failed` ("Anmeldung abgelehnt: Passwort pruefen; stimmt es, hat der Server etwas
+   Unbekanntes verlangt, siehe Log"); `Failed to complete authentication` -> dieselbe
+   Meldung; `Server asked us to run CSD` oder `Cisco Secure Desktop` ->
    `auth_failed` ("HostScan verlangt, Update noetig"); `SAML` oder `external browser` ->
    `auth_failed` ("Login-Verfahren geaendert"); `certificate` -> `error` ("Zertifikat").
    Die letzten 20 stderr-Zeilen werden im Status mitgefuehrt.
@@ -205,15 +224,17 @@ keine Peer-UID-Pruefung (auf macOS unmoeglich, auf Einzelnutzer-Laptops ohne Nut
 
 | Route | Methode | Inhalt |
 |---|---|---|
-| `/` | GET | Statusseite: Zustand in Klartext, Knoepfe Verbinden/Trennen, Formular "Passwort setzen", letzte Logzeilen, Versions- und Portangaben. Deutsch, so kurz wie moeglich. |
+| `/` | GET | Statusseite: Zustand in Klartext, Knoepfe Verbinden/Trennen, Formulare "Passwort setzen" und "TOTP-Schluessel setzen" (mit Link zum MFA-Portal), letzte Logzeilen, Versions- und Portangaben. Deutsch, so kurz wie moeglich. |
 | `/status.json` | GET | `{"protocol": 1, "version", "state", "message", "since", "host", "user", "socks_port", "active_connections", "bytes_in", "bytes_out", "last_error", "log_tail": [...]}` |
 | `/api/connect` | POST | Bedarf setzen, Aufbau starten (auch aus `auth_failed`, `keyring`, `error`) |
 | `/api/disconnect` | POST | Tunnel abbauen, Bedarf loeschen |
 | `/api/password` | POST | JSON `{"password": ...}` -> Keyring, danach Aufbau |
+| `/api/totp` | POST | JSON `{"secret": ...}` (otpauth-URL oder Base32) -> normalisiert in den Keyring, danach Aufbau; Antwort enthaelt den aktuellen Kontrollcode zum Vergleich mit der App |
 
 CSRF-Schutz: POST nur mit Header `X-Uni-VPN: 1` und Origin leer, `http://127.0.0.1:<port>`,
 `chrome-extension://*` oder `moz-extension://*`. Antworten tragen `Access-Control-Allow-Origin`
-fuer genau diese Origins. Das Passwort wird nie geloggt und nie in `/status.json` ausgegeben.
+fuer genau diese Origins. Passwort und Schluessel werden nie geloggt und nie in `/status.json`
+ausgegeben.
 
 ### 4.6 CLI
 
@@ -223,7 +244,8 @@ fuer genau diese Origins. Das Passwort wird nie geloggt und nie in `/status.json
 |---|---|
 | `status` | Zustand in einer Zeile; `--json` gibt `/status.json` aus |
 | `connect`, `disconnect` | wie die API |
-| `password` | fragt interaktiv (getpass), legt im Keyring ab: Linux `secret-tool store --label 'Uni VPN' service uni-vpn user <user>` (Passwort per stdin ohne Newline), macOS `security add-generic-password -a <user> -s uni-vpn -T /usr/bin/security -U -w` |
+| `password` | fragt interaktiv (getpass), legt im Keyring ab: Linux `secret-tool store --label 'Uni VPN' service uni-vpn user <user>` (Passwort per stdin ohne Newline), macOS `security add-generic-password -a <user> -s uni-vpn -T /usr/bin/security -w` (vorher loeschen statt `-U`, das haengt ohne GUI) |
+| `totp` | fragt interaktiv nach otpauth-URL oder Base32, prueft und normalisiert (`uni_vpn/totp.py`), legt unter `service uni-vpn-totp` ab, zeigt den Kontrollcode |
 | `log` | letzte 200 Logzeilen |
 | `doctor` | Selbstdiagnose, siehe 4.7 |
 | `daemon` | Vordergrundprozess fuer den Dienst |
@@ -236,7 +258,7 @@ Steuerung laeuft ueber die HTTP-API, kein zusaetzlicher Steuer-Socket.
 Prueft und meldet, ohne Geheimnisse auszugeben: Python-Version; openconnect und ocproxy
 gefunden (Pfad, Version); Config gueltig; Dienst geladen und aktiv; Ports 1080 und 1081
 gebunden (bei Belegung: welcher Prozess, per `ss -ltnp` bzw. `lsof`); Keyring-Roundtrip
-(Passwort hinterlegt: ja/nein/gesperrt); Cisco-Client installiert und verbunden; Secret
+(Passwort und TOTP-Schluessel hinterlegt: ja/nein/gesperrt); Cisco-Client installiert und verbunden; Secret
 Service erreichbar (Linux); Browser gefunden (Chrome, Firefox) und Hinweis auf die Extension.
 Ausgabe ist zum Einfuegen in ein GitHub-Issue gedacht.
 
@@ -260,8 +282,10 @@ durchlaufen hat. CI laeuft auf einem GitHub-Actions-macOS-Runner (Unit-Tests, `p
 
 ### 4.9 Sicherheit
 
-- Passwort nur im OS-Keyring; im Daemon nur kurz als bytes, nie in Umgebungsvariablen,
-  Argumenten oder Logs. Nie `--dump-http-traffic`, hoechstens ein `-v`, nie `ocproxy -T`.
+- Passwort und TOTP-Schluessel nur im OS-Keyring; im Daemon nur kurz im Speicher, nie in
+  Umgebungsvariablen, Argumenten oder Logs. Der Schluessel liegt waehrend des Aufbaus in einer
+  0600-Datei im 0700-Zustandsordner und wird danach geloescht. Nie `--dump-http-traffic`,
+  hoechstens ein `-v`, nie `ocproxy -T`.
 - Im Daemon `RLIMIT_CORE=0` und `PR_SET_DUMPABLE=0` (Linux, ctypes). `install.sh` traegt
   `/usr/sbin/openconnect` in `~/.apport-ignore.xml` ein.
 - 1080 und 1081 nur auf 127.0.0.1. Jeder lokale Prozess kann den SOCKS-Port nutzen; das ist
@@ -382,10 +406,15 @@ liest, nach Verzoegerung auf dem per Argument uebergebenen Port lauscht und Byte
 6. Exit 1 vor Bereitschaft -> `auth_failed`, kein Neustart; `connect` startet erneut.
 7. Prozessende nach Erfolg ohne Bedarf -> `idle`; mit Bedarf -> Backoff und Neustart.
 8. stderr-Marker -> richtige Zustaende und Meldungen.
-9. Keyring-Lookup: fehlend, Timeout, vorhanden (gemockter Befehl).
+9. Keyring-Lookup: fehlend, Timeout, vorhanden (gemockter Befehl); Passwort und TOTP unter
+   getrennten Dienstnamen.
+9a. TOTP: Normalisierung (otpauth-URL, Base32 mit Leerzeichen und Kleinbuchstaben, Ablehnung
+    von HOTP, fremden Ziffern/Perioden, Unsinn), RFC-6238-Testvektoren; Schluesseldatei
+    0600, Inhalt kommt beim Fake an, Datei ist nach Bereitschaft, Exit und Stopp weg;
+    fehlender Schluessel -> `keyring`, abgelehnter Code -> `auth_failed` ohne Wiederholung.
 10. Cisco-Erkennung und TLS-Probe (gemockt) -> `blocked` bzw. `offline`, keine Fehlversuche.
-11. HTTP-API: Status, connect, disconnect, password, CSRF-Ablehnung ohne Header oder mit
-    fremdem Origin.
+11. HTTP-API: Status, connect, disconnect, password, totp (Kontrollcode, Ablehnung von
+    Unsinn), CSRF-Ablehnung ohne Header oder mit fremdem Origin.
 12. Config-Fehler -> Daemon laeuft, Status meldet Zeile.
 13. Doppelstart -> Exit 0.
 
@@ -408,8 +437,9 @@ CI (GitHub Actions): `ubuntu-latest` und `macos-latest`: Unit-Tests, `python -m 
 
 ## 9. Offene Punkte
 
-- Ob der Server nach korrektem Passwort ein zweites Formular zeigt, laesst sich erst beim
-  ersten echten Login sehen. Der Daemon meldet es als `auth_failed` mit Klartext.
+- Ob das OTP-Formular des URZ als `challenge` oder `secondary_password` kommt (beides fuellt
+  openconnect selbst), zeigt erst der erste echte Login. Ein anderes Formular meldet der Daemon
+  als `auth_failed` mit Hinweis auf das Log, in dem der Prompt-Text steht.
 - Gleichzeitige Sessions desselben Kontos (Cisco-Client plus uni-vpn) sind nicht dokumentiert.
   Empfehlung im Readme: Cisco-Client nicht parallel verbinden, `AutoConnectOnStart` abschalten.
 - macOS ist bis zum Smoke-Test experimentell.

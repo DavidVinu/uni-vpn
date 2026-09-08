@@ -8,13 +8,14 @@ import random
 import ssl
 import time
 from enum import Enum
+from pathlib import Path
 from typing import Awaitable, Callable
 
 from . import PROTOCOL, __version__, credentials
 from . import platform as pf
 from .config import Config
 from .forwarder import Forwarder
-from .tunnel import Tunnel
+from .tunnel import Tunnel, remove_stale_token_files
 
 
 class State(str, Enum):
@@ -49,16 +50,22 @@ class Daemon:
     def __init__(self, cfg: Config, log: logging.Logger | None = None, *,
                  password_getter: Callable[[], Awaitable[bytes]] | None = None,
                  password_setter: Callable[[str], None] | None = None,
+                 totp_getter: Callable[[], Awaitable[bytes]] | None = None,
+                 totp_setter: Callable[[str], None] | None = None,
                  probe: Callable[[], Awaitable[bool]] | None = None,
                  cisco_check: Callable[[], bool] | None = None,
                  tunnel_factory: Callable[[], Tunnel] | None = None,
                  config_error: str | None = None,
                  log_tail=None,
-                 wrapper: str | None = None):
+                 wrapper: str | None = None,
+                 token_dir: Path | None = None):
         self.cfg = cfg
         self.log = log or logging.getLogger("uni-vpn")
         self.password_getter = password_getter or (lambda: credentials.get_password(cfg.user, cfg.keyring_timeout))
         self.password_setter = password_setter or (lambda pw: credentials.store_password(cfg.user, pw))
+        self.totp_getter = totp_getter or (lambda: credentials.get_totp(cfg.user, cfg.keyring_timeout))
+        self.totp_setter = totp_setter or (lambda token: credentials.store_totp(cfg.user, token))
+        self.token_dir = token_dir or pf.state_dir()
         self.probe = probe or (lambda: default_probe(cfg.host, cfg.probe_timeout))
         self.cisco_check = cisco_check or pf.cisco_connected
         self.tunnel_factory = tunnel_factory or self._make_tunnel
@@ -96,7 +103,7 @@ class Daemon:
         ocproxy = pf.find_binary("ocproxy", self.cfg.ocproxy)
         if not ocproxy:
             raise FileNotFoundError("ocproxy nicht gefunden, bitte install.sh ausfuehren")
-        return Tunnel(self.cfg, openconnect, self.wrapper, self.log, ocproxy=ocproxy)
+        return Tunnel(self.cfg, openconnect, self.wrapper, self.log, ocproxy=ocproxy, token_dir=self.token_dir)
 
     def _set(self, state: State, message: str) -> None:
         if state != self.state or message != self.message:
@@ -147,6 +154,9 @@ class Daemon:
     async def run(self) -> None:
         from .httpapi import HttpApi
 
+        stale = remove_stale_token_files(self.token_dir)
+        if stale:
+            self.log.warning("%d alte Schluesseldatei(en) entfernt", stale)
         self.http = HttpApi(self, "127.0.0.1", self.cfg.http_port, self.log)
         try:
             await self.http.start()
@@ -248,6 +258,11 @@ class Daemon:
         self.log.info("Passwort im Keyring abgelegt")
         await self.request_connect()
 
+    async def set_totp(self, token: str) -> None:
+        await asyncio.get_running_loop().run_in_executor(None, self.totp_setter, token)
+        self.log.info("TOTP-Schluessel im Keyring abgelegt")
+        await self.request_connect()
+
     # --- Aufbau -----------------------------------------------------------
 
     async def _connect_loop(self) -> None:
@@ -272,18 +287,29 @@ class Daemon:
             except credentials.KeyringError as exc:
                 self._final(State.keyring, str(exc))
                 return
+            try:
+                totp = (await self.totp_getter()).decode("ascii").strip()
+            except credentials.TotpMissing:
+                self._final(State.keyring, "Kein TOTP-Schluessel hinterlegt: uni-vpn totp")
+                return
+            except credentials.KeyringLocked:
+                self._final(State.keyring, "Schluesselbund gesperrt, bitte entsperren und erneut verbinden")
+                return
+            except (credentials.KeyringError, UnicodeDecodeError) as exc:
+                self._final(State.keyring, f"TOTP-Schluessel unlesbar: {exc}")
+                return
 
             self._set(State.connecting, "Verbindung wird aufgebaut")
             try:
                 tunnel = self.tunnel_factory()
                 self.tunnel = tunnel
-                await tunnel.start(password)
+                await tunnel.start(password, totp)
             except OSError as exc:
                 self.tunnel = None
                 self._final(State.error, f"openconnect konnte nicht gestartet werden: {exc}")
                 return
             finally:
-                del password
+                del password, totp
             self.connect_count += 1
 
             ready = await tunnel.wait_ready(cfg.ready_timeout)

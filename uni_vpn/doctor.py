@@ -20,12 +20,12 @@ class Check:
     detail: str
 
 
-def keyring_state(user: str, timeout: float = 5) -> str:
+def keyring_state(user: str, timeout: float = 5, kind: str = "password") -> str:
     async def probe() -> str:
         try:
-            await credentials.get_password(user, timeout)
+            await credentials.get_secret(user, kind, timeout)
             return "present"
-        except credentials.PasswordMissing:
+        except credentials.SecretMissing:
             return "missing"
         except credentials.KeyringLocked:
             return "locked"
@@ -136,6 +136,12 @@ def run_checks(cfg_path: Path | None = None, *,
                    "locked": ("warn", "Schluesselbund gesperrt oder keine Antwort")}
         status, detail = mapping.get(state, ("fail", state.replace("error:", "Fehler: ")))
         checks.append(Check("Keyring", status, detail))
+        state = keyring_probe(cfg.user, kind="totp")
+        mapping = {"present": ("ok", "TOTP-Schluessel hinterlegt"),
+                   "missing": ("fail", "kein TOTP-Schluessel hinterlegt: uni-vpn totp"),
+                   "locked": ("warn", "Schluesselbund gesperrt oder keine Antwort")}
+        status, detail = mapping.get(state, ("fail", state.replace("error:", "Fehler: ")))
+        checks.append(Check("Zweiter Faktor", status, detail))
 
     if cisco_installed():
         connected = cisco_connected()

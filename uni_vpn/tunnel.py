@@ -10,20 +10,30 @@ import shlex
 import signal
 import socket
 import subprocess
+import tempfile
 import time
+from pathlib import Path
 
+from . import platform as pf
 from .config import Config
 
-# Ein abgelehntes Passwort erzeugt bei --non-inter dieselbe Zeilenfolge wie eine echte
+# Ein abgelehntes Passwort erzeugt bei --non-inter dieselbe Zeilenfolge wie eine unbekannte
 # Zweitabfrage (Formular kommt erneut, stdin ist zu, "User input required", dann
 # "Failed to complete authentication"). Beide Marker bekommen daher eine Meldung.
 AUTH_REJECTED = (
     "Anmeldung abgelehnt: Passwort pruefen (uni-vpn password). "
-    "Stimmt es, verlangt der Server eine zweite Eingabe (OTP), siehe uni-vpn log"
+    "Stimmt es, hat der Server etwas verlangt, das uni-vpn nicht kennt, siehe uni-vpn log"
 )
+# openconnect probiert den aktuellen und den naechsten Code; lehnt der Server beide ab,
+# stimmt der Schluessel nicht oder die Uhr geht falsch.
+TOTP_REJECTED = (
+    "Einmalcode abgelehnt: Uhrzeit des Rechners pruefen, sonst TOTP-Schluessel neu eintragen (uni-vpn totp)"
+)
+TOKEN_PREFIX = "totp-"
 
 # (Teilstring in openconnect-Ausgabe, Zustand, Meldung). Erste Uebereinstimmung gewinnt.
 MARKERS: list[tuple[str, str, str]] = [
+    ("Server is rejecting the soft token", "auth_failed", TOTP_REJECTED),
     ("User input required in non-interactive mode", "auth_failed", AUTH_REJECTED),
     ("Server asked us to run CSD", "auth_failed", "Server verlangt HostScan, uni-vpn braucht ein Update"),
     ("Cisco Secure Desktop", "auth_failed", "Server verlangt HostScan, uni-vpn braucht ein Update"),
@@ -40,6 +50,23 @@ def classify_line(line: str) -> tuple[str, str] | None:
         if needle.lower() in lowered:
             return state, message
     return None
+
+
+def remove_stale_token_files(directory: Path) -> int:
+    """Schluesseldateien eines abgestuerzten Daemons entfernen. Liefert die Anzahl."""
+    removed = 0
+    try:
+        entries = list(directory.iterdir())
+    except OSError:
+        return 0
+    for entry in entries:
+        if entry.name.startswith(TOKEN_PREFIX) and entry.is_file():
+            try:
+                entry.unlink()
+                removed += 1
+            except OSError:
+                pass
+    return removed
 
 
 def free_port() -> int:
@@ -59,12 +86,15 @@ def port_open(port: int) -> bool:
 
 
 class Tunnel:
-    def __init__(self, cfg: Config, openconnect: str, wrapper: str, log: logging.Logger, ocproxy: str | None = None):
+    def __init__(self, cfg: Config, openconnect: str, wrapper: str, log: logging.Logger, ocproxy: str | None = None,
+                 token_dir: Path | None = None):
         self.cfg = cfg
         self.openconnect = openconnect
         self.wrapper = wrapper
         self.ocproxy = ocproxy
         self.log = log
+        self.token_dir = token_dir or pf.state_dir()
+        self.token_file: Path | None = None
         self.port: int | None = None
         self.proc: asyncio.subprocess.Process | None = None
         self.exited = asyncio.Event()
@@ -76,7 +106,7 @@ class Tunnel:
         self._reader: asyncio.Task | None = None
 
     def command(self, port: int) -> list[str]:
-        return [
+        cmd = [
             self.openconnect,
             "--protocol=anyconnect",
             f"--useragent={self.cfg.useragent}",
@@ -89,27 +119,55 @@ class Tunnel:
             "--script-tun",
             # openconnect fuehrt den Wert per /bin/sh -c aus, der Pfad darf Leerzeichen enthalten.
             f"--script={shlex.quote(self.wrapper)} {port}",
-            self.cfg.host,
         ]
+        if self.token_file:
+            # Der Schluessel geht ueber eine 0600-Datei, nie ueber die Prozessliste. openconnect
+            # liest sie bei jeder Code-Erzeugung neu, sie bleibt bis zum fertigen Aufbau.
+            cmd += ["--token-mode=totp", f"--token-secret=@{self.token_file}"]
+        return cmd + [self.cfg.host]
+
+    def _write_token_file(self, totp: str) -> None:
+        self.token_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        fd, name = tempfile.mkstemp(prefix=TOKEN_PREFIX, dir=self.token_dir)  # mkstemp legt 0600 an
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(totp + "\n")
+        self.token_file = Path(name)
+
+    def _remove_token_file(self) -> None:
+        if self.token_file is None:
+            return
+        try:
+            self.token_file.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            self.log.warning("Schluesseldatei %s konnte nicht geloescht werden: %s", self.token_file, exc)
+        self.token_file = None
 
     @property
     def returncode(self) -> int | None:
         return self.proc.returncode if self.proc else None
 
-    async def start(self, password: bytes) -> None:
+    async def start(self, password: bytes, totp: str | None = None) -> None:
         self.port = free_port()
         self.started_at = time.monotonic()
         env = dict(os.environ)
         if self.ocproxy:
             env["OCPROXY"] = self.ocproxy
-        self.proc = await asyncio.create_subprocess_exec(
-            *self.command(self.port),
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            start_new_session=True,
-            env=env,
-        )
+        if totp:
+            self._write_token_file(totp)
+        try:
+            self.proc = await asyncio.create_subprocess_exec(
+                *self.command(self.port),
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                start_new_session=True,
+                env=env,
+            )
+        except OSError:
+            self._remove_token_file()
+            raise
         self.proc.stdin.write(password + b"\n")
         try:
             await self.proc.stdin.drain()
@@ -130,6 +188,7 @@ class Tunnel:
             if self.classification is None:
                 self.classification = classify_line(text)
         await self.proc.wait()
+        self._remove_token_file()
         self.log.info("openconnect beendet, Exit %s", self.proc.returncode)
         self.exited.set()
 
@@ -140,11 +199,13 @@ class Tunnel:
                 return False
             if self.port and port_open(self.port):
                 self.ready_at = time.monotonic()
+                self._remove_token_file()
                 return True
             await asyncio.sleep(0.25)
         return False
 
     async def stop(self, grace: float) -> None:
+        self._remove_token_file()
         if self.proc is None or self.exited.is_set():
             return
         self.stopped_by_us = True

@@ -1,9 +1,9 @@
 # uni-vpn
 
 Uni-VPN (Cisco AnyConnect, Uni Heidelberg) nur fuer bestimmte Webseiten im Browser. Der Tunnel
-entsteht automatisch beim ersten Aufruf einer gelisteten Seite, das Passwort liegt im Keyring
-des Betriebssystems, nach 15 Minuten ohne Datenverkehr wird wieder getrennt. Alles andere auf
-dem Rechner bleibt unberuehrt.
+entsteht automatisch beim ersten Aufruf einer gelisteten Seite, Passwort und TOTP-Schluessel
+(zweiter Faktor) liegen im Keyring des Betriebssystems, nach 15 Minuten ohne Datenverkehr wird
+wieder getrennt. Alles andere auf dem Rechner bleibt unberuehrt.
 
 Unterstuetzt: Ubuntu 24.04 mit Google Chrome und Firefox (Snap). macOS 14+ auf Apple Silicon
 ist vorbereitet, aber noch nicht auf einem echten Mac getestet (siehe `docs/macos-test.md`).
@@ -22,8 +22,8 @@ git clone https://github.com/DavidVinu/uni-vpn.git ~/uni-vpn
 macOS: zuerst [Homebrew](https://brew.sh) installieren (Admin-Passwort, ein paar Minuten), dann
 dieselben drei Zeilen ohne `sudo apt`.
 
-Der Installer fragt nach Uni-ID und Passwort, richtet den Hintergrunddienst ein und zeigt zum
-Schluss eine Selbstdiagnose. Danach die Extension laden:
+Der Installer fragt nach Uni-ID, Passwort und dem TOTP-Schluessel, richtet den Hintergrunddienst
+ein und zeigt zum Schluss eine Selbstdiagnose. Danach die Extension laden:
 
 - Chrome: `chrome://extensions`, Entwicklermodus einschalten, "Entpackte Erweiterung laden",
   Ordner `~/uni-vpn/extension` waehlen.
@@ -36,6 +36,19 @@ Schluss eine Selbstdiagnose. Danach die Extension laden:
 Fertig. `https://sogo.uni-heidelberg.de` und `https://elearning-med.uni-heidelberg.de` laufen ab
 jetzt ueber die Uni, alles andere nicht. Weitere Domains stehen in den Optionen der Extension.
 
+### Zweiter Faktor
+
+Das URZ verlangt beim VPN-Login ein zeitbasiertes Einmalkennwort (TOTP). Damit uni-vpn ohne
+Nachfrage verbinden kann, bekommt der Rechner einen eigenen Token, genau wie das URZ es fuer
+KeePassXC beschreibt. Die App auf dem Handy bleibt daneben bestehen.
+
+1. Im Uni-Netz oder mit verbundenem Cisco-Client https://mfa.uni-heidelberg.de oeffnen.
+2. Unter "Soft-Token (zeitbasiert)" auf "Einrichten" klicken.
+3. Unter dem QR-Code "Tokendetails einblenden", den Text zwischen `secret=` und `&issuer=`
+   kopieren (oder die ganze `otpauth://`-Zeile).
+4. Im Installer einfuegen, oder spaeter mit `uni-vpn totp` bzw. auf der Statusseite. Der
+   angezeigte Kontrollcode muss mit dem Code in der App uebereinstimmen.
+
 ## Bedienung
 
 | Was | Wie |
@@ -43,6 +56,7 @@ jetzt ueber die Uni, alles andere nicht. Weitere Domains stehen in den Optionen 
 | Status | Extension-Icon anklicken, oder `http://127.0.0.1:1081/`, oder `uni-vpn status` |
 | Verbinden / Trennen | Knopf im Popup oder auf der Statusseite |
 | Passwort aendern | Statusseite, Formular unten, oder `uni-vpn password` |
+| TOTP-Schluessel aendern | Statusseite, zweites Formular, oder `uni-vpn totp` |
 | Domains aendern | Optionen der Extension (Rechtsklick auf das Icon) |
 | Wenn etwas nicht geht | `uni-vpn doctor`, Ausgabe in ein Issue kopieren |
 | Aktualisieren | `uni-vpn update`, danach Extension in `chrome://extensions` neu laden |
@@ -53,8 +67,9 @@ jetzt ueber die Uni, alles andere nicht. Weitere Domains stehen in den Optionen 
 | Anzeige | Ursache | Loesung |
 |---|---|---|
 | Browser: `ERR_PROXY_CONNECTION_FAILED` oder "Proxy verweigert die Verbindung" | Dienst laeuft nicht oder Tunnel in Fehlerzustand | `uni-vpn doctor`, dann `uni-vpn service start` |
-| Popup: "Anmeldung abgelehnt" | Passwort falsch oder abgelaufen | `uni-vpn password` |
-| Popup: "Server verlangt eine weitere Eingabe" | Uni hat auf Zwei-Faktor umgestellt | Issue eroeffnen, so nicht automatisierbar |
+| Popup: "Anmeldung abgelehnt" | Passwort falsch oder abgelaufen | `uni-vpn password`; bleibt es dabei, `uni-vpn log` ansehen und Issue eroeffnen |
+| Popup: "Einmalcode abgelehnt" | Uhr des Rechners geht falsch oder TOTP-Schluessel stimmt nicht | Automatische Zeit einschalten; sonst Token im MFA-Portal neu anlegen und `uni-vpn totp` |
+| Popup: "Kein TOTP-Schluessel hinterlegt" | Zweiter Faktor noch nicht eingetragen | `uni-vpn totp`, siehe "Zweiter Faktor" |
 | Popup: "Cisco Secure Client ist verbunden" | Cisco-Client aktiv | Cisco trennen, uni-vpn verbindet dann von selbst |
 | Popup: "Schluesselbund gesperrt" | Keyring nach Autologin nicht entsperrt | Abmelden und mit Passwort anmelden |
 | Popup: "Kein Netz oder Captive Portal" | WLAN-Anmeldeseite noch nicht bestaetigt | Anmeldeseite oeffnen, danach geht es von selbst weiter |
@@ -70,7 +85,10 @@ jetzt ueber die Uni, alles andere nicht. Weitere Domains stehen in den Optionen 
   --socks5-hostname 127.0.0.1:1080`).
 - Keine Routen, kein DNS, kein Root nach der Installation. Sudo wird nur fuer `apt install`
   gebraucht.
-- Das Passwort liegt im GNOME-Keyring bzw. macOS-Schluesselbund, nirgends sonst.
+- Passwort und TOTP-Schluessel liegen im GNOME-Keyring bzw. macOS-Schluesselbund, nirgends
+  sonst. Waehrend des Verbindungsaufbaus liest openconnect den Schluessel aus einer nur fuer den
+  Nutzer lesbaren Datei, die danach sofort geloescht wird. Der Rechner ist damit der zweite
+  Faktor, so wie beim vom URZ dokumentierten KeePassXC-Token.
 - macOS zeigt den Dienst unter Systemeinstellungen > Allgemein > Anmeldeobjekte.
 
 ## Entwicklung
