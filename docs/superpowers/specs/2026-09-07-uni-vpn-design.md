@@ -1,13 +1,16 @@
 # uni-vpn: Design
 
-Stand: 2026-09-07. Gilt fuer Etappe 1 (Backend) und Etappe 2 (Extension).
+Stand: 2026-09-08. Gilt fuer Etappe 1 (Backend) und Etappe 2 (Proxy-Regel im System). Die
+Extension aus der ersten Fassung wurde am 2026-09-08 nach dem E2E-Test gestrichen; die
+Rechercheergebnisse dazu in Abschnitt 2 bleiben als Begruendung stehen.
 
 ## 1. Ziel
 
 Das Cisco-AnyConnect-VPN der Uni Heidelberg (ASA-Cluster hinter `vpn-ac.uni-heidelberg.de`)
 so betreiben, dass
 
-1. der Login unbeaufsichtigt laeuft (Passwort im OS-Keyring, keine Eingabe im Alltag),
+1. der Login unbeaufsichtigt laeuft (Passwort und TOTP-Schluessel im OS-Keyring, keine
+   Eingabe im Alltag),
 2. nur im Browser und nur fuer eine konfigurierbare Domain-Liste Traffic ueber die Uni geht,
 3. die VPN-Session erst beim ersten Aufruf einer gelisteten Domain entsteht und nach
    Leerlauf wieder abgebaut wird,
@@ -21,12 +24,21 @@ Full-Tunnel-Zwecke, Verteilung ueber Chrome Web Store.
 
 Diese Punkte wurden gegen Doku, Quellcode oder direkt am Server geprueft und tragen das Design:
 
-- Der Uni-Server (Tunnel-Group `DefaultWEBVPNGroup`) liefert ein Login-Formular mit genau zwei
-  Feldern, `username` und `password`. Kein OTP-Feld, keine Gruppenauswahl. Gemessen mit
-  `openconnect --authenticate --non-inter` ohne Zugangsdaten, Antwortzeit 0,2 s.
-  Die URZ-Doku nennt seit 12/2023 TOTP fuer den "zentralen Dienst"; das betrifft offenbar eine
-  andere Tunnel-Group. Der Daemon muss den Fall "Server verlangt weitere Eingabe" trotzdem als
-  eigenen Fehler erkennen, falls sich das aendert.
+- Der Uni-Server (Tunnel-Group `DefaultWEBVPNGroup`) liefert zuerst ein Login-Formular mit
+  `username` und `password` (gemessen mit `openconnect --authenticate --non-inter`). Nach dem
+  Passwort verlangt das URZ seit 15.12.2023 ein zeitbasiertes Einmalkennwort (TOTP, RFC 6238,
+  6 Ziffern, 30 s), Prompt "Bitte zweiten Faktor eingeben (OTP)". ASA-Session 24 h, Idle 30 min
+  (Cisco-Journal vom 2026-09-07).
+- openconnect erzeugt TOTP-Codes selbst (`--token-mode=totp --token-secret=@datei`, Format
+  `base32:...`, optional `sha256:`-Praefix) und fuellt sie in das Feld `secondary_password`
+  oder in ein Formular mit `auth_id="challenge"` (auth.c, 9.12). Es probiert den aktuellen und
+  den naechsten Code, danach "Server is rejecting the soft token; switching to manual entry".
+  Die Datei wird bei jeder Code-Erzeugung neu gelesen (main.c `lock_token`), muss also bis zum
+  fertigen Aufbau existieren. Eine `otpauth://`-URL akzeptiert openconnect nicht.
+- Das URZ dokumentiert selbst KeePassXC auf dem PC als Token und empfiehlt zwei Token pro
+  Nutzer. Das Self-Service-Portal https://mfa.uni-heidelberg.de (LinOTP, nur aus dem Uni-Netz
+  oder per VPN) zeigt unter "Tokendetails einblenden" den Schluessel als Text. Ein Schluessel
+  im OS-Keyring entspricht damit dem offiziell beschriebenen Desktop-Token.
 - `openconnect --script-tun --script ocproxy` braucht kein Root, kein tun-Device, aendert
   weder Routen noch DNS. ocproxy bindet ohne `-g` nur auf Loopback. Hostnamen werden per
   SOCKS5 im Tunnel aufgeloest (nur erster VPN-DNS-Server, nur IPv4, kein UDP).
@@ -75,16 +87,19 @@ Diese Punkte wurden gegen Doku, Quellcode oder direkt am Server geprueft und tra
 ## 3. Architektur
 
 ```
-Browser (Chrome oder Firefox)
-  Extension: Domain-Liste, Proxy-Regel, Popup mit Status
-      |  gelistete Domain -> SOCKS5 127.0.0.1:1080 (Hostname geht mit)
-      |  Status/Steuerung -> HTTP 127.0.0.1:1081
+Browser (Chrome oder Firefox), liest die Systemeinstellung "automatische Proxy-Konfiguration"
+      |  holt http://127.0.0.1:1081/proxy.pac: gelistete Domain -> SOCKS5 127.0.0.1:1080, sonst DIRECT
+      |  Status/Steuerung: Statusseite http://127.0.0.1:1081/
       v
 uni-vpn Daemon (Python, ein Prozess, User-Dienst)
   SOCKS-Forwarder 1080 ---> ocproxy (dynamischer Port) <--socketpair-- openconnect ---TLS---> Uni-ASA
-  HTTP 1081: /status.json, /api/connect, /api/disconnect, /api/password, Statusseite
+  HTTP 1081: /proxy.pac, /status.json, /api/connect, /api/disconnect, /api/password, /api/totp, /api/domains, Statusseite
   Zustandsautomat, Leerlauf-Timer, Keyring-Zugriff, Log
 ```
+
+Keine Browser-Extension (Entscheidung vom 2026-09-08 nach dem E2E-Test: Entwicklermodus, temporaere
+Add-ons, Signierung und Freigabe-Dialoge waren die groesste Reibung; die Proxy-Regel kommt
+jetzt als PAC ueber die Systemeinstellung, die beide Browser lesen).
 
 Alles laeuft ohne Root. Das System sieht keinen Tunnel, keine Routen, kein DNS. Nur Prozesse,
 die 127.0.0.1:1080 als SOCKS5-Proxy benutzen, gehen ueber die Uni.
@@ -139,12 +154,12 @@ RotatingFileHandler 1 MB x 3, Datei 0600. Lock-Datei `~/.config/uni-vpn/daemon.l
 |---|---|---|---|
 | `idle` | kein Tunnel, nichts gebraucht | loesen Aufbau aus, warten max 25 s | keine |
 | `offline` | TLS-Probe zum Host fehlgeschlagen (kein Netz, Captive Portal) | sofort schliessen | Probe alle 30 s solange Bedarf |
-| `blocked` | Cisco Secure Client ist verbunden | sofort schliessen | Pruefung alle 30 s solange Bedarf |
+| `blocked` | Cisco Secure Client ist verbunden | sofort schliessen | Pruefung alle 30 s solange Bedarf; ohne Bedarf bleibt `blocked` stehen, bis der Ticker Cisco als getrennt sieht |
 | `connecting` | openconnect laeuft, ocproxy-Port noch zu | warten max 25 s | Abbruch nach 45 s -> `error` |
 | `connected` | Tunnel steht | durchreichen | Leerlauf-Timer |
 | `disconnecting` | Abbau laeuft | warten, dann neuer Aufbau bei Bedarf | |
-| `auth_failed` | Server hat Login abgelehnt oder mehr Eingabe verlangt | sofort schliessen | keine, bis `password` gesetzt oder `connect` ausgeloest |
-| `keyring` | Passwort fehlt oder Keyring gesperrt | sofort schliessen | keine, bis `password` oder `connect` |
+| `auth_failed` | Server hat Passwort oder Einmalcode abgelehnt oder etwas Unbekanntes verlangt | sofort schliessen | keine, bis `password`/`totp` gesetzt oder `connect` ausgeloest |
+| `keyring` | Passwort oder TOTP-Schluessel fehlt oder Keyring gesperrt | sofort schliessen | keine, bis `password`/`totp` oder `connect` |
 | `error` | Netz-/Serverfehler nach vorherigem Erfolg | sofort schliessen | Backoff 5, 10, 20, 40, 80 s, dann 5 min, mit Jitter, nur bei Bedarf |
 
 Bedarf = mindestens eine offene SOCKS-Verbindung oder Daten in den letzten 60 s oder ein
@@ -153,26 +168,50 @@ expliziter `connect`. Ohne Bedarf wird nach Prozessende nicht neu aufgebaut, son
 Aufbau, Schritt fuer Schritt:
 
 1. Cisco-Pruefung: `cscotun0` vorhanden (Linux) oder `/opt/cisco/secureclient/bin/vpn state`
-   meldet `Connected` -> `blocked`.
+   meldet `Connected` -> `blocked`. Dieselbe Pruefung laeuft alle 30 s auch bei stehendem
+   Tunnel (im Executor, weil `vpn state` auf macOS 2 s braucht): verbindet sich Cisco spaeter,
+   werden Browserverbindungen geschlossen, der Tunnel abgebaut und `blocked` gemeldet
+   (gemessen 2026-09-08: vorher lief uni-vpn einfach weiter).
 2. TLS-Probe: `ssl.create_default_context()`-Handshake auf `host:443`, 5 s -> sonst `offline`.
 3. Passwort: Keyring-Lookup mit 20 s Timeout. Exit 1 ohne Ausgabe -> `keyring` ("kein Passwort
-   hinterlegt"), Timeout -> `keyring` ("Schluesselbund gesperrt").
+   hinterlegt"), Timeout -> `keyring` ("Schluesselbund gesperrt"). Danach genauso der
+   TOTP-Schluessel (eigener Keyring-Eintrag `uni-vpn-totp`), fehlend -> `keyring` ("kein
+   TOTP-Schluessel hinterlegt: uni-vpn totp"). Ohne beides startet openconnect nicht.
 4. Freien ocproxy-Port waehlen (bind 127.0.0.1:0, getsockname, close).
-5. Start:
+4a. Einmalcode-Fenster: der Server nimmt jeden Code nur einmal an (gemessen 2026-09-08: ein
+    Neuaufbau 3 s nach dem Login scheiterte mit "Login failed"). Der Daemon merkt sich das
+    30-s-Fenster, in dem openconnect zuletzt einen Code erzeugt hat, und wartet im selben
+    Fenster bis zum naechsten (Zustand `connecting`, "Warte auf den naechsten Einmalcode").
+5. Start: TOTP-Schluessel in eine Datei `totp-*` (mkstemp, 0600) im Zustandsordner schreiben,
+   dann
    ```
    openconnect --protocol=anyconnect --useragent <ua> --user <user>
      --passwd-on-stdin --non-inter --no-dtls --force-dpd 30 --reconnect-timeout 60
-     --script-tun --script "<abs>/uni-vpn-ocproxy <port>" <host>
+     --script-tun --script "<abs>/uni-vpn-ocproxy <port>"
+     --token-mode=totp --token-secret=@<datei> <host>
    ```
    mit `start_new_session=True`, stdin=PIPE, stdout+stderr=PIPE. Passwort als bytes plus
    `\n` schreiben, stdin schliessen, Referenz loeschen. `uni-vpn-ocproxy` ist ein Wrapper mit
-   `exec ocproxy -D 127.0.0.1:<port> -k 30`, damit kein `sh` als Zwischenprozess bleibt.
+   `exec ocproxy -D 127.0.0.1:<port> -k 30`; der `--script`-Wert beginnt mit `exec`, weil
+   openconnect ihn per `/bin/sh -c` startet und dash sonst ein `sh` daneben stehen liesse.
+   Der Schluessel steht nie in der Kommandozeile. Die Datei wird geloescht, sobald der Port
+   offen ist, der Prozess endet oder der Daemon ihn stoppt; beim Daemon-Start werden
+   uebrig gebliebene `totp-*`-Dateien entfernt.
 6. Bereitschaft: TCP-Connect-Probe auf den ocproxy-Port alle 250 ms, max 45 s. Sobald offen:
    `connected`. Wartende Client-Verbindungen werden durchgereicht; die Auth-Dauer wird geloggt.
-7. stderr zeilenweise lesen und auf Marker abbilden:
-   `User input required in non-interactive mode` -> `auth_failed` ("Server verlangt weitere
-   Eingabe, vermutlich OTP"); `Failed to complete authentication` -> `auth_failed` ("Anmeldung
-   abgelehnt: Passwort pruefen"); `Server asked us to run CSD` oder `Cisco Secure Desktop` ->
+7. stderr zeilenweise lesen und bewerten (erstes Urteil bleibt). Gemessen am 2026-09-08:
+   der ASA meldet ein falsches Passwort mit `Login failed.` vor der OTP-Abfrage, einen
+   falschen Einmalcode mit `Login failed.` nach `Generating OATH TOTP token code`; danach
+   zeigt er in beiden Faellen das Formular erneut, es folgen `User input required` und
+   `Failed to complete authentication`. Daher: `Login failed` ohne vorherige Code-Erzeugung
+   -> `auth_failed` ("Passwort pruefen, uni-vpn password"), mit -> `auth_failed`
+   ("Einmalcode abgelehnt: Uhrzeit pruefen, sonst uni-vpn totp"). Weitere Marker:
+   `Server is rejecting the soft token` (Server zeigt das OTP-Formular erneut) -> dieselbe
+   Einmalcode-Meldung; `Soft token string is invalid` -> `auth_failed` ("uni-vpn totp");
+   `User input required in non-interactive mode` ohne vorheriges `Login failed` ->
+   `auth_failed` ("Passwort pruefen; stimmt es, hat der Server etwas Unbekanntes verlangt,
+   siehe Log"); `Failed to complete authentication` -> dieselbe Meldung; `Server asked us to
+   run CSD` oder `Cisco Secure Desktop` ->
    `auth_failed` ("HostScan verlangt, Update noetig"); `SAML` oder `external browser` ->
    `auth_failed` ("Login-Verfahren geaendert"); `certificate` -> `error` ("Zertifikat").
    Die letzten 20 stderr-Zeilen werden im Status mitgefuehrt.
@@ -189,8 +228,9 @@ Abbau nach `idle_minutes` ohne Bytes, unabhaengig von offenen Verbindungen (WebS
 Long-Polling halten sonst ewig). Halb geschlossene Verbindungen: EOF einer Seite wird als
 `write_eof` weitergegeben, nach 60 s Nachfrist ohne Daten wird geschlossen.
 
-Resume-Erkennung: alle 5 s `time.monotonic()` gegen `time.time()`; Sprung > 30 s -> SIGUSR2
-an openconnect, alle Forwarder-Verbindungen schliessen, `connecting`.
+Resume-Erkennung: alle 5 s `time.monotonic()` gegen `time.time()`; Sprung > 30 s -> alle
+Forwarder-Verbindungen schliessen, Tunnel sauber beenden (`disconnecting` -> `idle`) und bei
+Bedarf ueber den normalen Zustandsautomaten neu aufbauen.
 
 ### 4.4 SOCKS-Forwarder
 
@@ -204,15 +244,18 @@ keine Peer-UID-Pruefung (auf macOS unmoeglich, auf Einzelnutzer-Laptops ohne Nut
 
 | Route | Methode | Inhalt |
 |---|---|---|
-| `/` | GET | Statusseite: Zustand in Klartext, Knoepfe Verbinden/Trennen, Formular "Passwort setzen", letzte Logzeilen, Versions- und Portangaben. Deutsch, so kurz wie moeglich. |
-| `/status.json` | GET | `{"protocol": 1, "version", "state", "message", "since", "host", "user", "socks_port", "active_connections", "bytes_in", "bytes_out", "last_error", "log_tail": [...]}` |
+| `/` | GET | Statusseite: Zustand in Klartext, Knoepfe Verbinden/Trennen, Formulare "Passwort setzen", "TOTP-Schluessel setzen" (mit Link zum MFA-Portal) und "Domains", letzte Logzeilen, Versions- und Portangaben. Deutsch, so kurz wie moeglich. |
+| `/status.json` | GET | `{"protocol": 1, "version", "state", "message", "since", "host", "user", "socks_port", "active_connections", "bytes_in", "bytes_out", "last_error", "domains", "pac_url", "pac_refresh", "log_tail": [...]}` |
 | `/api/connect` | POST | Bedarf setzen, Aufbau starten (auch aus `auth_failed`, `keyring`, `error`) |
 | `/api/disconnect` | POST | Tunnel abbauen, Bedarf loeschen |
 | `/api/password` | POST | JSON `{"password": ...}` -> Keyring, danach Aufbau |
+| `/api/totp` | POST | JSON `{"secret": ...}` (otpauth-URL oder Base32) -> normalisiert in den Keyring, danach Aufbau; Antwort enthaelt den aktuellen Kontrollcode zum Vergleich mit der App |
+| `/proxy.pac` | GET | PAC-Datei aus der Domainliste (Abschnitt 5) |
+| `/api/domains` | POST | JSON `{"text": ...}` (eine Domain je Zeile) -> `domains.txt`, danach Nachladen der Regel im System; 400 mit Zeilennummern bei Fehlern |
 
-CSRF-Schutz: POST nur mit Header `X-Uni-VPN: 1` und Origin leer, `http://127.0.0.1:<port>`,
-`chrome-extension://*` oder `moz-extension://*`. Antworten tragen `Access-Control-Allow-Origin`
-fuer genau diese Origins. Das Passwort wird nie geloggt und nie in `/status.json` ausgegeben.
+CSRF-Schutz: POST nur mit Header `X-Uni-VPN: 1` und Origin leer oder `http://127.0.0.1:<port>`.
+Antworten tragen `Access-Control-Allow-Origin` nur fuer diesen Origin. Passwort und Schluessel werden nie geloggt und nie in `/status.json`
+ausgegeben.
 
 ### 4.6 CLI
 
@@ -222,7 +265,8 @@ fuer genau diese Origins. Das Passwort wird nie geloggt und nie in `/status.json
 |---|---|
 | `status` | Zustand in einer Zeile; `--json` gibt `/status.json` aus |
 | `connect`, `disconnect` | wie die API |
-| `password` | fragt interaktiv (getpass), legt im Keyring ab: Linux `secret-tool store --label 'Uni VPN' service uni-vpn user <user>` (Passwort per stdin ohne Newline), macOS `security add-generic-password -a <user> -s uni-vpn -T /usr/bin/security -U -w` |
+| `password` | fragt interaktiv (getpass), legt im Keyring ab: Linux `secret-tool store --label 'Uni VPN' service uni-vpn user <user>` (Passwort per stdin ohne Newline), macOS `security add-generic-password -a <user> -s uni-vpn -T /usr/bin/security -w` (vorher loeschen statt `-U`, das haengt ohne GUI) |
+| `totp` | fragt interaktiv nach otpauth-URL oder Base32, prueft und normalisiert (`uni_vpn/totp.py`), legt unter `service uni-vpn-totp` ab, zeigt den Kontrollcode |
 | `log` | letzte 200 Logzeilen |
 | `doctor` | Selbstdiagnose, siehe 4.7 |
 | `daemon` | Vordergrundprozess fuer den Dienst |
@@ -235,8 +279,8 @@ Steuerung laeuft ueber die HTTP-API, kein zusaetzlicher Steuer-Socket.
 Prueft und meldet, ohne Geheimnisse auszugeben: Python-Version; openconnect und ocproxy
 gefunden (Pfad, Version); Config gueltig; Dienst geladen und aktiv; Ports 1080 und 1081
 gebunden (bei Belegung: welcher Prozess, per `ss -ltnp` bzw. `lsof`); Keyring-Roundtrip
-(Passwort hinterlegt: ja/nein/gesperrt); Cisco-Client installiert und verbunden; Secret
-Service erreichbar (Linux); Browser gefunden (Chrome, Firefox) und Hinweis auf die Extension.
+(Passwort und TOTP-Schluessel hinterlegt: ja/nein/gesperrt); Cisco-Client installiert und verbunden; Secret
+Service erreichbar (Linux); Proxy-Regel im System (Abschnitt 5.3); Browser gefunden (Chrome, Firefox).
 Ausgabe ist zum Einfuegen in ein GitHub-Issue gedacht.
 
 ### 4.8 Plattformen
@@ -248,7 +292,7 @@ Ausgabe ist zum Einfuegen in ein GitHub-Issue gedacht.
 | Keyring | secret-tool (GNOME-Keyring oder KDE ksecretd ueber Secret Service) | security (Login-Schluesselbund) |
 | Autostart | `~/.config/systemd/user/uni-vpn.service`, `WantedBy=graphical-session.target`, `PartOf=graphical-session.target`, `Restart=always`, `RestartSec=5`, `StartLimitIntervalSec=0`, `LimitCORE=0` | `~/Library/LaunchAgents/de.davidvinu.uni-vpn.plist`, `RunAtLoad`, `KeepAlive`, `EnvironmentVariables.PATH` mit Brew-Prefix, Log nach `~/Library/Logs/uni-vpn/` |
 | Laden | `systemctl --user daemon-reload && systemctl --user enable --now uni-vpn` | `launchctl bootout gui/$UID <plist>; launchctl bootstrap gui/$UID <plist>` |
-| Cisco-Erkennung | `/sys/class/net/cscotun0` oder `vpn state` | `vpn state` |
+| Cisco-Erkennung | nur `/sys/class/net/cscotun0` (`vpn state` braucht 2,2 s je Aufruf) | `vpn state` |
 | Log | `~/.local/state/uni-vpn/` | `~/Library/Logs/uni-vpn/` |
 
 Kein Linger: der Dienst startet mit der grafischen Sitzung, dann ist der Keyring entsperrt.
@@ -259,89 +303,60 @@ durchlaufen hat. CI laeuft auf einem GitHub-Actions-macOS-Runner (Unit-Tests, `p
 
 ### 4.9 Sicherheit
 
-- Passwort nur im OS-Keyring; im Daemon nur kurz als bytes, nie in Umgebungsvariablen,
-  Argumenten oder Logs. Nie `--dump-http-traffic`, hoechstens ein `-v`, nie `ocproxy -T`.
+- Passwort und TOTP-Schluessel nur im OS-Keyring; im Daemon nur kurz im Speicher, nie in
+  Umgebungsvariablen, Argumenten oder Logs. Der Schluessel liegt waehrend des Aufbaus in einer
+  0600-Datei im 0700-Zustandsordner und wird danach geloescht. Nie `--dump-http-traffic`,
+  hoechstens ein `-v`, nie `ocproxy -T`.
 - Im Daemon `RLIMIT_CORE=0` und `PR_SET_DUMPABLE=0` (Linux, ctypes). `install.sh` traegt
   `/usr/sbin/openconnect` in `~/.apport-ignore.xml` ein.
 - 1080 und 1081 nur auf 127.0.0.1. Jeder lokale Prozess kann den SOCKS-Port nutzen; das ist
   enger als der Cisco-Client (Full Tunnel fuer alle Prozesse) und wird im Readme genannt.
 - Kein Zertifikats-Pinning; Systemtruststore (GEANT ist in ca-certificates).
 
-## 5. Extension
+## 5. Proxy-Regel im System (PAC)
 
-Ein Ordner `extension/`, reines JavaScript ohne Bundler und ohne Minifier, ein Manifest fuer
-beide Browser.
+### 5.1 Regel
 
-### 5.1 Manifest
+`uni_vpn/pac.py` erzeugt aus der Domainliste eine PAC-Datei: `host == d || host.endsWith("." + d)`
+-> `SOCKS5 127.0.0.1:<socks_port>` (Chrome und Firefox loesen den Hostnamen dann ueber den
+Proxy auf), sonst `DIRECT`. Kein DIRECT-Fallback fuer gelistete Hosts. Der Daemon liefert sie
+unter `GET /proxy.pac` (`application/x-ns-proxy-autoconfig`, `Cache-Control: no-store`) und
+liest die Liste bei jeder Anfrage neu.
 
-```json
-{
-  "manifest_version": 3,
-  "name": "Uni VPN",
-  "version": "0.1.0",
-  "permissions": ["proxy", "storage"],
-  "host_permissions": ["http://127.0.0.1/*"],
-  "optional_host_permissions": ["<all_urls>"],
-  "background": { "scripts": ["background.js"], "service_worker": "background.js" },
-  "action": { "default_popup": "popup.html" },
-  "options_ui": { "page": "options.html" },
-  "key": "<Public Key fuer stabile Chrome-ID>",
-  "browser_specific_settings": {
-    "gecko": {
-      "id": "uni-vpn@davidvinu.de",
-      "strict_min_version": "140.0",
-      "data_collection_permissions": { "required": ["none"] }
-    }
-  }
-}
-```
+### 5.2 Domainliste
 
-`host_permissions` fuer 127.0.0.1 erlaubt den Status-Fetch. In Firefox werden pro gelisteter
-Domain `*://<domain>/*` und `*://*.<domain>/*` als optionale Host-Permission beim Speichern
-der Optionen angefragt (Nutzergeste), Chrome braucht das fuer PAC nicht und fragt nicht.
+`~/.config/uni-vpn/domains.txt`, eine Domain je Zeile, `#` leitet Kommentare ein, fuehrendes
+`*.` wird entfernt, Kleinschreibung, Duplikate fallen weg, Hostnamen werden geprueft (keine
+Schemata, Pfade, IPv6-Literale, mindestens zwei Labels). Fehlt die Datei, gilt die Vorbelegung
+`sogo.uni-heidelberg.de`, `elearning-med.uni-heidelberg.de`, `cip.dmed.uni-heidelberg.de`
+(Matomo-Skript von elearning-med, sonst wartet der Browser 136 s auf den Timeout). Aenderung
+ueber die Statusseite (`POST /api/domains`, Fehler mit Zeilennummer) oder mit einem Editor.
 
-### 5.2 Verhalten
+### 5.3 Eintrag im System
 
-Gemeinsam: Domain-Liste, `socks_port`, `http_port` und Schalter `enabled` liegen in
-`storage.local` (nicht `sync`, damit die Regel nie auf ein Geraet ohne Daemon wandert).
-Vorbelegung: `sogo.uni-heidelberg.de`, `elearning-med.uni-heidelberg.de`. Ein Eintrag gilt fuer
-den Host und alle Subdomains; Matching ist `host == d || host.endsWith("." + d)`.
+`uni_vpn/sysproxy.py`:
 
-Chrome: `background.js` setzt bei Start, bei `storage.onChanged` und bei `runtime.onInstalled`
-per `chrome.proxy.settings.set({value: {mode: "pac_script", pacScript: {data}}, scope:
-"regular"})` eine PAC, die fuer gelistete Hosts `SOCKS5 127.0.0.1:<port>` und sonst `DIRECT`
-liefert, ohne DIRECT-Fallback fuer gelistete Hosts. Vor dem Setzen wird `proxy.settings.get`
-gelesen; ist `levelOfControl` nicht `controllable_by_this_extension` oder
-`controlled_by_this_extension`, zeigt das Popup eine Warnung. `enabled = false` ->
-`proxy.settings.clear`.
+| | Linux (GNOME) | macOS |
+|---|---|---|
+| Lesen | `gsettings get org.gnome.system.proxy mode` und `autoconfig-url` | `networksetup -listallnetworkservices`, je Dienst `-getautoproxyurl` |
+| Setzen | `autoconfig-url` auf die PAC-URL, `mode` auf `auto` | `-setautoproxyurl <Dienst> <URL>` fuer jeden aktiven Dienst (verlangt Admin-Rechte) |
+| Nachladen nach Listenaenderung | `autoconfig-url` mit `?v=<Zeit>` neu setzen; GNOME meldet die Aenderung, Chrome und Firefox holen die PAC neu | nicht automatisch, Statusseite sagt "Browser neu starten" |
+| Zuruecksetzen | gesicherte Werte aus `~/.config/uni-vpn/proxy-backup.json` | dito, `-setautoproxystate off` wenn vorher aus |
 
-Firefox: `browser.proxy.onRequest` wird synchron auf oberster Ebene registriert und gibt ein
-Promise zurueck, das erst nach dem Laden der Liste aufloest; fuer gelistete Hosts
-`{type: "socks", host: "127.0.0.1", port, proxyDNS: true}`, sonst `{type: "direct"}`. Kein
-Failover-Eintrag. Liste wird gecacht und per `storage.onChanged` aktualisiert. Der Listener
-wird mit Filter `<all_urls>` registriert; feuert er in Firefox ohne die Host-Permission
-`<all_urls>` nicht zuverlaessig fuer die gelisteten Domains (in der Umsetzung pruefen), wird
-`<all_urls>` beim ersten Speichern der Optionen angefragt statt der Domain-Muster.
+Der Installer sichert den vorherigen Zustand einmalig (ein zweiter Lauf ueberschreibt die
+Sicherung nicht), traegt die Regel ein und meldet, wenn er eine fremde Proxy-Einstellung ersetzt
+hat. Ohne GNOME- oder macOS-Proxyverwaltung (KDE, Xfce) nennt er die PAC-URL zum Eintragen im
+Browser; `uni-vpn doctor` prueft den Eintrag ("Proxy-Regel": ok, nicht gesetzt, fremd, keine
+Verwaltung).
 
-Popup: laedt `/status.json`, zeigt Zustand mit Farbe (grau idle/offline, gelb connecting,
-gruen connected, rot auth_failed/keyring/error, orange blocked) und `message`, Knoepfe
-Verbinden/Trennen, Link zur Statusseite und zu den Optionen. Fetch-Fehler -> "Daemon nicht
-erreichbar" mit Hinweis `uni-vpn doctor`. Weicht `socks_port` im Status vom eigenen Wert ab,
-wird er uebernommen. `protocol != 1` -> "Extension und Backend passen nicht zusammen".
-Firefox: Popup prueft `extension.isAllowedIncognitoAccess()` und `permissions.contains` fuer
-jede Domain und zeigt fehlende Freigaben rot mit Klick auf `permissions.request`.
-
-Optionen: Textarea Domain-Liste (eine pro Zeile, `#` Kommentar), Ports, Schalter aktiv.
-Speichern validiert Hostnamen (keine IPv6-Literale, keine Schemata, keine Pfade).
-
-### 5.3 Installation
-
-Chrome: `chrome://extensions`, Entwicklermodus, "Entpackte Erweiterung laden", Ordner
-`extension/` aus dem Repo. Update: `uni-vpn update`, dann Reload in `chrome://extensions`.
-Firefox: bis zur Signierung temporaer ueber `about:debugging`; danach signierte `.xpi` aus
-GitHub Releases (Etappe 3, unlisted-Signierung ueber AMO, kostenlos, `web-ext sign`, kein
-Source-Upload noetig, weil kein Bundler; `gecko.update_url` auf `updates.json` ueber GitHub
-Pages). Keine Chrome-Policies, keine `.crx`, kein `defaults write`, kein Native Messaging.
+Chrome liest die GNOME-Einstellung ueber GSettings, Firefox mit `network.proxy.type = 5`
+(Voreinstellung "Systemeinstellungen") ebenfalls. Beide holen die PAC beim Start und bei
+Aenderung der Einstellung (gemessen 2026-09-08: Chrome sofort, Firefox nach etwa 10 s).
+Firefox loest Hostnamen bei PAC-SOCKS lokal auf (`network.proxy.socks_remote_dns` ist in
+Firefox 155 `false`); Hosts, die nur im Uni-DNS existieren, brauchen dort die Umstellung auf
+`true`, das Readme nennt sie. Chrome loest bei `SOCKS5` immer ueber den Proxy auf. Firefox weicht nach einem gescheiterten Proxy-Verbindungsversuch fuer
+10 s auf DIRECT aus (`network.proxy.failover_direct`), Chrome meldet
+`ERR_PROXY_CONNECTION_FAILED`; beides steht im Readme.
 
 ## 6. Installer und Lebenszyklus
 
@@ -352,19 +367,20 @@ Pages). Keine Chrome-Policies, keine `.crx`, kein `defaults write`, kein Native 
   Hinweis, `brew install openconnect ocproxy python`; Python-Version pruefen; Uni-ID abfragen
   und `config.toml` schreiben, falls nicht vorhanden; `~/.local/bin/uni-vpn` verlinken;
   Dienst-Datei mit absoluten Pfaden schreiben und laden; Cisco-Client erkennen und
-  Hinweis geben (nichts ungefragt aendern); `uni-vpn password` aufrufen; `uni-vpn doctor`
-  ausfuehren; Browser-Schritte fuer die Extension ausgeben. Jede angelegte Datei kommt in
+  Hinweis geben (nichts ungefragt aendern); Proxy-Regel im System eintragen (Abschnitt 5.3);
+  Passwort und TOTP-Schluessel abfragen; `uni-vpn doctor` ausfuehren; auf die Statusseite und
+  den Browser-Neustart hinweisen. Jede angelegte Datei kommt in
   `~/.config/uni-vpn/installed-files.txt`.
-- `./install.sh --update` bzw. `uni-vpn update`: `git pull` im Repo, Dienst neu starten,
-  Hinweis auf Extension-Reload.
-- `./install.sh --uninstall`: Dienst stoppen und entfernen, Dateien aus der Liste loeschen,
-  Keyring-Eintrag mit Rueckfrage loeschen, sagen, was bleibt (apt/brew-Pakete, Extension im
-  Browser, Repo-Ordner).
+- `./install.sh --update` bzw. `uni-vpn update`: `git pull` im Repo, Dienst neu starten.
+- `./install.sh --uninstall`: Proxy-Einstellung zuruecksetzen, Dienst stoppen und entfernen,
+  Dateien aus der Liste loeschen, Keyring-Eintraege mit Rueckfrage loeschen, sagen, was bleibt
+  (apt/brew-Pakete, Repo-Ordner, Log).
 
-Support-Matrix im Readme: Ubuntu 24.04 mit Google Chrome (deb) und Firefox (Snap), macOS 14+
+Support-Matrix im Readme: Ubuntu 24.04 (GNOME) mit Google Chrome und Firefox, macOS 14+
 Apple Silicon mit Chrome und Firefox. Alles andere "kann funktionieren, kein Support".
-Erwartbare Dialoge (sudo, Keyring, macOS Anmeldeobjekte, Firefox-Freigaben) werden im Readme
-vorweggenommen. Fehlermeldungstabelle "Anzeige -> Ursache -> Loesung".
+Erwartbare Dialoge (sudo, Keyring, macOS Anmeldeobjekte und Admin-Passwort fuer die
+Proxy-Einstellung) werden im Readme vorweggenommen. Fehlermeldungstabelle "Anzeige -> Ursache
+-> Loesung".
 
 ## 7. Tests
 
@@ -381,20 +397,28 @@ liest, nach Verzoegerung auf dem per Argument uebergebenen Port lauscht und Byte
 6. Exit 1 vor Bereitschaft -> `auth_failed`, kein Neustart; `connect` startet erneut.
 7. Prozessende nach Erfolg ohne Bedarf -> `idle`; mit Bedarf -> Backoff und Neustart.
 8. stderr-Marker -> richtige Zustaende und Meldungen.
-9. Keyring-Lookup: fehlend, Timeout, vorhanden (gemockter Befehl).
+9. Keyring-Lookup: fehlend, Timeout, vorhanden (gemockter Befehl); Passwort und TOTP unter
+   getrennten Dienstnamen.
+9a. TOTP: Normalisierung (otpauth-URL, Base32 mit Leerzeichen und Kleinbuchstaben, Ablehnung
+    von HOTP, fremden Ziffern/Perioden, Unsinn), RFC-6238-Testvektoren; Schluesseldatei
+    0600, Inhalt kommt beim Fake an, Datei ist nach Bereitschaft, Exit und Stopp weg;
+    fehlender Schluessel -> `keyring`, abgelehnter Code -> `auth_failed` ohne Wiederholung.
 10. Cisco-Erkennung und TLS-Probe (gemockt) -> `blocked` bzw. `offline`, keine Fehlversuche.
-11. HTTP-API: Status, connect, disconnect, password, CSRF-Ablehnung ohne Header oder mit
-    fremdem Origin.
+11. HTTP-API: Status, connect, disconnect, password, totp (Kontrollcode, Ablehnung von
+    Unsinn), CSRF-Ablehnung ohne Header oder mit fremdem Origin.
 12. Config-Fehler -> Daemon laeuft, Status meldet Zeile.
 13. Doppelstart -> Exit 0.
 
-Extension: PAC-Funktion und Matching mit Node gegen eine Hostliste; Manifest-Lint mit
-`web-ext lint` in CI, sobald verfuegbar.
+PAC und Systemproxy: Domainliste (Normalisierung, Fehler mit Zeilennummer, Datei-Roundtrip,
+Vorbelegung), PAC-Text und, wo `node` vorhanden ist, die Auswertung der PAC-Funktion gegen eine
+Hostliste; `sysproxy` mit abgefangenen `gsettings`- bzw. `networksetup`-Aufrufen (lesen,
+setzen, sichern, zuruecksetzen, Nachladen, Zustaende fuer den Doctor); HTTP `/proxy.pac` und
+`/api/domains`.
 
 End-to-End auf Linux (manuell, dokumentiert in `docs/e2e.md`): Cisco getrennt, `curl
---socks5-hostname 127.0.0.1:1080 https://ifconfig.me` liefert eine 129.206.x.x-Adresse,
-Statusseite zeigt `connected`, nach `idle_minutes` wieder `idle`, Chrome und Firefox laden
-`sogo.uni-heidelberg.de` ueber den Tunnel.
+--socks5-hostname 127.0.0.1:1080 https://ifconfig.me` liefert eine Uni-Adresse, Statusseite
+zeigt `connected`, nach `idle_minutes` wieder `idle`, Chrome und Firefox laden ueber die
+Systemeinstellung `sogo.uni-heidelberg.de` durch den Tunnel und `ifconfig.me` direkt.
 
 CI (GitHub Actions): `ubuntu-latest` und `macos-latest`: Unit-Tests, `python -m compileall`,
 `plutil -lint` fuer das Plist, `bash -n install.sh`, Installer-Trockenlauf (`--dry-run`).
@@ -402,13 +426,22 @@ CI (GitHub Actions): `ubuntu-latest` und `macos-latest`: Unit-Tests, `python -m 
 ## 8. Etappen
 
 1. Backend, Installer, Tests, Readme (Linux getestet, macOS ueber CI abgesichert).
-2. Extension (Chrome entpackt, Firefox temporaer), E2E in beiden Browsern.
-3. Verteilung: Firefox-Signierung mit `update_url`, macOS-Smoke-Test durch eine Person mit Mac.
+2. Proxy-Regel im System (PAC), E2E in beiden Browsern.
+3. macOS-Smoke-Test durch eine Person mit Mac.
 
 ## 9. Offene Punkte
 
-- Ob der Server nach korrektem Passwort ein zweites Formular zeigt, laesst sich erst beim
-  ersten echten Login sehen. Der Daemon meldet es als `auth_failed` mit Klartext.
+- Das OTP-Formular des URZ kommt als Challenge nach dem Passwort ("Bitte zweiten Faktor
+  eingeben (OTP)"), openconnect fuellt es selbst (bestaetigt am 2026-09-08, Tunnel nach
+  1,5 s). Aendert das URZ das Formular, meldet der Daemon `auth_failed` mit Hinweis auf das
+  Log, in dem der Prompt-Text steht.
 - Gleichzeitige Sessions desselben Kontos (Cisco-Client plus uni-vpn) sind nicht dokumentiert.
   Empfehlung im Readme: Cisco-Client nicht parallel verbinden, `AutoConnectOnStart` abschalten.
 - macOS ist bis zum Smoke-Test experimentell.
+- Durchsatz: etwa 450 KB/s je Verbindung durch ocproxy (lwIP, `TCP_WND` 64 KB, `TCP_MSS`
+  1024, gemessen 2026-09-08 bei 48 ms RTT; direkt 7,4 MB/s). Ohne eigenen ocproxy-Build nicht
+  aenderbar, fuer Mail und Moodle ausreichend, im Readme als Grenze genannt.
+- Seiten auf gelisteten Domains binden Ressourcen weiterer interner Uni-Hosts ein; ist so ein
+  Host nicht gelistet, wartet der Browser bis zum Verbindungs-Timeout (Chrome 136 s), bevor
+  die Seite als geladen gilt. Bekannte Faelle stehen in der Vorbelegung, das Readme erklaert
+  die Suche nach weiteren.

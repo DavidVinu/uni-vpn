@@ -1,0 +1,16 @@
+[Unit]
+Description=Uni VPN (openconnect + ocproxy bei Bedarf)
+PartOf=graphical-session.target
+After=graphical-session.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart="@PYTHON@" "@UNI_VPN@" daemon
+@EXTRA_ENV@
+Restart=always
+RestartSec=5
+LimitCORE=0
+
+[Install]
+WantedBy=graphical-session.target
