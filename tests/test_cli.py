@@ -18,7 +18,7 @@ from uni_vpn import daemon as dm
 from uni_vpn import platform as pf
 from uni_vpn.tunnel import free_port
 
-from tests import posix_only
+from tests import WINDOWS, posix_only
 from tests.test_daemon import DaemonHarness, wait_state
 
 
@@ -213,5 +213,6 @@ class DaemonCommandTests(unittest.TestCase):
         self.assertEqual(data["http_port"], http_port)
         self.assertEqual(data["socks_port"], socks_port)
         self.assertIn("line 4", (self.tmp / "daemon.log").read_text(encoding="utf-8"))
-        self.assertEqual(file_mode(self.tmp / "daemon.log"), 0o600)
-        self.assertEqual(file_mode(self.tmp / "daemon.lock"), 0o600)
+        if not WINDOWS:
+            self.assertEqual(file_mode(self.tmp / "daemon.log"), 0o600)
+            self.assertEqual(file_mode(self.tmp / "daemon.lock"), 0o600)

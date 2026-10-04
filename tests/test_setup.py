@@ -90,7 +90,7 @@ class SetupTests(SetupHarness):
         link = self.home / ".local" / "bin" / "uni-vpn"
         self.assertTrue(link.exists())
         self.assertIn(sys.executable, link.read_text())
-        self.assertIn("bin/uni-vpn", link.read_text())
+        self.assertIn(os.path.join("bin", "uni-vpn"), link.read_text())
         self.assertTrue(os.access(link, os.X_OK))
         self.assertEqual(self.stored, [("ab123", "pw")])
         self.assertEqual(self.stored_totp, [("ab123", "base32:GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")])

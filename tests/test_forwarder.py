@@ -60,7 +60,8 @@ class ForwarderTests(unittest.IsolatedAsyncioTestCase):
     async def test_unreachable_target_closes(self):
         self.target = free_port()
         reader, writer = await asyncio.open_connection("127.0.0.1", self.fwd.port)
-        self.assertEqual(await asyncio.wait_for(reader.read(10), 2), b"")
+        # Windows retries a refused connection to localhost for about 2 s.
+        self.assertEqual(await asyncio.wait_for(reader.read(10), 5), b"")
         writer.close()
 
     async def test_close_all(self):

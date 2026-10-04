@@ -9,7 +9,7 @@ from unittest import mock
 from uni_vpn import platform as pf
 from uni_vpn import service
 
-from tests import simulate_posix
+from tests import posix_only, simulate_posix
 
 setUpModule, tearDownModule = simulate_posix()
 
@@ -78,6 +78,7 @@ class RenderTests(unittest.TestCase):
         self.assertTrue(data["KeepAlive"])
 
 
+@posix_only  # systemd and launchd paths, which must not contain backslashes
 class InstallTests(unittest.TestCase):
     def setUp(self):
         self.home = Path(tempfile.mkdtemp())

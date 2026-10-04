@@ -5,7 +5,7 @@ from unittest import mock
 
 from uni_vpn import credentials, platform as pf
 
-from tests import simulate_posix
+from tests import posix_only, simulate_posix
 
 setUpModule, tearDownModule = simulate_posix()
 
@@ -15,6 +15,7 @@ class GetPasswordTests(unittest.IsolatedAsyncioTestCase):
         cmd = [sys.executable, "-c", "import sys; sys.stdout.write('secret')"]
         self.assertEqual(await credentials.get_password("u", 2, command=cmd), b"secret")
 
+    @posix_only
     async def test_macos_strips_exactly_one_newline(self):
         cmd = [sys.executable, "-c", "import sys; sys.stdout.write('pw \\n')"]
         with mock.patch.object(pf, "IS_MACOS", True):

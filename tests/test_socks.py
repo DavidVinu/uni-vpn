@@ -87,7 +87,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.echo_port = self.echo.sockets[0].getsockname()[1]
         self.port = free_port()
         self.server = socks.SocksServer(self.port, "127.0.0.1", ["127.0.0.1"], logging.getLogger("t"),
-                                        dns_port=self.dns_port, connect_timeout=2)
+                                        dns_port=self.dns_port, connect_timeout=5)
         await self.server.start()
 
     async def asyncTearDown(self):
