@@ -107,6 +107,8 @@ def main():
     if os.environ.get("UNI_VPN_STATE"):
         # Windows: openconnect runs the vpnc-script, which reports the tunnel address.
         with open(os.environ["UNI_VPN_STATE"], "w", encoding="utf-8") as handle:
+            if os.environ.get("FAKE_SCRIPT_ERROR"):
+                handle.write(f"ERROR={os.environ['FAKE_SCRIPT_ERROR']}\n")
             handle.write("INTERNAL_IP4_ADDRESS=127.0.0.1\nINTERNAL_IP4_DNS=127.0.0.1\nTUNIDX=7\n")
         log("Connected as 127.0.0.1, using SSL")
         while True:

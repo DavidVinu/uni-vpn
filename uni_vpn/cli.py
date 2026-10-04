@@ -238,6 +238,7 @@ def cmd_daemon(args) -> int:
         from . import windows
 
         windows.kill_children_with_us()
+        windows.allow_ctrl_c_for_children()
         if not windows.is_admin():
             log.warning("Not running elevated: openconnect cannot create the Wintun adapter")
 
@@ -331,6 +332,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     except credentials.KeyringError as exc:
         print(str(exc))
+        return 1
+    except EOFError:
+        print("\nNo terminal to answer questions: run the installer in a terminal, or pass --user")
         return 1
     except KeyboardInterrupt:
         return 130

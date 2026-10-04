@@ -185,7 +185,12 @@ class Tunnel:
     def returncode(self) -> int | None:
         return self.proc.returncode if self.proc else None
 
+    def _password_bytes(self, password: bytes) -> bytes:
+        """The password as openconnect reads it from stdin."""
+        return password
+
     async def start(self, password: bytes, totp: str | None = None) -> None:
+        data = self._password_bytes(password) + b"\n"
         self.port = free_port()
         self.started_at = time.monotonic()
         env = self._env()
@@ -203,7 +208,7 @@ class Tunnel:
         except OSError:
             self._remove_token_file()
             raise
-        self.proc.stdin.write(password + b"\n")
+        self.proc.stdin.write(data)
         try:
             await self.proc.stdin.drain()
         except (BrokenPipeError, ConnectionResetError):

@@ -60,6 +60,15 @@ class ProcessTests(unittest.TestCase):
         self.assertTrue(windows.send_ctrl_c(proc.pid))
         self.assertEqual(proc.wait(10), 7)
 
+    def test_awake_clock_advances(self):
+        first = windows.awake_seconds()
+        time.sleep(0.2)
+        self.assertGreater(windows.awake_seconds() - first, 0.1)
+
+    def test_ctrl_c_still_reaches_children_after_allowing_it(self):
+        windows.allow_ctrl_c_for_children()
+        self.test_ctrl_c_reaches_a_process_with_its_own_console()
+
     def test_task_xml_is_accepted_by_task_scheduler(self):
         if not windows.is_admin():
             self.skipTest("creating a task with the highest run level needs administrator rights")
@@ -95,19 +104,27 @@ class VpncScriptTests(unittest.TestCase):
         self.assertEqual(lines, [
             "RUN netsh interface ipv4 set subinterface 42 mtu=1290 store=active",
             "RUN netsh interface ipv4 set interface 42 metric=9000 store=active",
+            "RUN netsh interface ipv4 set interface 42 dadtransmits=0 store=active",
             "RUN netsh interface ipv4 set address 42 static 10.8.0.5 255.255.255.0 store=active",
             "RUN netsh interface ipv4 delete dnsservers 42 all",
             "RUN netsh interface ipv4 delete route 0.0.0.0/0 42 store=active",
             "RUN netsh interface ipv4 add route 0.0.0.0/0 42 metric=9000 store=active",
         ])
         values = wintunnel.parse_state(state.read_text())
+        self.assertNotIn("ERROR", values)
         self.assertEqual(values["INTERNAL_IP4_ADDRESS"], "10.8.0.5")
         self.assertEqual(wintunnel.dns_servers(values), ["10.0.0.1", "10.0.0.2"])
 
-    def test_connect_without_address_fails(self):
+    def test_connect_without_address_reports_error(self):
         result, state = self.run_script("connect", TUNIDX="42", INTERNAL_IP4_ADDRESS="")
         self.assertEqual(result.returncode, 1)
-        self.assertFalse(state.exists())
+        self.assertIn("no interface index", wintunnel.parse_state(state.read_text())["ERROR"])
+
+    def test_failed_route_is_reported_in_the_state_file(self):
+        result, state = self.run_script("connect", TUNIDX="42", INTERNAL_IP4_ADDRESS="10.8.0.5",
+                                        UNI_VPN_DRY_FAIL="add route")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("add route 0.0.0.0/0 42", wintunnel.parse_state(state.read_text())["ERROR"])
 
     def test_disconnect_removes_state(self):
         _, state = self.run_script("connect", TUNIDX="1", INTERNAL_IP4_ADDRESS="10.8.0.5")

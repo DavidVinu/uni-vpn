@@ -1,10 +1,13 @@
-"""Render, load and control service files: systemd --user (Linux), launchd (macOS)."""
+"""Render, load and control the service: systemd --user (Linux), launchd (macOS), Task Scheduler (Windows)."""
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
+import time
+import urllib.request
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -48,6 +51,44 @@ def _no_window() -> dict:
     return {"creationflags": 0x08000000} if pf.IS_WINDOWS else {}  # CREATE_NO_WINDOW
 
 
+def _disconnect_daemon(timeout: float = 15, sleep=time.sleep) -> None:
+    """Ask a running daemon to log out of the VPN. Ending the task kills it outright, and the
+    session would stay open on the server until it times out."""
+    from . import config
+
+    try:
+        port = config.load(config.default_path()).http_port
+    except (config.ConfigError, OSError):
+        port = 1081
+    base = f"http://127.0.0.1:{port}"
+    try:
+        request = urllib.request.Request(f"{base}/api/disconnect", data=b"{}", method="POST",
+                                         headers={"X-Uni-VPN": "1", "Content-Type": "application/json"})
+        urllib.request.urlopen(request, timeout=3).close()
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            with urllib.request.urlopen(f"{base}/status.json", timeout=3) as response:
+                if json.load(response).get("state") not in ("connected", "connecting", "disconnecting"):
+                    return
+            sleep(0.3)
+    except (OSError, ValueError):
+        pass  # not running, or an older daemon without the API
+
+
+def _end_task(run, sleep=time.sleep) -> bool:
+    """Log out, end the task and wait until Task Scheduler no longer counts it as running
+    (with IgnoreNew a "/Run" right after "/End" is otherwise silently dropped)."""
+    from .windows import TASK_NAME
+
+    _disconnect_daemon(sleep=sleep)
+    run(_schtasks("/End", "/TN", TASK_NAME), capture_output=True, text=True, **_no_window())
+    for _ in range(20):
+        if not is_active(run):
+            return True
+        sleep(0.5)
+    return False
+
+
 def _install_windows(target: Path, dry_run: bool, run) -> list[Path]:
     from . import windows
 
@@ -62,7 +103,7 @@ def _install_windows(target: Path, dry_run: bool, run) -> list[Path]:
     files = [target]
     _run_checked(run, _schtasks("/Create", "/TN", windows.TASK_NAME, "/XML", str(target), "/F"), files)
     # Like "systemctl restart": a running old daemon makes way for the new code.
-    run(_schtasks("/End", "/TN", windows.TASK_NAME), capture_output=True, text=True, **_no_window())
+    _end_task(run)
     _run_checked(run, _schtasks("/Run", "/TN", windows.TASK_NAME), files)
     return files
 
@@ -137,7 +178,15 @@ def install(dry_run: bool = False, run=subprocess.run) -> list[Path]:
     files = [target]
     if pf.IS_MACOS:
         run(["launchctl", "bootout", _gui_domain(), str(target)], capture_output=True, text=True)
-        _run_checked(run, ["launchctl", "bootstrap", _gui_domain(), str(target)], files)
+        # Right after bootout the old job may still be going away ("Bootstrap failed: 5").
+        for attempt in range(5):
+            try:
+                _run_checked(run, ["launchctl", "bootstrap", _gui_domain(), str(target)], files)
+                break
+            except ServiceError:
+                if attempt == 4:
+                    raise
+                time.sleep(1)
     else:
         _run_checked(run, ["systemctl", "--user", "daemon-reload"], files)
         _run_checked(run, ["systemctl", "--user", "enable", "--now", UNIT], files)
@@ -146,15 +195,18 @@ def install(dry_run: bool = False, run=subprocess.run) -> list[Path]:
     return files
 
 
-def uninstall(run=subprocess.run) -> None:
+def uninstall(run=subprocess.run) -> bool:
+    """False if the service could not be removed."""
     target = unit_target_path()
     if pf.IS_WINDOWS:
         from .windows import TASK_NAME
 
-        run(_schtasks("/End", "/TN", TASK_NAME), capture_output=True, text=True, **_no_window())
-        run(_schtasks("/Delete", "/TN", TASK_NAME, "/F"), capture_output=True, text=True, **_no_window())
+        _end_task(run)
+        result = run(_schtasks("/Delete", "/TN", TASK_NAME, "/F"), capture_output=True, text=True, **_no_window())
+        missing = run(_schtasks("/Query", "/TN", TASK_NAME), capture_output=True, text=True,
+                      **_no_window()).returncode != 0
         target.unlink(missing_ok=True)
-        return
+        return result.returncode == 0 or missing
     if pf.IS_MACOS:
         run(["launchctl", "bootout", _gui_domain(), str(target)], capture_output=True, text=True)
     else:
@@ -163,6 +215,7 @@ def uninstall(run=subprocess.run) -> None:
         target.unlink()
     if not pf.IS_MACOS:
         run(["systemctl", "--user", "daemon-reload"], capture_output=True, text=True)
+    return True
 
 
 def is_active(run=subprocess.run) -> bool:
@@ -192,19 +245,19 @@ def control(action: str, run=subprocess.run) -> int:
         if not target.exists():
             print(f"Service file is missing ({target}), please run install.ps1")
             return 1
-        end, start = _schtasks("/End", "/TN", TASK_NAME), _schtasks("/Run", "/TN", TASK_NAME)
+        start = _schtasks("/Run", "/TN", TASK_NAME)
+        if action in ("stop", "restart", "disable") and not _end_task(run) and action != "disable":
+            print("The service did not stop (administrator rights needed?)")
+            return 1
         steps = {
-            "start": [start], "stop": [end], "restart": [end, start],
+            "start": [start], "stop": [], "restart": [start],
             "enable": [_schtasks("/Change", "/TN", TASK_NAME, "/ENABLE"), start],
-            "disable": [end, _schtasks("/Change", "/TN", TASK_NAME, "/DISABLE")],
+            "disable": [_schtasks("/Change", "/TN", TASK_NAME, "/DISABLE")],
             "status": [_schtasks("/Query", "/TN", TASK_NAME, "/V", "/FO", "LIST")],
         }[action]
         rc = 0
-        for index, cmd in enumerate(steps):
-            result = run(cmd, text=True)
-            # "/End" on a task that is not running fails; that must not stop a restart.
-            if index == len(steps) - 1 or cmd[1] != "/End":
-                rc = rc or result.returncode
+        for cmd in steps:
+            rc = rc or run(cmd, text=True).returncode
         return rc
     if pf.IS_MACOS:
         commands = {

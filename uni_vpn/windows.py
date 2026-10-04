@@ -129,6 +129,14 @@ def proxy_set(url: str) -> None:
 
 # --- processes ------------------------------------------------------------
 
+def awake_seconds() -> float:
+    """Time the machine was awake. time.monotonic() keeps counting through sleep on Windows,
+    so the daemon's resume detection uses this instead."""
+    value = ctypes.c_ulonglong()
+    _kernel32.QueryUnbiasedInterruptTime(ctypes.byref(value))
+    return value.value / 1e7  # 100 ns units
+
+
 def is_admin() -> bool:
     try:
         return bool(ctypes.windll.shell32.IsUserAnAdmin())
@@ -157,6 +165,12 @@ class _JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
 
 
 _JOB_HANDLE = None
+
+
+def allow_ctrl_c_for_children() -> None:
+    """Task Scheduler may start us with Ctrl+C disabled, which openconnect would inherit:
+    then the clean logout by Ctrl+C never arrives and every stop becomes a kill."""
+    _kernel32.SetConsoleCtrlHandler(None, False)
 
 
 def kill_children_with_us() -> bool:

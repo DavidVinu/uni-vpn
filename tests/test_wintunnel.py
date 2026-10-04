@@ -22,6 +22,8 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(wintunnel.dns_servers(values), ["10.0.0.1", "10.0.0.2"])
         self.assertEqual(values["TUNIDX"], "")
         self.assertEqual(wintunnel.dns_servers({}), [])
+        # openconnect lists IPv6 servers in the same variable; the SOCKS source address is IPv4.
+        self.assertEqual(wintunnel.dns_servers({"INTERNAL_IP4_DNS": "fd00::53 10.0.0.1 junk"}), ["10.0.0.1"])
 
     def test_command_uses_interface_and_script_not_script_tun(self):
         tunnel = wintunnel.WindowsTunnel(Config(user="ab1", host="vpn.example"), "C:\\oc\\openconnect.exe",
@@ -30,7 +32,16 @@ class ParseTests(unittest.TestCase):
         self.assertIn("--interface=uni-vpn", cmd)
         self.assertIn("--script=C:\\Program Files\\uni vpn\\bin\\uni-vpn-vpnc.js", cmd)
         self.assertNotIn("--script-tun", cmd)
+        self.assertIn("--disable-ipv6", cmd)
         self.assertEqual(cmd[-1], "vpn.example")
+
+    def test_password_is_passed_in_the_ansi_code_page(self):
+        tunnel = wintunnel.WindowsTunnel(Config(user="ab1", host="vpn.example"), "openconnect.exe", "x.js",
+                                         logging.getLogger("t"))
+        with mock.patch.object(wintunnel.locale, "getencoding", return_value="cp1252"):
+            self.assertEqual(tunnel._password_bytes("pä€".encode()), "pä€".encode("cp1252"))
+            with self.assertRaises(wintunnel.PasswordEncodingError):
+                tunnel._password_bytes("p\u4e2d".encode())
 
     def test_remove_stale_state_files(self):
         tmp = Path(tempfile.mkdtemp())
@@ -92,6 +103,17 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.tunnel.socks)
         self.assertFalse(self.tunnel.state_file.exists())
         self.assertEqual(list(self.token_dir.glob("totp-*")), [])
+
+    async def test_script_error_ends_the_attempt_with_its_message(self):
+        os.environ["FAKE_SCRIPT_ERROR"] = "netsh add route failed"
+        self.addCleanup(os.environ.pop, "FAKE_SCRIPT_ERROR", None)
+        self.tunnel.cfg.stop_grace = 2
+        await self.tunnel.start(b"pw")
+        self.assertFalse(await self.tunnel.wait_ready(5))
+        self.assertTrue(self.tunnel.exited.is_set())
+        self.assertFalse(self.tunnel.stopped_by_us)
+        self.assertEqual(self.tunnel.classification, ("error", "Tunnel setup failed: netsh add route failed"))
+        self.assertIsNone(self.tunnel.socks)
 
     async def test_server_stops_when_openconnect_dies(self):
         await self.tunnel.start(b"pw")

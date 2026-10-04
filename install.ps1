@@ -30,6 +30,9 @@ function Test-Admin {
 }
 
 function Find-Python {
+    # Native stderr (for example "py -3" without any Python 3) must not throw under "Stop"
+    # in Windows PowerShell 5.1.
+    $ErrorActionPreference = "Continue"
     $candidates = @()
     foreach ($base in @($env:ProgramFiles, "$env:LOCALAPPDATA\Programs\Python")) {
         if ($base -and (Test-Path $base)) {
@@ -125,7 +128,13 @@ if (-not $DryRun -and -not (Test-Admin)) {
         exit 1
     }
     if ($process.ExitCode -eq 0 -and $mode -eq "setup" -and -not $NoGui) {
-        Start-Process "http://127.0.0.1:1081/"
+        $port = 1081
+        $config = Join-Path $env:LOCALAPPDATA "uni-vpn\config.toml"
+        if (Test-Path $config) {
+            $match = Select-String -Path $config -Pattern '^\s*http_port\s*=\s*(\d+)' | Select-Object -First 1
+            if ($match) { $port = [int]$match.Matches[0].Groups[1].Value }
+        }
+        Start-Process "http://127.0.0.1:$port/"
     }
     exit $process.ExitCode
 }

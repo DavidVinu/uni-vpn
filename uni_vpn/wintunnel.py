@@ -10,7 +10,10 @@ server then connects from that address, which Windows sends through the adapter.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
+import locale
 import logging
+import time
 from pathlib import Path
 
 from . import platform as pf
@@ -32,7 +35,18 @@ def parse_state(text: str) -> dict[str, str]:
 
 
 def dns_servers(values: dict[str, str]) -> list[str]:
-    return [server for server in values.get("INTERNAL_IP4_DNS", "").split() if server]
+    """IPv4 servers only: openconnect also lists IPv6 ones here, the SOCKS source is IPv4."""
+    servers = []
+    for server in values.get("INTERNAL_IP4_DNS", "").split():
+        try:
+            servers.append(str(ipaddress.IPv4Address(server)))
+        except ValueError:
+            pass
+    return servers
+
+
+class PasswordEncodingError(OSError):
+    pass
 
 
 class WindowsTunnel(Tunnel):
@@ -56,8 +70,10 @@ class WindowsTunnel(Tunnel):
             "--no-dtls",
             "--force-dpd=30",
             "--reconnect-timeout=60",
+            # The script configures IPv4 only; an IPv6 address would be left half set up.
+            "--disable-ipv6",
             f"--interface={INTERFACE}",
-            # openconnect runs it as: cscript.exe /e:JScript "<script>"
+            # openconnect 9.12 runs it as: cscript.exe "<script>" (the .js association picks JScript)
             f"--script={self.script}",
         ]
         if self.token_file:
@@ -70,6 +86,16 @@ class WindowsTunnel(Tunnel):
         self.state_file.unlink(missing_ok=True)
         env["UNI_VPN_STATE"] = str(self.state_file)
         return env
+
+    def _password_bytes(self, password: bytes) -> bytes:
+        # openconnect reads stdin as text in the ANSI code page (setlocale(LC_ALL, "") and
+        # fgetws), so UTF-8 bytes would turn "ä" into "Ã¤" and fail the login.
+        encoding = locale.getencoding()
+        try:
+            return password.decode("utf-8").encode(encoding)
+        except UnicodeError:
+            raise PasswordEncodingError(
+                f"The password contains characters openconnect cannot read on this Windows ({encoding})") from None
 
     def _spawn_kwargs(self) -> dict:
         from . import windows
@@ -86,14 +112,25 @@ class WindowsTunnel(Tunnel):
         """Start the SOCKS server on self.port as soon as the script reports the address."""
         while not self.exited.is_set():
             values = self._read_state()
+            if values.get("ERROR"):
+                # The script could not set up the adapter; without it nothing would work.
+                self.log.error("Tunnel setup failed: %s", values["ERROR"])
+                self.classification = ("error", f"Tunnel setup failed: {values['ERROR']}")
+                await self._end_process(self.cfg.stop_grace)
+                return
             if values.get("INTERNAL_IP4_ADDRESS"):
-                self.socks = SocksServer(self.port, values["INTERNAL_IP4_ADDRESS"], dns_servers(values), self.log)
+                server = SocksServer(self.port, values["INTERNAL_IP4_ADDRESS"], dns_servers(values), self.log)
                 try:
-                    await self.socks.start()
+                    await server.start()
+                except asyncio.CancelledError:
+                    await server.stop()
+                    raise
                 except OSError as exc:
                     self.log.error("SOCKS server on port %s failed: %s", self.port, exc)
-                    self.socks = None
+                    self.classification = ("error", f"Local proxy port {self.port} not available: {exc}")
+                    await self._end_process(self.cfg.stop_grace)
                     return
+                self.socks = server  # only now: wait_ready() takes it as the ready signal
                 self.log.info("Tunnel address %s, DNS %s", values["INTERNAL_IP4_ADDRESS"],
                               " ".join(dns_servers(values)) or "(none)")
                 return
@@ -107,10 +144,30 @@ class WindowsTunnel(Tunnel):
         except OSError:
             return {}
 
+    async def wait_ready(self, timeout: float) -> bool:
+        # Ready means the SOCKS server is up. Polling the port like on POSIX would block the
+        # event loop: Windows takes about 2 s to refuse a connection to localhost.
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self.exited.is_set():
+                return False
+            if self.socks is not None:
+                self.ready_at = time.monotonic()
+                self._remove_token_file()
+                return True
+            await asyncio.sleep(0.1)
+        return False
+
     async def stop(self, grace: float) -> None:
         self._remove_token_file()
         if self.proc is not None and not self.exited.is_set():
             self.stopped_by_us = True
+            await self._end_process(grace)
+        await self._stop_server()
+
+    async def _end_process(self, grace: float) -> None:
+        """Ctrl+C for a clean logout, killed if it does not exit within grace."""
+        if self.proc is not None and not self.exited.is_set():
             from . import windows
 
             loop = asyncio.get_running_loop()
@@ -126,7 +183,6 @@ class WindowsTunnel(Tunnel):
                 except ProcessLookupError:
                     pass
                 await self.exited.wait()
-        await self._stop_server()
 
     async def _stop_server(self) -> None:
         if self._server_task and not self._server_task.done():

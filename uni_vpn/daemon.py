@@ -519,13 +519,18 @@ class Daemon:
     # --- Idle and resume ------------------------------------------------
 
     async def _ticker(self) -> None:
-        last_mono, last_wall = time.monotonic(), time.time()
+        # A clock that stops during sleep: the difference to the wall clock reveals a resume.
+        if pf.IS_WINDOWS:
+            from .windows import awake_seconds as awake
+        else:
+            awake = time.monotonic
+        last_awake, last_wall = awake(), time.time()
         last_cisco = time.monotonic()
         while True:
             await asyncio.sleep(self.cfg.tick)
-            mono, wall = time.monotonic(), time.time()
-            jump = (wall - last_wall) - (mono - last_mono)
-            last_mono, last_wall = mono, wall
+            mono, wall, now_awake = time.monotonic(), time.time(), awake()
+            jump = (wall - last_wall) - (now_awake - last_awake)
+            last_awake, last_wall = now_awake, wall
             if mono - last_cisco >= self.cfg.retry_interval and self.state in (State.connected, State.blocked):
                 last_cisco = mono
                 # In the executor: "vpn state" takes 2 s on macOS and must not stall the forwarder.

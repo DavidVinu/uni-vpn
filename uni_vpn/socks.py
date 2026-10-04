@@ -111,8 +111,8 @@ async def resolve(name: str, servers: list[str], source: str, timeout: float = 3
         try:
             transport, _ = await loop.create_datagram_endpoint(
                 lambda: _DnsProtocol(future), local_addr=(source, 0), remote_addr=(server, port))
-        except OSError as exc:
-            last = exc
+        except (OSError, ValueError) as exc:  # ValueError: a server address of another family
+            last = exc if isinstance(exc, OSError) else DnsError(f"unusable DNS server {server}")
             continue
         try:
             transport.sendto(build_query(name, qid))
