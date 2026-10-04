@@ -275,6 +275,10 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
     if gui:
         # The service has started, but the daemon needs a moment until bind().
         wait_for_port(cfg.http_port, port_open=port_open, timeout=15)
+        if getattr(args, "no_browser", False):
+            # install.ps1 runs this elevated and opens the browser itself, unelevated.
+            print(f"\nFinish in the browser ({url}).")
+            return 0
         if open_url(url):
             print(f"\nFinish in the browser window that just opened ({url}).")
             print("Restart any other open browser once so that it reads the proxy rule.")
