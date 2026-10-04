@@ -187,3 +187,28 @@ def set_user(path: Path, user: str) -> None:
     if written != user:
         raise ConfigError(f"could not change the university ID in {path}, please edit it by hand")
     path.write_text(new, encoding="utf-8")
+
+
+_PORT_LINE = re.compile(r"^\s*(socks_port|http_port)\s*=\s*([0-9]{1,5})\s*(#.*)?$")
+
+
+def ports_from_broken(path: Path | None) -> dict[str, int]:
+    """Read the ports from a broken config.toml as far as possible.
+
+    Even then the status page must be reachable where browsers and the user expect
+    it, otherwise nobody sees the error message with the line number.
+    """
+    try:
+        text = (path or default_path()).read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    ports: dict[str, int] = {}
+    for line in text.splitlines():
+        if line.strip().startswith("["):
+            break  # tables like [timing] from here on, no more top-level keys
+        match = _PORT_LINE.match(line)
+        if match and 1 <= int(match.group(2)) <= 65535:
+            ports[match.group(1)] = int(match.group(2))
+    if len(ports) == 2 and ports["socks_port"] == ports["http_port"]:
+        return {}
+    return ports

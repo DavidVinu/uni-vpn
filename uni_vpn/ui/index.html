@@ -264,7 +264,7 @@ async function refresh() {
     refreshing = false;
   }
   if (S.setup_needed && !setupDone) {
-    if (view !== "setup") { show("setup"); step("step1"); }
+    if (view !== "setup") { show("setup"); step("step1", $("s-user").value ? "s-pw" : null); }
     return;
   }
   if (view === "setup" && !setupSent) {
@@ -276,6 +276,9 @@ async function refresh() {
 }
 
 // --- setup assistant ---------------------------------------------------------
+// The installer passes the ID it was given (setup --user) in the address.
+const givenUser = new URLSearchParams(location.search).get("user");
+if (givenUser && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(givenUser)) $("s-user").value = givenUser;
 $("step1").onsubmit = (e) => {
   e.preventDefault();
   const user = $("s-user").value.trim();

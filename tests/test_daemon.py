@@ -402,6 +402,39 @@ class FailureTests(DaemonHarness):
         await d.request_disconnect()
         await wait_state(d, dm.State.idle)
 
+    async def test_disconnect_survives_the_tunnel_going_away_meanwhile(self):
+        d = await self.start_daemon()
+        await d.request_connect()
+        await wait_state(d, dm.State.connected)
+        close_all = d.forwarder.close_all
+
+        async def tunnel_gone():
+            await close_all()
+            d.tunnel = None
+
+        d.forwarder.close_all = tunnel_gone
+        await d.request_disconnect()
+        await wait_state(d, dm.State.idle)
+
+    async def test_disconnect_during_a_secrets_restart_wins(self):
+        os.environ["FAKE_DELAY"] = "3"
+        os.environ["FAKE_MODE"] = "ignore_sigterm"  # the stop takes stop_grace
+        d = await self.start_daemon()
+        await d.request_connect()
+        await wait_state(d, dm.State.connecting)
+        for _ in range(40):
+            if d.tunnel and d.tunnel.proc:
+                break
+            await asyncio.sleep(0.05)
+        saving = asyncio.create_task(d.set_password("second"))
+        await asyncio.sleep(0.05)
+        await d.request_disconnect()
+        await saving
+        await wait_state(d, dm.State.idle)
+        await asyncio.sleep(0.5)
+        self.assertEqual(d.state, dm.State.idle)
+        self.assertEqual(len(self.pw_lines()), 1, "no new attempt after the Disconnect")
+
     async def test_stale_token_files_are_removed_at_start(self):
         (self.token_dir / "totp-old").write_text("base32:OLD")
         await self.start_daemon()

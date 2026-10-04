@@ -94,6 +94,7 @@ class Daemon:
         self.config_path = config_path or cfg.path
         # No config.toml yet: the status page shows the setup assistant instead of an error.
         self.needs_setup = needs_setup
+        self._disconnects = 0
         self.log_tail = log_tail if log_tail is not None else []
         self.wrapper = wrapper or str(pf.bin_dir() / "uni-vpn-ocproxy")
 
@@ -257,7 +258,10 @@ class Daemon:
         tunnel = self.tunnel
         if tunnel and self.state == State.connecting and not tunnel.exited.is_set():
             self.log.info("Secrets changed while connecting, starting over")
+            disconnects = self._disconnects
             await tunnel.stop(self.cfg.stop_grace)
+            if self._disconnects != disconnects:
+                return  # a Disconnect during the stop wins
         await self.request_connect()
 
     def pac(self) -> str:
@@ -357,13 +361,15 @@ class Daemon:
         self._wake.set()
 
     async def request_disconnect(self) -> None:
+        self._disconnects += 1
         self.explicit = False
         self.demand_until = 0.0
         self._wake.set()
-        if self.tunnel:
+        tunnel = self.tunnel
+        if tunnel:
             self._set(State.disconnecting, "Disconnecting")
             await self.forwarder.close_all()
-            await self.tunnel.stop(self.cfg.stop_grace)
+            await tunnel.stop(self.cfg.stop_grace)  # the loop may have dropped self.tunnel meanwhile
             return
         if self._loop_task and not self._loop_task.done():
             self._loop_task.cancel()
@@ -393,7 +399,7 @@ class Daemon:
             if self._elevated() is False:
                 self._final(State.error, "Needs administrator rights (Wintun): run the installer again")
                 return
-            if self.cisco_check():
+            if await asyncio.get_running_loop().run_in_executor(None, self.cisco_check):
                 self._set(State.blocked, BLOCKED_MESSAGE)
                 await self._sleep(cfg.retry_interval)
                 continue

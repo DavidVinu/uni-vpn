@@ -140,7 +140,10 @@ if (-not $DryRun -and -not (Test-Admin)) {
             $match = Select-String -Path $config -Pattern '^\s*http_port\s*=\s*(\d+)' | Select-Object -First 1
             if ($match) { $port = [int]$match.Matches[0].Groups[1].Value }
         }
-        Start-Process "http://127.0.0.1:$port/"
+        $url = "http://127.0.0.1:$port/"
+        # A given ID is prefilled in the assistant, which writes the config.
+        if ($User -and -not (Test-Path $config)) { $url += "?user=$([uri]::EscapeDataString($User))" }
+        Start-Process $url
     }
     exit $process.ExitCode
 }

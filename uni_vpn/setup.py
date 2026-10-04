@@ -236,7 +236,7 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
         except config.ConfigError as exc:
             # An update must still go through; the file stays as it is and the daemon reports the error.
             broken = exc
-            cfg = config.Config()
+            cfg = config.Config(**config.ports_from_broken(cfg_path))  # the ports the daemon uses
             print(f"Config {cfg_path} is invalid ({exc}), please fix it; continuing with defaults")
         else:
             _say(f"Config found: {cfg_path} (university ID {cfg.user})")
@@ -250,7 +250,11 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
                 config.set_user(cfg_path, user)
                 cfg = config.load(cfg_path)
                 _say(f"University ID changed to {user}")
-    elif gui and not user:
+    elif gui:
+        # The assistant writes config.toml together with the secrets; a given ID is only prefilled.
+        if user and not config.valid_user(user):
+            print(f"Not a university ID: {user!r}")
+            return 1
         cfg = config.Config()
     else:
         if not user:
@@ -324,6 +328,8 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
 
     url = f"http://127.0.0.1:{cfg.http_port}/"
     if gui:
+        if user and not configured:
+            url += f"?user={user}"
         # The service has started, but the daemon needs a moment until bind().
         if not wait_for_port(cfg.http_port, port_open=port_open, timeout=15):
             print(f"\nThe service did not open {url} within 15 seconds. See: uni-vpn log, uni-vpn doctor")
@@ -396,6 +402,14 @@ def uninstall(args, *, input_fn=input, service_uninstall=service.uninstall, dele
         for path in recorded():
             print(f"   {path}")
         return 0
+    if pf.IS_WINDOWS:
+        from . import windows
+
+        if not windows.is_admin():
+            # The elevated task cannot be removed without; stop before anything else is gone.
+            script = Path(__file__).resolve().parent.parent / "install.ps1"
+            print(f'Removing needs administrator rights: powershell -ExecutionPolicy Bypass -File "{script}" -Uninstall')
+            return 1
     failed = False
     proxy = proxy_uninstall()
     if proxy == "failed":

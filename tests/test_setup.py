@@ -121,6 +121,14 @@ class SetupTests(SetupHarness):
         self.assertEqual(self.stored, [])
         self.assertIn('socks_port = "x"', cfg.read_text())
 
+    def test_invalid_config_keeps_the_ports_the_daemon_uses(self):
+        cfg = self.home / ".config" / "uni-vpn" / "config.toml"
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text('user = "ab123"\nhttp_port = 1091\nsocks_port = 1090\nidle_minutes = "x"\n')
+        rc, out = self.run_setup()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.proxy_calls, [1091])
+
     def test_proxy_unavailable_prints_manual_pac_url(self):
         self.proxy_result = "unavailable"
         rc, out = self.run_setup(user="ab123")
@@ -340,6 +348,12 @@ class GuiSetupTests(SetupHarness):
         self.assertIn(desktop, recorded)
         self.assertIn(self.home / ".config" / "uni-vpn" / "config.toml", recorded)
 
+    def test_given_id_is_prefilled_in_the_assistant(self):
+        rc, out = self.run_gui(user="ab123")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.urls, ["http://127.0.0.1:1081/?user=ab123"])
+        self.assertFalse((self.home / ".config" / "uni-vpn" / "config.toml").exists())
+
     def test_without_a_browser_it_says_where_to_go(self):
         rc, out = self.run_gui(opened=False)
         self.assertEqual(rc, 0)
@@ -398,6 +412,20 @@ class UninstallTests(SetupHarness):
         self.assertFalse((self.home / ".config" / "uni-vpn" / "config.toml").exists())
         self.assertFalse((self.home / ".local" / "bin" / "uni-vpn").exists())
         self.assertFalse((self.home / ".config" / "uni-vpn" / setup.INSTALLED_FILES).exists())
+
+    def test_windows_uninstall_without_admin_rights_changes_nothing(self):
+        self.run_setup()
+        from uni_vpn import windows
+
+        out = StringIO()
+        with redirect_stdout(out), mock.patch.object(pf, "IS_WINDOWS", True), \
+                mock.patch.object(windows, "is_admin", return_value=False):
+            rc = setup.uninstall(self.args(yes=True), input_fn=lambda p: "y",
+                                 service_uninstall=mock.Mock(side_effect=AssertionError("service removed")),
+                                 proxy_uninstall=mock.Mock(side_effect=AssertionError("proxy restored")))
+        self.assertEqual(rc, 1)
+        self.assertIn("install.ps1", out.getvalue())
+        self.assertTrue((self.home / ".config" / "uni-vpn" / "config.toml").exists())
 
     def test_uninstall_keeps_keyring_when_declined(self):
         self.run_setup()

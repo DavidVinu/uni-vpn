@@ -135,6 +135,17 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.tunnel.exited.is_set())
         await self.tunnel.stop(2)
 
+    async def test_new_address_after_a_reconnect_is_followed(self):
+        await self.tunnel.start(b"pw")
+        self.assertTrue(await self.tunnel.wait_ready(5))
+        self.tunnel.state_file.write_text("INTERNAL_IP4_ADDRESS=127.0.0.2\nINTERNAL_IP4_DNS=127.0.0.3\n")
+        for _ in range(30):
+            if self.tunnel.socks.source == "127.0.0.2":
+                break
+            await asyncio.sleep(0.1)
+        self.assertEqual((self.tunnel.socks.source, self.tunnel.socks.dns), ("127.0.0.2", ["127.0.0.3"]))
+        await self.tunnel.stop(2)
+
     async def test_server_stops_when_openconnect_dies(self):
         await self.tunnel.start(b"pw")
         self.assertTrue(await self.tunnel.wait_ready(5))

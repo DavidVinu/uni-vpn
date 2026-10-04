@@ -110,7 +110,7 @@ class WindowsTunnel(Tunnel):
         self._server_task = asyncio.create_task(self._serve_when_up())
 
     async def _serve_when_up(self) -> None:
-        """Start the SOCKS server on self.port as soon as the script reports the address."""
+        """Start the SOCKS server on self.port as soon as the script reports the address, then follow it."""
         while not self.exited.is_set():
             values = self._read_state()
             if values.get("ERROR"):
@@ -119,8 +119,9 @@ class WindowsTunnel(Tunnel):
                 self.classification = ("error", f"Tunnel setup failed: {values['ERROR']}")
                 await self._end_process(self.cfg.stop_grace)
                 return
-            if values.get("INTERNAL_IP4_ADDRESS"):
-                server = SocksServer(self.port, values["INTERNAL_IP4_ADDRESS"], dns_servers(values), self.log)
+            address, dns = values.get("INTERNAL_IP4_ADDRESS"), dns_servers(values)
+            if address and self.socks is None:
+                server = SocksServer(self.port, address, dns, self.log)
                 try:
                     await server.start()
                 except asyncio.CancelledError:
@@ -132,10 +133,12 @@ class WindowsTunnel(Tunnel):
                     await self._end_process(self.cfg.stop_grace)
                     return
                 self.socks = server  # only now: wait_ready() takes it as the ready signal
-                self.log.info("Tunnel address %s, DNS %s", values["INTERNAL_IP4_ADDRESS"],
-                              " ".join(dns_servers(values)) or "(none)")
-                return
-            await asyncio.sleep(0.2)
+                self.log.info("Tunnel address %s, DNS %s", address, " ".join(dns) or "(none)")
+            elif address and (address, dns) != (self.socks.source, self.socks.dns):
+                # openconnect reconnected on its own and the script reported a new address.
+                self.socks.source, self.socks.dns = address, dns
+                self.log.info("Tunnel address now %s, DNS %s", address, " ".join(dns) or "(none)")
+            await asyncio.sleep(0.2 if self.socks is None else 1)
 
     def _read_state(self) -> dict[str, str]:
         if self.state_file is None:
