@@ -31,14 +31,16 @@ function Test-Admin {
     return (New-Object Security.Principal.WindowsPrincipal $identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-function Find-Python {
+function Find-Python([switch]$Anywhere) {
     # Native stderr (for example "py -3" without any Python 3) must not throw under "Stop"
     # in Windows PowerShell 5.1.
     $ErrorActionPreference = "Continue"
     # Only a Python in Program Files: a per-user one could be changed by any program of the user
     # and the service runs it elevated.
     $candidates = @()
-    foreach ($base in @($env:ProgramFiles)) {
+    $bases = @($env:ProgramFiles)
+    if ($Anywhere) { $bases += "$env:LOCALAPPDATA\Programs\Python" }
+    foreach ($base in $bases) {
         if ($base -and (Test-Path $base)) {
             $candidates += Get-ChildItem -Path $base -Directory -Filter "Python3*" -ErrorAction SilentlyContinue |
                 Sort-Object Name -Descending | ForEach-Object { Join-Path $_.FullName "python.exe" }
@@ -50,7 +52,8 @@ function Find-Python {
         if ($LASTEXITCODE -eq 0 -and $found) { $candidates += $found.Trim() }
     }
     foreach ($candidate in $candidates) {
-        if (-not (Test-Path $candidate) -or -not $candidate.StartsWith("$env:ProgramFiles\", [StringComparison]::OrdinalIgnoreCase)) { continue }
+        if (-not (Test-Path $candidate) -or $candidate -like "*\WindowsApps\*") { continue }
+        if (-not $Anywhere -and -not $candidate.StartsWith("$env:ProgramFiles\", [StringComparison]::OrdinalIgnoreCase)) { continue }
         & $candidate -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" 2>$null
         if ($LASTEXITCODE -eq 0) { return $candidate }
     }
@@ -154,12 +157,12 @@ function Copy-App {
     if ([IO.Path]::GetFullPath($Root).TrimEnd("\") -ieq [IO.Path]::GetFullPath($AppDir).TrimEnd("\")) { return }
     if ($DryRun) { Say "would copy uni-vpn to $AppDir"; return }
     Say "copying uni-vpn to $AppDir"
-    & robocopy.exe $Root $AppDir /MIR /XD .git __pycache__ /NFL /NDL /NJH /NJS /NP | Out-Null
+    & robocopy.exe $Root $AppDir /MIR /XD .git __pycache__ /R:2 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "Copying to $AppDir failed (robocopy $LASTEXITCODE)" }
 }
 
 try {
-    if ($mode -eq "setup") {
+    if ($mode -ne "uninstall") {
         if (-not (Find-Python)) {
             if ($DryRun) { Say "would install Python 3.12" } else { Install-Python }
         }
@@ -167,9 +170,12 @@ try {
             if ($DryRun) { Say "would install OpenConnect from $OpenConnectUrl" } else { Install-OpenConnect }
         }
     }
-    $python = Find-Python
+    # Uninstalling runs nothing elevated afterwards, so any Python will do.
+    $python = if ($mode -eq "uninstall") { Find-Python -Anywhere } else { Find-Python }
     if (-not $python) {
-        if ($DryRun) { $python = (Get-Command python.exe).Source } else { throw "Python >= 3.11 was not found after installing it" }
+        if ($DryRun) { $python = (Get-Command python.exe).Source }
+        elseif ($mode -eq "uninstall") { throw "Python >= 3.11 is needed to uninstall; run install.ps1 once to install it" }
+        else { throw "Python >= 3.11 in Program Files was not found after installing it" }
     }
     $run = $Root
     if ($mode -ne "uninstall") {
@@ -178,10 +184,12 @@ try {
     } elseif (Test-Path (Join-Path $AppDir "bin\uni-vpn")) {
         $run = $AppDir
     }
-    # The new files are in place; an update only has to restart the service.
-    $command = if ($mode -eq "update" -and -not $DryRun) { @("service", "restart") } else { @($mode) }
-    $cliArgs = @("-I", "$run\bin\uni-vpn") + $command
+    # The new files are in place; for an update "setup" registers the task and the command again
+    # (paths and arguments may have changed) and restarts the service. It asks nothing.
+    $command = if ($mode -eq "update" -and -not $DryRun) { "setup" } else { $mode }
+    $cliArgs = @("-I", "$run\bin\uni-vpn", $command)
     if ($DryRun) { $cliArgs += "--dry-run" }
+    if ($command -eq "setup" -and $mode -eq "update") { $cliArgs += "--no-browser" }
     if ($mode -eq "setup") {
         if ($NoGui) { $cliArgs += "--no-gui" }
         if ($NoBrowser) { $cliArgs += "--no-browser" }

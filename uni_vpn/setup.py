@@ -432,11 +432,15 @@ def uninstall(args, *, input_fn=input, service_uninstall=service.uninstall, dele
     # so that install.sh --uninstall can run again.
     if not failed and app == pf.app_install_dir().resolve() and not (app / ".git").exists():
         shutil.rmtree(app, ignore_errors=True)
-        _say(f"deleted: {app}")
-        try:
-            app.parent.rmdir()
-        except OSError:
-            pass
+        if app.exists():
+            # For example the folder a shell is in, or a file still open on Windows.
+            print(f"   Could not delete everything in {app}, remove it by hand")
+        else:
+            _say(f"deleted: {app}")
+            try:
+                app.parent.rmdir()
+            except OSError:
+                pass
         print(f"Left in place: packages (openconnect, ocproxy) and the log in {pf.state_dir()}")
     else:
         print(f"Left in place: packages (openconnect, ocproxy), the repo {app} and the log in {pf.state_dir()}")

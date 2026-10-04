@@ -179,4 +179,11 @@ def set_user(path: Path, user: str) -> None:
     if not count:
         head, sep, rest = text.partition("\n[")
         new = head.rstrip("\n") + f'\nuser = "{user}"\n' + (sep.lstrip("\n") and "\n[" + rest)
+    # Forms the regex does not know ('''...''', "user" = ...) must not end in a broken file.
+    try:
+        written = tomllib.loads(new).get("user")
+    except tomllib.TOMLDecodeError:
+        written = None
+    if written != user:
+        raise ConfigError(f"could not change the university ID in {path}, please edit it by hand")
     path.write_text(new, encoding="utf-8")

@@ -43,6 +43,18 @@ class ParseTests(unittest.TestCase):
             with self.assertRaises(wintunnel.PasswordEncodingError):
                 tunnel._password_bytes("p\u4e2d".encode())
 
+    def test_child_environment_keeps_no_user_controlled_paths(self):
+        current = {"ComSpec": "C:\\Users\\a\\evil.exe", "Path": "C:\\Users\\a\\bin", "TEMP": "C:\\T",
+                   "SystemRoot": "C:\\Users\\a\\fake", "P11_KIT_SERVER_ADDRESS": "x", "OPENSSL_CONF": "y",
+                   "UNI_VPN_STATE": "dropped by trusted_env, set again by _env"}
+        env = windows.trusted_env(current, "C:\\Windows\\system32", "C:\\Windows")
+        self.assertEqual(env["ComSpec"], os.path.join("C:\\Windows\\system32", "cmd.exe"))
+        self.assertEqual(env["SystemRoot"], "C:\\Windows")
+        self.assertTrue(env["PATH"].startswith("C:\\Windows\\system32;"))
+        self.assertEqual(env["TEMP"], "C:\\T")
+        for name in ("Path", "P11_KIT_SERVER_ADDRESS", "OPENSSL_CONF", "UNI_VPN_STATE"):
+            self.assertNotIn(name, env)
+
     def test_remove_stale_state_files(self):
         tmp = Path(tempfile.mkdtemp())
         (tmp / "tunnel-123.env").write_text("x")

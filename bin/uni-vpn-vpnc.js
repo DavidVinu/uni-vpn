@@ -9,6 +9,10 @@ var procEnv = shell.Environment("Process");
 var fso = WScript.CreateObject("Scripting.FileSystemObject");
 var dry = procEnv("UNI_VPN_DRY") == "1";
 var ROUTE_METRIC = 9000;
+// Full paths from the system, not %ComSpec% or PATH: this runs elevated, and the user can set
+// those variables.
+var SYSTEM = fso.GetSpecialFolder(1).Path;
+var NETSH = SYSTEM + "\\netsh.exe";
 
 function env(name) {
     return procEnv(name);
@@ -16,19 +20,20 @@ function env(name) {
 
 var failure = "";
 
+// Runs netsh with the given arguments; returns its exit code.
 function run(cmd, quiet) {
     if (dry) {
-        WScript.Echo("RUN " + cmd);
+        WScript.Echo("RUN netsh " + cmd);
         return procEnv("UNI_VPN_DRY_FAIL") && cmd.indexOf(procEnv("UNI_VPN_DRY_FAIL")) >= 0 ? 1 : 0;
     }
-    var exec = shell.Exec(procEnv("ComSpec") + " /C \"" + cmd + "\" 2>&1");
+    var exec = shell.Exec("\"" + NETSH + "\" " + cmd);
     exec.StdIn.Close();
-    var output = exec.StdOut.ReadAll();
+    var output = exec.StdOut.ReadAll() + exec.StdErr.ReadAll();
     while (exec.Status == 0) {
         WScript.Sleep(20);
     }
     if (exec.ExitCode != 0 && !quiet) {
-        WScript.Echo("uni-vpn-vpnc: \"" + cmd + "\" failed (" + exec.ExitCode + "): " + output);
+        WScript.Echo("uni-vpn-vpnc: \"netsh " + cmd + "\" failed (" + exec.ExitCode + "): " + output);
     }
     return exec.ExitCode;
 }
@@ -36,7 +41,7 @@ function run(cmd, quiet) {
 // The commands without which the SOCKS server would have no working address.
 function must(cmd) {
     if (run(cmd) != 0 && !failure) {
-        failure = cmd + " failed";
+        failure = "netsh " + cmd + " failed";
     }
 }
 
@@ -73,15 +78,15 @@ case "reconnect":
     }
     var mask = env("INTERNAL_IP4_NETMASK") || "255.255.255.255";
     if (env("INTERNAL_IP4_MTU")) {
-        run("netsh interface ipv4 set subinterface " + idx + " mtu=" + env("INTERNAL_IP4_MTU") + " store=active");
+        run("interface ipv4 set subinterface " + idx + " mtu=" + env("INTERNAL_IP4_MTU") + " store=active");
     }
-    must("netsh interface ipv4 set interface " + idx + " metric=" + ROUTE_METRIC + " store=active");
+    run("interface ipv4 set interface " + idx + " metric=" + ROUTE_METRIC + " store=active");
     // No duplicate address detection: a tentative address cannot be bound for a moment.
-    run("netsh interface ipv4 set interface " + idx + " dadtransmits=0 store=active", true);
-    must("netsh interface ipv4 set address " + idx + " static " + env("INTERNAL_IP4_ADDRESS") + " " + mask + " store=active");
-    run("netsh interface ipv4 delete dnsservers " + idx + " all", true);
-    run("netsh interface ipv4 delete route 0.0.0.0/0 " + idx + " store=active", true);
-    must("netsh interface ipv4 add route 0.0.0.0/0 " + idx + " metric=" + ROUTE_METRIC + " store=active");
+    run("interface ipv4 set interface " + idx + " dadtransmits=0 store=active", true);
+    must("interface ipv4 set address " + idx + " static " + env("INTERNAL_IP4_ADDRESS") + " " + mask + " store=active");
+    run("interface ipv4 delete dnsservers " + idx + " all", true);
+    run("interface ipv4 delete route 0.0.0.0/0 " + idx + " store=active", true);
+    must("interface ipv4 add route 0.0.0.0/0 " + idx + " metric=" + ROUTE_METRIC + " store=active");
     if (state) {
         writeState(state);
     }

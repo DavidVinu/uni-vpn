@@ -51,6 +51,11 @@ class RegistryTests(unittest.TestCase):
 
 @unittest.skipUnless(sys.platform == "win32", "Windows only")
 class ProcessTests(unittest.TestCase):
+    def test_system_dirs_come_from_the_api(self):
+        system, windows_dir = windows.system_dirs()
+        self.assertTrue(os.path.isfile(os.path.join(system, "netsh.exe")))
+        self.assertTrue(os.path.isdir(windows_dir))
+
     def test_ctrl_c_reaches_a_process_with_its_own_console(self):
         script = "import time\ntry:\n    time.sleep(30)\nexcept KeyboardInterrupt:\n    raise SystemExit(7)\n"
         proc = subprocess.Popen([sys.executable, "-c", script], creationflags=windows.CREATE_NEW_CONSOLE,
@@ -125,6 +130,17 @@ class VpncScriptTests(unittest.TestCase):
                                         UNI_VPN_DRY_FAIL="add route")
         self.assertEqual(result.returncode, 1)
         self.assertIn("add route 0.0.0.0/0 42", wintunnel.parse_state(state.read_text())["ERROR"])
+
+    def test_real_netsh_failure_on_a_missing_interface_is_reported(self):
+        tmp = Path(tempfile.mkdtemp())
+        state = tmp / "tunnel-1080.env"
+        env = windows.trusted_env(dict(os.environ), *windows.system_dirs())
+        env.update(UNI_VPN_STATE=str(state), reason="connect", TUNIDX="99999", INTERNAL_IP4_ADDRESS="10.8.0.5",
+                   ComSpec="C:\\nonexistent\\evil.exe")
+        result = subprocess.run(["cscript", "//nologo", "//E:JScript", str(VPNC)], env=env,
+                                capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("set address 99999", wintunnel.parse_state(state.read_text())["ERROR"])
 
     def test_disconnect_removes_state(self):
         _, state = self.run_script("connect", TUNIDX="1", INTERNAL_IP4_ADDRESS="10.8.0.5")

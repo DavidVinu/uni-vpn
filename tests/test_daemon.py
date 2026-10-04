@@ -365,6 +365,29 @@ class FailureTests(DaemonHarness):
         await wait_state(d, dm.State.connected)
         self.assertEqual(self.pw_lines()[-1], "second")
 
+    async def test_new_password_during_the_keyring_read_is_used(self):
+        # The attempt already read the old password when the new one arrived; its result
+        # must not be shown as the result for the new one.
+        os.environ["FAKE_MODE"] = "auth_fail"
+        d = await self.start_daemon()
+        release = asyncio.Event()
+        old = self.password
+
+        async def slow_getter():
+            value = self.password
+            await release.wait()
+            return value
+
+        d.password_getter = slow_getter
+        await d.request_connect()
+        await asyncio.sleep(0.2)
+        self.password = b"second"
+        await d.set_password("second")
+        release.set()
+        # Both attempts are rejected by the fake; only the second one may decide the state.
+        await wait_state(d, dm.State.auth_failed)
+        self.assertEqual(self.pw_lines(), [old.decode(), "second"])
+
     async def test_stale_token_files_are_removed_at_start(self):
         (self.token_dir / "totp-old").write_text("base32:OLD")
         await self.start_daemon()

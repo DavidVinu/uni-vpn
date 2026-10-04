@@ -129,6 +129,35 @@ def proxy_set(url: str) -> None:
 
 # --- processes ------------------------------------------------------------
 
+def system_dirs() -> tuple[str, str]:
+    """System32 and the Windows folder from the API, not from variables the user can set."""
+    buffer = ctypes.create_unicode_buffer(260)
+    _kernel32.GetSystemDirectoryW(buffer, 260)
+    system = buffer.value
+    _kernel32.GetSystemWindowsDirectoryW(buffer, 260)
+    return system, buffer.value
+
+
+# Environment passed to the elevated openconnect (and its vpnc script): only these names, and
+# the system ones with trusted values. User variables override system ones on Windows, so for
+# example ComSpec, PATH or a library search path could otherwise run user code elevated.
+CHILD_ENV_KEEP = ("TEMP", "TMP", "SystemDrive", "ProgramData", "ProgramFiles", "ProgramFiles(x86)",
+                  "ProgramW6432", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE", "OS", "USERNAME",
+                  "COMPUTERNAME")
+
+
+def trusted_env(current: dict[str, str], system: str, windows: str) -> dict[str, str]:
+    lower = {key.lower(): value for key, value in current.items()}
+    env = {key: lower[key.lower()] for key in CHILD_ENV_KEEP if key.lower() in lower}
+    env.update({
+        "SystemRoot": windows, "windir": windows, "ComSpec": os.path.join(system, "cmd.exe"),
+        "PATH": ";".join([system, windows, os.path.join(system, "Wbem"),
+                          os.path.join(system, "WindowsPowerShell", "v1.0")]),
+        "PATHEXT": ".COM;.EXE;.BAT;.CMD;.VBS;.JS;.WSF",
+    })
+    return env
+
+
 def awake_seconds() -> float:
     """Time the machine was awake. time.monotonic() keeps counting through sleep on Windows,
     so the daemon's resume detection uses this instead."""
@@ -208,7 +237,7 @@ def send_ctrl_c(pid: int, python: str | None = None, timeout: float = 5) -> bool
     """Ctrl+C to a process with its own console: openconnect then logs out cleanly. A helper
     process does it, because attaching to another console would detach the daemon from its own."""
     try:
-        result = subprocess.run([python or sys.executable, "-c", CTRL_C_HELPER, str(pid)],
+        result = subprocess.run([python or sys.executable, "-I", "-c", CTRL_C_HELPER, str(pid)],
                                 capture_output=True, timeout=timeout, creationflags=CREATE_NO_WINDOW)
     except (OSError, subprocess.SubprocessError):
         return False

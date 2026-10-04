@@ -16,7 +16,7 @@ from . import platform as pf
 from . import config as config_mod
 from .config import Config
 from .forwarder import Forwarder
-from .tunnel import Tunnel, remove_stale_token_files
+from .tunnel import PasswordEncodingError, Tunnel, remove_stale_token_files
 
 
 class State(str, Enum):
@@ -113,6 +113,8 @@ class Daemon:
         # then reports `blocked` instead of "Disconnected".
         self.paused_by_cisco = False
         self.tunnel: Tunnel | None = None
+        # Counts password/TOTP changes: an attempt started with older secrets does not count.
+        self._secrets_gen = 0
         self.http = None
         self._loop_task: asyncio.Task | None = None
         self._changed = asyncio.Event()
@@ -251,6 +253,7 @@ class Daemon:
 
     async def _secrets_changed(self) -> None:
         """New password or TOTP secret: an attempt still running with the old ones starts over."""
+        self._secrets_gen += 1
         tunnel = self.tunnel
         if tunnel and self.state == State.connecting and not tunnel.exited.is_set():
             self.log.info("Secrets changed while connecting, starting over")
@@ -403,6 +406,7 @@ class Daemon:
                 self._set(State.connecting, "Waiting for the next one-time code (up to 30 s)")
                 await self._sleep(wait)
                 continue  # checks Cisco, network and demand again, then fetches the secrets
+            generation = self._secrets_gen
             try:
                 password = await self.password_getter()
             except credentials.PasswordMissing:
@@ -431,6 +435,10 @@ class Daemon:
                 tunnel = self.tunnel_factory()
                 self.tunnel = tunnel
                 await tunnel.start(password, totp)
+            except PasswordEncodingError as exc:
+                self.tunnel = None
+                self._final(State.keyring, f"{exc}. Change the password (uni-vpn password)")
+                return
             except OSError as exc:
                 self.tunnel = None
                 self._final(State.error, f"Could not start openconnect: {exc}")
@@ -445,6 +453,12 @@ class Daemon:
             ready = await tunnel.wait_ready(cfg.ready_timeout)
             if tunnel.otp_generated_at:
                 self.last_otp_step = int(tunnel.otp_generated_at // OTP_STEP)
+            if not ready and generation != self._secrets_gen:
+                # The secrets changed while connecting: this result says nothing about the new ones.
+                if not tunnel.exited.is_set():
+                    await tunnel.stop(cfg.stop_grace)
+                self.tunnel = None
+                continue
             if not ready:
                 if tunnel.stopped_by_us:
                     self.tunnel = None

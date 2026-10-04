@@ -107,7 +107,9 @@ def _install_windows(target: Path, dry_run: bool, run) -> list[Path]:
     files = [target]
     _run_checked(run, _schtasks("/Create", "/TN", windows.TASK_NAME, "/XML", str(target), "/F"), files)
     # Like "systemctl restart": a running old daemon makes way for the new code.
-    _end_task(run)
+    if not _end_task(run):
+        # With IgnoreNew, "/Run" would be dropped silently and the old code keep running.
+        raise ServiceError("The running service did not stop, log out and in, then run the installer again", files)
     _run_checked(run, _schtasks("/Run", "/TN", windows.TASK_NAME), files)
     return files
 

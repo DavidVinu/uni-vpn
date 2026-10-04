@@ -63,6 +63,15 @@ class LoadTests(unittest.TestCase):
 
 
 class SetUserTests(unittest.TestCase):
+    def test_unknown_forms_are_refused_instead_of_breaking_the_file(self):
+        for line in ('user = """ab1"""', '"user" = "ab1"'):
+            path = Path(tempfile.mkdtemp()) / "config.toml"
+            original = f'{line}\nhttp_port = 1081\n'
+            path.write_text(original, encoding="utf-8")
+            with self.assertRaises(config.ConfigError):
+                config.set_user(path, "zz9")
+            self.assertEqual(path.read_text(encoding="utf-8"), original)
+
     def test_replaces_double_and_single_quoted_values(self):
         for line in ('user = "ab123"', "user = 'ab123'", "user='ab123'  # mine"):
             path = Path(tempfile.mkdtemp()) / "config.toml"

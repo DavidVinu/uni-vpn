@@ -110,6 +110,10 @@ def port_open(port: int) -> bool:
             return False
 
 
+class PasswordEncodingError(OSError):
+    """The password cannot be passed to openconnect on this system."""
+
+
 class Tunnel:
     def __init__(self, cfg: Config, openconnect: str, wrapper: str, log: logging.Logger, ocproxy: str | None = None,
                  token_dir: Path | None = None):
@@ -215,6 +219,12 @@ class Tunnel:
             pass
         self.proc.stdin.close()
         self._reader = asyncio.create_task(self._read_output())
+        if self.stopped_by_us:  # stop() came while the process was being started
+            self._remove_token_file()
+            try:
+                self.proc.kill()
+            except ProcessLookupError:
+                pass
 
     async def _read_output(self) -> None:
         assert self.proc and self.proc.stdout
@@ -248,7 +258,10 @@ class Tunnel:
 
     async def stop(self, grace: float) -> None:
         self._remove_token_file()
-        if self.proc is None or self.exited.is_set():
+        if self.proc is None:
+            self.stopped_by_us = True  # still starting: the attempt does not count
+            return
+        if self.exited.is_set():
             return
         self.stopped_by_us = True
         try:

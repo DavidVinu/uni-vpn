@@ -19,7 +19,7 @@ from pathlib import Path
 from . import platform as pf
 from .config import Config
 from .socks import SocksServer
-from .tunnel import Tunnel
+from .tunnel import PasswordEncodingError, Tunnel
 
 INTERFACE = "uni-vpn"
 STATE_PREFIX = "tunnel-"
@@ -44,9 +44,6 @@ def dns_servers(values: dict[str, str]) -> list[str]:
             pass
     return servers
 
-
-class PasswordEncodingError(OSError):
-    pass
 
 
 class WindowsTunnel(Tunnel):
@@ -82,6 +79,10 @@ class WindowsTunnel(Tunnel):
 
     def _env(self) -> dict[str, str]:
         env = super()._env()
+        if pf.IS_WINDOWS:
+            from . import windows
+
+            env = windows.trusted_env(env, *windows.system_dirs())
         self.state_file = self.token_dir / f"{STATE_PREFIX}{self.port}.env"
         self.state_file.unlink(missing_ok=True)
         env["UNI_VPN_STATE"] = str(self.state_file)
