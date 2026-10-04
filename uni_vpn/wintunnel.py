@@ -161,7 +161,10 @@ class WindowsTunnel(Tunnel):
 
     async def stop(self, grace: float) -> None:
         self._remove_token_file()
-        if self.proc is not None and not self.exited.is_set():
+        if self.proc is None:
+            # Stopped while starting: start() ends the process as soon as it exists.
+            self.stopped_by_us = True
+        elif not self.exited.is_set():
             self.stopped_by_us = True
             await self._end_process(grace)
         await self._stop_server()

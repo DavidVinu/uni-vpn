@@ -458,6 +458,8 @@ class Daemon:
                 if not tunnel.exited.is_set():
                     await tunnel.stop(cfg.stop_grace)
                 self.tunnel = None
+                if tunnel.stopped_by_us and self.state == State.disconnecting:
+                    self._after_stop()
                 continue
             if not ready:
                 if tunnel.stopped_by_us:
@@ -505,7 +507,7 @@ class Daemon:
                 break
         # `blocked` stays until the ticker sees Cisco disconnected, so the popup keeps
         # explaining why nothing works.
-        if self.state in (State.offline, State.error, State.connecting):
+        if self.state in (State.offline, State.error, State.connecting, State.disconnecting):
             self._set(State.idle, "Not connected")
 
     def _after_stop(self) -> None:

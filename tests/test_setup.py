@@ -109,6 +109,18 @@ class SetupTests(SetupHarness):
         self.assertNotIn("chrome://extensions", out)
         self.assertIn("http://127.0.0.1:1081/", out)
 
+    def test_invalid_config_does_not_stop_an_update(self):
+        cfg = self.home / ".config" / "uni-vpn" / "config.toml"
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text('user = "ab123"\nsocks_port = "x"\n')
+        rc, out = self.run_setup(user="cd456")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("invalid", out)
+        self.assertEqual(len(self.installed), 1)
+        self.assertEqual(self.proxy_calls, [1081])
+        self.assertEqual(self.stored, [])
+        self.assertIn('socks_port = "x"', cfg.read_text())
+
     def test_proxy_unavailable_prints_manual_pac_url(self):
         self.proxy_result = "unavailable"
         rc, out = self.run_setup(user="ab123")

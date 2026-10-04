@@ -388,6 +388,20 @@ class FailureTests(DaemonHarness):
         await wait_state(d, dm.State.auth_failed)
         self.assertEqual(self.pw_lines(), [old.decode(), "second"])
 
+    async def test_disconnect_after_secrets_changed_while_connecting_ends_idle(self):
+        # The attempt belongs to old secrets and was stopped by the user: not stuck in disconnecting.
+        os.environ["FAKE_DELAY"] = "3"
+        d = await self.start_daemon()
+        await d.request_connect()
+        await wait_state(d, dm.State.connecting)
+        for _ in range(40):
+            if d.tunnel and d.tunnel.proc:
+                break
+            await asyncio.sleep(0.05)
+        d._secrets_gen += 1
+        await d.request_disconnect()
+        await wait_state(d, dm.State.idle)
+
     async def test_stale_token_files_are_removed_at_start(self):
         (self.token_dir / "totp-old").write_text("base32:OLD")
         await self.start_daemon()

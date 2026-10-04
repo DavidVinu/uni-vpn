@@ -228,10 +228,19 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
 
     cfg_path = config.default_path()
     user = (getattr(args, "user", None) or "").strip()
-    if cfg_path.exists():
-        cfg = config.load(cfg_path)
-        _say(f"Config found: {cfg_path} (university ID {cfg.user})")
-        if user and user != cfg.user:
+    broken = None
+    configured = cfg_path.exists()
+    if configured:
+        try:
+            cfg = config.load(cfg_path)
+        except config.ConfigError as exc:
+            # An update must still go through; the file stays as it is and the daemon reports the error.
+            broken = exc
+            cfg = config.Config()
+            print(f"Config {cfg_path} is invalid ({exc}), please fix it; continuing with defaults")
+        else:
+            _say(f"Config found: {cfg_path} (university ID {cfg.user})")
+        if user and broken is None and user != cfg.user:
             if not config.valid_user(user):
                 print(f"Not a university ID: {user!r}")
                 return 1
@@ -308,6 +317,11 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
         print("   Note: Cisco Secure Client is installed. Do not connect both at once; uni-vpn pauses while Cisco is connected.")
         print("   Recommendation: in the Cisco client, turn off automatic connect on start ('Beim Start automatisch verbinden').")
 
+    if broken is not None:
+        # Nothing to ask for without a valid university ID; the service is in place again.
+        print(f"\nFix {cfg_path} (or delete it and run setup again), then: uni-vpn service restart")
+        return 0
+
     url = f"http://127.0.0.1:{cfg.http_port}/"
     if gui:
         # The service has started, but the daemon needs a moment until bind().
@@ -318,8 +332,8 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
                 print(doctor.format_checks(doctor.run_checks(cfg_path)))
             return 1
         if getattr(args, "no_browser", False):
-            # install.ps1 runs this elevated and opens the browser itself, unelevated.
-            print(f"\nFinish in the browser ({url}).")
+            # install.ps1 runs this elevated and opens the browser itself, unelevated (not on update).
+            print(f"\nStatus page: {url}" if configured else f"\nFinish in the browser ({url}).")
             return 0
         if open_url(url):
             print(f"\nFinish in the browser window that just opened ({url}).")

@@ -127,6 +127,14 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.tunnel.classification, ("error", "Tunnel setup failed: netsh add route failed"))
         self.assertIsNone(self.tunnel.socks)
 
+    async def test_stop_before_the_process_exists_ends_the_attempt(self):
+        await self.tunnel.stop(2)
+        self.assertTrue(self.tunnel.stopped_by_us)
+        await self.tunnel.start(b"pw")
+        self.assertFalse(await self.tunnel.wait_ready(3))
+        self.assertTrue(self.tunnel.exited.is_set())
+        await self.tunnel.stop(2)
+
     async def test_server_stops_when_openconnect_dies(self):
         await self.tunnel.start(b"pw")
         self.assertTrue(await self.tunnel.wait_ready(5))
