@@ -584,6 +584,21 @@ class UpdateTests(unittest.TestCase):
         self.assertNotIn("Service restarted", out.getvalue())
         self.assertIn("failed", out.getvalue())
 
+    def test_update_on_windows_goes_through_get_ps1(self):
+        calls = []
+
+        def run(cmd, **kwargs):
+            calls.append((cmd, kwargs.get("env", {}).get("UNI_VPN_UPDATE")))
+            return subprocess.CompletedProcess(cmd, 0)
+
+        with mock.patch.object(pf, "IS_WINDOWS", True):
+            rc = setup.update(argparse.Namespace(dry_run=False), run=run,
+                              download=lambda target: self.fail("Program Files needs administrator rights"))
+        self.assertEqual(rc, 0)
+        self.assertEqual(calls[0][0][0], "powershell")
+        self.assertIn(setup.GET_PS1_URL, calls[0][0][-1])
+        self.assertEqual(calls[0][1], "1")
+
     def test_update_without_git_downloads_and_restarts(self):
         root = Path(tempfile.mkdtemp())
         calls = []

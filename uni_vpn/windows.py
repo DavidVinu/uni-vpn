@@ -277,7 +277,7 @@ def render_task(python: str, script: str, user: str, workdir: str) -> str:
   <Actions Context="Author">
     <Exec>
       <Command>{escape(python)}</Command>
-      <Arguments>{escape(_quote_arg(script))} daemon</Arguments>
+      <Arguments>-I {escape(_quote_arg(script))} daemon</Arguments>
       <WorkingDirectory>{escape(workdir)}</WorkingDirectory>
     </Exec>
   </Actions>

@@ -527,8 +527,20 @@ def download_release(target: Path, url: str = ARCHIVE_URL, opener=None) -> None:
     _remove_stale(root, set(files))
 
 
+GET_PS1_URL = "https://raw.githubusercontent.com/DavidVinu/uni-vpn/main/get.ps1"
+
+
 def update(args, run=subprocess.run, download=download_release) -> int:
     dry = bool(getattr(args, "dry_run", False))
+    if pf.IS_WINDOWS:
+        # The program lives in Program Files: get.ps1 downloads it and install.ps1 copies it there
+        # with one administrator prompt, then restarts the service.
+        if dry:
+            _say(f"would run {GET_PS1_URL} to update {pf.app_install_dir()}")
+            return 0
+        command = f"& {{ irm {GET_PS1_URL} | iex }}; exit $LASTEXITCODE"
+        return run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+                   env=dict(os.environ, UNI_VPN_UPDATE="1")).returncode
     repo = pf.repo_root()
     git = (repo / ".git").exists()
     if dry:

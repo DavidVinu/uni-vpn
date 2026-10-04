@@ -1,7 +1,8 @@
 # Install uni-vpn on Windows: Python and OpenConnect (with Wintun) if missing, then "uni-vpn setup".
 # Usage: powershell -ExecutionPolicy Bypass -File install.ps1 [-Uninstall | -Update] [-DryRun] [-NoGui] [-User UNIVERSITY-ID]
 # Needs an administrator account: Wintun, the virtual network adapter openconnect uses on
-# Windows, can only be created with administrator rights.
+# Windows, can only be created with administrator rights. The program goes to
+# %ProgramFiles%\uni-vpn: the service runs it elevated, so only administrators may change it.
 [CmdletBinding()]
 param(
     [switch]$Uninstall,
@@ -16,6 +17,7 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"  # Invoke-WebRequest is many times slower with the progress bar
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 $Root = $PSScriptRoot
+$AppDir = Join-Path $env:ProgramFiles "uni-vpn"
 
 $OpenConnectUrl = "https://www.infradead.org/openconnect-gui/download/openconnect-gui-1.6.2-win64.exe"
 $OpenConnectSha256 = "de08d8968e40e219932d01025521f879178ec99246802db488c0fdac9fcef11a"
@@ -33,8 +35,10 @@ function Find-Python {
     # Native stderr (for example "py -3" without any Python 3) must not throw under "Stop"
     # in Windows PowerShell 5.1.
     $ErrorActionPreference = "Continue"
+    # Only a Python in Program Files: a per-user one could be changed by any program of the user
+    # and the service runs it elevated.
     $candidates = @()
-    foreach ($base in @($env:ProgramFiles, "$env:LOCALAPPDATA\Programs\Python")) {
+    foreach ($base in @($env:ProgramFiles)) {
         if ($base -and (Test-Path $base)) {
             $candidates += Get-ChildItem -Path $base -Directory -Filter "Python3*" -ErrorAction SilentlyContinue |
                 Sort-Object Name -Descending | ForEach-Object { Join-Path $_.FullName "python.exe" }
@@ -46,8 +50,7 @@ function Find-Python {
         if ($LASTEXITCODE -eq 0 -and $found) { $candidates += $found.Trim() }
     }
     foreach ($candidate in $candidates) {
-        # Skip the Microsoft Store alias: it opens the Store instead of running Python.
-        if (-not (Test-Path $candidate) -or $candidate -like "*\WindowsApps\*") { continue }
+        if (-not (Test-Path $candidate) -or -not $candidate.StartsWith("$env:ProgramFiles\", [StringComparison]::OrdinalIgnoreCase)) { continue }
         & $candidate -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" 2>$null
         if ($LASTEXITCODE -eq 0) { return $candidate }
     }
@@ -146,6 +149,15 @@ if ($ForUser -and $ForUser -ne $env:USERNAME) {
     exit 1
 }
 
+function Copy-App {
+    # A fresh copy in Program Files, without files the new version no longer has.
+    if ([IO.Path]::GetFullPath($Root).TrimEnd("\") -ieq [IO.Path]::GetFullPath($AppDir).TrimEnd("\")) { return }
+    if ($DryRun) { Say "would copy uni-vpn to $AppDir"; return }
+    Say "copying uni-vpn to $AppDir"
+    & robocopy.exe $Root $AppDir /MIR /XD .git __pycache__ /NFL /NDL /NJH /NJS /NP | Out-Null
+    if ($LASTEXITCODE -ge 8) { throw "Copying to $AppDir failed (robocopy $LASTEXITCODE)" }
+}
+
 try {
     if ($mode -eq "setup") {
         if (-not (Find-Python)) {
@@ -159,7 +171,16 @@ try {
     if (-not $python) {
         if ($DryRun) { $python = (Get-Command python.exe).Source } else { throw "Python >= 3.11 was not found after installing it" }
     }
-    $cliArgs = @("$Root\bin\uni-vpn", $mode)
+    $run = $Root
+    if ($mode -ne "uninstall") {
+        Copy-App
+        if (-not $DryRun) { $run = $AppDir }
+    } elseif (Test-Path (Join-Path $AppDir "bin\uni-vpn")) {
+        $run = $AppDir
+    }
+    # The new files are in place; an update only has to restart the service.
+    $command = if ($mode -eq "update" -and -not $DryRun) { @("service", "restart") } else { @($mode) }
+    $cliArgs = @("-I", "$run\bin\uni-vpn") + $command
     if ($DryRun) { $cliArgs += "--dry-run" }
     if ($mode -eq "setup") {
         if ($NoGui) { $cliArgs += "--no-gui" }

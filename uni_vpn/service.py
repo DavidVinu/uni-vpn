@@ -93,6 +93,10 @@ def _install_windows(target: Path, dry_run: bool, run) -> list[Path]:
     from . import windows
 
     python = windows.pythonw(pf.python_executable())
+    for path in (python, str(pf.bin_dir() / "uni-vpn")):
+        if not pf.admin_only(path):
+            # Runs elevated: anything the user can change could gain administrator rights.
+            print(f"   Warning: {path} is not in Program Files, use install.ps1 to install")
     text = windows.render_task(python, str(pf.bin_dir() / "uni-vpn"), windows.current_user(), str(pf.repo_root()))
     if dry_run:
         print(f"-> would register the scheduled task {windows.TASK_NAME} ({target}) and start it")

@@ -15,7 +15,9 @@ Note: Windows version and build, CPU, Python version, Chrome, Edge and Firefox v
    at `http://127.0.0.1:1081/`. Note every dialog (UAC, SmartScreen, Defender, firewall).
 3. Assistant: university ID and password, then TOTP secret (the check code must match the
    phone app or the MFA portal), then "All set".
-4. Task Scheduler: task `uni-vpn` exists, runs with highest privileges, state Running.
+4. Task Scheduler: task `uni-vpn` exists, runs with highest privileges, state Running, and
+   starts `pythonw.exe -I "C:\Program Files\uni-vpn\bin\uni-vpn" daemon`. As the normal
+   user, creating a file in `C:\Program Files\uni-vpn` is refused.
    `uni-vpn status` in a new terminal shows `connected` or `idle`.
 5. `curl.exe -s --socks5-hostname 127.0.0.1:1080 https://ifconfig.me` returns a university
    address (`129.206.x.x` or `147.142.x.x`). `curl.exe -s https://ifconfig.me` returns the

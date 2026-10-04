@@ -48,6 +48,38 @@ class BinaryTests(unittest.TestCase):
         self.assertIsNone(pf.find_binary("definitely-not-a-binary-xyz"))
 
 
+class AdminOnlyBinaryTests(unittest.TestCase):
+    """Windows: the elevated service must only run programs from Program Files."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.program_files = self.tmp / "Program Files"
+        self.tool = self.program_files / "OpenConnect-GUI" / "openconnect"
+        self.tool.parent.mkdir(parents=True)
+        self.user_tool = self.tmp / "user" / "openconnect"
+        self.user_tool.parent.mkdir()
+        for path in (self.tool, self.user_tool):
+            path.write_text("#!/bin/sh\n")
+            path.chmod(0o755)
+        for patcher in (mock.patch.object(pf, "IS_WINDOWS", True),
+                        mock.patch.object(pf, "_PROGRAM_FILES", [str(self.program_files)]),
+                        mock.patch.object(pf, "SEARCH_DIRS", [str(self.tool.parent)]),
+                        mock.patch.dict(os.environ, {"PATH": str(self.user_tool.parent)})):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_path_and_user_writable_override_are_ignored(self):
+        self.assertTrue(pf.admin_only(str(self.tool)))
+        self.assertFalse(pf.admin_only(str(self.user_tool)))
+        self.assertFalse(pf.admin_only(str(self.tmp / "Program Files Evil" / "x")))
+        self.assertEqual(pf.find_binary("openconnect"), str(self.tool))
+        self.assertEqual(pf.find_binary("openconnect", str(self.user_tool)), str(self.tool))
+        self.assertEqual(pf.find_binary("openconnect", str(self.tool)), str(self.tool))
+
+    def test_app_goes_to_program_files(self):
+        self.assertEqual(pf.app_install_dir(), self.program_files / "uni-vpn")
+
+
 class CiscoTests(unittest.TestCase):
     def test_connected_via_interface(self):
         d = Path(tempfile.mkdtemp())

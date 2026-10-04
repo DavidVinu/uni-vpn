@@ -132,7 +132,8 @@ class TaskXmlTests(unittest.TestCase):
         xml = windows.render_task("C:\\Python\\pythonw.exe", "C:\\Users\\A & B\\uni-vpn\\bin\\uni-vpn",
                                   "PC\\a&b", "C:\\Users\\A & B\\uni-vpn")
         self.assertIn("<Command>C:\\Python\\pythonw.exe</Command>", xml)
-        self.assertIn("<Arguments>\"C:\\Users\\A &amp; B\\uni-vpn\\bin\\uni-vpn\" daemon</Arguments>", xml)
+        # -I: no user site-packages or PYTHON* variables, which the user could plant code in.
+        self.assertIn("<Arguments>-I \"C:\\Users\\A &amp; B\\uni-vpn\\bin\\uni-vpn\" daemon</Arguments>", xml)
         self.assertIn("<UserId>PC\\a&amp;b</UserId>", xml)
         self.assertIn("<RunLevel>HighestAvailable</RunLevel>", xml)
         self.assertIn("<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>", xml)

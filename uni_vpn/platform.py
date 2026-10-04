@@ -64,10 +64,21 @@ def lock_file() -> Path:
     return config_dir() / "daemon.lock"
 
 
+def admin_only(path: str) -> bool:
+    """Windows: inside Program Files, which only administrators can change. The elevated
+    service must not run programs that any process of the user could replace."""
+    full = os.path.normcase(os.path.realpath(path))
+    return any(full.startswith(os.path.normcase(os.path.realpath(base)) + os.sep) for base in _PROGRAM_FILES)
+
+
 def find_binary(name: str, override: str | None = None) -> str | None:
+    if IS_WINDOWS:
+        # Neither PATH nor config.toml (both writable by the user) for the elevated service.
+        if override and not admin_only(override):
+            override = None
     if override:
         return override if os.access(override, os.X_OK) and os.path.isfile(override) else None
-    found = shutil.which(name)
+    found = None if IS_WINDOWS else shutil.which(name)
     if found:
         return found
     names = [name, name + ".exe"] if IS_WINDOWS and not name.lower().endswith(".exe") else [name]
@@ -150,7 +161,8 @@ def open_url(url: str, popen=subprocess.Popen) -> bool:
 def app_install_dir() -> Path:
     """Where get.sh and get.ps1 put the program."""
     if IS_WINDOWS:
-        return _local_appdata() / APP / "app"
+        # Program Files: the elevated service runs this code, so only administrators may change it.
+        return Path(_PROGRAM_FILES[0]) / APP
     if IS_MACOS:
         return Path.home() / "Library" / "Application Support" / APP / "app"
     base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
