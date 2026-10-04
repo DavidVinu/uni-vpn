@@ -288,3 +288,41 @@ def pythonw(python: str) -> str:
 def start_menu_dir() -> str:
     return os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")),
                         "Microsoft", "Windows", "Start Menu", "Programs")
+
+
+# --- user PATH -------------------------------------------------------------
+
+def _broadcast_environment() -> None:
+    result = ctypes.c_size_t()
+    ctypes.windll.user32.SendMessageTimeoutW(0xFFFF, 0x001A, 0, "Environment", 0x0002, 5000, ctypes.byref(result))
+
+
+def _path_entries(value: str) -> list[str]:
+    return [entry for entry in value.split(";") if entry]
+
+
+def add_user_path(directory: str) -> bool:
+    """Append a directory to the user's PATH (new terminals see it). True if it was added."""
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_READ | winreg.KEY_SET_VALUE) as key:
+        try:
+            value, kind = winreg.QueryValueEx(key, "Path")
+        except FileNotFoundError:
+            value, kind = "", winreg.REG_EXPAND_SZ
+        entries = _path_entries(value)
+        if any(os.path.normcase(e.rstrip("\\")) == os.path.normcase(directory.rstrip("\\")) for e in entries):
+            return False
+        winreg.SetValueEx(key, "Path", 0, kind, ";".join(entries + [directory]))
+    _broadcast_environment()
+    return True
+
+
+def remove_user_path(directory: str) -> None:
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_READ | winreg.KEY_SET_VALUE) as key:
+        try:
+            value, kind = winreg.QueryValueEx(key, "Path")
+        except FileNotFoundError:
+            return
+        target = os.path.normcase(directory.rstrip("\\"))
+        entries = [e for e in _path_entries(value) if os.path.normcase(e.rstrip("\\")) != target]
+        winreg.SetValueEx(key, "Path", 0, kind, ";".join(entries))
+    _broadcast_environment()

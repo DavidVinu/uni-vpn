@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import getpass
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -22,7 +23,7 @@ FINAL_HINT = """
 Status page (state, connect/disconnect, domain list): http://127.0.0.1:{port}/
 Restart any open browser once so that it reads the proxy rule.
 """
-MANUAL_PROXY_HINT = """   The proxy rule could not be registered automatically (no GNOME or macOS proxy settings found).
+MANUAL_PROXY_HINT = """   The proxy rule could not be registered automatically (no GNOME, KDE, macOS or Windows proxy settings found).
    Enter it by hand in the browser: Settings -> Network/Proxy -> automatic proxy configuration (PAC):
    {url}"""
 
@@ -93,11 +94,94 @@ def wait_for_port(port: int, *, port_open=_port_open, timeout: float = 5.0, step
         sleep(step)
 
 
+def _install_hint() -> str:
+    if pf.IS_WINDOWS:
+        return "run install.ps1 again"
+    if pf.IS_MACOS:
+        return "brew install openconnect ocproxy, or run install.sh again"
+    return "run install.sh again (Debian/Ubuntu: sudo apt install openconnect ocproxy libsecret-tools)"
+
+
+def needed_programs() -> list[str]:
+    return ["openconnect"] + pf.tunnel_helpers() + ([] if (pf.IS_MACOS or pf.IS_WINDOWS) else ["secret-tool"])
+
+
+def command_path() -> Path:
+    if pf.IS_WINDOWS:
+        return pf.config_dir() / "bin" / "uni-vpn.cmd"
+    return Path.home() / ".local" / "bin" / "uni-vpn"
+
+
+def install_command(dry: bool, created) -> None:
+    """`uni-vpn` on the PATH, always running the interpreter used for setup (otherwise on macOS
+    /usr/bin/python3 3.9 if Homebrew is not first in PATH)."""
+    link = command_path()
+    target = pf.bin_dir() / "uni-vpn"
+    if pf.IS_WINDOWS:
+        wrapper = f'@echo off\r\n"{pf.python_executable()}" "{target}" %*\r\n'
+    else:
+        wrapper = f'#!/bin/sh\nexec "{pf.python_executable()}" "{target}" "$@"\n'
+    if dry:
+        _say(f"would create {link} as a wrapper for {target}")
+        return
+    link.parent.mkdir(parents=True, exist_ok=True)
+    if link.is_symlink() or link.exists():
+        link.unlink()
+    link.write_text(wrapper, encoding="utf-8", newline="")
+    link.chmod(0o755)
+    created(link)
+    _say(f"Command created: {link}")
+    if pf.IS_WINDOWS:
+        from . import windows
+
+        if windows.add_user_path(str(link.parent)):
+            print("   Open a new terminal to use the uni-vpn command")
+    elif str(link.parent) not in os.environ.get("PATH", "").split(os.pathsep):
+        print(f"   Note: {link.parent} is not in PATH, open a new shell or add it to PATH")
+
+
+def launcher_path() -> Path:
+    if pf.IS_WINDOWS:
+        from .windows import start_menu_dir
+
+        return Path(start_menu_dir()) / "Uni VPN.url"
+    if pf.IS_MACOS:
+        return Path.home() / "Applications" / "Uni VPN.app"
+    base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    return Path(base) / "applications" / "uni-vpn.desktop"
+
+
+def install_launcher(port: int, dry: bool, created, run=subprocess.run) -> None:
+    """An app entry in the start menu, Launchpad or app grid that opens the status page."""
+    url = f"http://127.0.0.1:{int(port)}/"
+    path = launcher_path()
+    if dry:
+        _say(f"would add {path} to open {url}")
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if pf.IS_WINDOWS:
+        path.write_text(f"[InternetShortcut]\r\nURL={url}\r\n", encoding="utf-8", newline="")
+    elif pf.IS_MACOS:
+        result = run(["osacompile", "-o", str(path), "-e", f'open location "{url}"'], capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"   App entry could not be created: {(result.stderr or '').strip()}")
+            return
+    else:
+        path.write_text("[Desktop Entry]\nType=Application\nName=Uni VPN\nComment=University VPN for selected websites\n"
+                        f"Exec=xdg-open {url}\nIcon=network-vpn\nCategories=Network;\nTerminal=false\n", encoding="utf-8")
+    created(path)
+    _say(f"App entry created: {path}")
+
+
 def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=service.install,
           store=credentials.store_password, store_totp=credentials.store_totp,
           keyring_probe=doctor.keyring_state, proxy_install=sysproxy.install, run_doctor=True,
-          port_open=_port_open) -> int:
+          port_open=_port_open, open_url=None, has_desktop=None) -> int:
     dry = bool(getattr(args, "dry_run", False))
+    open_url = open_url or pf.open_url
+    has_desktop = has_desktop or pf.has_desktop
+    # With a desktop the browser does the rest (setup assistant); otherwise ask here.
+    gui = not dry and not getattr(args, "no_gui", False) and has_desktop()
 
     def created(path: Path) -> None:
         # Record right away so that an abort further down leaves nothing unrecorded behind.
@@ -107,24 +191,24 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
         print(f"Python {sys.version_info.major}.{sys.version_info.minor} is too old, at least 3.11 is required")
         return 1
 
-    needed = ["openconnect", "ocproxy"] + ([] if pf.IS_MACOS else ["secret-tool"])
-    missing = [name for name in needed if not pf.find_binary(name)]
+    missing = [name for name in needed_programs() if not pf.find_binary(name)]
     if missing:
-        hint = "brew install openconnect ocproxy" if pf.IS_MACOS else "sudo apt install openconnect ocproxy libsecret-tools"
         if dry:
-            _say(f"would require: {', '.join(missing)} ({hint})")
+            _say(f"would require: {', '.join(missing)} ({_install_hint()})")
         else:
-            print(f"Missing: {', '.join(missing)}. Install with: {hint}")
+            print(f"Missing: {', '.join(missing)}. To install: {_install_hint()}")
             return 1
     else:
-        _say("openconnect and ocproxy found")
+        _say(f"{' and '.join(needed_programs()[:2])} found")
 
     cfg_path = config.default_path()
+    user = (getattr(args, "user", None) or "").strip()
     if cfg_path.exists():
         cfg = config.load(cfg_path)
         _say(f"Config found: {cfg_path} (university ID {cfg.user})")
+    elif gui and not user:
+        cfg = config.Config()
     else:
-        user = (getattr(args, "user", None) or "").strip()
         if not user:
             if dry and not sys.stdin.isatty():
                 user = "example"
@@ -132,6 +216,9 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
                 user = input_fn("University ID (e.g. ab123): ").strip()
         if not user:
             print("No university ID given")
+            return 1
+        if not config.valid_user(user):
+            print(f"Not a university ID: {user!r}")
             return 1
         if dry:
             _say(f"would create {cfg_path} with university ID {user}")
@@ -141,26 +228,13 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
             created(cfg_path)
             cfg = config.load(cfg_path)
             _say(f"Config created: {cfg_path}")
+    if gui and not cfg_path.exists():
+        # The setup assistant writes it; record it now so uninstall removes it.
+        created(cfg_path)
 
-    link = Path.home() / ".local" / "bin" / "uni-vpn"
-    target = pf.bin_dir() / "uni-vpn"
-    # A wrapper instead of a symlink, so the interpreter used for setup always runs
-    # (otherwise on macOS /usr/bin/python3 3.9 if Homebrew is not first in PATH).
-    wrapper = f'#!/bin/sh\nexec "{pf.python_executable()}" "{target}" "$@"\n'
-    if dry:
-        _say(f"would create {link} as a wrapper for {target}")
-    else:
-        link.parent.mkdir(parents=True, exist_ok=True)
-        if link.is_symlink() or link.exists():
-            link.unlink()
-        link.write_text(wrapper, encoding="utf-8")
-        link.chmod(0o755)
-        created(link)
-        _say(f"Command created: {link}")
-        if str(link.parent) not in os.environ.get("PATH", "").split(os.pathsep):
-            print(f"   Note: {link.parent} is not in PATH, open a new shell or add it to PATH")
+    install_command(dry, created)
 
-    if not pf.IS_MACOS:
+    if not (pf.IS_MACOS or pf.IS_WINDOWS):
         openconnect = pf.find_binary("openconnect", cfg.openconnect) or "/usr/sbin/openconnect"
         new_file = ensure_apport_ignore(openconnect, dry_run=dry)
         if new_file:
@@ -187,13 +261,28 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
         if result == "unavailable":
             print(MANUAL_PROXY_HINT.format(url=sysproxy.pac_url(cfg.http_port)))
         elif result == "replaced":
-            _say("Proxy rule registered with the system; an existing proxy setting was replaced (backed up, install.sh --uninstall restores it)")
+            _say("Proxy rule registered with the system; an existing proxy setting was replaced (backed up, uninstall restores it)")
         else:
-            _say("Proxy rule registered with the system (Chrome and Firefox read it on their own)")
+            _say("Proxy rule registered with the system (Chrome, Edge and Firefox read it on their own)")
+
+    install_launcher(cfg.http_port, dry, created)
 
     if pf.cisco_installed():
         print("   Note: Cisco Secure Client is installed. Do not connect both at once; uni-vpn pauses while Cisco is connected.")
         print("   Recommendation: in the Cisco client, turn off automatic connect on start ('Beim Start automatisch verbinden').")
+
+    url = f"http://127.0.0.1:{cfg.http_port}/"
+    if gui:
+        # The service has started, but the daemon needs a moment until bind().
+        wait_for_port(cfg.http_port, port_open=port_open, timeout=15)
+        if open_url(url):
+            print(f"\nFinish in the browser window that just opened ({url}).")
+            print("Restart any other open browser once so that it reads the proxy rule.")
+            return 0
+        gui = False
+        if not cfg_path.exists():
+            print(f"\nOpen {url} in a browser to finish the setup.")
+            return 0
 
     if dry:
         _say("would ask for the university password and the TOTP secret and store both in the keyring")
@@ -227,7 +316,7 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
 
     if run_doctor and not dry:
         # The service has started, but the daemon needs a moment until bind().
-        wait_for_port(cfg.http_port, port_open=port_open)
+        wait_for_port(cfg.http_port, port_open=port_open, timeout=15)
         print()
         print(doctor.format_checks(doctor.run_checks(cfg_path)))
     print(FINAL_HINT.format(port=cfg.http_port))
@@ -251,9 +340,16 @@ def uninstall(args, *, input_fn=input, service_uninstall=service.uninstall, dele
     service_uninstall()
     _say("Service removed")
     for path in recorded():
-        if path.is_symlink() or path.exists():
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path, ignore_errors=True)  # macOS app entry
+            _say(f"deleted: {path}")
+        elif path.is_symlink() or path.exists():
             path.unlink()
             _say(f"deleted: {path}")
+    if pf.IS_WINDOWS:
+        from . import windows
+
+        windows.remove_user_path(str(command_path().parent))
     if _records_path().exists():
         _records_path().unlink()
     for name in ("daemon.lock",):
@@ -269,16 +365,58 @@ def uninstall(args, *, input_fn=input, service_uninstall=service.uninstall, dele
     return 0
 
 
-def update(args, run=subprocess.run) -> int:
+ARCHIVE_URL = "https://codeload.github.com/DavidVinu/uni-vpn/zip/refs/heads/main"
+
+
+def download_release(target: Path, url: str = ARCHIVE_URL, opener=None) -> None:
+    """Replace the program files in target with the current main branch (installs without git)."""
+    import io
+    import urllib.request
+    import zipfile
+
+    opener = opener or urllib.request.urlopen
+    with opener(url, timeout=60) as response:
+        data = response.read()
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        names = archive.namelist()
+        prefix = names[0].split("/", 1)[0] + "/"
+        if not any(n == prefix + "uni_vpn/__init__.py" for n in names):
+            raise ValueError("the download does not look like uni-vpn")
+        for name in names:
+            relative = name[len(prefix):]
+            if not relative or name.endswith("/"):
+                continue
+            destination = (target / relative).resolve()
+            if target.resolve() not in destination.parents:
+                raise ValueError(f"unexpected path in the download: {name}")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            # Overwrite in place: on Windows the running service has this folder as its working
+            # directory, so the folder itself cannot be swapped.
+            destination.write_bytes(archive.read(name))
+            if relative.startswith("bin/") or relative.endswith(".sh"):
+                destination.chmod(0o755)
+
+
+def update(args, run=subprocess.run, download=download_release) -> int:
     dry = bool(getattr(args, "dry_run", False))
     repo = pf.repo_root()
+    git = (repo / ".git").exists()
     if dry:
-        _say(f"would run git pull in {repo} and restart the service")
+        how = "git pull" if git else "download the current version"
+        _say(f"would {how} in {repo} and restart the service")
         return 0
-    result = run(["git", "-C", str(repo), "pull", "--ff-only"], text=True)
-    if result.returncode != 0:
-        print("git pull failed")
-        return result.returncode
+    if git:
+        result = run(["git", "-C", str(repo), "pull", "--ff-only"], text=True)
+        if result.returncode != 0:
+            print("git pull failed")
+            return result.returncode
+    else:
+        try:
+            download(repo)
+        except (OSError, ValueError) as exc:
+            print(f"Update failed: {exc}")
+            return 1
+        _say("Downloaded the current version")
     rc = service.control("restart", run=run)
     print("Service restarted.")
     return rc

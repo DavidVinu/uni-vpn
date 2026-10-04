@@ -116,9 +116,20 @@ def python_executable() -> str:
     return sys.executable
 
 
+def has_desktop() -> bool:
+    """True when a browser window can be shown to the person running setup."""
+    if IS_WINDOWS:
+        return True
+    if os.environ.get("SSH_CONNECTION") and not os.environ.get("DISPLAY"):
+        return False
+    if IS_MACOS:
+        return True
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
 def open_url(url: str, run=subprocess.run) -> bool:
     """Open a URL in the default browser. False when there is no desktop to show it on."""
-    if not (IS_MACOS or IS_WINDOWS) and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+    if not has_desktop():
         return False
     try:
         if IS_WINDOWS:

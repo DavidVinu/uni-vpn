@@ -25,6 +25,11 @@ class SetupHarness(unittest.TestCase):
         self.macos.start()
         self.find = mock.patch.object(pf, "find_binary", lambda name, override=None: f"/usr/bin/{name}")
         self.find.start()
+        for name, value in (("IS_WINDOWS", False), ("has_desktop", lambda: False),
+                            ("open_url", mock.Mock(side_effect=AssertionError("browser opened in a test")))):
+            patch = mock.patch.object(pf, name, value)
+            patch.start()
+            self.addCleanup(patch.stop)
         self.stored = []
         self.stored_totp = []
         self.installed = []
@@ -240,6 +245,60 @@ class SetupTests(SetupHarness):
         self.assertIn("already in the keyring", out.getvalue())
 
 
+class GuiSetupTests(SetupHarness):
+    def run_gui(self, opened=True, **kwargs):
+        self.urls = []
+
+        def open_url(url):
+            self.urls.append(url)
+            return opened
+
+        out = StringIO()
+        with redirect_stdout(out):
+            rc = setup.setup(self.args(**kwargs), input_fn=lambda p: (_ for _ in ()).throw(AssertionError("must not ask")),
+                             getpass_fn=lambda p: (_ for _ in ()).throw(AssertionError("must not ask")),
+                             service_install=self.fake_service_install, store=self.stored.append,
+                             store_totp=self.stored_totp.append, proxy_install=self.fake_proxy_install,
+                             keyring_probe=lambda user, kind="password": "missing", run_doctor=False,
+                             port_open=lambda port: True, open_url=open_url, has_desktop=lambda: True)
+        return rc, out.getvalue()
+
+    def test_desktop_setup_asks_nothing_and_opens_the_assistant(self):
+        rc, out = self.run_gui()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.urls, ["http://127.0.0.1:1081/"])
+        self.assertFalse((self.home / ".config" / "uni-vpn" / "config.toml").exists())
+        self.assertEqual(self.proxy_calls, [1081])
+        self.assertEqual(self.stored, [])
+        desktop = self.home / ".local" / "share" / "applications" / "uni-vpn.desktop"
+        self.assertIn("Exec=xdg-open http://127.0.0.1:1081/", desktop.read_text())
+        recorded = setup.recorded()
+        self.assertIn(desktop, recorded)
+        self.assertIn(self.home / ".config" / "uni-vpn" / "config.toml", recorded)
+
+    def test_without_a_browser_it_says_where_to_go(self):
+        rc, out = self.run_gui(opened=False)
+        self.assertEqual(rc, 0)
+        self.assertIn("Open http://127.0.0.1:1081/ in a browser", out)
+
+    def test_no_gui_flag_asks_in_the_terminal(self):
+        out = StringIO()
+        with redirect_stdout(out):
+            rc = setup.setup(self.args(no_gui=True), input_fn=lambda p: "ab123", getpass_fn=self.answer,
+                             service_install=self.fake_service_install,
+                             store=lambda user, pw: self.stored.append((user, pw)),
+                             store_totp=lambda user, token: self.stored_totp.append((user, token)),
+                             keyring_probe=lambda user, kind="password": "missing", proxy_install=self.fake_proxy_install,
+                             run_doctor=False, port_open=lambda port: True, has_desktop=lambda: True)
+        self.assertEqual(rc, 0, out.getvalue())
+        self.assertEqual(self.stored, [("ab123", "pw")])
+
+    def test_invalid_university_id_is_refused(self):
+        rc, out = self.run_setup(user='ab"1')
+        self.assertEqual(rc, 1)
+        self.assertIn("Not a university ID", out)
+
+
 class UninstallTests(SetupHarness):
     def test_uninstall_removes_recorded_files(self):
         self.run_setup()
@@ -286,3 +345,56 @@ class ApportTests(SetupHarness):
         self.assertIn("/bin/sh", text)
         setup.ensure_apport_ignore("/bin/sh")
         self.assertEqual(text.count("/bin/sh"), path.read_text().count("/bin/sh"))
+
+
+class UpdateTests(unittest.TestCase):
+    def archive(self, files):
+        import io
+        import zipfile
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("uni-vpn-main/", "")
+            for name, data in files.items():
+                zf.writestr("uni-vpn-main/" + name, data)
+        payload = buf.getvalue()
+
+        class Response(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        return lambda url, timeout=None: Response(payload)
+
+    def test_download_overwrites_program_files(self):
+        target = Path(tempfile.mkdtemp())
+        (target / "uni_vpn").mkdir()
+        (target / "uni_vpn" / "__init__.py").write_text("old")
+        (target / "keep.txt").write_text("mine")
+        opener = self.archive({"uni_vpn/__init__.py": "new", "bin/uni-vpn": "#!/bin/sh\n"})
+        setup.download_release(target, opener=opener)
+        self.assertEqual((target / "uni_vpn" / "__init__.py").read_text(), "new")
+        self.assertEqual((target / "keep.txt").read_text(), "mine")
+        if os.name == "posix":
+            self.assertTrue(os.access(target / "bin" / "uni-vpn", os.X_OK))
+
+    def test_download_refuses_foreign_or_escaping_archives(self):
+        target = Path(tempfile.mkdtemp()) / "app"
+        target.mkdir()
+        with self.assertRaises(ValueError):
+            setup.download_release(target, opener=self.archive({"README.md": "x"}))
+        with self.assertRaises(ValueError):
+            setup.download_release(target, opener=self.archive({"uni_vpn/__init__.py": "x", "../evil": "x"}))
+        self.assertFalse((target.parent / "evil").exists())
+
+    def test_update_without_git_downloads_and_restarts(self):
+        root = Path(tempfile.mkdtemp())
+        calls = []
+        with mock.patch.object(pf, "repo_root", return_value=root), \
+                mock.patch.object(setup.service, "control", lambda action, run=None: calls.append(action) or 0), \
+                redirect_stdout(StringIO()):
+            rc = setup.update(argparse.Namespace(dry_run=False), download=lambda target: calls.append(target))
+        self.assertEqual(rc, 0)
+        self.assertEqual(calls, [root, "restart"])

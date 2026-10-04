@@ -308,6 +308,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("setup", help="Set up (called by install.sh)")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--user", help="University ID")
+    p.add_argument("--no-gui", action="store_true", help="Ask in the terminal instead of opening the setup assistant")
     p.set_defaults(func=cmd_setup)
     p = sub.add_parser("uninstall", help="Remove the service and files")
     p.add_argument("--yes", action="store_true", help="Delete the keyring entries without asking")

@@ -190,7 +190,15 @@ class Daemon:
             "setup_needed": self.needs_setup,
             "error_kind": self.error_kind(),
             "platform": "windows" if pf.IS_WINDOWS else "macos" if pf.IS_MACOS else "linux",
+            "elevated": self._elevated(),
         }
+
+    def _elevated(self) -> bool | None:
+        if not pf.IS_WINDOWS:
+            return None
+        from .windows import is_admin
+
+        return is_admin()
 
     def error_kind(self) -> str | None:
         """Which factor the current error is about, so the page can offer the right fix."""

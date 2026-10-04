@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -53,6 +54,16 @@ def openconnect_version(path: str, run=subprocess.run) -> str:
 
 def port_owner(port: int, run=subprocess.run) -> str:
     """Process line from ss (Linux) or lsof (macOS) for a port in use, shortened. Empty if unknown."""
+    if pf.IS_WINDOWS:
+        try:
+            result = run(["netstat", "-ano", "-p", "TCP"], capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        for line in (result.stdout or "").splitlines():
+            parts = line.split()
+            if len(parts) >= 5 and parts[1].endswith(f":{port}") and parts[3].upper() == "LISTENING":
+                return f"PID {parts[4]}"
+        return ""
     if pf.IS_MACOS:
         cmd = ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN"]
     else:
@@ -85,14 +96,20 @@ def run_checks(cfg_path: Path | None = None, *,
     except config.ConfigError as exc:
         checks.append(Check("Config", "fail", str(exc)))
 
-    for name, override in (("openconnect", cfg.openconnect), ("ocproxy", cfg.ocproxy)):
+    programs = [("openconnect", cfg.openconnect)] + [(name, cfg.ocproxy) for name in pf.tunnel_helpers()]
+    for name, override in programs:
         found = find_binary(name, override)
         detail = found or "not found, run install.sh"
         if found and name == "openconnect":
             version = openconnect_version(found, run)
             detail = f"{found}, {version}" if version else found
         checks.append(Check(name, "ok" if found else "fail", detail))
-    if not pf.IS_MACOS:
+    if pf.IS_WINDOWS:
+        found = find_binary("openconnect", cfg.openconnect)
+        wintun = bool(found) and os.path.isfile(os.path.join(os.path.dirname(found), "wintun.dll"))
+        checks.append(Check("Wintun", "ok" if wintun else "fail",
+                            "wintun.dll next to openconnect" if wintun else "wintun.dll missing, run install.ps1 again"))
+    elif not pf.IS_MACOS:
         found = find_binary("secret-tool")
         checks.append(Check("secret-tool", "ok" if found else "fail", found or "not found, run install.sh (libsecret-tools)"))
 
@@ -158,6 +175,12 @@ def run_checks(cfg_path: Path | None = None, *,
     else:
         checks.append(Check("Cisco Secure Client", "ok", "not installed"))
 
+    if daemon_status and pf.IS_WINDOWS and daemon_status.get("elevated") is not None:
+        elevated = daemon_status["elevated"]
+        checks.append(Check("Administrator rights", "ok" if elevated else "fail",
+                            "service runs elevated" if elevated
+                            else "service is not elevated, Wintun needs it: run install.ps1 from an administrator account"))
+
     if daemon_status:
         bad = daemon_status["state"] in ("auth_failed", "keyring", "error", "blocked")
         checks.append(Check("Daemon", "warn" if bad else "ok",
@@ -167,7 +190,7 @@ def run_checks(cfg_path: Path | None = None, *,
 
     browsers = [name for name in ("google-chrome", "google-chrome-stable", "chromium", "firefox", "brave-browser")
                 if find_binary(name)]
-    checks.append(Check("Browser", "ok", ", ".join(browsers) if browsers else "none found in PATH (normal on macOS)"))
+    checks.append(Check("Browser", "ok", ", ".join(browsers) if browsers else "none found in PATH (normal on macOS and Windows)"))
     checks.append(Check("uni-vpn", "ok", f"version {__version__}, repo {pf.repo_root()}"))
     return checks
 
