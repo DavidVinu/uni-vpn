@@ -338,7 +338,8 @@ class FailureTests(DaemonHarness):
         await wait_state(d, dm.State.connected)
         await d.request_disconnect()
         await wait_state(d, dm.State.idle)
-        with mock.patch.object(d, "_otp_wait", return_value=0.8):
+        waits = iter([0.8])
+        with mock.patch.object(d, "_otp_wait", side_effect=lambda: next(waits, 0)):
             started = time.monotonic()
             await d.request_connect()
             await wait_state(d, dm.State.connecting)
@@ -346,6 +347,23 @@ class FailureTests(DaemonHarness):
             await wait_state(d, dm.State.connected)
         self.assertGreaterEqual(time.monotonic() - started, 0.8)
         self.assertEqual(len(self.pw_lines()), 2)
+
+    async def test_new_password_while_connecting_starts_over_with_it(self):
+        # Measured with the assistant: Back, corrected password, Next. The attempt still running
+        # used the old password and its result was shown for the new one.
+        os.environ["FAKE_DELAY"] = "3"
+        d = await self.start_daemon()
+        await d.request_connect()
+        await wait_state(d, dm.State.connecting)
+        for _ in range(40):
+            if self.pw_lines():
+                break
+            await asyncio.sleep(0.05)
+        os.environ["FAKE_DELAY"] = "0.2"
+        self.password = b"second"
+        await d.set_password("second")
+        await wait_state(d, dm.State.connected)
+        self.assertEqual(self.pw_lines()[-1], "second")
 
     async def test_stale_token_files_are_removed_at_start(self):
         (self.token_dir / "totp-old").write_text("base32:OLD")

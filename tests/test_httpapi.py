@@ -1,8 +1,9 @@
 import asyncio
 import json
+import time
 
 from uni_vpn import daemon as dm
-from uni_vpn import pac, totp
+from uni_vpn import credentials, pac, totp
 from uni_vpn.httpapi import allowed_origin
 
 from tests.test_daemon import DaemonHarness, wait_state
@@ -31,6 +32,8 @@ class OriginTests(DaemonHarness):
     async def test_allowed_origin(self):
         self.assertTrue(allowed_origin(None, 1081))
         self.assertTrue(allowed_origin("http://127.0.0.1:1081", 1081))
+        self.assertTrue(allowed_origin("http://localhost:1081", 1081))
+        self.assertFalse(allowed_origin("http://localhost:9999", 1081))
         # Without the extension there is no longer any foreign origin allowed to POST.
         self.assertFalse(allowed_origin("chrome-extension://abcdef", 1081))
         self.assertFalse(allowed_origin("moz-extension://1234-5678", 1081))
@@ -266,6 +269,28 @@ class SetupTests(DaemonHarness):
         await wait_state(d, dm.State.connected)
         _, _, payload = await http(self.cfg.http_port, "GET", "/status.json")
         self.assertFalse(json.loads(payload)["setup_needed"])
+
+    async def test_keyring_failure_writes_no_config_so_the_assistant_stays(self):
+        def refuse(_secret):
+            raise credentials.KeyringError("keyring locked")
+
+        d = await self.start_setup_daemon()
+        d.totp_setter = refuse
+        body = json.dumps({"user": "ab123", "password": "pw", "secret": "GEZDGNBVGY3TQOJQ"}).encode()
+        status, _, payload = await http(self.cfg.http_port, "POST", "/api/setup", self.HEADERS, body)
+        self.assertEqual(status, 500)
+        self.assertIn(b"keyring locked", payload)
+        self.assertFalse(self.cfg_path.exists())
+        self.assertTrue(d.needs_setup)
+        self.assertEqual(d.cfg.user, "")
+
+    async def test_check_code_marks_the_window_as_used(self):
+        # The assistant asks to type the check code into the MFA portal, which uses it up.
+        d = await self.start_setup_daemon()
+        body = json.dumps({"secret": "GEZDGNBVGY3TQOJQ"}).encode()
+        status, _, _ = await http(self.cfg.http_port, "POST", "/api/totp/check", self.HEADERS, body)
+        self.assertEqual(status, 200)
+        self.assertEqual(d.last_otp_step, int(time.time() // 30))
 
     async def test_setup_rejects_bad_input_without_writing(self):
         await self.start_setup_daemon()

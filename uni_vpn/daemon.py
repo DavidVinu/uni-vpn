@@ -188,6 +188,8 @@ class Daemon:
             "pac_refresh": "manual" if pf.IS_MACOS else "auto",
             "log_tail": list(self.log_tail)[-30:],
             "setup_needed": self.needs_setup,
+            # A connect loop is running (also while retrying in offline, blocked or error).
+            "busy": self._loop_task is not None and not self._loop_task.done(),
             "error_kind": self.error_kind(),
             "platform": "windows" if pf.IS_WINDOWS else "macos" if pf.IS_MACOS else "linux",
             "elevated": self._elevated(),
@@ -220,18 +222,39 @@ class Daemon:
             raise ValueError(f"Fix config.toml first: {self.config_error}")
         path = self.config_path or config_mod.default_path()
         loop = asyncio.get_running_loop()
-        if path.exists():
-            await loop.run_in_executor(None, config_mod.set_user, path, user)
-        else:
-            await loop.run_in_executor(None, config_mod.write_initial, path, user)
+        # Secrets first: if the keyring refuses, no config.toml exists yet and the assistant
+        # stays the way in after a restart.
+        previous_user = self.cfg.user
         self.cfg.user = user
+        try:
+            await loop.run_in_executor(None, self.password_setter, password)
+            await loop.run_in_executor(None, self.totp_setter, token)
+            if path.exists():
+                await loop.run_in_executor(None, config_mod.set_user, path, user)
+            else:
+                await loop.run_in_executor(None, config_mod.write_initial, path, user)
+        except config_mod.ConfigError as exc:
+            self.cfg.user = previous_user
+            raise ValueError(str(exc)) from exc
+        except BaseException:
+            self.cfg.user = previous_user
+            raise
         self.config_path = path
-        await loop.run_in_executor(None, self.password_setter, password)
-        await loop.run_in_executor(None, self.totp_setter, token)
         self.log.info("Setup completed for %s", user)
         self.needs_setup = False
         self.config_error = None
-        self.last_otp_step = None
+        await self._secrets_changed()
+
+    def note_code_shown(self) -> None:
+        """A check code was shown: the user may type it into the MFA portal, which uses it up."""
+        self.last_otp_step = int(time.time() // OTP_STEP)
+
+    async def _secrets_changed(self) -> None:
+        """New password or TOTP secret: an attempt still running with the old ones starts over."""
+        tunnel = self.tunnel
+        if tunnel and self.state == State.connecting and not tunnel.exited.is_set():
+            self.log.info("Secrets changed while connecting, starting over")
+            await tunnel.stop(self.cfg.stop_grace)
         await self.request_connect()
 
     def pac(self) -> str:
@@ -351,12 +374,13 @@ class Daemon:
     async def set_password(self, password: str) -> None:
         await asyncio.get_running_loop().run_in_executor(None, self.password_setter, password)
         self.log.info("Password stored in the keyring")
-        await self.request_connect()
+        await self._secrets_changed()
 
     async def set_totp(self, token: str) -> None:
         await asyncio.get_running_loop().run_in_executor(None, self.totp_setter, token)
         self.log.info("TOTP secret stored in the keyring")
-        await self.request_connect()
+        self.note_code_shown()  # the page shows the new check code
+        await self._secrets_changed()
 
     # --- Connecting -------------------------------------------------------
 
@@ -374,6 +398,11 @@ class Daemon:
                 self._set(State.offline, "No network or captive portal")
                 await self._sleep(cfg.retry_interval)
                 continue
+            wait = self._otp_wait()
+            if wait:
+                self._set(State.connecting, "Waiting for the next one-time code (up to 30 s)")
+                await self._sleep(wait)
+                continue  # checks Cisco, network and demand again, then fetches the secrets
             try:
                 password = await self.password_getter()
             except credentials.PasswordMissing:
@@ -397,13 +426,6 @@ class Daemon:
                 self._final(State.keyring, f"TOTP secret unreadable: {exc}")
                 return
 
-            wait = self._otp_wait()
-            if wait:
-                self._set(State.connecting, "Waiting for the next one-time code (up to 30 s)")
-                await self._sleep(wait)
-                if not self.has_demand():
-                    del password, totp
-                    continue
             self._set(State.connecting, "Connecting")
             try:
                 tunnel = self.tunnel_factory()

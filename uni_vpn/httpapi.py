@@ -9,6 +9,7 @@ import logging
 import re
 from pathlib import Path
 
+from . import config as config_mod
 from . import totp
 
 MAX_HEADER = 16 * 1024
@@ -28,7 +29,7 @@ def allowed_origin(origin: str | None, port: int) -> bool:
     # "null" (sandboxed iframe, data: page) is a foreign origin, not a missing one.
     if origin is None or origin == "":
         return True
-    return origin == f"http://127.0.0.1:{port}"
+    return origin in (f"http://127.0.0.1:{port}", f"http://localhost:{port}")
 
 
 def allowed_host(host: str | None, port: int) -> bool:
@@ -197,28 +198,35 @@ class HttpApi:
             except ValueError as exc:
                 return 400, "text/plain", str(exc).encode()
             remaining = totp.STEP - int(time.time()) % totp.STEP
+            self.daemon.note_code_shown()
             return 200, "application/json", json.dumps({"ok": True, "code": totp.code(token),
                                                          "remaining": remaining}).encode()
         elif path == "/api/setup":
+            # Errors name the step that has to change, so the assistant can go back to it.
+            def fail(status: int, field: str | None, message: str):
+                return status, "application/json", json.dumps({"ok": False, "field": field, "error": message}).encode()
+
             try:
                 data = json.loads(body.decode("utf-8"))
                 user, password, secret = data["user"], data["password"], data["secret"]
             except (ValueError, KeyError, TypeError, UnicodeDecodeError):
-                return 400, "text/plain", b"expected JSON with 'user', 'password' and 'secret'"
+                return fail(400, None, "expected JSON with 'user', 'password' and 'secret'")
             if not all(isinstance(v, str) for v in (user, password, secret)):
-                return 400, "text/plain", b"user, password and secret must be text"
+                return fail(400, None, "user, password and secret must be text")
+            if not config_mod.valid_user(user.strip()):
+                return fail(400, "user", "Invalid university ID")
             if not password or "\n" in password or "\r" in password:
-                return 400, "text/plain", b"Enter your password"
+                return fail(400, "password", "Enter your password")
             try:
                 token = totp.normalize(secret)
             except ValueError as exc:
-                return 400, "text/plain", str(exc).encode()
+                return fail(400, "totp", str(exc))
             try:
                 await self.daemon.complete_setup(user, password, token)
             except ValueError as exc:
-                return 400, "text/plain", str(exc).encode()
+                return fail(400, "user", str(exc))
             except Exception as exc:  # noqa: BLE001 - the error text goes to the page
-                return 500, "text/plain", str(exc).encode()
+                return fail(500, None, str(exc))
             payload = {"ok": True, "state": self.daemon.state.value, "code": totp.code(token)}
             return 200, "application/json", json.dumps(payload).encode()
         else:
