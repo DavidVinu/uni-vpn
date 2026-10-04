@@ -131,6 +131,12 @@ class VpncScriptTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("add route 0.0.0.0/0 42", wintunnel.parse_state(state.read_text())["ERROR"])
 
+    def test_reconnect_tolerates_the_address_being_set_already(self):
+        result, state = self.run_script("reconnect", TUNIDX="42", INTERNAL_IP4_ADDRESS="10.8.0.5",
+                                        UNI_VPN_DRY_FAIL="set address")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("ERROR", wintunnel.parse_state(state.read_text()))
+
     def test_real_netsh_failure_on_a_missing_interface_is_reported(self):
         tmp = Path(tempfile.mkdtemp())
         state = tmp / "tunnel-1080.env"

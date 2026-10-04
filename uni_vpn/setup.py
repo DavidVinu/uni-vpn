@@ -347,7 +347,7 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
             return 0
         gui = False
         if not cfg_path.exists():
-            print(f"\nOpen {url} in a browser to finish the setup.")
+            print(f"\nOpen {url} in a browser to finish the setup (or here: uni-vpn setup --no-gui).")
             return 0
 
     if dry:

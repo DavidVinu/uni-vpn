@@ -146,6 +146,15 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((self.tunnel.socks.source, self.tunnel.socks.dns), ("127.0.0.2", ["127.0.0.3"]))
         await self.tunnel.stop(2)
 
+    async def test_script_error_after_a_reconnect_keeps_the_tunnel(self):
+        await self.tunnel.start(b"pw")
+        self.assertTrue(await self.tunnel.wait_ready(5))
+        self.tunnel.state_file.write_text("ERROR=netsh set address failed\nINTERNAL_IP4_ADDRESS=127.0.0.1\n")
+        await asyncio.sleep(1.5)
+        self.assertFalse(self.tunnel.exited.is_set())
+        self.assertIsNotNone(self.tunnel.socks)
+        await self.tunnel.stop(2)
+
     async def test_server_stops_when_openconnect_dies(self):
         await self.tunnel.start(b"pw")
         self.assertTrue(await self.tunnel.wait_ready(5))

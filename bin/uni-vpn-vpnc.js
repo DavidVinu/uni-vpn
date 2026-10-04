@@ -83,7 +83,13 @@ case "reconnect":
     run("interface ipv4 set interface " + idx + " metric=" + ROUTE_METRIC + " store=active");
     // No duplicate address detection: a tentative address cannot be bound for a moment.
     run("interface ipv4 set interface " + idx + " dadtransmits=0 store=active", true);
-    must("interface ipv4 set address " + idx + " static " + env("INTERNAL_IP4_ADDRESS") + " " + mask + " store=active");
+    // On reconnect the address is usually already set and netsh may refuse to set it again.
+    var setAddress = "interface ipv4 set address " + idx + " static " + env("INTERNAL_IP4_ADDRESS") + " " + mask + " store=active";
+    if (env("reason") == "connect") {
+        must(setAddress);
+    } else {
+        run(setAddress);
+    }
     run("interface ipv4 delete dnsservers " + idx + " all", true);
     run("interface ipv4 delete route 0.0.0.0/0 " + idx + " store=active", true);
     must("interface ipv4 add route 0.0.0.0/0 " + idx + " metric=" + ROUTE_METRIC + " store=active");

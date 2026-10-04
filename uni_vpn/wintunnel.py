@@ -111,9 +111,15 @@ class WindowsTunnel(Tunnel):
 
     async def _serve_when_up(self) -> None:
         """Start the SOCKS server on self.port as soon as the script reports the address, then follow it."""
+        reported = None
         while not self.exited.is_set():
             values = self._read_state()
-            if values.get("ERROR"):
+            if values.get("ERROR") and self.socks is not None:
+                # After a reconnect of openconnect: the tunnel may still work, so keep it.
+                if values["ERROR"] != reported:
+                    reported = values["ERROR"]
+                    self.log.warning("vpnc script after reconnect: %s", reported)
+            elif values.get("ERROR"):
                 # The script could not set up the adapter; without it nothing would work.
                 self.log.error("Tunnel setup failed: %s", values["ERROR"])
                 self.classification = ("error", f"Tunnel setup failed: {values['ERROR']}")
