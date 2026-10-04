@@ -433,7 +433,8 @@ class FailureTests(DaemonHarness):
         await wait_state(d, dm.State.idle)
         await asyncio.sleep(0.5)
         self.assertEqual(d.state, dm.State.idle)
-        self.assertEqual(len(self.pw_lines()), 1, "no new attempt after the Disconnect")
+        # Counted by the daemon: on a slow runner the fake may be gone before it records the password.
+        self.assertEqual(d.connect_count, 1, "no new attempt after the Disconnect")
 
     async def test_stale_token_files_are_removed_at_start(self):
         (self.token_dir / "totp-old").write_text("base32:OLD")
