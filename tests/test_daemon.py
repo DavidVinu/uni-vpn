@@ -401,6 +401,14 @@ class FailureTests(DaemonHarness):
         self.assertEqual(await asyncio.wait_for(reader.read(10), 3), b"")
         writer.close()
 
+    async def test_windows_without_elevation_explains_instead_of_starting(self):
+        d = await self.start_daemon()
+        with mock.patch.object(d, "_elevated", return_value=False):
+            await d.request_connect()
+            await wait_state(d, dm.State.error)
+        self.assertIn("administrator", d.message)
+        self.assertEqual(self.pw_lines(), [])
+
     async def test_cisco_blocked_then_released(self):
         self.cisco = True
         d = await self.start_daemon()

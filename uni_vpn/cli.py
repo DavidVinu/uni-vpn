@@ -286,7 +286,7 @@ def cmd_update(args) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="uni-vpn", description="University VPN on demand as a local SOCKS5 proxy")
-    parser.add_argument("--config", help="Path to config.toml (default: ~/.config/uni-vpn/config.toml)")
+    parser.add_argument("--config", help=f"Path to config.toml (default: {pf.config_dir() / 'config.toml'})")
     parser.add_argument("--version", action="version", version=f"uni-vpn {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -301,11 +301,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-n", "--lines", type=int, default=200)
     p.set_defaults(func=cmd_log)
     sub.add_parser("doctor", help="Self-diagnosis").set_defaults(func=cmd_doctor)
-    sub.add_parser("daemon", help="Run the service in the foreground (for systemd/launchd)").set_defaults(func=cmd_daemon)
+    sub.add_parser("daemon", help="Run the service in the foreground (used by the background service)").set_defaults(func=cmd_daemon)
     p = sub.add_parser("service", help="Control the service")
     p.add_argument("action", choices=["start", "stop", "restart", "enable", "disable", "status"])
     p.set_defaults(func=cmd_service)
-    p = sub.add_parser("setup", help="Set up (called by install.sh)")
+    p = sub.add_parser("setup", help="Set up (called by the installer)")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--user", help="University ID")
     p.add_argument("--no-gui", action="store_true", help="Ask in the terminal instead of opening the setup assistant")
@@ -315,7 +315,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--yes", action="store_true", help="Delete the keyring entries without asking")
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(func=cmd_uninstall)
-    p = sub.add_parser("update", help="git pull and restart the service")
+    p = sub.add_parser("update", help="Fetch the latest version and restart the service")
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(func=cmd_update)
     return parser

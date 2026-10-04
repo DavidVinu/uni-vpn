@@ -363,6 +363,9 @@ class Daemon:
     async def _connect_loop(self) -> None:
         cfg = self.cfg
         while self.has_demand():
+            if self._elevated() is False:
+                self._final(State.error, "Needs administrator rights (Wintun): run the installer again")
+                return
             if self.cisco_check():
                 self._set(State.blocked, BLOCKED_MESSAGE)
                 await self._sleep(cfg.retry_interval)
