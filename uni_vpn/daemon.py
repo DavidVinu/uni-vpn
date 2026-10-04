@@ -36,6 +36,18 @@ OTP_STEP = 30  # Sekunden je Einmalcode (RFC 6238, wie openconnect)
 BLOCKED_MESSAGE = "Cisco Secure Client ist verbunden, uni-vpn pausiert"
 
 
+async def wait_event(event: asyncio.Event, timeout: float) -> bool:
+    """Wait for an event; True if it was set. Unlike asyncio.wait_for on Python 3.11, a cancel
+    that races with the event being set is never swallowed (gh-86296)."""
+    waiter = asyncio.ensure_future(event.wait())
+    try:
+        done, _pending = await asyncio.wait({waiter}, timeout=max(timeout, 0))
+    finally:
+        if not waiter.done():
+            waiter.cancel()
+    return bool(done)
+
+
 async def default_probe(host: str, timeout: float) -> bool:
     """TLS-Handshake auf host:443 mit Systemtruststore. False bei Captive Portal oder ohne Netz."""
     context = ssl.create_default_context()
@@ -234,10 +246,7 @@ class Daemon:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return None
-            changed = self._changed
-            try:
-                await asyncio.wait_for(changed.wait(), remaining)
-            except asyncio.TimeoutError:
+            if not await wait_event(self._changed, remaining):
                 return None
 
     def _ensure_loop(self) -> None:
@@ -246,10 +255,7 @@ class Daemon:
 
     async def _sleep(self, seconds: float) -> None:
         self._wake.clear()
-        try:
-            await asyncio.wait_for(self._wake.wait(), seconds)
-        except asyncio.TimeoutError:
-            pass
+        await wait_event(self._wake, seconds)
 
     async def request_connect(self) -> None:
         if self.config_error:
