@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import logging
 import re
+from pathlib import Path
 
 from . import totp
 
@@ -14,95 +16,12 @@ MAX_BODY = 64 * 1024
 
 CONTENT_LENGTH = re.compile(r"[0-9]+")
 
-STATUS_PAGE = """<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Uni VPN</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-body{font:15px/1.4 system-ui,sans-serif;max-width:40rem;margin:2rem auto;padding:0 1rem;color:#222;background:#fafafa}
-h1{font-size:1.3rem;margin:0 0 1rem}
-.state{display:flex;align-items:center;gap:.6rem;font-size:1.1rem;margin:1rem 0}
-.dot{width:.9rem;height:.9rem;border-radius:50%;background:#999;flex:none}
-.dot.connected{background:#2a9d4b}.dot.connecting,.dot.disconnecting{background:#e0b400}
-.dot.auth_failed,.dot.keyring,.dot.error{background:#d33}.dot.blocked{background:#e07b00}
-button{font:inherit;padding:.45rem .9rem;margin-right:.5rem;border:1px solid #888;border-radius:6px;background:#fff;cursor:pointer}
-button:disabled{opacity:.5;cursor:default}
-form{margin-top:1.5rem;padding-top:1rem;border-top:1px solid #ddd}
-input[type=password]{font:inherit;padding:.4rem;width:14rem}
-input#totp{width:100%;max-width:26rem}
-textarea{font:inherit;width:100%;max-width:26rem;padding:.4rem}
-pre{background:#eee;padding:.6rem;font-size:12px;max-height:16rem;overflow:auto;white-space:pre-wrap}
-small{color:#666}
-</style></head><body>
-<h1>Uni VPN</h1>
-<div class="state"><span class="dot" id="dot"></span><span id="msg">loading</span></div>
-<div><button id="connect">Connect</button><button id="disconnect">Disconnect</button></div>
-<div id="meta"><small></small></div>
-<form id="pwform"><label>Save university password in the keyring:<br><input type="password" id="pw" autocomplete="current-password"></label>
-<button type="submit">Save</button> <small id="pwmsg"></small></form>
-<form id="totpform"><label>Save TOTP secret (second factor) in the keyring:<br><input type="password" id="totp" autocomplete="off" placeholder="otpauth://... or Base32"></label>
-<button type="submit">Save</button> <small id="totpmsg"></small><br>
-<small>From the <a href="https://mfa.uni-heidelberg.de/" target="_blank" rel="noopener">MFA portal</a> (reachable only on the university network or via VPN):
-set up "Soft-Token (zeitbasiert)", click "Tokendetails einblenden", copy the text between <code>secret=</code> and <code>&amp;issuer=</code>.</small></form>
-<form id="domform"><label>Domains that go through the university (one per line, also covers subdomains):<br>
-<textarea id="domains" rows="5" spellcheck="false"></textarea></label><br>
-<button type="submit">Save</button> <small id="dommsg"></small></form>
-<details><summary>Log</summary><pre id="log"></pre></details>
-<script>
-const H = {"X-Uni-VPN": "1", "Content-Type": "application/json"};
-let domainsShown = false, pacRefresh = "auto";
-async function post(path, body) { return fetch(path, {method: "POST", headers: H, body: body ? JSON.stringify(body) : "{}"}); }
-async function refresh() {
-  try {
-    const s = await (await fetch("/status.json")).json();
-    pacRefresh = s.pac_refresh;
-    if (!domainsShown) { document.getElementById("domains").value = (s.domains || []).join("\n"); domainsShown = true; }
-    document.getElementById("dot").className = "dot " + s.state;
-    document.getElementById("msg").textContent = s.message;
-    document.querySelector("#meta small").textContent =
-      s.user + " @ " + s.host + " | SOCKS 127.0.0.1:" + s.socks_port + " | Connections: " + s.active_connections +
-      " | Version " + s.version;
-    document.getElementById("log").textContent = (s.log_tail || []).join("\\n");
-    document.getElementById("connect").disabled = ["connected", "connecting"].includes(s.state);
-    document.getElementById("disconnect").disabled = ["idle", "disconnecting"].includes(s.state);
-  } catch (e) { document.getElementById("msg").textContent = "Daemon not reachable"; }
-}
-document.getElementById("connect").onclick = () => post("/api/connect").then(refresh);
-document.getElementById("disconnect").onclick = () => post("/api/disconnect").then(refresh);
-document.getElementById("pwform").onsubmit = async (e) => {
-  e.preventDefault();
-  const r = await post("/api/password", {password: document.getElementById("pw").value});
-  document.getElementById("pwmsg").textContent = r.ok ? "saved" : "Error: " + (await r.text());
-  document.getElementById("pw").value = "";
-  refresh();
-};
-document.getElementById("domform").onsubmit = async (e) => {
-  e.preventDefault();
-  const r = await post("/api/domains", {text: document.getElementById("domains").value});
-  const msg = document.getElementById("dommsg");
-  if (r.ok) {
-    const d = await r.json();
-    document.getElementById("domains").value = d.domains.join("\n");
-    msg.textContent = pacRefresh === "auto" ? "saved, browsers pick up the rule on their own" : "saved, restart the browser";
-  } else {
-    msg.textContent = "Error: " + (await r.text());
-  }
-};
-document.getElementById("totpform").onsubmit = async (e) => {
-  e.preventDefault();
-  const r = await post("/api/totp", {secret: document.getElementById("totp").value});
-  const msg = document.getElementById("totpmsg");
-  if (r.ok) {
-    const d = await r.json();
-    msg.textContent = "saved, check code " + d.code + " (must match the app)";
-  } else {
-    msg.textContent = "Error: " + (await r.text());
-  }
-  document.getElementById("totp").value = "";
-  refresh();
-};
-refresh(); setInterval(refresh, 2000);
-</script></body></html>
-"""
+UI_FILE = Path(__file__).resolve().parent / "ui" / "index.html"
+
+
+def status_page() -> bytes:
+    """The app: setup assistant on first run, status and settings afterwards."""
+    return UI_FILE.read_bytes()
 
 
 def allowed_origin(origin: str | None, port: int) -> bool:
@@ -206,7 +125,7 @@ class HttpApi:
             return 204, "text/plain", b""
         if method == "GET":
             if path == "/":
-                return 200, "text/html", STATUS_PAGE.encode()
+                return 200, "text/html", status_page()
             if path == "/status.json":
                 return 200, "application/json", json.dumps(self.daemon.status()).encode()
             if path == "/proxy.pac":
@@ -263,6 +182,41 @@ class HttpApi:
                 return 400, "text/plain", str(exc).encode()
             try:
                 await self.daemon.set_totp(token)
+            except Exception as exc:  # noqa: BLE001 - the error text goes to the page
+                return 500, "text/plain", str(exc).encode()
+            payload = {"ok": True, "state": self.daemon.state.value, "code": totp.code(token)}
+            return 200, "application/json", json.dumps(payload).encode()
+        elif path == "/api/totp/check":
+            # Check code for a secret without storing it: the setup assistant shows it for the
+            # portal's "Testen" step before anything is saved.
+            try:
+                secret = json.loads(body.decode("utf-8"))["secret"]
+                token = totp.normalize(secret if isinstance(secret, str) else "")
+            except (KeyError, TypeError, UnicodeDecodeError):
+                return 400, "text/plain", b"expected JSON with 'secret'"
+            except ValueError as exc:
+                return 400, "text/plain", str(exc).encode()
+            remaining = totp.STEP - int(time.time()) % totp.STEP
+            return 200, "application/json", json.dumps({"ok": True, "code": totp.code(token),
+                                                         "remaining": remaining}).encode()
+        elif path == "/api/setup":
+            try:
+                data = json.loads(body.decode("utf-8"))
+                user, password, secret = data["user"], data["password"], data["secret"]
+            except (ValueError, KeyError, TypeError, UnicodeDecodeError):
+                return 400, "text/plain", b"expected JSON with 'user', 'password' and 'secret'"
+            if not all(isinstance(v, str) for v in (user, password, secret)):
+                return 400, "text/plain", b"user, password and secret must be text"
+            if not password or "\n" in password or "\r" in password:
+                return 400, "text/plain", b"Enter your password"
+            try:
+                token = totp.normalize(secret)
+            except ValueError as exc:
+                return 400, "text/plain", str(exc).encode()
+            try:
+                await self.daemon.complete_setup(user, password, token)
+            except ValueError as exc:
+                return 400, "text/plain", str(exc).encode()
             except Exception as exc:  # noqa: BLE001 - the error text goes to the page
                 return 500, "text/plain", str(exc).encode()
             payload = {"ok": True, "state": self.daemon.state.value, "code": totp.code(token)}

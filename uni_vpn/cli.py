@@ -226,6 +226,7 @@ def cmd_daemon(args) -> int:
         return 0
     log, tail = setup_logging(pf.log_file())
     config_error = None
+    cfg_path = Path(args.config) if args.config else config.default_path()
     try:
         cfg = _load(args)
     except config.ConfigError as exc:
@@ -241,7 +242,8 @@ def cmd_daemon(args) -> int:
             log.warning("Not running elevated: openconnect cannot create the Wintun adapter")
 
     async def run() -> None:
-        daemon = Daemon(cfg, log, config_error=config_error, log_tail=tail)
+        daemon = Daemon(cfg, log, config_error=config_error, log_tail=tail, config_path=cfg_path,
+                        needs_setup=not cfg_path.exists())
         install_signal_handlers(asyncio.get_running_loop(), daemon)
         await daemon.run()
 

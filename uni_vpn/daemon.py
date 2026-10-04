@@ -13,6 +13,7 @@ from typing import Awaitable, Callable
 
 from . import PROTOCOL, __version__, credentials, pac, sysproxy
 from . import platform as pf
+from . import config as config_mod
 from .config import Config
 from .forwarder import Forwarder
 from .tunnel import Tunnel, remove_stale_token_files
@@ -70,6 +71,8 @@ class Daemon:
                  cisco_check: Callable[[], bool] | None = None,
                  tunnel_factory: Callable[[], Tunnel] | None = None,
                  config_error: str | None = None,
+                 config_path: Path | None = None,
+                 needs_setup: bool = False,
                  log_tail=None,
                  wrapper: str | None = None,
                  token_dir: Path | None = None,
@@ -88,6 +91,9 @@ class Daemon:
         self.cisco_check = cisco_check or pf.cisco_connected
         self.tunnel_factory = tunnel_factory or self._make_tunnel
         self.config_error = config_error
+        self.config_path = config_path or cfg.path
+        # No config.toml yet: the status page shows the setup assistant instead of an error.
+        self.needs_setup = needs_setup
         self.log_tail = log_tail if log_tail is not None else []
         self.wrapper = wrapper or str(pf.bin_dir() / "uni-vpn-ocproxy")
 
@@ -115,7 +121,9 @@ class Daemon:
         self.started = asyncio.Event()
         self.forwarder = Forwarder("127.0.0.1", cfg.socks_port, self.acquire, self.note_activity,
                                    cfg.halfclose_grace, self.log)
-        if config_error:
+        if needs_setup:
+            self.message = "Setup needed"
+        elif config_error:
             self._set(State.error, f"Configuration error: {config_error}")
 
     # --- Helpers ----------------------------------------------------------
@@ -179,7 +187,44 @@ class Daemon:
             "pac_url": sysproxy.pac_url(self.cfg.http_port),
             "pac_refresh": "manual" if pf.IS_MACOS else "auto",
             "log_tail": list(self.log_tail)[-30:],
+            "setup_needed": self.needs_setup,
+            "error_kind": self.error_kind(),
+            "platform": "windows" if pf.IS_WINDOWS else "macos" if pf.IS_MACOS else "linux",
         }
+
+    def error_kind(self) -> str | None:
+        """Which factor the current error is about, so the page can offer the right fix."""
+        if self.state not in (State.auth_failed, State.keyring):
+            return None
+        text = self.message.lower()
+        if "one-time code" in text or "totp" in text:
+            return "totp"
+        if "password" in text:
+            return "password"
+        return None
+
+    async def complete_setup(self, user: str, password: str, token: str) -> None:
+        """First run from the setup assistant: config.toml, both secrets, then a test connection."""
+        user = user.strip()
+        if not config_mod.valid_user(user):
+            raise ValueError("Invalid university ID")
+        if self.config_error and not self.needs_setup:
+            raise ValueError(f"Fix config.toml first: {self.config_error}")
+        path = self.config_path or config_mod.default_path()
+        loop = asyncio.get_running_loop()
+        if path.exists():
+            await loop.run_in_executor(None, config_mod.set_user, path, user)
+        else:
+            await loop.run_in_executor(None, config_mod.write_initial, path, user)
+        self.cfg.user = user
+        self.config_path = path
+        await loop.run_in_executor(None, self.password_setter, password)
+        await loop.run_in_executor(None, self.totp_setter, token)
+        self.log.info("Setup completed for %s", user)
+        self.needs_setup = False
+        self.config_error = None
+        self.last_otp_step = None
+        await self.request_connect()
 
     def pac(self) -> str:
         return pac.build_pac(pac.read_domains(self.domains_path), self.cfg.socks_port)

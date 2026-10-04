@@ -154,6 +154,27 @@ http_port = 1081         # status page http://127.0.0.1:1081
 
 
 def write_initial(path: Path, user: str, host: str = DEFAULT_HOST) -> None:
+    if not valid_user(user):
+        raise ConfigError(f"invalid university ID: {user!r}")
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     path.write_text(TEMPLATE.format(host=host, user=user, useragent=DEFAULT_USERAGENT), encoding="utf-8")
     path.chmod(0o600)
+
+
+USER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+def valid_user(user: str) -> bool:
+    return bool(USER_RE.fullmatch(user or ""))
+
+
+def set_user(path: Path, user: str) -> None:
+    """Write a new university ID into an existing config.toml, keeping everything else."""
+    if not valid_user(user):
+        raise ConfigError(f"invalid university ID: {user!r}")
+    text = path.read_text(encoding="utf-8")
+    new, count = re.subn(r'(?m)^(\s*user\s*=\s*)"[^"\n]*"', lambda m: f'{m.group(1)}"{user}"', text, count=1)
+    if not count:
+        head, sep, rest = text.partition("\n[")
+        new = head.rstrip("\n") + f'\nuser = "{user}"\n' + (sep.lstrip("\n") and "\n[" + rest)
+    path.write_text(new, encoding="utf-8")

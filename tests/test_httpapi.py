@@ -234,6 +234,79 @@ class TotpEndpointTests(DaemonHarness):
         self.assertNotIn(b"pw-s3cret", payload)
 
 
+class SetupTests(DaemonHarness):
+    HEADERS = {"X-Uni-VPN": "1", "Content-Type": "application/json"}
+
+    async def start_setup_daemon(self):
+        import tempfile
+        from pathlib import Path
+
+        self.cfg_path = Path(tempfile.mkdtemp()) / "uni-vpn" / "config.toml"
+        self.cfg.user = ""
+        return await self.start_daemon(config_error="missing", config_path=self.cfg_path, needs_setup=True)
+
+    async def test_status_reports_setup_needed_and_connect_is_refused(self):
+        d = await self.start_setup_daemon()
+        _, _, payload = await http(self.cfg.http_port, "GET", "/status.json")
+        data = json.loads(payload)
+        self.assertTrue(data["setup_needed"])
+        self.assertEqual(data["state"], "idle")
+        await d.request_connect()
+        self.assertEqual(self.pw_lines(), [])
+
+    async def test_setup_writes_config_stores_secrets_and_connects(self):
+        d = await self.start_setup_daemon()
+        body = json.dumps({"user": "ab123", "password": "pw", "secret": "GEZDGNBVGY3TQOJQ"}).encode()
+        status, _, payload = await http(self.cfg.http_port, "POST", "/api/setup", self.HEADERS, body)
+        self.assertEqual(status, 200, payload)
+        self.assertEqual(json.loads(payload)["code"], totp.code("base32:GEZDGNBVGY3TQOJQ"))
+        self.assertIn('user = "ab123"', self.cfg_path.read_text())
+        self.assertEqual(self.stored, ["pw"])
+        self.assertEqual(self.stored_totp, ["base32:GEZDGNBVGY3TQOJQ"])
+        await wait_state(d, dm.State.connected)
+        _, _, payload = await http(self.cfg.http_port, "GET", "/status.json")
+        self.assertFalse(json.loads(payload)["setup_needed"])
+
+    async def test_setup_rejects_bad_input_without_writing(self):
+        await self.start_setup_daemon()
+        for body in ({"user": "ab 1\"", "password": "pw", "secret": "GEZDGNBVGY3TQOJQ"},
+                     {"user": "ab1", "password": "", "secret": "GEZDGNBVGY3TQOJQ"},
+                     {"user": "ab1", "password": "a\nb", "secret": "GEZDGNBVGY3TQOJQ"},
+                     {"user": "ab1", "password": "pw", "secret": "0189"},
+                     {"user": "ab1", "password": "pw"}):
+            status, _, _ = await http(self.cfg.http_port, "POST", "/api/setup", self.HEADERS, json.dumps(body).encode())
+            self.assertEqual(status, 400, body)
+        self.assertFalse(self.cfg_path.exists())
+        self.assertEqual(self.stored, [])
+
+    async def test_setup_needs_csrf_header(self):
+        await self.start_setup_daemon()
+        body = json.dumps({"user": "ab1", "password": "pw", "secret": "GEZDGNBVGY3TQOJQ"}).encode()
+        status, _, _ = await http(self.cfg.http_port, "POST", "/api/setup", {"Content-Type": "application/json"}, body)
+        self.assertEqual(status, 403)
+
+    async def test_totp_check_shows_code_without_storing(self):
+        await self.start_daemon()
+        body = json.dumps({"secret": "otpauth://totp/x?secret=GEZDGNBVGY3TQOJQ"}).encode()
+        status, _, payload = await http(self.cfg.http_port, "POST", "/api/totp/check", self.HEADERS, body)
+        self.assertEqual(status, 200, payload)
+        data = json.loads(payload)
+        self.assertEqual(len(data["code"]), 6)
+        self.assertTrue(1 <= data["remaining"] <= 30)
+        self.assertEqual(self.stored_totp, [])
+        status, _, _ = await http(self.cfg.http_port, "POST", "/api/totp/check", self.HEADERS, b'{"secret": "nope!"}')
+        self.assertEqual(status, 400)
+
+    async def test_error_kind_names_the_factor(self):
+        d = await self.start_daemon()
+        d._set(dm.State.auth_failed, "One-time code rejected: check the clock")
+        self.assertEqual(d.status()["error_kind"], "totp")
+        d._set(dm.State.keyring, "No password stored: uni-vpn password")
+        self.assertEqual(d.status()["error_kind"], "password")
+        d._set(dm.State.idle, "Not connected")
+        self.assertIsNone(d.status()["error_kind"])
+
+
 class PacTests(DaemonHarness):
     HEADERS = {"X-Uni-VPN": "1", "Content-Type": "application/json"}
 

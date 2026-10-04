@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 ALGORITHMS = {"SHA1": "sha1", "SHA256": "sha256", "SHA512": "sha512"}
 BASE32 = re.compile(r"^[A-Z2-7]+$")
+STEP = 30  # seconds per code
 MIN_CHARS = 16  # 80 bits, no portal issues less
 
 
@@ -70,7 +71,7 @@ def code(token: str, now: float | None = None) -> str:
     if not token.startswith("base32:"):
         raise ValueError("Unknown token format")
     key = _decode(token[len("base32:"):])
-    counter = int((time.time() if now is None else now) // 30)
+    counter = int((time.time() if now is None else now) // STEP)
     mac = hmac.new(key, struct.pack(">Q", counter), getattr(hashlib, digest)).digest()
     offset = mac[-1] & 0x0F
     number = struct.unpack(">I", mac[offset:offset + 4])[0] & 0x7FFFFFFF
