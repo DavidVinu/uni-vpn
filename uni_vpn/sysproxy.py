@@ -1,8 +1,7 @@
-"""Proxy-Regel im System eintragen: GNOME (gsettings) auf Linux, networksetup auf macOS.
+"""Register the proxy rule with the system: GNOME (gsettings) on Linux, networksetup on macOS.
 
-Chrome und Firefox lesen die Systemeinstellung "automatische Proxy-Konfiguration" und holen
-sich die PAC-Datei vom Daemon. Der vorherige Zustand wird gesichert und beim Entfernen
-wiederhergestellt.
+Chrome and Firefox read the system's "automatic proxy configuration" setting and fetch the
+PAC file from the daemon. The previous state is backed up and restored on removal.
 """
 
 from __future__ import annotations
@@ -51,13 +50,13 @@ def _services(run) -> list[str]:
     names = []
     for line in (result.stdout or "").splitlines()[1:]:
         line = line.strip()
-        if line and not line.startswith("*"):  # * = deaktivierter Dienst
+        if line and not line.startswith("*"):  # * = disabled service
             names.append(line)
     return names
 
 
 def current(run=subprocess.run) -> dict | None:
-    """Aktuelle Einstellung oder None, wenn das System keine bekannte Proxy-Verwaltung hat."""
+    """Current setting, or None if the system has no known proxy management."""
     try:
         if pf.IS_MACOS:
             services = {}
@@ -99,9 +98,9 @@ def restore(saved: dict, run=subprocess.run) -> None:
 
 
 def refresh(http_port: int, run=subprocess.run) -> None:
-    """Neue URL-Version setzen: GNOME meldet die Aenderung, Chrome und Firefox laden die PAC neu."""
+    """Set a new URL version: GNOME announces the change, Chrome and Firefox reload the PAC."""
     if pf.IS_MACOS:
-        return  # networksetup verlangt Admin-Rechte; Nutzer startet den Browser neu
+        return  # networksetup requires admin rights; the user restarts the browser
     try:
         _run(["gsettings", "set", SCHEMA, "autoconfig-url", pac_url(http_port, int(time.time()))], run)
     except (OSError, subprocess.SubprocessError):
@@ -109,7 +108,7 @@ def refresh(http_port: int, run=subprocess.run) -> None:
 
 
 def install(http_port: int, backup: Path | None = None, run=subprocess.run) -> str:
-    """Liefert 'ok', 'replaced' (fremde Einstellung ersetzt) oder 'unavailable'."""
+    """Returns 'ok', 'replaced' (a foreign setting was replaced) or 'unavailable'."""
     backup = backup or backup_path()
     before = current(run=run)
     if before is None:
@@ -140,7 +139,7 @@ def uninstall(backup: Path | None = None, run=subprocess.run) -> bool:
 
 
 def state(http_port: int, run=subprocess.run) -> str:
-    """'ok' (unsere PAC aktiv), 'unset', 'foreign' (andere Proxy-Einstellung) oder 'unavailable'."""
+    """'ok' (our PAC active), 'unset', 'foreign' (another proxy setting) or 'unavailable'."""
     now = current(run=run)
     if now is None:
         return "unavailable"

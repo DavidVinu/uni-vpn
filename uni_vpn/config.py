@@ -1,4 +1,4 @@
-"""config.toml lesen und schreiben."""
+"""Read and write config.toml."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ class ConfigError(Exception):
 
     def __str__(self) -> str:
         if self.line:
-            return f"config.toml Zeile {self.line}: {self.args[0]}"
+            return f"config.toml line {self.line}: {self.args[0]}"
         return f"config.toml: {self.args[0]}"
 
 
@@ -32,7 +32,7 @@ class Config:
     useragent: str = DEFAULT_USERAGENT
     openconnect: str | None = None
     ocproxy: str | None = None
-    # [timing], alles in Sekunden
+    # [timing], all in seconds
     ready_timeout: float = 45.0
     client_wait: float = 25.0
     stop_grace: float = 15.0
@@ -93,7 +93,7 @@ def _check(key: str, value, types: tuple[type, ...], text: str, table: str | Non
     ok = isinstance(value, types) and not (isinstance(value, bool) and bool not in types)
     if not ok:
         names = "/".join(t.__name__ for t in types)
-        raise ConfigError(f"'{key}' muss {names} sein", line=_line_of_key(text, key, table))
+        raise ConfigError(f"'{key}' must be {names}", line=_line_of_key(text, key, table))
 
 
 def load(path: Path | None = None) -> Config:
@@ -101,7 +101,7 @@ def load(path: Path | None = None) -> Config:
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
-        raise ConfigError(f"{path} fehlt, bitte install.sh ausfuehren") from None
+        raise ConfigError(f"{path} is missing, please run install.sh") from None
     try:
         data = tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
@@ -112,41 +112,41 @@ def load(path: Path | None = None) -> Config:
     for key, value in data.items():
         if key == "timing":
             if not isinstance(value, dict):
-                raise ConfigError("'timing' muss eine Tabelle sein", line=_line_of_key(text, key))
+                raise ConfigError("'timing' must be a table", line=_line_of_key(text, key))
             for tkey, tvalue in value.items():
                 if tkey not in TIMING_KEYS:
-                    raise ConfigError(f"unbekannter Schluessel '{tkey}'", line=_line_of_key(text, tkey, "timing"))
+                    raise ConfigError(f"unknown key '{tkey}'", line=_line_of_key(text, tkey, "timing"))
                 _check(tkey, tvalue, TIMING_KEYS[tkey], text, "timing")
                 if tkey == "backoff" and not all(isinstance(v, _NUMBER) for v in tvalue):
-                    raise ConfigError("'backoff' muss eine Liste von Zahlen sein", line=_line_of_key(text, tkey, "timing"))
+                    raise ConfigError("'backoff' must be a list of numbers", line=_line_of_key(text, tkey, "timing"))
                 setattr(cfg, tkey, tvalue)
             continue
         if key not in TOP_KEYS:
-            raise ConfigError(f"unbekannter Schluessel '{key}'", line=_line_of_key(text, key))
+            raise ConfigError(f"unknown key '{key}'", line=_line_of_key(text, key))
         _check(key, value, TOP_KEYS[key], text, None)
         setattr(cfg, key, value)
 
     if not cfg.user:
-        raise ConfigError("'user' (Uni-ID) fehlt")
+        raise ConfigError("'user' (university ID) is missing")
     for name in ("socks_port", "http_port"):
         port = getattr(cfg, name)
         if not 1 <= port <= 65535:
-            raise ConfigError(f"'{name}' muss zwischen 1 und 65535 liegen", line=_line_of_key(text, name))
+            raise ConfigError(f"'{name}' must be between 1 and 65535", line=_line_of_key(text, name))
     if cfg.socks_port == cfg.http_port:
-        raise ConfigError("'socks_port' und 'http_port' muessen verschieden sein")
+        raise ConfigError("'socks_port' and 'http_port' must differ")
     if cfg.idle_minutes <= 0:
-        raise ConfigError("'idle_minutes' muss groesser als 0 sein", line=_line_of_key(text, "idle_minutes"))
+        raise ConfigError("'idle_minutes' must be greater than 0", line=_line_of_key(text, "idle_minutes"))
     if not cfg.backoff:
-        raise ConfigError("'backoff' darf nicht leer sein", line=_line_of_key(text, "backoff", "timing"))
+        raise ConfigError("'backoff' must not be empty", line=_line_of_key(text, "backoff", "timing"))
     return cfg
 
 
-TEMPLATE = """# uni-vpn Konfiguration
+TEMPLATE = """# uni-vpn configuration
 host = "{host}"
-user = "{user}"          # Uni-ID
-idle_minutes = 15        # Tunnel abbauen nach so vielen Minuten ohne Datenverkehr
-socks_port = 1080        # SOCKS5-Proxy fuer den Browser
-http_port = 1081         # Statusseite http://127.0.0.1:1081
+user = "{user}"          # university ID
+idle_minutes = 15        # tear the tunnel down after this many minutes without traffic
+socks_port = 1080        # SOCKS5 proxy for the browser
+http_port = 1081         # status page http://127.0.0.1:1081
 # useragent = "{useragent}"
 # openconnect = "/usr/sbin/openconnect"
 # ocproxy = "/usr/bin/ocproxy"

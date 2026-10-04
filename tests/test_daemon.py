@@ -20,7 +20,7 @@ async def wait_state(d, state, timeout=6):
         if d.state == state:
             return
         await asyncio.sleep(0.05)
-    raise AssertionError(f"Zustand ist {d.state.value} ({d.message}), erwartet {state.value}")
+    raise AssertionError(f"state is {d.state.value} ({d.message}), expected {state.value}")
 
 
 class DaemonHarness(unittest.IsolatedAsyncioTestCase):
@@ -33,12 +33,12 @@ class DaemonHarness(unittest.IsolatedAsyncioTestCase):
         self.env = mock.patch.dict(os.environ, {"FAKE_PASSWORD_FILE": str(self.pwfile), "FAKE_TOKEN_FILE": str(self.tokenfile),
                                                 "FAKE_MODE": "ok", "FAKE_DELAY": "0.2"})
         self.env.start()
-        # Die Tests bauen den Tunnel im Sekundentakt neu auf; das echte Warten auf das naechste
-        # Einmalcode-Fenster (bis 30 s) wuerde sie ausbremsen. Nur die OTP-Tests nutzen das Original.
+        # The tests reconnect the tunnel every second; really waiting for the next one-time
+        # code window (up to 30 s) would slow them down. Only the OTP tests use the original.
         self.real_otp_wait = dm.Daemon._otp_wait
         self.otp_patch = mock.patch.object(dm.Daemon, "_otp_wait", return_value=0)
         self.otp_patch.start()
-        # ocproxy=FAKE: irgendein ausfuehrbarer Pfad reicht, der Fake startet den Wrapper nie.
+        # ocproxy=FAKE: any executable path will do, the fake never starts the wrapper.
         self.cfg = Config(
             user="u", host="vpn.example", openconnect=FAKE, ocproxy=FAKE,
             socks_port=free_port(), http_port=free_port(),
@@ -46,7 +46,7 @@ class DaemonHarness(unittest.IsolatedAsyncioTestCase):
             halfclose_grace=0.5, demand_window=0.3, retry_interval=0.2, tick=0.1,
             backoff=[0.1, 0.1],
         )
-        self.password = b"geheim"
+        self.password = b"pw-s3cret"
         self.totp = b"base32:GEZDGNBVGY3TQOJQ"
         self.probe_result = True
         self.cisco = False
@@ -102,11 +102,11 @@ class ConnectTests(DaemonHarness):
     async def test_first_connection_starts_tunnel_and_echoes(self):
         d = await self.start_daemon()
         reader, writer = await self.client()
-        writer.write(b"hallo")
+        writer.write(b"hello")
         await writer.drain()
-        self.assertEqual(await asyncio.wait_for(reader.readexactly(5), 4), b"hallo")
+        self.assertEqual(await asyncio.wait_for(reader.readexactly(5), 4), b"hello")
         self.assertEqual(d.state, dm.State.connected)
-        self.assertEqual(self.pw_lines(), ["geheim"])
+        self.assertEqual(self.pw_lines(), ["pw-s3cret"])
         self.assertEqual(d.status()["active_connections"], 1)
         writer.close()
 
@@ -154,8 +154,8 @@ class ConnectTests(DaemonHarness):
         d = await self.start_daemon()
         reader, writer = await self.client()
         await wait_state(d, dm.State.connecting)
-        # Erst trennen, wenn der Prozess das Passwort gelesen hat: `connecting` wird vor dem
-        # Start gesetzt, und auf dem macOS-Runner brauchte der Fake dafuer laenger als der Test.
+        # Disconnect only once the process has read the password: `connecting` is set before
+        # the start, and on the macOS runner the fake took longer for that than the test.
         deadline = time.monotonic() + 3
         while len(self.pw_lines()) < 1 and time.monotonic() < deadline:
             await asyncio.sleep(0.05)
@@ -173,7 +173,7 @@ class ConnectTests(DaemonHarness):
         await d.request_connect()
         await wait_state(d, dm.State.connected)
         self.assertEqual(len(self.pw_lines()), 1)
-        # Der Wunsch "jetzt verbinden" ist erfuellt, danach zaehlt nur noch echte Nutzung.
+        # The "connect now" request is fulfilled, after that only real use counts.
         self.assertFalse(d.explicit)
 
     async def test_connect_request_during_disconnecting_reconnects(self):
@@ -181,7 +181,7 @@ class ConnectTests(DaemonHarness):
         await d.request_connect()
         await wait_state(d, dm.State.connected)
         disconnect = asyncio.create_task(d.request_disconnect())
-        await asyncio.sleep(0)  # request_disconnect hat den Zustand gesetzt und wartet auf den Prozess
+        await asyncio.sleep(0)  # request_disconnect has set the state and is waiting for the process
         self.assertEqual(d.state, dm.State.disconnecting)
         await d.request_connect()
         await disconnect
@@ -220,7 +220,7 @@ class FailureTests(DaemonHarness):
         self.assertEqual(await asyncio.wait_for(reader.read(10), 4), b"")
         writer.close()
         await wait_state(d, dm.State.auth_failed)
-        self.assertIn("Passwort", d.message)
+        self.assertIn("password", d.message)
         await asyncio.sleep(0.6)
         self.assertEqual(len(self.pw_lines()), 1)
         reader2, writer2 = await self.client()
@@ -241,7 +241,7 @@ class FailureTests(DaemonHarness):
     async def test_tunnel_dies_with_demand_reconnects(self):
         os.environ["FAKE_MODE"] = "exit_after_ready"
         os.environ["FAKE_EXIT_AFTER"] = "0.4"
-        self.cfg.demand_window = 1.5  # Bedarf kommt aus der Nutzung, nicht aus request_connect
+        self.cfg.demand_window = 1.5  # demand comes from usage, not from request_connect
         d = await self.start_daemon()
         reader, writer = await self.client()
         writer.write(b"x")
@@ -252,12 +252,12 @@ class FailureTests(DaemonHarness):
             await asyncio.sleep(0.05)
         self.assertGreaterEqual(len(self.pw_lines()), 2)
         self.assertIsNotNone(d.last_error)
-        self.assertIn("Exit 1", d.last_error["message"])
+        self.assertIn("exit code 1", d.last_error["message"])
 
     async def test_tunnel_dies_without_demand_goes_idle(self):
         os.environ["FAKE_MODE"] = "exit_after_ready"
         os.environ["FAKE_EXIT_AFTER"] = "0.8"
-        self.cfg.idle_minutes = 1  # Leerlauf-Timer darf hier nicht zuerst greifen
+        self.cfg.idle_minutes = 1  # the idle timer must not fire first here
         d = await self.start_daemon()
         reader, writer = await self.client()
         writer.write(b"x")
@@ -266,7 +266,7 @@ class FailureTests(DaemonHarness):
         await wait_state(d, dm.State.idle, timeout=4)
         await asyncio.sleep(0.5)
         self.assertEqual(len(self.pw_lines()), 1)
-        self.assertIn("Exit 1", d.last_error["message"])
+        self.assertIn("exit code 1", d.last_error["message"])
 
     async def test_password_missing(self):
         self.password = credentials.PasswordMissing("x")
@@ -289,7 +289,7 @@ class FailureTests(DaemonHarness):
         await d.request_connect()
         await wait_state(d, dm.State.keyring)
         self.assertIn("uni-vpn totp", d.message)
-        self.assertEqual(self.pw_lines(), [], "ohne Schluessel darf openconnect nicht starten")
+        self.assertEqual(self.pw_lines(), [], "openconnect must not start without a secret")
 
     async def test_set_totp_stores_and_connects(self):
         self.totp = credentials.TotpMissing("x")
@@ -306,9 +306,9 @@ class FailureTests(DaemonHarness):
         d = await self.start_daemon()
         await d.request_connect()
         await wait_state(d, dm.State.auth_failed)
-        self.assertIn("Einmalcode", d.message)
+        self.assertIn("One-time code", d.message)
         await asyncio.sleep(0.5)
-        self.assertEqual(len(self.pw_lines()), 1, "kein automatischer zweiter Versuch")
+        self.assertEqual(len(self.pw_lines()), 1, "no automatic second attempt")
 
     async def test_successful_login_records_otp_window(self):
         d = await self.start_daemon()
@@ -321,15 +321,15 @@ class FailureTests(DaemonHarness):
         d = await self.start_daemon()
         wait = self.real_otp_wait
         self.assertEqual(wait(d, now=1000.0), 0)
-        d.last_otp_step = int(1000.0 // 30)  # Fenster 990..1020
+        d.last_otp_step = int(1000.0 // 30)  # window 990..1020
         self.assertAlmostEqual(wait(d, now=1000.0), 20.5, places=1)
         self.assertAlmostEqual(wait(d, now=1019.0), 1.5, places=1)
         self.assertEqual(wait(d, now=1020.0), 0)
         self.assertEqual(wait(d, now=1100.0), 0)
 
     async def test_reconnect_in_same_window_waits_for_next_code(self):
-        # Gemessen 2026-09-08: derselbe Einmalcode gilt nur einmal. Ein Neuaufbau 3 s nach dem
-        # Login scheiterte mit "Login failed". Der Daemon wartet deshalb das Fenster ab.
+        # Measured 2026-09-08: the same one-time code is valid only once. Reconnecting 3 s after
+        # the login failed with "Login failed". So the daemon waits for the window to pass.
         d = await self.start_daemon()
         await d.request_connect()
         await wait_state(d, dm.State.connected)
@@ -339,13 +339,13 @@ class FailureTests(DaemonHarness):
             started = time.monotonic()
             await d.request_connect()
             await wait_state(d, dm.State.connecting)
-            self.assertIn("Einmalcode", d.message)
+            self.assertIn("one-time code", d.message)
             await wait_state(d, dm.State.connected)
         self.assertGreaterEqual(time.monotonic() - started, 0.8)
         self.assertEqual(len(self.pw_lines()), 2)
 
     async def test_stale_token_files_are_removed_at_start(self):
-        (self.token_dir / "totp-alt").write_text("base32:ALT")
+        (self.token_dir / "totp-old").write_text("base32:OLD")
         await self.start_daemon()
         self.assertEqual([p.name for p in self.token_dir.iterdir()], [])
 
@@ -354,21 +354,21 @@ class FailureTests(DaemonHarness):
         d = await self.start_daemon()
         await d.request_connect()
         await wait_state(d, dm.State.keyring)
-        self.assertIn("gesperrt", d.message)
+        self.assertIn("locked", d.message)
 
     async def test_set_password_stores_and_connects(self):
         self.password = credentials.PasswordMissing("x")
         d = await self.start_daemon()
         await d.request_connect()
         await wait_state(d, dm.State.keyring)
-        self.password = b"neu"
-        await d.set_password("neu")
-        self.assertEqual(self.stored, ["neu"])
+        self.password = b"new"
+        await d.set_password("new")
+        self.assertEqual(self.stored, ["new"])
         await wait_state(d, dm.State.connected)
 
     async def test_cisco_connecting_later_pauses_running_tunnel(self):
-        # Gemessen 2026-09-08: Cisco wurde bei stehendem Tunnel verbunden, uni-vpn lief weiter,
-        # weil die Pruefung nur beim Aufbau stattfand.
+        # Measured 2026-09-08: Cisco was connected while the tunnel was up, and uni-vpn kept
+        # running because the check only happened while connecting.
         d = await self.start_daemon()
         await d.request_connect()
         await wait_state(d, dm.State.connected)
@@ -380,8 +380,8 @@ class FailureTests(DaemonHarness):
             await asyncio.sleep(0.05)
         self.assertIsNone(d.tunnel)
         await asyncio.sleep(0.5)
-        self.assertEqual(d.state, dm.State.blocked, "ohne Bedarf bleibt blocked sichtbar")
-        self.assertEqual(len(self.pw_lines()), 1, "kein Neuaufbau, solange Cisco verbunden ist")
+        self.assertEqual(d.state, dm.State.blocked, "without demand, blocked stays visible")
+        self.assertEqual(len(self.pw_lines()), 1, "no reconnect while Cisco is connected")
         self.cisco = False
         await wait_state(d, dm.State.idle)
         await d.request_connect()
@@ -424,9 +424,9 @@ class FailureTests(DaemonHarness):
         self.assertIn("openconnect", d.message)
 
     async def test_config_error_daemon(self):
-        d = await self.start_daemon(config_error="config.toml Zeile 2: kaputt")
+        d = await self.start_daemon(config_error="config.toml line 2: broken")
         self.assertEqual(d.state, dm.State.error)
-        self.assertIn("Zeile 2", d.message)
+        self.assertIn("line 2", d.message)
         self.assertIsNone(await d.acquire())
 
 
@@ -450,10 +450,10 @@ class StatusTests(DaemonHarness):
         with self.assertLogs("t", logging.INFO) as logs:
             with mock.patch.object(dm.time, "time", lambda: real_time() + 120):
                 await asyncio.sleep(0.4)
-        self.assertTrue(any("Resume erkannt, Tunnel wird neu aufgebaut" in line for line in logs.output))
-        # Der alte Tunnel ist weg, die Browserverbindung wurde geschlossen ...
+        self.assertTrue(any("Resume detected, reconnecting the tunnel" in line for line in logs.output))
+        # The old tunnel is gone, the browser connection was closed ...
         self.assertEqual(await asyncio.wait_for(reader.read(10), 3), b"")
         writer.close()
-        # ... und weil noch Bedarf bestand, steht ein neuer Tunnel.
+        # ... and since there was still demand, a new tunnel is up.
         await wait_state(d, dm.State.connected)
         self.assertEqual(len(self.pw_lines()), 2)

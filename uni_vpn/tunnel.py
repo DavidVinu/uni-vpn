@@ -1,4 +1,4 @@
-"""openconnect-Prozess: Start, Bereitschaft, Stopp, stderr-Auswertung."""
+"""openconnect process: start, readiness, stop, stderr classification."""
 
 from __future__ import annotations
 
@@ -17,35 +17,35 @@ from pathlib import Path
 from . import platform as pf
 from .config import Config
 
-# Gemessen am 2026-09-08 gegen vpn-ac: Der ASA lehnt ein falsches Passwort mit "Login failed."
-# ab, bevor er nach dem OTP fragt. Bei falschem Einmalcode kommt erst die OTP-Abfrage
-# ("Generating OATH TOTP token code"), dann "Login failed.". In beiden Faellen zeigt er das
-# Formular erneut, stdin ist zu, "User input required", dann "Failed to complete
-# authentication". Die Reihenfolge entscheidet also, welcher Faktor falsch war.
-PASSWORD_REJECTED = "Anmeldung abgelehnt: Passwort pruefen (uni-vpn password)"
+# Measured on 2026-09-08 against vpn-ac: the ASA rejects a wrong password with "Login failed."
+# before it asks for the OTP. With a wrong one-time code the OTP prompt comes first
+# ("Generating OATH TOTP token code"), then "Login failed.". In both cases it shows the form
+# again, stdin is closed, "User input required", then "Failed to complete authentication".
+# So the order decides which factor was wrong.
+PASSWORD_REJECTED = "Login rejected: check your password (uni-vpn password)"
 TOTP_REJECTED = (
-    "Einmalcode abgelehnt: Uhrzeit des Rechners pruefen, sonst TOTP-Schluessel neu eintragen (uni-vpn totp)"
+    "One-time code rejected: check the computer's clock, otherwise re-enter the TOTP secret (uni-vpn totp)"
 )
-# Ohne vorheriges "Login failed." hat der Server etwas verlangt, das uni-vpn nicht ausfuellen kann.
+# Without a preceding "Login failed." the server asked for something uni-vpn cannot fill in.
 AUTH_REJECTED = (
-    "Anmeldung abgelehnt: Passwort pruefen (uni-vpn password). "
-    "Stimmt es, hat der Server etwas verlangt, das uni-vpn nicht kennt, siehe uni-vpn log"
+    "Login rejected: check your password (uni-vpn password). "
+    "If it is correct, the server asked for something uni-vpn does not know, see uni-vpn log"
 )
 OTP_GENERATED = "Generating OATH TOTP token code"
 LOGIN_FAILED = "Login failed"
 TOKEN_PREFIX = "totp-"
 
-# (Teilstring in openconnect-Ausgabe, Zustand, Meldung). Erste Uebereinstimmung gewinnt.
+# (substring of the openconnect output, state, message). The first match wins.
 MARKERS: list[tuple[str, str, str]] = [
     ("Server is rejecting the soft token", "auth_failed", TOTP_REJECTED),
-    ("Soft token string is invalid", "auth_failed", "TOTP-Schluessel unbrauchbar, neu eintragen (uni-vpn totp)"),
+    ("Soft token string is invalid", "auth_failed", "TOTP secret unusable, enter it again (uni-vpn totp)"),
     ("User input required in non-interactive mode", "auth_failed", AUTH_REJECTED),
-    ("Server asked us to run CSD", "auth_failed", "Server verlangt HostScan, uni-vpn braucht ein Update"),
-    ("Cisco Secure Desktop", "auth_failed", "Server verlangt HostScan, uni-vpn braucht ein Update"),
-    ("SAML", "auth_failed", "Login-Verfahren geaendert (SAML), uni-vpn braucht ein Update"),
-    ("external browser", "auth_failed", "Login-Verfahren geaendert, uni-vpn braucht ein Update"),
+    ("Server asked us to run CSD", "auth_failed", "Server requires HostScan, uni-vpn needs an update"),
+    ("Cisco Secure Desktop", "auth_failed", "Server requires HostScan, uni-vpn needs an update"),
+    ("SAML", "auth_failed", "Login method changed (SAML), uni-vpn needs an update"),
+    ("external browser", "auth_failed", "Login method changed, uni-vpn needs an update"),
     ("Failed to complete authentication", "auth_failed", AUTH_REJECTED),
-    ("certificate", "error", "Zertifikatsproblem beim Server"),
+    ("certificate", "error", "Certificate problem on the server"),
 ]
 
 
@@ -58,7 +58,7 @@ def classify_line(line: str) -> tuple[str, str] | None:
 
 
 class Classifier:
-    """Bewertet die openconnect-Ausgabe zeilenweise; das erste Urteil bleibt bestehen."""
+    """Classifies the openconnect output line by line; the first verdict sticks."""
 
     def __init__(self) -> None:
         self.otp_generated = False
@@ -78,7 +78,7 @@ class Classifier:
 
 
 def remove_stale_token_files(directory: Path) -> int:
-    """Schluesseldateien eines abgestuerzten Daemons entfernen. Liefert die Anzahl."""
+    """Remove secret files left behind by a crashed daemon. Returns how many."""
     removed = 0
     try:
         entries = list(directory.iterdir())
@@ -126,7 +126,7 @@ class Tunnel:
         self.stderr_tail: collections.deque[str] = collections.deque(maxlen=20)
         self.classifier = Classifier()
         self.classification: tuple[str, str] | None = None
-        self.otp_generated_at: float | None = None  # Wallclock, wenn openconnect einen Code erzeugt hat
+        self.otp_generated_at: float | None = None  # wall clock time when openconnect generated a code
         self.stopped_by_us = False
         self.started_at: float | None = None
         self.ready_at: float | None = None
@@ -144,19 +144,19 @@ class Tunnel:
             "--force-dpd=30",
             "--reconnect-timeout=60",
             "--script-tun",
-            # openconnect fuehrt den Wert per /bin/sh -c aus, der Pfad darf Leerzeichen enthalten.
-            # "exec", damit dash kein sh neben ocproxy stehen laesst.
+            # openconnect runs the value via /bin/sh -c, so the path may contain spaces.
+            # "exec" so that dash does not leave an sh running next to ocproxy.
             f"--script=exec {shlex.quote(self.wrapper)} {port}",
         ]
         if self.token_file:
-            # Der Schluessel geht ueber eine 0600-Datei, nie ueber die Prozessliste. openconnect
-            # liest sie bei jeder Code-Erzeugung neu, sie bleibt bis zum fertigen Aufbau.
+            # The secret is passed via a 0600 file, never via the process list. openconnect
+            # rereads it for every code it generates, so it stays until the tunnel is up.
             cmd += ["--token-mode=totp", f"--token-secret=@{self.token_file}"]
         return cmd + [self.cfg.host]
 
     def _write_token_file(self, totp: str) -> None:
         self.token_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        fd, name = tempfile.mkstemp(prefix=TOKEN_PREFIX, dir=self.token_dir)  # mkstemp legt 0600 an
+        fd, name = tempfile.mkstemp(prefix=TOKEN_PREFIX, dir=self.token_dir)  # mkstemp creates it as 0600
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(totp + "\n")
         self.token_file = Path(name)
@@ -169,7 +169,7 @@ class Tunnel:
         except FileNotFoundError:
             pass
         except OSError as exc:
-            self.log.warning("Schluesseldatei %s konnte nicht geloescht werden: %s", self.token_file, exc)
+            self.log.warning("Could not delete secret file %s: %s", self.token_file, exc)
         self.token_file = None
 
     @property
@@ -219,7 +219,7 @@ class Tunnel:
                 self.otp_generated_at = time.time()
         await self.proc.wait()
         self._remove_token_file()
-        self.log.info("openconnect beendet, Exit %s", self.proc.returncode)
+        self.log.info("openconnect exited with code %s", self.proc.returncode)
         self.exited.set()
 
     async def wait_ready(self, timeout: float) -> bool:
@@ -246,7 +246,7 @@ class Tunnel:
         try:
             await asyncio.wait_for(self.exited.wait(), grace)
         except asyncio.TimeoutError:
-            self.log.warning("openconnect reagiert nicht auf SIGTERM, SIGKILL")
+            self.log.warning("openconnect does not respond to SIGTERM, sending SIGKILL")
             try:
                 self.proc.kill()
             except ProcessLookupError:
@@ -259,11 +259,11 @@ class Tunnel:
         self._kill_wrapper()
 
     def _kill_wrapper(self) -> None:
-        # Muster ohne fuehrenden Bindestrich und hinter "--", sonst liest pkill es als Option.
+        # Pattern without a leading hyphen and after "--", otherwise pkill reads it as an option.
         pattern = f"ocproxy -D 127.0.0.1:{self.port} "
-        self.log.warning("ocproxy haelt Port %s noch, pkill", self.port)
+        self.log.warning("ocproxy still holds port %s, running pkill", self.port)
         result = subprocess.run(["pkill", "-9", "-U", str(os.getuid()), "-f", "--", pattern], check=False)
-        self.log.warning("pkill Exit %s (0 = getroffen, 1 = kein Treffer, 2 = Syntaxfehler)", result.returncode)
+        self.log.warning("pkill exit code %s (0 = matched, 1 = no match, 2 = syntax error)", result.returncode)
 
     def reconnect(self) -> None:
         if self.proc and not self.exited.is_set():

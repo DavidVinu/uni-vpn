@@ -31,10 +31,10 @@ class SetupHarness(unittest.TestCase):
         self.keyring = {"password": "missing", "totp": "missing"}
         self.proxy_calls = []
         self.proxy_result = "ok"
-        # Schutz: kein Test darf die echte Proxy-Einstellung des Rechners anfassen (passiert am
-        # 2026-09-08, als ein Test setup() ohne proxy_install aufrief).
+        # Guard: no test may touch the machine's real proxy setting (this happened on
+        # 2026-09-08, when a test called setup() without proxy_install).
         for name in ("install", "uninstall", "refresh", "state", "current", "apply", "restore"):
-            patch = mock.patch.object(sysproxy, name, side_effect=AssertionError(f"sysproxy.{name} im Test aufgerufen"))
+            patch = mock.patch.object(sysproxy, name, side_effect=AssertionError(f"sysproxy.{name} called in a test"))
             patch.start()
             self.addCleanup(patch.stop)
 
@@ -56,7 +56,7 @@ class SetupHarness(unittest.TestCase):
         return argparse.Namespace(**base)
 
     def answer(self, prompt):
-        return "pw" if "Passwort" in prompt else "gezd gnbv gy3t qojq gezd gnbv gy3t qojq"
+        return "pw" if "password" in prompt else "gezd gnbv gy3t qojq gezd gnbv gy3t qojq"
 
     def fake_proxy_install(self, http_port):
         self.proxy_calls.append(http_port)
@@ -89,7 +89,7 @@ class SetupTests(SetupHarness):
         self.assertTrue(os.access(link, os.X_OK))
         self.assertEqual(self.stored, [("ab123", "pw")])
         self.assertEqual(self.stored_totp, [("ab123", "base32:GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")])
-        self.assertIn("Kontrollcode", out)
+        self.assertIn("Check code", out)
         recorded = setup.recorded()
         self.assertIn(cfg, recorded)
         self.assertIn(link, recorded)
@@ -97,7 +97,7 @@ class SetupTests(SetupHarness):
         self.assertTrue(setup.apport_ignore_path().exists())
         self.assertIn("/usr/bin/openconnect", setup.apport_ignore_path().read_text())
         self.assertEqual(self.proxy_calls, [1081])
-        self.assertIn("Proxy-Regel im System eingetragen", out)
+        self.assertIn("Proxy rule registered with the system", out)
         self.assertNotIn("chrome://extensions", out)
         self.assertIn("http://127.0.0.1:1081/", out)
 
@@ -106,13 +106,13 @@ class SetupTests(SetupHarness):
         rc, out = self.run_setup(user="ab123")
         self.assertEqual(rc, 0)
         self.assertIn("http://127.0.0.1:1081/proxy.pac", out)
-        self.assertIn("Von Hand", out)
+        self.assertIn("by hand", out)
 
     def test_proxy_replaced_is_mentioned(self):
         self.proxy_result = "replaced"
         rc, out = self.run_setup(user="ab123")
         self.assertEqual(rc, 0)
-        self.assertIn("ersetzt", out)
+        self.assertIn("replaced", out)
 
     def test_setup_is_idempotent(self):
         self.run_setup()
@@ -126,10 +126,10 @@ class SetupTests(SetupHarness):
         self.assertFalse((self.home / ".config" / "uni-vpn").exists())
         self.assertEqual(self.stored, [])
         self.assertEqual(self.stored_totp, [])
-        self.assertIn("wuerde", out)
+        self.assertIn("would", out)
         self.assertIn("TOTP", out)
         self.assertEqual(self.proxy_calls, [])
-        self.assertIn("Proxy", out)
+        self.assertIn("proxy rule", out)
 
     def test_totp_asked_alone_when_password_present(self):
         self.keyring["password"] = "present"
@@ -150,17 +150,17 @@ class SetupTests(SetupHarness):
         rc, out = self.run_setup(user="ab123")
         self.assertEqual(rc, 0)
         self.assertIn("mfa.uni-heidelberg.de", out)
-        self.assertLess(out.index("mfa.uni-heidelberg.de"), out.index("Kontrollcode"))
+        self.assertLess(out.index("mfa.uni-heidelberg.de"), out.index("Check code"))
 
     def test_invalid_totp_input_is_reported_and_setup_continues(self):
-        rc, out = self.run_setup(user="ab123", getpass_fn=lambda p: "pw" if "Passwort" in p else "0189")
+        rc, out = self.run_setup(user="ab123", getpass_fn=lambda p: "pw" if "password" in p else "0189")
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.stored_totp, [])
         self.assertIn("Base32", out)
         self.assertIn("uni-vpn totp", out)
 
     def test_empty_totp_input_hints_at_later_command(self):
-        rc, out = self.run_setup(user="ab123", getpass_fn=lambda p: "pw" if "Passwort" in p else "")
+        rc, out = self.run_setup(user="ab123", getpass_fn=lambda p: "pw" if "password" in p else "")
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.stored_totp, [])
         self.assertIn("uni-vpn totp", out)
@@ -169,7 +169,7 @@ class SetupTests(SetupHarness):
         with mock.patch.object(pf, "find_binary", lambda name, override=None: None):
             rc, out = self.run_setup(dry_run=True, user="ab123")
         self.assertEqual(rc, 0)
-        self.assertIn("voraussetzen", out)
+        self.assertIn("would require", out)
 
     def test_missing_binary_aborts(self):
         with mock.patch.object(pf, "find_binary", lambda name, override=None: None):
@@ -187,7 +187,7 @@ class SetupTests(SetupHarness):
 
         rc, out = self.run_setup(service_install=broken_install)
         self.assertEqual(rc, 1)
-        self.assertIn("Dienst konnte nicht geladen werden: Failed to connect to bus", out)
+        self.assertIn("Service could not be loaded: Failed to connect to bus", out)
         self.assertNotIn("Traceback", out)
         recorded = setup.recorded()
         self.assertIn(self.home / ".config" / "uni-vpn" / "config.toml", recorded)
@@ -201,7 +201,7 @@ class SetupTests(SetupHarness):
 
         rc, out = self.run_setup(service_install=broken_install)
         self.assertEqual(rc, 1)
-        self.assertIn("Dienst konnte nicht geladen werden: Bootstrap failed", out)
+        self.assertIn("Service could not be loaded: Bootstrap failed", out)
 
     def test_setup_waits_for_http_port_before_doctor(self):
         seen = []
@@ -221,7 +221,7 @@ class SetupTests(SetupHarness):
         checks.assert_called_once()
 
     def test_wait_for_port_gives_up_after_timeout(self):
-        # Start 0.0, Frist 5.0: nach 1.0, 2.0 und 4.0 wird geschlafen, bei 5.5 aufgegeben.
+        # Start 0.0, deadline 5.0: sleeps after 1.0, 2.0 and 4.0, gives up at 5.5.
         clock = iter([0.0, 1.0, 2.0, 4.0, 5.5])
         sleeps = []
         ready = setup.wait_for_port(1081, port_open=lambda port: False, timeout=5, step=0.25,
@@ -232,12 +232,12 @@ class SetupTests(SetupHarness):
     def test_existing_secrets_not_asked_again(self):
         out = StringIO()
         with redirect_stdout(out):
-            rc = setup.setup(self.args(user="ab123"), input_fn=lambda p: "x", getpass_fn=lambda p: (_ for _ in ()).throw(AssertionError("darf nicht fragen")),
+            rc = setup.setup(self.args(user="ab123"), input_fn=lambda p: "x", getpass_fn=lambda p: (_ for _ in ()).throw(AssertionError("must not ask")),
                              service_install=self.fake_service_install, store=self.stored.append,
                              store_totp=self.stored_totp.append, proxy_install=self.fake_proxy_install,
                              keyring_probe=lambda user, kind="password": "present", run_doctor=False)
         self.assertEqual(rc, 0)
-        self.assertIn("bereits im Keyring", out.getvalue())
+        self.assertIn("already in the keyring", out.getvalue())
 
 
 class UninstallTests(SetupHarness):
@@ -249,7 +249,7 @@ class UninstallTests(SetupHarness):
         proxy_restored = []
         out = StringIO()
         with redirect_stdout(out):
-            rc = setup.uninstall(self.args(yes=True), input_fn=lambda p: "j",
+            rc = setup.uninstall(self.args(yes=True), input_fn=lambda p: "y",
                                  service_uninstall=lambda run=None: removed_service.append(True),
                                  delete=lambda user: deleted.append(user) or True,
                                  delete_totp=lambda user: deleted_totp.append(user) or True,
@@ -259,7 +259,7 @@ class UninstallTests(SetupHarness):
         self.assertEqual(deleted, ["ab123"])
         self.assertEqual(deleted_totp, ["ab123"])
         self.assertEqual(proxy_restored, [True])
-        self.assertIn("Proxy-Einstellung wiederhergestellt", out.getvalue())
+        self.assertIn("Proxy setting restored", out.getvalue())
         self.assertNotIn("Extension", out.getvalue())
         self.assertFalse((self.home / ".config" / "uni-vpn" / "config.toml").exists())
         self.assertFalse((self.home / ".local" / "bin" / "uni-vpn").exists())

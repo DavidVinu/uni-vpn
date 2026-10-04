@@ -58,8 +58,8 @@ class CiscoTests(unittest.TestCase):
             self.assertTrue(pf.cisco_connected(run=run, cscotun=Path("/nonexistent/cscotun0")))
 
     def test_linux_never_asks_the_cisco_cli(self):
-        # "vpn state" braucht 2,2 s (gemessen 2026-09-08) und verzoegert jeden Aufbau; auf Linux
-        # legt der Cisco-Client bei Verbindung immer cscotun0 an, das reicht als Erkennung.
+        # "vpn state" takes 2.2 s (measured 2026-09-08) and delays every connect; on Linux the
+        # Cisco client always creates cscotun0 when connected, which is enough for detection.
         calls = []
 
         def run(cmd, **kwargs):

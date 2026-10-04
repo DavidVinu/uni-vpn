@@ -10,7 +10,7 @@ from tests.test_daemon import DaemonHarness, wait_state
 
 async def http(port, method, path, headers=None, body=b""):
     reader, writer = await asyncio.open_connection("127.0.0.1", port)
-    # Eigene Host- oder Content-Length-Header des Aufrufers ersetzen die Standardwerte.
+    # The caller's own Host or Content-Length headers replace the defaults.
     hdrs = {"Host": "127.0.0.1", "Content-Length": str(len(body))}
     for key, value in (headers or {}).items():
         hdrs = {k: v for k, v in hdrs.items() if k.lower() != key.lower()}
@@ -31,12 +31,12 @@ class OriginTests(DaemonHarness):
     async def test_allowed_origin(self):
         self.assertTrue(allowed_origin(None, 1081))
         self.assertTrue(allowed_origin("http://127.0.0.1:1081", 1081))
-        # Ohne Extension gibt es keinen fremden Origin mehr, der POSTen darf.
+        # Without the extension there is no longer any foreign origin allowed to POST.
         self.assertFalse(allowed_origin("chrome-extension://abcdef", 1081))
         self.assertFalse(allowed_origin("moz-extension://1234-5678", 1081))
         self.assertFalse(allowed_origin("https://evil.example", 1081))
         self.assertFalse(allowed_origin("http://127.0.0.1:9999", 1081))
-        # "null" senden sandboxed iframes und data:-Seiten: kein vertrauenswuerdiger Origin.
+        # Sandboxed iframes and data: pages send "null": not a trustworthy origin.
         self.assertFalse(allowed_origin("null", 1081))
         self.assertFalse(allowed_origin("chrome-extension://abc\nX-Injected: 1", 1081))
         self.assertFalse(allowed_origin("chrome-extension://abc\r\n", 1081))
@@ -153,11 +153,11 @@ class ApiTests(DaemonHarness):
 
     async def test_password_endpoint(self):
         d = await self.start_daemon()
-        body = json.dumps({"password": "neu"}).encode()
+        body = json.dumps({"password": "new"}).encode()
         status, _, _ = await http(self.cfg.http_port, "POST", "/api/password",
                                   {"X-Uni-VPN": "1", "Content-Type": "application/json"}, body)
         self.assertEqual(status, 200)
-        self.assertEqual(self.stored, ["neu"])
+        self.assertEqual(self.stored, ["new"])
         await wait_state(d, dm.State.connected)
 
     async def test_password_endpoint_rejects_bad_json(self):
@@ -176,7 +176,7 @@ class ApiTests(DaemonHarness):
             status, _, payload = await http(self.cfg.http_port, "POST", "/api/password",
                                             {"X-Uni-VPN": "1", "Content-Type": "application/json"}, body)
             self.assertEqual(status, 400, repr(password))
-            self.assertEqual(payload.decode(), "Passwort darf keinen Zeilenumbruch enthalten")
+            self.assertEqual(payload.decode(), "Password must not contain a line break")
         self.assertEqual(self.stored, [])
         self.assertEqual(d.state, dm.State.idle)
 
@@ -231,7 +231,7 @@ class TotpEndpointTests(DaemonHarness):
         await wait_state(d, dm.State.connected)
         _, _, payload = await http(self.cfg.http_port, "GET", "/status.json")
         self.assertNotIn(b"GEZDGNBVGY3TQOJQ", payload)
-        self.assertNotIn(b"geheim", payload)
+        self.assertNotIn(b"pw-s3cret", payload)
 
 
 class PacTests(DaemonHarness):
@@ -265,7 +265,7 @@ class PacTests(DaemonHarness):
 
     async def test_domains_endpoint_writes_file_refreshes_proxy_and_updates_pac(self):
         await self.start_daemon()
-        body = json.dumps({"text": "Example.ORG\n# Kommentar\nsogo.uni-heidelberg.de\n"}).encode()
+        body = json.dumps({"text": "Example.ORG\n# comment\nsogo.uni-heidelberg.de\n"}).encode()
         status, _, payload = await http(self.cfg.http_port, "POST", "/api/domains", self.HEADERS, body)
         self.assertEqual(status, 200, payload)
         self.assertEqual(json.loads(payload)["domains"], ["example.org", "sogo.uni-heidelberg.de"])
@@ -277,10 +277,10 @@ class PacTests(DaemonHarness):
 
     async def test_domains_endpoint_rejects_invalid_lines_and_changes_nothing(self):
         await self.start_daemon()
-        body = json.dumps({"text": "sogo.uni-heidelberg.de\nkaputt\n"}).encode()
+        body = json.dumps({"text": "sogo.uni-heidelberg.de\nbroken\n"}).encode()
         status, _, payload = await http(self.cfg.http_port, "POST", "/api/domains", self.HEADERS, body)
         self.assertEqual(status, 400)
-        self.assertIn(b"Zeile 2", payload)
+        self.assertIn(b"line 2", payload)
         self.assertFalse(self.domains_path.exists())
         self.assertEqual(self.refreshed, [])
 

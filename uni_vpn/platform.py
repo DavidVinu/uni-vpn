@@ -1,4 +1,4 @@
-"""Betriebssystem, Pfade, Binaries, Cisco-Erkennung."""
+"""Operating system, paths, binaries, Cisco detection."""
 
 from __future__ import annotations
 
@@ -67,8 +67,8 @@ def cisco_connected(run=subprocess.run, cscotun: Path = Path("/sys/class/net/csc
     if cscotun.exists():
         return True
     if not IS_MACOS:
-        # Auf Linux legt der Cisco-Client bei Verbindung immer cscotun0 an. "vpn state"
-        # braucht 2,2 s (gemessen 2026-09-08) und wuerde jeden Aufbau verzoegern.
+        # On Linux the Cisco client always creates cscotun0 when connected. "vpn state"
+        # takes 2.2 s (measured 2026-09-08) and would delay every connect.
         return False
     if not cisco_installed():
         return False

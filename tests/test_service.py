@@ -29,8 +29,8 @@ class RenderTests(unittest.TestCase):
 
     def test_systemd_unit_quotes_path_with_space(self):
         with mock.patch.object(pf, "IS_MACOS", False):
-            text = service.render_unit("/usr/bin/python3", "/home/x/Uni Zeug/uni-vpn/bin/uni-vpn", "/home/x/.local/state/uni-vpn")
-        self.assertIn('ExecStart="/usr/bin/python3" "/home/x/Uni Zeug/uni-vpn/bin/uni-vpn" daemon', text)
+            text = service.render_unit("/usr/bin/python3", "/home/x/Uni Stuff/uni-vpn/bin/uni-vpn", "/home/x/.local/state/uni-vpn")
+        self.assertIn('ExecStart="/usr/bin/python3" "/home/x/Uni Stuff/uni-vpn/bin/uni-vpn" daemon', text)
 
     def test_render_unit_rejects_quote_and_backslash(self):
         for bad in ('/home/x/a"b/uni-vpn', "/home/x/a\\b/uni-vpn"):
@@ -51,11 +51,11 @@ class RenderTests(unittest.TestCase):
 
     def test_launchd_plist_extra_env(self):
         with mock.patch.object(pf, "IS_MACOS", True):
-            text = service.render_unit("/opt/homebrew/bin/python3", "/Users/x/Uni Zeug/uni-vpn/bin/uni-vpn",
+            text = service.render_unit("/opt/homebrew/bin/python3", "/Users/x/Uni Stuff/uni-vpn/bin/uni-vpn",
                                        "/Users/x/Library/Logs/uni-vpn", brew_prefix="/opt/homebrew",
                                        extra_env={"XDG_CONFIG_HOME": "/Users/x/.cfg & co"})
         data = plistlib.loads(text.encode())
-        self.assertEqual(data["ProgramArguments"][1], "/Users/x/Uni Zeug/uni-vpn/bin/uni-vpn")
+        self.assertEqual(data["ProgramArguments"][1], "/Users/x/Uni Stuff/uni-vpn/bin/uni-vpn")
         self.assertEqual(data["EnvironmentVariables"]["XDG_CONFIG_HOME"], "/Users/x/.cfg & co")
         self.assertTrue(data["EnvironmentVariables"]["PATH"].startswith("/opt/homebrew/bin:"))
         with mock.patch.object(pf, "IS_MACOS", True):
@@ -111,8 +111,8 @@ class InstallTests(unittest.TestCase):
             self.assertNotIn("Environment=", unit.read_text())
 
     def test_install_restarts_running_service_so_new_code_is_loaded(self):
-        # "enable --now" laesst einen laufenden Dienst unangetastet; nach einem Update oder
-        # erneutem install.sh lief sonst der alte Code weiter (gesehen 2026-09-08).
+        # "enable --now" leaves a running service untouched; after an update or a repeated
+        # install.sh the old code would otherwise keep running (seen 2026-09-08).
         calls = []
 
         def run(cmd, **kwargs):

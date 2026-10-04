@@ -14,12 +14,12 @@ class DomainListTests(unittest.TestCase):
                          ["sogo.uni-heidelberg.de", "elearning-med.uni-heidelberg.de", "cip.dmed.uni-heidelberg.de"])
 
     def test_parse_normalizes_and_reports_errors_with_line_numbers(self):
-        text = "Sogo.Uni-Heidelberg.DE\n# Kommentar\n\n*.example.org  # Wildcard\nsogo.uni-heidelberg.de\nnicht gueltig\nhttp://x.y\n"
+        text = "Sogo.Uni-Heidelberg.DE\n# comment\n\n*.example.org  # wildcard\nsogo.uni-heidelberg.de\nnot valid\nhttp://x.y\n"
         domains, errors = pac.parse_domain_list(text)
         self.assertEqual(domains, ["sogo.uni-heidelberg.de", "example.org"])
         self.assertEqual(len(errors), 2)
-        self.assertIn("Zeile 6", errors[0])
-        self.assertIn("Zeile 7", errors[1])
+        self.assertIn("line 6", errors[0])
+        self.assertIn("line 7", errors[1])
 
     def test_parse_rejects_single_label_and_too_long(self):
         domains, errors = pac.parse_domain_list("localhost\n" + "a" * 64 + ".de\n")
@@ -44,7 +44,7 @@ class BuildPacTests(unittest.TestCase):
         self.assertIn('"SOCKS5 127.0.0.1:1080"', text)
         self.assertIn('"DIRECT"', text)
 
-    @unittest.skipUnless(shutil.which("node"), "node fehlt")
+    @unittest.skipUnless(shutil.which("node"), "node missing")
     def test_pac_evaluates_like_the_matcher(self):
         script = pac.build_pac(["sogo.uni-heidelberg.de", "example.org"], 1080) + """
 const cases = ["sogo.uni-heidelberg.de", "SOGO.uni-heidelberg.de.", "mail.example.org", "notsogo.uni-heidelberg.de", "uni-heidelberg.de", "ifconfig.me"];
@@ -69,9 +69,9 @@ class DomainFileTests(unittest.TestCase):
         self.assertEqual(pac.read_domains(self.path), ["example.org", "sogo.uni-heidelberg.de"])
 
     def test_invalid_lines_are_skipped_when_reading(self):
-        self.path.write_text("sogo.uni-heidelberg.de\nkaputt\n", encoding="utf-8")
+        self.path.write_text("sogo.uni-heidelberg.de\nbroken\n", encoding="utf-8")
         self.assertEqual(pac.read_domains(self.path), ["sogo.uni-heidelberg.de"])
 
     def test_empty_file_means_no_domains_not_defaults(self):
-        self.path.write_text("# nichts\n", encoding="utf-8")
+        self.path.write_text("# nothing\n", encoding="utf-8")
         self.assertEqual(pac.read_domains(self.path), [])

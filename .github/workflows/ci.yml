@@ -12,17 +12,17 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Python-Version
+      - name: Python version
         run: python3 --version
       - name: Syntax (compileall)
         run: python3 -m compileall -q uni_vpn bin/uni-vpn tests
-      - name: Unit-Tests
+      - name: Unit tests
         run: python3 -m unittest discover -s tests -t . -v
-      - name: Shell-Syntax
+      - name: Shell syntax
         run: bash -n install.sh
-      - name: Installer-Trockenlauf
+      - name: Installer dry run
         run: ./install.sh --dry-run --user citest
-      - name: launchd-Plist pruefen
+      - name: Check launchd plist
         if: runner.os == 'macOS'
         run: |
           python3 - <<'EOF'

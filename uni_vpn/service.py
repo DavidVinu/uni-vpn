@@ -1,4 +1,4 @@
-"""Dienstdateien rendern, laden und steuern: systemd --user (Linux), launchd (macOS)."""
+"""Render, load and control service files: systemd --user (Linux), launchd (macOS)."""
 
 from __future__ import annotations
 
@@ -12,12 +12,12 @@ from . import platform as pf
 
 LABEL = "de.davidvinu.uni-vpn"
 UNIT = "uni-vpn"
-# Diese Variablen bestimmen config_dir()/state_dir(); der Dienst bekommt sie sonst nicht.
+# These variables determine config_dir()/state_dir(); otherwise the service does not get them.
 PASSTHROUGH_ENV = ("XDG_CONFIG_HOME", "XDG_STATE_HOME")
 
 
 class ServiceError(Exception):
-    """Dienstdatei geschrieben, aber systemctl/launchctl ist gescheitert. files: bereits angelegte Dateien."""
+    """Service file written, but systemctl/launchctl failed. files: files already created."""
 
     def __init__(self, message: str, files: list[Path] | None = None):
         super().__init__(message)
@@ -42,14 +42,14 @@ def render(template: str, mapping: dict[str, str]) -> str:
         text = text.replace(f"@{key}@", value)
     leftover = re.findall(r"@[A-Z_]+@", text)
     if leftover:
-        raise ValueError(f"Platzhalter nicht ersetzt: {', '.join(leftover)}")
+        raise ValueError(f"Placeholders not replaced: {', '.join(leftover)}")
     return text
 
 
 def _check_value(name: str, value: str) -> str:
-    # Die Werte landen in systemd-Anfuehrungszeichen bzw. Environment=-Zeilen; dort waeren " und \ Escape-Zeichen.
+    # The values end up in systemd quotes or Environment= lines, where " and \ would be escape characters.
     if any(ch in value for ch in '"\\\n'):
-        raise ValueError(f"{name} darf keine Anfuehrungszeichen, Backslashes oder Zeilenumbrueche enthalten: {value!r}")
+        raise ValueError(f"{name} must not contain quotes, backslashes or line breaks: {value!r}")
     return value
 
 
@@ -96,7 +96,7 @@ def install(dry_run: bool = False, run=subprocess.run) -> list[Path]:
     text = render_unit(pf.python_executable(), str(pf.bin_dir() / "uni-vpn"), str(pf.state_dir()),
                        pf.brew_prefix() if pf.IS_MACOS else None, extra_env=passthrough_env())
     if dry_run:
-        print(f"-> wuerde {target} schreiben und den Dienst laden")
+        print(f"-> would write {target} and load the service")
         return [target]
     target.parent.mkdir(parents=True, exist_ok=True)
     pf.state_dir().mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -108,7 +108,7 @@ def install(dry_run: bool = False, run=subprocess.run) -> list[Path]:
     else:
         _run_checked(run, ["systemctl", "--user", "daemon-reload"], files)
         _run_checked(run, ["systemctl", "--user", "enable", "--now", UNIT], files)
-        # "enable --now" laesst einen laufenden Dienst stehen; nach install.sh soll der neue Code laufen.
+        # "enable --now" leaves a running service alone; after install.sh the new code should run.
         _run_checked(run, ["systemctl", "--user", "restart", UNIT], files)
     return files
 
@@ -157,7 +157,7 @@ def control(action: str, run=subprocess.run) -> int:
             "status": ["systemctl", "--user", "status", "--no-pager", UNIT],
         }
     if not target.exists():
-        print(f"Dienstdatei fehlt ({target}), bitte install.sh ausfuehren")
+        print(f"Service file is missing ({target}), please run install.sh")
         return 1
     result = run(commands[action], text=True)
     return result.returncode

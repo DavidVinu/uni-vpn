@@ -1,4 +1,4 @@
-"""Kommandozeile: uni-vpn <kommando>."""
+"""Command line: uni-vpn <command>."""
 
 from __future__ import annotations
 
@@ -49,11 +49,11 @@ def api_post(cfg: config.Config, path: str, body: dict | None = None, timeout: f
 
 def format_status(status: dict) -> str:
     return (f"{status['state']}: {status['message']} ({status['user']}@{status['host']}, "
-            f"SOCKS 127.0.0.1:{status['socks_port']}, {status['active_connections']} Verbindungen)")
+            f"SOCKS 127.0.0.1:{status['socks_port']}, {status['active_connections']} connections)")
 
 
 def harden() -> None:
-    """Keine Coredumps mit Passwort im Speicher."""
+    """No core dumps with the password in memory."""
     try:
         resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     except (ValueError, OSError):
@@ -66,7 +66,7 @@ def harden() -> None:
             pass
 
 
-UNREACHABLE_HINT = "Daemon nicht erreichbar. Starten mit: uni-vpn service start, dann uni-vpn doctor"
+UNREACHABLE_HINT = "Daemon not reachable. Start it with: uni-vpn service start, then uni-vpn doctor"
 
 
 def _load(args) -> config.Config:
@@ -91,7 +91,7 @@ def cmd_connect(args) -> int:
     except DaemonUnreachable:
         print(UNREACHABLE_HINT)
         return 1
-    print("Verbindungsaufbau angestossen, Status: uni-vpn status")
+    print("Connecting, check with: uni-vpn status")
     return 0
 
 
@@ -102,21 +102,21 @@ def cmd_disconnect(args) -> int:
     except DaemonUnreachable:
         print(UNREACHABLE_HINT)
         return 1
-    print("Getrennt")
+    print("Disconnected")
     return 0
 
 
 def cmd_password(args) -> int:
     cfg = _load(args)
-    password = getpass.getpass(f"Uni-Passwort fuer {cfg.user}: ")
+    password = getpass.getpass(f"University password for {cfg.user}: ")
     if not password:
-        print("Kein Passwort eingegeben")
+        print("No password entered")
         return 2
     if "\n" in password or "\r" in password:
-        print("Passwort darf keinen Zeilenumbruch enthalten")
+        print("Password must not contain a line break")
         return 2
     credentials.store_password(cfg.user, password)
-    print("Passwort im Keyring abgelegt")
+    print("Password stored in the keyring")
     try:
         api_post(cfg, "/api/connect")
     except DaemonUnreachable:
@@ -126,9 +126,9 @@ def cmd_password(args) -> int:
 
 def cmd_totp(args) -> int:
     cfg = _load(args)
-    text = getpass.getpass(f"TOTP-Schluessel fuer {cfg.user} (otpauth-URL oder Base32, Eingabe bleibt unsichtbar): ")
+    text = getpass.getpass(f"TOTP secret for {cfg.user} (otpauth URL or Base32, input stays hidden): ")
     if not text.strip():
-        print("Kein Schluessel eingegeben")
+        print("No secret entered")
         return 2
     try:
         token = totp.normalize(text)
@@ -136,7 +136,7 @@ def cmd_totp(args) -> int:
         print(str(exc))
         return 2
     credentials.store_totp(cfg.user, token)
-    print(f"TOTP-Schluessel im Keyring abgelegt. Kontrollcode jetzt: {totp.code(token)} (muss mit der App uebereinstimmen)")
+    print(f"TOTP secret stored in the keyring. Check code now: {totp.code(token)} (must match the app)")
     try:
         api_post(cfg, "/api/connect")
     except DaemonUnreachable:
@@ -147,7 +147,7 @@ def cmd_totp(args) -> int:
 def cmd_log(args) -> int:
     path = pf.log_file()
     if not path.exists():
-        print(f"Kein Log unter {path}")
+        print(f"No log at {path}")
         return 1
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     print("\n".join(lines[-args.lines:]))
@@ -158,10 +158,10 @@ _PORT_LINE = re.compile(r"^\s*(socks_port|http_port)\s*=\s*([0-9]{1,5})\s*(#.*)?
 
 
 def _ports_from_broken_config(path: Path | None) -> dict[str, int]:
-    """Ports bestmoeglich aus einer fehlerhaften config.toml lesen.
+    """Read the ports from a broken config.toml as far as possible.
 
-    Die Statusseite muss auch dann dort erreichbar sein, wo Browser und Nutzer sie
-    erwarten, sonst sieht niemand die Fehlermeldung mit der Zeilennummer.
+    Even then the status page must be reachable where browsers and the user expect
+    it, otherwise nobody sees the error message with the line number.
     """
     try:
         text = (path or config.default_path()).read_text(encoding="utf-8")
@@ -170,7 +170,7 @@ def _ports_from_broken_config(path: Path | None) -> dict[str, int]:
     ports: dict[str, int] = {}
     for line in text.splitlines():
         if line.strip().startswith("["):
-            break  # ab hier Tabellen wie [timing], keine Top-Level-Schluessel mehr
+            break  # tables like [timing] from here on, no more top-level keys
         match = _PORT_LINE.match(line)
         if match and 1 <= int(match.group(2)) <= 65535:
             ports[match.group(1)] = int(match.group(2))
@@ -189,14 +189,14 @@ def cmd_daemon(args) -> int:
     from .logsetup import setup_logging
 
     harden()
-    os.umask(0o077)  # Lock-Datei, Log und alles Weitere nur fuer den Nutzer lesbar
+    os.umask(0o077)  # lock file, log and everything else readable only by the user
     lock_path = pf.lock_file()
     lock_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    lock = open(lock_path, "w")  # noqa: SIM115 - bleibt bis zum Ende offen
+    lock = open(lock_path, "w")  # noqa: SIM115 - stays open until the end
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
-        print("uni-vpn daemon laeuft bereits", file=sys.stderr)
+        print("uni-vpn daemon is already running", file=sys.stderr)
         return 0
     log, tail = setup_logging(pf.log_file())
     config_error = None
@@ -206,7 +206,7 @@ def cmd_daemon(args) -> int:
         cfg = config.Config(**_ports_from_broken_config(Path(args.config) if args.config else None))
         config_error = str(exc)
         log.error("%s", exc)
-    log.info("uni-vpn %s startet (SOCKS %s, Status %s)", __version__, cfg.socks_port, cfg.http_port)
+    log.info("uni-vpn %s starting (SOCKS %s, status %s)", __version__, cfg.socks_port, cfg.http_port)
 
     async def run() -> None:
         daemon = Daemon(cfg, log, config_error=config_error, log_tail=tail)
@@ -214,7 +214,7 @@ def cmd_daemon(args) -> int:
         await daemon.run()
 
     asyncio.run(run())
-    log.info("uni-vpn beendet")
+    log.info("uni-vpn stopped")
     return 0
 
 
@@ -251,35 +251,35 @@ def cmd_update(args) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="uni-vpn", description="Uni-VPN bei Bedarf als lokaler SOCKS5-Proxy")
-    parser.add_argument("--config", help="Pfad zur config.toml (Default: ~/.config/uni-vpn/config.toml)")
+    parser = argparse.ArgumentParser(prog="uni-vpn", description="University VPN on demand as a local SOCKS5 proxy")
+    parser.add_argument("--config", help="Path to config.toml (default: ~/.config/uni-vpn/config.toml)")
     parser.add_argument("--version", action="version", version=f"uni-vpn {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("status", help="Zustand anzeigen")
+    p = sub.add_parser("status", help="Show the state")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_status)
-    sub.add_parser("connect", help="Tunnel aufbauen").set_defaults(func=cmd_connect)
-    sub.add_parser("disconnect", help="Tunnel abbauen").set_defaults(func=cmd_disconnect)
-    sub.add_parser("password", help="Uni-Passwort im Keyring ablegen").set_defaults(func=cmd_password)
-    sub.add_parser("totp", help="TOTP-Schluessel (zweiter Faktor) im Keyring ablegen").set_defaults(func=cmd_totp)
-    p = sub.add_parser("log", help="letzte Logzeilen")
+    sub.add_parser("connect", help="Bring the tunnel up").set_defaults(func=cmd_connect)
+    sub.add_parser("disconnect", help="Tear the tunnel down").set_defaults(func=cmd_disconnect)
+    sub.add_parser("password", help="Store the university password in the keyring").set_defaults(func=cmd_password)
+    sub.add_parser("totp", help="Store the TOTP secret (second factor) in the keyring").set_defaults(func=cmd_totp)
+    p = sub.add_parser("log", help="Show the last log lines")
     p.add_argument("-n", "--lines", type=int, default=200)
     p.set_defaults(func=cmd_log)
-    sub.add_parser("doctor", help="Selbstdiagnose").set_defaults(func=cmd_doctor)
-    sub.add_parser("daemon", help="Dienst im Vordergrund (fuer systemd/launchd)").set_defaults(func=cmd_daemon)
-    p = sub.add_parser("service", help="Dienst steuern")
+    sub.add_parser("doctor", help="Self-diagnosis").set_defaults(func=cmd_doctor)
+    sub.add_parser("daemon", help="Run the service in the foreground (for systemd/launchd)").set_defaults(func=cmd_daemon)
+    p = sub.add_parser("service", help="Control the service")
     p.add_argument("action", choices=["start", "stop", "restart", "enable", "disable", "status"])
     p.set_defaults(func=cmd_service)
-    p = sub.add_parser("setup", help="Einrichten (wird von install.sh aufgerufen)")
+    p = sub.add_parser("setup", help="Set up (called by install.sh)")
     p.add_argument("--dry-run", action="store_true")
-    p.add_argument("--user", help="Uni-ID")
+    p.add_argument("--user", help="University ID")
     p.set_defaults(func=cmd_setup)
-    p = sub.add_parser("uninstall", help="Dienst und Dateien entfernen")
-    p.add_argument("--yes", action="store_true", help="Keyring-Eintrag ohne Rueckfrage loeschen")
+    p = sub.add_parser("uninstall", help="Remove the service and files")
+    p.add_argument("--yes", action="store_true", help="Delete the keyring entries without asking")
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(func=cmd_uninstall)
-    p = sub.add_parser("update", help="git pull und Dienst neu starten")
+    p = sub.add_parser("update", help="git pull and restart the service")
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(func=cmd_update)
     return parser
@@ -287,7 +287,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     raw = sys.argv[1:] if argv is None else argv
-    args = build_parser().parse_args([a for a in raw if a != ""])  # install.sh liefert unter bash 3.2 leere Argumente
+    args = build_parser().parse_args([a for a in raw if a != ""])  # install.sh passes empty arguments under bash 3.2
     try:
         return args.func(args)
     except config.ConfigError as exc:

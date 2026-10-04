@@ -1,7 +1,7 @@
-"""Passwort und TOTP-Schluessel im OS-Keyring: GNOME-Keyring/KDE (secret-tool) oder macOS-Schluesselbund (security).
+"""Password and TOTP secret in the OS keyring: GNOME keyring/KDE (secret-tool) or macOS keychain (security).
 
-Zwei getrennte Eintraege mit eigenem Dienstnamen: secret-tool sucht nach Attributmengen, ein
-Eintrag mit Zusatzattribut wuerde die Suche nach dem Passwort ebenfalls treffen.
+Two separate entries, each with its own service name: secret-tool searches by attribute sets, so an
+entry with an extra attribute would also match the search for the password.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from . import platform as pf
 SERVICE = "uni-vpn"
 LABEL = "Uni VPN"
 SERVICES = {"password": SERVICE, "totp": "uni-vpn-totp"}
-LABELS = {"password": LABEL, "totp": "Uni VPN (zweiter Faktor)"}
+LABELS = {"password": LABEL, "totp": "Uni VPN (second factor)"}
 
 
 class SecretMissing(Exception):
@@ -40,7 +40,7 @@ class KeyringError(Exception):
 def _secret_tool() -> str:
     tool = pf.find_binary("secret-tool")
     if not tool:
-        raise KeyringError("secret-tool fehlt (Paket libsecret-tools)")
+        raise KeyringError("secret-tool is missing (package libsecret-tools)")
     return tool
 
 
@@ -51,8 +51,8 @@ def lookup_command(user: str, kind: str = "password") -> list[str]:
     return [_secret_tool(), "lookup", "service", service, "user", user]
 
 
-MISSING = {"password": (PasswordMissing, "Kein Passwort hinterlegt"),
-           "totp": (TotpMissing, "Kein TOTP-Schluessel hinterlegt")}
+MISSING = {"password": (PasswordMissing, "No password saved"),
+           "totp": (TotpMissing, "No TOTP secret saved")}
 
 
 async def get_secret(user: str, kind: str, timeout: float, command: list[str] | None = None) -> bytes:
@@ -66,7 +66,7 @@ async def get_secret(user: str, kind: str, timeout: float, command: list[str] | 
     except asyncio.TimeoutError:
         proc.kill()
         await proc.wait()
-        raise KeyringLocked("Schluesselbund gesperrt oder Zugriff verweigert") from None
+        raise KeyringLocked("Keyring locked or access denied") from None
     if proc.returncode != 0 or not out:
         error, message = MISSING[kind]
         raise error(message)
@@ -87,20 +87,20 @@ def _quote_security(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
-# Ein Keyring-Dialog, den niemand sieht (Dienst ohne GUI, CI), darf nichts ewig blockieren.
+# A keyring dialog nobody sees (service without GUI, CI) must not block anything forever.
 COMMAND_TIMEOUT = 60
 
 
 def store_secret(user: str, kind: str, value: str, run=subprocess.run) -> None:
-    # Letzte Verteidigung: `security -i` liest zeilenweise Kommandos, openconnect
-    # --passwd-on-stdin genau eine Zeile. CLI und HTTP-API weisen das vorher ab.
+    # Last line of defence: `security -i` reads commands line by line, openconnect
+    # --passwd-on-stdin exactly one line. The CLI and HTTP API reject this earlier.
     if "\n" in value or "\r" in value:
-        raise KeyringError("Passwort darf keinen Zeilenumbruch enthalten")
+        raise KeyringError("Password must not contain a line break")
     service, label = SERVICES[kind], LABELS[kind]
     try:
         if pf.IS_MACOS:
-            # Erst loeschen, dann neu anlegen: "-U" (Update) loest auf macOS einen
-            # Bestaetigungsdialog aus, der ohne GUI ewig wartet (in CI gemessen).
+            # Delete first, then create anew: "-U" (update) triggers a confirmation dialog
+            # on macOS that waits forever without a GUI (measured in CI).
             delete_secret(user, kind, run=run)
             script = (
                 f'add-generic-password -a "{_quote_security(user)}" -s "{service}" '
@@ -111,10 +111,10 @@ def store_secret(user: str, kind: str, value: str, run=subprocess.run) -> None:
             cmd = [_secret_tool(), "store", "--label", label, "service", service, "user", user]
             result = run(cmd, input=value.encode(), capture_output=True, timeout=COMMAND_TIMEOUT)
     except subprocess.TimeoutExpired:
-        raise KeyringError("Keine Antwort vom Schluesselbund (gesperrt oder Dialog wartet)") from None
+        raise KeyringError("No answer from the keyring (locked, or a dialog is waiting)") from None
     if result.returncode != 0:
         detail = (result.stderr or b"").decode(errors="replace").strip()
-        raise KeyringError(f"{label} konnte nicht abgelegt werden: {detail or result.returncode}")
+        raise KeyringError(f"{label} could not be saved: {detail or result.returncode}")
 
 
 def store_password(user: str, password: str, run=subprocess.run) -> None:

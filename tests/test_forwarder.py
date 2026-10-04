@@ -39,9 +39,9 @@ class ForwarderTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_pipes_both_directions_and_counts(self):
         reader, writer = await asyncio.open_connection("127.0.0.1", self.fwd.port)
-        writer.write(b"hallo")
+        writer.write(b"hello")
         await writer.drain()
-        self.assertEqual(await reader.readexactly(5), b"hallo")
+        self.assertEqual(await reader.readexactly(5), b"hello")
         self.assertEqual(self.fwd.active, 1)
         self.assertEqual(self.fwd.bytes_out, 5)
         self.assertEqual(self.fwd.bytes_in, 5)

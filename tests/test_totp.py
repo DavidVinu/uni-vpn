@@ -2,7 +2,7 @@ import unittest
 
 from uni_vpn import totp
 
-# RFC 6238, Anhang B: Secret "12345678901234567890" (SHA1) bzw. 32 Byte fuer SHA256.
+# RFC 6238, Appendix B: secret "12345678901234567890" (SHA1), or 32 bytes for SHA256.
 RFC_SHA1 = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
 RFC_SHA256 = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZA"
 
@@ -26,7 +26,7 @@ class NormalizeTests(unittest.TestCase):
     def test_rejects_hotp_uri(self):
         with self.assertRaises(ValueError) as ctx:
             totp.normalize(f"otpauth://hotp/x?secret={RFC_SHA1}&counter=0")
-        self.assertIn("zeitbasiert", str(ctx.exception))
+        self.assertIn("time-based", str(ctx.exception))
 
     def test_rejects_unusual_digits_or_period(self):
         for query in ("digits=8", "period=60"):

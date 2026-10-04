@@ -1,4 +1,4 @@
-"""Zustandsautomat: Bedarf, Aufbau, Leerlauf, Fehlerklassen, Resume."""
+"""State machine: demand, connecting, idle, error classes, resume."""
 
 from __future__ import annotations
 
@@ -32,8 +32,8 @@ class State(str, Enum):
 
 FINAL_STATES = {State.auth_failed, State.keyring}
 RETRY_STATES = {State.offline, State.blocked, State.error}
-OTP_STEP = 30  # Sekunden je Einmalcode (RFC 6238, wie openconnect)
-BLOCKED_MESSAGE = "Cisco Secure Client ist verbunden, uni-vpn pausiert"
+OTP_STEP = 30  # seconds per one-time code (RFC 6238, same as openconnect)
+BLOCKED_MESSAGE = "Cisco Secure Client is connected, uni-vpn is paused"
 
 
 async def wait_event(event: asyncio.Event, timeout: float) -> bool:
@@ -49,7 +49,7 @@ async def wait_event(event: asyncio.Event, timeout: float) -> bool:
 
 
 async def default_probe(host: str, timeout: float) -> bool:
-    """TLS-Handshake auf host:443 mit Systemtruststore. False bei Captive Portal oder ohne Netz."""
+    """TLS handshake with host:443 using the system trust store. False behind a captive portal or without network."""
     context = ssl.create_default_context()
     try:
         _reader, writer = await asyncio.wait_for(
@@ -92,7 +92,7 @@ class Daemon:
         self.wrapper = wrapper or str(pf.bin_dir() / "uni-vpn-ocproxy")
 
         self.state = State.idle
-        self.message = "Nicht verbunden"
+        self.message = "Not connected"
         self.since = time.time()
         self.last_error: dict | None = None
         self.failures = 0
@@ -100,11 +100,11 @@ class Daemon:
         self.demand_until = 0.0
         self.last_activity = time.monotonic()
         self.connect_count = 0
-        # Der Server nimmt jeden Einmalcode nur einmal an (gemessen 2026-09-08: Neuaufbau 3 s
-        # nach dem Login -> "Login failed"). Merken, in welchem Fenster zuletzt einer verbraucht wurde.
+        # The server accepts each one-time code only once (measured 2026-09-08: reconnecting 3 s
+        # after the login -> "Login failed"). Remember the window in which one was last used.
         self.last_otp_step: int | None = None
-        # Vom Ticker gesetzt, wenn Cisco bei stehendem Tunnel verbindet; die Aufbau-Schleife
-        # meldet dann `blocked` statt "Getrennt".
+        # Set by the ticker when Cisco connects while the tunnel is up; the connect loop
+        # then reports `blocked` instead of "Disconnected".
         self.paused_by_cisco = False
         self.tunnel: Tunnel | None = None
         self.http = None
@@ -116,22 +116,22 @@ class Daemon:
         self.forwarder = Forwarder("127.0.0.1", cfg.socks_port, self.acquire, self.note_activity,
                                    cfg.halfclose_grace, self.log)
         if config_error:
-            self._set(State.error, f"Konfiguration fehlerhaft: {config_error}")
+            self._set(State.error, f"Configuration error: {config_error}")
 
-    # --- Hilfen -----------------------------------------------------------
+    # --- Helpers ----------------------------------------------------------
 
     def _make_tunnel(self) -> Tunnel:
         openconnect = pf.find_binary("openconnect", self.cfg.openconnect)
         if not openconnect:
-            raise FileNotFoundError("openconnect nicht gefunden, bitte install.sh ausfuehren")
+            raise FileNotFoundError("openconnect not found, please run install.sh")
         ocproxy = pf.find_binary("ocproxy", self.cfg.ocproxy)
         if not ocproxy:
-            raise FileNotFoundError("ocproxy nicht gefunden, bitte install.sh ausfuehren")
+            raise FileNotFoundError("ocproxy not found, please run install.sh")
         return Tunnel(self.cfg, openconnect, self.wrapper, self.log, ocproxy=ocproxy, token_dir=self.token_dir)
 
     def _set(self, state: State, message: str) -> None:
         if state != self.state or message != self.message:
-            self.log.info("Zustand %s -> %s: %s", self.state.value, state.value, message)
+            self.log.info("State %s -> %s: %s", self.state.value, state.value, message)
         self.state = state
         self.message = message
         self.since = time.time()
@@ -184,29 +184,29 @@ class Daemon:
         if errors:
             raise ValueError("\n".join(errors))
         pac.write_domains(self.domains_path, domains)
-        self.log.info("Domainliste gespeichert: %s", ", ".join(domains) or "(leer)")
+        self.log.info("Domain list saved: %s", ", ".join(domains) or "(empty)")
         await asyncio.get_running_loop().run_in_executor(None, self.proxy_refresh, self.cfg.http_port)
         return domains
 
-    # --- Lebenszyklus -----------------------------------------------------
+    # --- Lifecycle --------------------------------------------------------
 
     async def run(self) -> None:
         from .httpapi import HttpApi
 
         stale = remove_stale_token_files(self.token_dir)
         if stale:
-            self.log.warning("%d alte Schluesseldatei(en) entfernt", stale)
+            self.log.warning("Removed %d stale secret file(s)", stale)
         self.http = HttpApi(self, "127.0.0.1", self.cfg.http_port, self.log)
         try:
             await self.http.start()
         except OSError as exc:
-            self.log.error("Statusport %s nicht verfuegbar: %s", self.cfg.http_port, exc)
+            self.log.error("Status port %s not available: %s", self.cfg.http_port, exc)
             self.http = None
         try:
             await self.forwarder.start()
         except OSError as exc:
-            self.log.error("SOCKS-Port %s nicht verfuegbar: %s", self.cfg.socks_port, exc)
-            self._set(State.error, f"Port {self.cfg.socks_port} ist belegt, uni-vpn doctor ausfuehren")
+            self.log.error("SOCKS port %s not available: %s", self.cfg.socks_port, exc)
+            self._set(State.error, f"Port {self.cfg.socks_port} is in use, run uni-vpn doctor")
         ticker = asyncio.create_task(self._ticker())
         self.started.set()
         try:
@@ -224,10 +224,10 @@ class Daemon:
     def stop(self) -> None:
         self._stop.set()
 
-    # --- Bedarf -----------------------------------------------------------
+    # --- Demand -----------------------------------------------------------
 
     async def acquire(self) -> int | None:
-        """Vom Forwarder pro Browserverbindung aufgerufen. Liefert den ocproxy-Port oder None."""
+        """Called by the forwarder for each browser connection. Returns the ocproxy port or None."""
         self.note_activity()
         if self.config_error:
             return None
@@ -263,7 +263,7 @@ class Daemon:
         self.explicit = True
         self.failures = 0
         if self.state in FINAL_STATES or self.state in RETRY_STATES:
-            self._set(State.idle, "Nicht verbunden")
+            self._set(State.idle, "Not connected")
         self.note_activity()
         self._ensure_loop()
         self._wake.set()
@@ -273,7 +273,7 @@ class Daemon:
         self.demand_until = 0.0
         self._wake.set()
         if self.tunnel:
-            self._set(State.disconnecting, "Wird getrennt")
+            self._set(State.disconnecting, "Disconnecting")
             await self.forwarder.close_all()
             await self.tunnel.stop(self.cfg.stop_grace)
             return
@@ -284,19 +284,19 @@ class Daemon:
             except asyncio.CancelledError:
                 pass
         if self.state not in FINAL_STATES:
-            self._set(State.idle, "Nicht verbunden")
+            self._set(State.idle, "Not connected")
 
     async def set_password(self, password: str) -> None:
         await asyncio.get_running_loop().run_in_executor(None, self.password_setter, password)
-        self.log.info("Passwort im Keyring abgelegt")
+        self.log.info("Password stored in the keyring")
         await self.request_connect()
 
     async def set_totp(self, token: str) -> None:
         await asyncio.get_running_loop().run_in_executor(None, self.totp_setter, token)
-        self.log.info("TOTP-Schluessel im Keyring abgelegt")
+        self.log.info("TOTP secret stored in the keyring")
         await self.request_connect()
 
-    # --- Aufbau -----------------------------------------------------------
+    # --- Connecting -------------------------------------------------------
 
     async def _connect_loop(self) -> None:
         cfg = self.cfg
@@ -306,16 +306,16 @@ class Daemon:
                 await self._sleep(cfg.retry_interval)
                 continue
             if not await self.probe():
-                self._set(State.offline, "Kein Netz oder Captive Portal")
+                self._set(State.offline, "No network or captive portal")
                 await self._sleep(cfg.retry_interval)
                 continue
             try:
                 password = await self.password_getter()
             except credentials.PasswordMissing:
-                self._final(State.keyring, "Kein Passwort hinterlegt: uni-vpn password")
+                self._final(State.keyring, "No password stored: uni-vpn password")
                 return
             except credentials.KeyringLocked:
-                self._final(State.keyring, "Schluesselbund gesperrt, bitte entsperren und erneut verbinden")
+                self._final(State.keyring, "Keyring locked, please unlock it and connect again")
                 return
             except credentials.KeyringError as exc:
                 self._final(State.keyring, str(exc))
@@ -323,36 +323,36 @@ class Daemon:
             try:
                 totp = (await self.totp_getter()).decode("ascii").strip()
             except credentials.TotpMissing:
-                self._final(State.keyring, "Kein TOTP-Schluessel hinterlegt: uni-vpn totp")
+                self._final(State.keyring, "No TOTP secret stored: uni-vpn totp")
                 return
             except credentials.KeyringLocked:
-                self._final(State.keyring, "Schluesselbund gesperrt, bitte entsperren und erneut verbinden")
+                self._final(State.keyring, "Keyring locked, please unlock it and connect again")
                 return
             except (credentials.KeyringError, UnicodeDecodeError) as exc:
-                self._final(State.keyring, f"TOTP-Schluessel unlesbar: {exc}")
+                self._final(State.keyring, f"TOTP secret unreadable: {exc}")
                 return
 
             wait = self._otp_wait()
             if wait:
-                self._set(State.connecting, "Warte auf den naechsten Einmalcode (bis zu 30 s)")
+                self._set(State.connecting, "Waiting for the next one-time code (up to 30 s)")
                 await self._sleep(wait)
                 if not self.has_demand():
                     del password, totp
                     continue
-            self._set(State.connecting, "Verbindung wird aufgebaut")
+            self._set(State.connecting, "Connecting")
             try:
                 tunnel = self.tunnel_factory()
                 self.tunnel = tunnel
                 await tunnel.start(password, totp)
             except OSError as exc:
                 self.tunnel = None
-                self._final(State.error, f"openconnect konnte nicht gestartet werden: {exc}")
+                self._final(State.error, f"Could not start openconnect: {exc}")
                 return
             finally:
                 del password, totp
             self.connect_count += 1
-            # openconnect erzeugt den Code direkt nach dem Start; das Fenster gleich merken, denn
-            # der Leser der Ausgabe kann hinter der Portpruefung zurueckliegen (macOS-CI).
+            # openconnect generates the code right after starting; record the window now, because
+            # the output reader can lag behind the port check (macOS CI).
             self.last_otp_step = int(time.time() // OTP_STEP)
 
             ready = await tunnel.wait_ready(cfg.ready_timeout)
@@ -362,16 +362,16 @@ class Daemon:
                 if tunnel.stopped_by_us:
                     self.tunnel = None
                     self._after_stop()
-                    continue  # ein zwischenzeitliches request_connect greift ueber has_demand()
+                    continue  # a request_connect in the meantime takes effect via has_demand()
                 if not tunnel.exited.is_set():
                     await tunnel.stop(cfg.stop_grace)
-                    state, message = State.error, "Verbindungsaufbau dauerte zu lange"
+                    state, message = State.error, "Connecting took too long"
                 elif tunnel.classification:
                     state, message = State(tunnel.classification[0]), tunnel.classification[1]
                 elif tunnel.returncode == 1:
-                    state, message = State.auth_failed, "Anmeldung fehlgeschlagen (openconnect Exit 1), siehe uni-vpn log"
+                    state, message = State.auth_failed, "Login failed (openconnect exit code 1), see uni-vpn log"
                 else:
-                    state, message = State.error, f"openconnect endete mit Exit {tunnel.returncode}"
+                    state, message = State.error, f"openconnect exited with code {tunnel.returncode}"
                 self.tunnel = None
                 if state == State.auth_failed:
                     self._final(state, message)
@@ -382,10 +382,10 @@ class Daemon:
                 continue
 
             self.failures = 0
-            self.log.info("Tunnel bereit nach %.1f s", (tunnel.ready_at or 0) - (tunnel.started_at or 0))
-            self._set(State.connected, "Verbunden")
-            # Der Wunsch "jetzt verbinden" ist erfuellt. Ab hier zaehlt nur noch echte Nutzung,
-            # den Rest regelt der Leerlauf-Timer.
+            self.log.info("Tunnel ready after %.1f s", (tunnel.ready_at or 0) - (tunnel.started_at or 0))
+            self._set(State.connected, "Connected")
+            # The "connect now" request is fulfilled. From here on only real use counts,
+            # the idle timer handles the rest.
             self.explicit = False
             self.note_activity()
             await tunnel.exited.wait()
@@ -393,29 +393,29 @@ class Daemon:
             await self.forwarder.close_all()
             if tunnel.stopped_by_us:
                 self._after_stop()
-                continue  # ein zwischenzeitliches request_connect greift ueber has_demand()
-            message = tunnel.classification[1] if tunnel.classification else f"Tunnel abgebrochen (Exit {tunnel.returncode})"
+                continue  # a request_connect in the meantime takes effect via has_demand()
+            message = tunnel.classification[1] if tunnel.classification else f"Tunnel dropped (exit code {tunnel.returncode})"
             self.last_error = {"message": message, "at": time.time()}
             if not self.has_demand():
-                self._set(State.idle, f"Nicht verbunden ({message})")
+                self._set(State.idle, f"Not connected ({message})")
                 return
             self._set(State.error, message)
             if not await self._backoff():
                 break
-        # `blocked` bleibt stehen, bis der Ticker Cisco als getrennt sieht: so erklaert das Popup
-        # weiter, warum nichts geht.
+        # `blocked` stays until the ticker sees Cisco disconnected, so the popup keeps
+        # explaining why nothing works.
         if self.state in (State.offline, State.error, State.connecting):
-            self._set(State.idle, "Nicht verbunden")
+            self._set(State.idle, "Not connected")
 
     def _after_stop(self) -> None:
         if self.paused_by_cisco:
             self.paused_by_cisco = False
             self._set(State.blocked, BLOCKED_MESSAGE)
         else:
-            self._set(State.idle, "Getrennt")
+            self._set(State.idle, "Disconnected")
 
     def _otp_wait(self, now: float | None = None) -> float:
-        """Sekunden bis zum naechsten Einmalcode-Fenster, 0 wenn der aktuelle Code noch unverbraucht ist."""
+        """Seconds until the next one-time code window, 0 if the current code is still unused."""
         now = time.time() if now is None else now
         if self.last_otp_step is None or int(now // OTP_STEP) != self.last_otp_step:
             return 0
@@ -425,11 +425,11 @@ class Daemon:
         delays = self.cfg.backoff
         delay = delays[min(self.failures, len(delays) - 1)] * random.uniform(0.8, 1.2)
         self.failures += 1
-        self.log.info("Neuer Versuch in %.1f s", delay)
+        self.log.info("Retrying in %.1f s", delay)
         await self._sleep(delay)
         return self.has_demand()
 
-    # --- Leerlauf und Resume ---------------------------------------------
+    # --- Idle and resume ------------------------------------------------
 
     async def _ticker(self) -> None:
         last_mono, last_wall = time.monotonic(), time.time()
@@ -441,32 +441,32 @@ class Daemon:
             last_mono, last_wall = mono, wall
             if mono - last_cisco >= self.cfg.retry_interval and self.state in (State.connected, State.blocked):
                 last_cisco = mono
-                # Im Executor: "vpn state" auf macOS braucht 2 s und darf den Forwarder nicht anhalten.
+                # In the executor: "vpn state" takes 2 s on macOS and must not stall the forwarder.
                 cisco = await asyncio.get_running_loop().run_in_executor(None, self.cisco_check)
                 tunnel = self.tunnel
                 if cisco and self.state == State.connected and tunnel:
-                    self.log.info("Cisco Secure Client hat sich verbunden, Tunnel wird abgebaut")
+                    self.log.info("Cisco Secure Client connected, tearing down the tunnel")
                     self.paused_by_cisco = True
                     self._set(State.blocked, BLOCKED_MESSAGE)
                     await self.forwarder.close_all()
                     await tunnel.stop(self.cfg.stop_grace)
                 elif not cisco and self.state == State.blocked and (self._loop_task is None or self._loop_task.done()):
-                    self._set(State.idle, "Nicht verbunden")
+                    self._set(State.idle, "Not connected")
             if jump > 30:
-                self.log.info("Resume erkannt (Uhr sprang um %.0f s)", jump)
+                self.log.info("Resume detected (clock jumped by %.0f s)", jump)
                 tunnel = self.tunnel
                 if tunnel:
-                    # Sauber beenden statt SIGUSR2: der Zustandsautomat laeuft dann ueber
-                    # disconnecting -> idle und baut bei Bedarf neu auf.
-                    self.log.info("Resume erkannt, Tunnel wird neu aufgebaut")
-                    self._set(State.disconnecting, "Resume, Tunnel wird neu aufgebaut")
+                    # Stop cleanly instead of SIGUSR2: the state machine then goes through
+                    # disconnecting -> idle and reconnects if there is demand.
+                    self.log.info("Resume detected, reconnecting the tunnel")
+                    self._set(State.disconnecting, "Resume, reconnecting the tunnel")
                     await self.forwarder.close_all()
                     await tunnel.stop(self.cfg.stop_grace)
             if self.state == State.connected and self.tunnel and mono - self.last_activity > self.cfg.idle_minutes * 60:
-                self.log.info("Leerlauf seit %.0f s, Tunnel wird abgebaut", mono - self.last_activity)
+                self.log.info("Idle for %.0f s, tearing down the tunnel", mono - self.last_activity)
                 self.explicit = False
                 self.demand_until = 0.0
                 tunnel = self.tunnel
-                self._set(State.disconnecting, "Leerlauf, wird getrennt")
+                self._set(State.disconnecting, "Idle, disconnecting")
                 await self.forwarder.close_all()
                 await tunnel.stop(self.cfg.stop_grace)

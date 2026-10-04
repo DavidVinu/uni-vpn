@@ -1,4 +1,4 @@
-"""Statusseite und JSON-API auf 127.0.0.1:<http_port>. Reines asyncio, kein http.server."""
+"""Status page and JSON API on 127.0.0.1:<http_port>. Plain asyncio, no http.server."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ MAX_BODY = 64 * 1024
 CONTENT_LENGTH = re.compile(r"[0-9]+")
 
 STATUS_PAGE = """<!doctype html>
-<html lang="de"><head><meta charset="utf-8"><title>Uni VPN</title>
+<html lang="en"><head><meta charset="utf-8"><title>Uni VPN</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
 body{font:15px/1.4 system-ui,sans-serif;max-width:40rem;margin:2rem auto;padding:0 1rem;color:#222;background:#fafafa}
@@ -34,18 +34,18 @@ pre{background:#eee;padding:.6rem;font-size:12px;max-height:16rem;overflow:auto;
 small{color:#666}
 </style></head><body>
 <h1>Uni VPN</h1>
-<div class="state"><span class="dot" id="dot"></span><span id="msg">wird geladen</span></div>
-<div><button id="connect">Verbinden</button><button id="disconnect">Trennen</button></div>
+<div class="state"><span class="dot" id="dot"></span><span id="msg">loading</span></div>
+<div><button id="connect">Connect</button><button id="disconnect">Disconnect</button></div>
 <div id="meta"><small></small></div>
-<form id="pwform"><label>Uni-Passwort im Keyring ablegen:<br><input type="password" id="pw" autocomplete="current-password"></label>
-<button type="submit">Speichern</button> <small id="pwmsg"></small></form>
-<form id="totpform"><label>TOTP-Schluessel (zweiter Faktor) im Keyring ablegen:<br><input type="password" id="totp" autocomplete="off" placeholder="otpauth://... oder Base32"></label>
-<button type="submit">Speichern</button> <small id="totpmsg"></small><br>
-<small>Aus dem <a href="https://mfa.uni-heidelberg.de/" target="_blank" rel="noopener">MFA-Portal</a> (nur im Uni-Netz oder per VPN erreichbar):
-Soft-Token (zeitbasiert) einrichten, "Tokendetails einblenden", Text zwischen <code>secret=</code> und <code>&amp;issuer=</code> kopieren.</small></form>
-<form id="domform"><label>Domains, die ueber die Uni laufen (eine je Zeile, gilt auch fuer Subdomains):<br>
+<form id="pwform"><label>Save university password in the keyring:<br><input type="password" id="pw" autocomplete="current-password"></label>
+<button type="submit">Save</button> <small id="pwmsg"></small></form>
+<form id="totpform"><label>Save TOTP secret (second factor) in the keyring:<br><input type="password" id="totp" autocomplete="off" placeholder="otpauth://... or Base32"></label>
+<button type="submit">Save</button> <small id="totpmsg"></small><br>
+<small>From the <a href="https://mfa.uni-heidelberg.de/" target="_blank" rel="noopener">MFA portal</a> (reachable only on the university network or via VPN):
+set up "Soft-Token (zeitbasiert)", click "Tokendetails einblenden", copy the text between <code>secret=</code> and <code>&amp;issuer=</code>.</small></form>
+<form id="domform"><label>Domains that go through the university (one per line, also covers subdomains):<br>
 <textarea id="domains" rows="5" spellcheck="false"></textarea></label><br>
-<button type="submit">Speichern</button> <small id="dommsg"></small></form>
+<button type="submit">Save</button> <small id="dommsg"></small></form>
 <details><summary>Log</summary><pre id="log"></pre></details>
 <script>
 const H = {"X-Uni-VPN": "1", "Content-Type": "application/json"};
@@ -59,19 +59,19 @@ async function refresh() {
     document.getElementById("dot").className = "dot " + s.state;
     document.getElementById("msg").textContent = s.message;
     document.querySelector("#meta small").textContent =
-      s.user + " @ " + s.host + " | SOCKS 127.0.0.1:" + s.socks_port + " | Verbindungen: " + s.active_connections +
+      s.user + " @ " + s.host + " | SOCKS 127.0.0.1:" + s.socks_port + " | Connections: " + s.active_connections +
       " | Version " + s.version;
     document.getElementById("log").textContent = (s.log_tail || []).join("\\n");
     document.getElementById("connect").disabled = ["connected", "connecting"].includes(s.state);
     document.getElementById("disconnect").disabled = ["idle", "disconnecting"].includes(s.state);
-  } catch (e) { document.getElementById("msg").textContent = "Daemon nicht erreichbar"; }
+  } catch (e) { document.getElementById("msg").textContent = "Daemon not reachable"; }
 }
 document.getElementById("connect").onclick = () => post("/api/connect").then(refresh);
 document.getElementById("disconnect").onclick = () => post("/api/disconnect").then(refresh);
 document.getElementById("pwform").onsubmit = async (e) => {
   e.preventDefault();
   const r = await post("/api/password", {password: document.getElementById("pw").value});
-  document.getElementById("pwmsg").textContent = r.ok ? "gespeichert" : "Fehler: " + (await r.text());
+  document.getElementById("pwmsg").textContent = r.ok ? "saved" : "Error: " + (await r.text());
   document.getElementById("pw").value = "";
   refresh();
 };
@@ -82,9 +82,9 @@ document.getElementById("domform").onsubmit = async (e) => {
   if (r.ok) {
     const d = await r.json();
     document.getElementById("domains").value = d.domains.join("\n");
-    msg.textContent = pacRefresh === "auto" ? "gespeichert, Browser uebernehmen die Regel von selbst" : "gespeichert, Browser neu starten";
+    msg.textContent = pacRefresh === "auto" ? "saved, browsers pick up the rule on their own" : "saved, restart the browser";
   } else {
-    msg.textContent = "Fehler: " + (await r.text());
+    msg.textContent = "Error: " + (await r.text());
   }
 };
 document.getElementById("totpform").onsubmit = async (e) => {
@@ -93,9 +93,9 @@ document.getElementById("totpform").onsubmit = async (e) => {
   const msg = document.getElementById("totpmsg");
   if (r.ok) {
     const d = await r.json();
-    msg.textContent = "gespeichert, Kontrollcode " + d.code + " (muss mit der App uebereinstimmen)";
+    msg.textContent = "saved, check code " + d.code + " (must match the app)";
   } else {
-    msg.textContent = "Fehler: " + (await r.text());
+    msg.textContent = "Error: " + (await r.text());
   }
   document.getElementById("totp").value = "";
   refresh();
@@ -106,14 +106,14 @@ refresh(); setInterval(refresh, 2000);
 
 
 def allowed_origin(origin: str | None, port: int) -> bool:
-    # "null" (sandboxed iframe, data:-Seite) ist ein fremder Origin, kein fehlender.
+    # "null" (sandboxed iframe, data: page) is a foreign origin, not a missing one.
     if origin is None or origin == "":
         return True
     return origin == f"http://127.0.0.1:{port}"
 
 
 def allowed_host(host: str | None, port: int) -> bool:
-    """Schutz vor DNS-Rebinding: nur Loopback-Namen, sonst liest eine fremde Seite same-origin."""
+    """Protection against DNS rebinding: loopback names only, otherwise a foreign page reads same-origin."""
     return host in ("127.0.0.1", f"127.0.0.1:{port}", "localhost", f"localhost:{port}")
 
 
@@ -134,7 +134,7 @@ class HttpApi:
             try:
                 await asyncio.wait_for(self._server.wait_closed(), 5)
             except asyncio.TimeoutError:
-                self.log.warning("HTTP: Verbindungen nicht rechtzeitig geschlossen")
+                self.log.warning("HTTP: connections not closed in time")
 
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
@@ -158,7 +158,7 @@ class HttpApi:
                 headers[key.lower()] = value
         raw_length = headers.get("content-length", "0").strip() or "0"
         if not CONTENT_LENGTH.fullmatch(raw_length):
-            await self._respond(writer, 400, "text/plain", b"ungueltige Content-Length", headers)
+            await self._respond(writer, 400, "text/plain", b"invalid Content-Length", headers)
             return
         length = int(raw_length)
         body = b""
@@ -169,17 +169,17 @@ class HttpApi:
                 writer.close()
                 return
         elif length > MAX_BODY:
-            await self._respond(writer, 413, "text/plain", b"zu gross", headers)
+            await self._respond(writer, 413, "text/plain", b"too large", headers)
             return
         path = target.split("?", 1)[0]
         if not allowed_host(headers.get("host"), self.port):
-            await self._respond(writer, 403, "text/plain", b"verboten", headers)
+            await self._respond(writer, 403, "text/plain", b"forbidden", headers)
             return
         try:
             status, ctype, payload = await self._route(method, path, headers, body)
-        except Exception as exc:  # noqa: BLE001 - Statusseite darf nie sterben
-            self.log.exception("HTTP-Fehler: %s", exc)
-            status, ctype, payload = 500, "text/plain", b"interner Fehler"
+        except Exception as exc:  # noqa: BLE001 - the status page must never die
+            self.log.exception("HTTP error: %s", exc)
+            status, ctype, payload = 500, "text/plain", b"internal error"
         await self._respond(writer, status, ctype, payload, headers)
 
     async def _respond(self, writer, status: int, ctype: str, payload: bytes, request_headers: dict[str, str]) -> None:
@@ -211,11 +211,11 @@ class HttpApi:
                 return 200, "application/json", json.dumps(self.daemon.status()).encode()
             if path == "/proxy.pac":
                 return 200, "application/x-ns-proxy-autoconfig", self.daemon.pac().encode()
-            return 404, "text/plain", b"nicht gefunden"
+            return 404, "text/plain", b"not found"
         if method != "POST":
-            return 405, "text/plain", b"Methode nicht erlaubt"
+            return 405, "text/plain", b"method not allowed"
         if headers.get("x-uni-vpn") != "1" or not allowed_origin(headers.get("origin"), self.port):
-            return 403, "text/plain", b"verboten"
+            return 403, "text/plain", b"forbidden"
         if path == "/api/connect":
             await self.daemon.request_connect()
         elif path == "/api/disconnect":
@@ -225,28 +225,28 @@ class HttpApi:
                 data = json.loads(body.decode("utf-8"))
                 password = data["password"]
             except (ValueError, KeyError, TypeError, UnicodeDecodeError):
-                return 400, "text/plain", b"JSON mit 'password' erwartet"
+                return 400, "text/plain", b"expected JSON with 'password'"
             if not isinstance(password, str) or not password:
-                return 400, "text/plain", b"Passwort leer"
+                return 400, "text/plain", b"password empty"
             if "\n" in password or "\r" in password:
-                return 400, "text/plain", "Passwort darf keinen Zeilenumbruch enthalten".encode()
+                return 400, "text/plain", "Password must not contain a line break".encode()
             try:
                 await self.daemon.set_password(password)
-            except Exception as exc:  # noqa: BLE001 - Fehlertext geht an die Seite
+            except Exception as exc:  # noqa: BLE001 - the error text goes to the page
                 return 500, "text/plain", str(exc).encode()
         elif path == "/api/domains":
             try:
                 data = json.loads(body.decode("utf-8"))
                 text = data["text"]
             except (ValueError, KeyError, TypeError, UnicodeDecodeError):
-                return 400, "text/plain", b"JSON mit 'text' erwartet"
+                return 400, "text/plain", b"expected JSON with 'text'"
             if not isinstance(text, str):
-                return 400, "text/plain", b"Domains muessen Text sein"
+                return 400, "text/plain", b"domains must be text"
             try:
                 domains = await self.daemon.set_domains(text)
             except ValueError as exc:
                 return 400, "text/plain", str(exc).encode()
-            except Exception as exc:  # noqa: BLE001 - Fehlertext geht an die Seite
+            except Exception as exc:  # noqa: BLE001 - the error text goes to the page
                 return 500, "text/plain", str(exc).encode()
             return 200, "application/json", json.dumps({"ok": True, "domains": domains}).encode()
         elif path == "/api/totp":
@@ -254,19 +254,19 @@ class HttpApi:
                 data = json.loads(body.decode("utf-8"))
                 secret = data["secret"]
             except (ValueError, KeyError, TypeError, UnicodeDecodeError):
-                return 400, "text/plain", b"JSON mit 'secret' erwartet"
+                return 400, "text/plain", b"expected JSON with 'secret'"
             if not isinstance(secret, str):
-                return 400, "text/plain", b"Schluessel muss Text sein"
+                return 400, "text/plain", b"secret must be text"
             try:
                 token = totp.normalize(secret)
             except ValueError as exc:
                 return 400, "text/plain", str(exc).encode()
             try:
                 await self.daemon.set_totp(token)
-            except Exception as exc:  # noqa: BLE001 - Fehlertext geht an die Seite
+            except Exception as exc:  # noqa: BLE001 - the error text goes to the page
                 return 500, "text/plain", str(exc).encode()
             payload = {"ok": True, "state": self.daemon.state.value, "code": totp.code(token)}
             return 200, "application/json", json.dumps(payload).encode()
         else:
-            return 404, "text/plain", b"nicht gefunden"
+            return 404, "text/plain", b"not found"
         return 200, "application/json", json.dumps({"ok": True, "state": self.daemon.state.value}).encode()

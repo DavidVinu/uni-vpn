@@ -10,7 +10,7 @@ from uni_vpn import sysproxy
 
 
 class Runner:
-    """Faengt Kommandos ab und liefert vorbereitete Antworten."""
+    """Captures commands and returns prepared answers."""
 
     def __init__(self, answers=None):
         self.calls = []
@@ -82,7 +82,7 @@ class LinuxTests(unittest.TestCase):
         self.assertFalse(backup.exists())
 
     def test_install_keeps_existing_backup_when_rerun(self):
-        # Beim zweiten install.sh ist unser eigener Eintrag aktiv; der urspruengliche Zustand bleibt gesichert.
+        # On the second install.sh our own entry is active; the original state stays backed up.
         backup = Path(tempfile.mkdtemp()) / "proxy-backup.json"
         backup.write_text(json.dumps({"mode": "none", "url": ""}))
         run = Runner({"gsettings get org.gnome.system.proxy mode": (0, "'auto'\n"),
@@ -105,7 +105,7 @@ class LinuxTests(unittest.TestCase):
 
     def test_uninstall_without_backup_is_noop(self):
         run = Runner()
-        self.assertFalse(sysproxy.uninstall(backup=Path(tempfile.mkdtemp()) / "fehlt.json", run=run))
+        self.assertFalse(sysproxy.uninstall(backup=Path(tempfile.mkdtemp()) / "missing.json", run=run))
         self.assertEqual(run.calls, [])
 
     def test_state_for_doctor(self):
@@ -145,8 +145,8 @@ class MacTests(unittest.TestCase):
 
     def test_restore_puts_old_url_back(self):
         run = Runner(self.answers)
-        sysproxy.restore({"services": {"Wi-Fi": {"url": "http://alt/p.pac", "enabled": True}}}, run=run)
-        self.assertIn(["networksetup", "-setautoproxyurl", "Wi-Fi", "http://alt/p.pac"], run.calls)
+        sysproxy.restore({"services": {"Wi-Fi": {"url": "http://old/p.pac", "enabled": True}}}, run=run)
+        self.assertIn(["networksetup", "-setautoproxyurl", "Wi-Fi", "http://old/p.pac"], run.calls)
 
     def test_state_ok_when_our_url_is_enabled(self):
         answers = dict(self.answers)

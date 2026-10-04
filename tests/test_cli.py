@@ -24,9 +24,9 @@ from tests.test_daemon import DaemonHarness, wait_state
 
 class FormatTests(unittest.TestCase):
     def test_format_status(self):
-        text = cli.format_status({"state": "connected", "message": "Verbunden", "user": "ab1", "host": "h",
+        text = cli.format_status({"state": "connected", "message": "Connected", "user": "ab1", "host": "h",
                                   "socks_port": 1080, "active_connections": 2})
-        self.assertEqual(text, "connected: Verbunden (ab1@h, SOCKS 127.0.0.1:1080, 2 Verbindungen)")
+        self.assertEqual(text, "connected: Connected (ab1@h, SOCKS 127.0.0.1:1080, 2 connections)")
 
 
 class ApiTests(DaemonHarness):
@@ -37,7 +37,7 @@ class ApiTests(DaemonHarness):
         return str(path)
 
     async def run_cli(self, *argv):
-        # Die CLI blockiert synchron in urlopen; der Daemon-Server laeuft auf dieser Loop.
+        # The CLI blocks synchronously in urlopen; the daemon server runs on this loop.
         return await asyncio.to_thread(cli.main, ["--config", self.config_path(), *argv])
 
     async def test_status_json_and_connect(self):
@@ -60,7 +60,7 @@ class ApiTests(DaemonHarness):
         with redirect_stdout(out):
             rc = cli.main(["--config", cfg_path, "status"])
         self.assertEqual(rc, 1)
-        self.assertIn("nicht erreichbar", out.getvalue())
+        self.assertIn("not reachable", out.getvalue())
 
     async def test_password_command_stores_and_connects(self):
         d = await self.start_daemon()
@@ -83,7 +83,7 @@ class ApiTests(DaemonHarness):
             rc = await self.run_cli("totp")
         self.assertEqual(rc, 0)
         self.assertEqual(stored, [("u", "base32:GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")])
-        self.assertIn("Kontrollcode", out.getvalue())
+        self.assertIn("Check code", out.getvalue())
         self.assertRegex(out.getvalue(), r"[0-9]{6}")
         self.assertNotIn("GEZDGNBVGY3TQOJQ", out.getvalue())
         await wait_state(d, dm.State.connected)
@@ -108,7 +108,7 @@ class ApiTests(DaemonHarness):
                  mock.patch.object(credentials, "store_password") as store, redirect_stdout(out):
                 self.assertEqual(cli.main(["--config", self.config_path(), "password"]), 2)
             store.assert_not_called()
-            self.assertIn("Zeilenumbruch", out.getvalue())
+            self.assertIn("line break", out.getvalue())
 
     async def test_config_error_exit_code(self):
         path = Path(tempfile.mkdtemp()) / "config.toml"
@@ -118,11 +118,11 @@ class ApiTests(DaemonHarness):
 
     async def test_log_command(self):
         log_path = Path(tempfile.mkdtemp()) / "daemon.log"
-        log_path.write_text("\n".join(f"zeile {i}" for i in range(300)) + "\n")
+        log_path.write_text("\n".join(f"line {i}" for i in range(300)) + "\n")
         out = io.StringIO()
         with mock.patch("uni_vpn.platform.log_file", return_value=log_path), redirect_stdout(out):
             self.assertEqual(cli.main(["--config", self.config_path(), "log", "-n", "5"]), 0)
-        self.assertEqual(out.getvalue().splitlines(), [f"zeile {i}" for i in range(295, 300)])
+        self.assertEqual(out.getvalue().splitlines(), [f"line {i}" for i in range(295, 300)])
 
 
 def file_mode(path: Path) -> int:
@@ -140,21 +140,21 @@ class LogFileModeTests(unittest.TestCase):
         handler.doRollover()
         self.assertTrue(path.with_name("daemon.log.1").exists())
         self.assertEqual(file_mode(path), 0o600)
-        handler.emit(logging.makeLogRecord({"msg": "nach der Rotation"}))
+        handler.emit(logging.makeLogRecord({"msg": "after the rollover"}))
         self.assertEqual(file_mode(path), 0o600)
-        self.assertIn("nach der Rotation", path.read_text(encoding="utf-8"))
+        self.assertIn("after the rollover", path.read_text(encoding="utf-8"))
 
 
 class DaemonCommandTests(unittest.TestCase):
-    """cmd_daemon ohne echten Dienst: Lock-Datei und Log liegen im Temp-Verzeichnis."""
+    """cmd_daemon without a real service: lock file and log live in the temp directory."""
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
-        self.addCleanup(os.umask, os.umask(0o022))  # cmd_daemon setzt die Umask prozessweit
+        self.addCleanup(os.umask, os.umask(0o022))  # cmd_daemon sets the umask process-wide
         self.addCleanup(logging.getLogger("uni-vpn").handlers.clear)
         for patch in (mock.patch.object(pf, "lock_file", return_value=self.tmp / "daemon.lock"),
                       mock.patch.object(pf, "log_file", return_value=self.tmp / "daemon.log"),
-                      mock.patch.object(cli, "harden")):  # RLIMIT_CORE und PR_SET_DUMPABLE nicht im Testprozess
+                      mock.patch.object(cli, "harden")):  # no RLIMIT_CORE or PR_SET_DUMPABLE in the test process
             patch.start()
             self.addCleanup(patch.stop)
 
@@ -170,7 +170,7 @@ class DaemonCommandTests(unittest.TestCase):
         with redirect_stderr(err):
             rc = cli.main(["--config", str(cfg_path), "daemon"])
         self.assertEqual(rc, 0)
-        self.assertIn("laeuft bereits", err.getvalue())
+        self.assertIn("already running", err.getvalue())
         self.assertFalse((self.tmp / "daemon.log").exists())
 
     def test_config_error_daemon_serves_status_with_line(self):
@@ -190,7 +190,7 @@ class DaemonCommandTests(unittest.TestCase):
             thread = threading.Thread(target=lambda: results.append(cli.main(["--config", str(cfg_path), "daemon"])))
             thread.start()
             try:
-                self.assertTrue(ready.wait(3), "Daemon wurde nicht gestartet")
+                self.assertTrue(ready.wait(3), "daemon was not started")
                 data = None
                 deadline = time.monotonic() + 3
                 while time.monotonic() < deadline:
@@ -204,13 +204,13 @@ class DaemonCommandTests(unittest.TestCase):
                 if "loop" in captured:
                     captured["loop"].call_soon_threadsafe(captured["daemon"].stop)
                 thread.join(5)
-        self.assertFalse(thread.is_alive(), "Daemon-Thread laeuft noch")
+        self.assertFalse(thread.is_alive(), "daemon thread still running")
         self.assertEqual(results, [0])
-        self.assertIsNotNone(data, "status.json nicht erreichbar")
+        self.assertIsNotNone(data, "status.json not reachable")
         self.assertEqual(data["state"], "error")
-        self.assertIn("Zeile 4", data["message"])
+        self.assertIn("line 4", data["message"])
         self.assertEqual(data["http_port"], http_port)
         self.assertEqual(data["socks_port"], socks_port)
-        self.assertIn("Zeile 4", (self.tmp / "daemon.log").read_text(encoding="utf-8"))
+        self.assertIn("line 4", (self.tmp / "daemon.log").read_text(encoding="utf-8"))
         self.assertEqual(file_mode(self.tmp / "daemon.log"), 0o600)
         self.assertEqual(file_mode(self.tmp / "daemon.lock"), 0o600)

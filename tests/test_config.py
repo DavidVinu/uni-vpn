@@ -52,7 +52,7 @@ class LoadTests(unittest.TestCase):
     def test_missing_file(self):
         with self.assertRaises(config.ConfigError) as cm:
             config.load(Path(tempfile.mkdtemp()) / "nope.toml")
-        self.assertIn("fehlt", str(cm.exception))
+        self.assertIn("missing", str(cm.exception))
 
     def test_write_initial_roundtrip(self):
         path = Path(tempfile.mkdtemp()) / "config.toml"

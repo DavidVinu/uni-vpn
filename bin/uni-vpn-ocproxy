@@ -1,3 +1,3 @@
 #!/bin/sh
-# Wird von openconnect --script gestartet. exec, damit kein sh dazwischen bleibt.
+# Started by openconnect --script. exec, so no sh stays in between.
 exec "${OCPROXY:-ocproxy}" -D "127.0.0.1:$1" -k 30

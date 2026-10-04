@@ -18,7 +18,7 @@ def unreachable(cfg, path):
     raise doctor.cli.DaemonUnreachable("x")
 
 
-STATUS = {"state": "idle", "message": "Nicht verbunden", "version": "0.1.0", "protocol": 1}
+STATUS = {"state": "idle", "message": "Not connected", "version": "0.1.0", "protocol": 1}
 
 
 class DoctorTests(unittest.TestCase):
@@ -63,23 +63,23 @@ class DoctorTests(unittest.TestCase):
 
     def test_config_error_fails_and_uses_defaults(self):
         checks = doctor.run_checks(write_config("user = 1\n"), **self.probes())
-        self.assertEqual(self.by_name(checks, "Konfiguration").status, "fail")
-        self.assertIn("Zeile 1", self.by_name(checks, "Konfiguration").detail)
+        self.assertEqual(self.by_name(checks, "Config").status, "fail")
+        self.assertIn("line 1", self.by_name(checks, "Config").detail)
 
     def test_service_inactive_and_port_busy(self):
         checks = doctor.run_checks(write_config(), **self.probes(is_active=lambda: False, api_get=unreachable))
-        self.assertEqual(self.by_name(checks, "Dienst").status, "fail")
+        self.assertEqual(self.by_name(checks, "Service").status, "fail")
         self.assertEqual(self.by_name(checks, "Port 1080").status, "fail")
-        self.assertIn("belegt von anderem Prozess", self.by_name(checks, "Port 1080").detail)
+        self.assertIn("in use by another process", self.by_name(checks, "Port 1080").detail)
         self.assertEqual(self.by_name(checks, "Daemon").status, "fail")
 
     def test_manual_daemon_counts_as_own_ports(self):
         checks = doctor.run_checks(write_config(), **self.probes(is_active=lambda: False))
-        self.assertEqual(self.by_name(checks, "Dienst").status, "warn")
-        self.assertIn("Daemon laeuft, aber nicht als Dienst", self.by_name(checks, "Dienst").detail)
+        self.assertEqual(self.by_name(checks, "Service").status, "warn")
+        self.assertIn("Daemon running, but not as a service", self.by_name(checks, "Service").detail)
         for port in ("Port 1080", "Port 1081"):
             self.assertEqual(self.by_name(checks, port).status, "ok", port)
-            self.assertIn("gebunden (uni-vpn)", self.by_name(checks, port).detail)
+            self.assertIn("bound (uni-vpn)", self.by_name(checks, port).detail)
         self.assertEqual(self.by_name(checks, "Daemon").status, "ok")
         self.assertFalse([c for c in self.commands if c[0] in ("ss", "lsof")])
 
@@ -123,7 +123,7 @@ class DoctorTests(unittest.TestCase):
         checks = doctor.run_checks(write_config(), **self.probes(is_active=lambda: False, api_get=unreachable, run=run))
         detail = self.by_name(checks, "Port 1080").detail
         self.assertEqual(self.by_name(checks, "Port 1080").status, "fail")
-        self.assertIn("belegt von anderem Prozess", detail)
+        self.assertIn("in use by another process", detail)
         self.assertIn("config.toml", detail)
 
     def test_openconnect_version_in_detail(self):
@@ -147,10 +147,10 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(self.by_name(checks, "openconnect").detail, "/usr/bin/openconnect")
 
     def test_keyring_states(self):
-        for state, expected in (("missing", "fail"), ("locked", "warn"), ("error:kaputt", "fail"), ("present", "ok")):
+        for state, expected in (("missing", "fail"), ("locked", "warn"), ("error:broken", "fail"), ("present", "ok")):
             checks = doctor.run_checks(write_config(), **self.probes(keyring_probe=lambda u, kind="password", s=state: s))
             self.assertEqual(self.by_name(checks, "Keyring").status, expected, state)
-            self.assertEqual(self.by_name(checks, "Zweiter Faktor").status, expected, state)
+            self.assertEqual(self.by_name(checks, "Second factor").status, expected, state)
 
     def test_second_factor_missing_names_command(self):
         def probe(user, kind="password"):
@@ -158,8 +158,8 @@ class DoctorTests(unittest.TestCase):
 
         checks = doctor.run_checks(write_config(), **self.probes(keyring_probe=probe))
         self.assertEqual(self.by_name(checks, "Keyring").status, "ok")
-        self.assertEqual(self.by_name(checks, "Zweiter Faktor").status, "fail")
-        self.assertIn("uni-vpn totp", self.by_name(checks, "Zweiter Faktor").detail)
+        self.assertEqual(self.by_name(checks, "Second factor").status, "fail")
+        self.assertIn("uni-vpn totp", self.by_name(checks, "Second factor").detail)
 
     def test_keyring_state_probes_requested_kind(self):
         seen = []
@@ -175,9 +175,9 @@ class DoctorTests(unittest.TestCase):
 
     def test_proxy_states(self):
         for state, expected, needle in (("ok", "ok", "proxy.pac"), ("unset", "fail", "install.sh"),
-                                        ("foreign", "warn", "andere"), ("unavailable", "warn", "http://127.0.0.1:1081/proxy.pac")):
+                                        ("foreign", "warn", "another"), ("unavailable", "warn", "http://127.0.0.1:1081/proxy.pac")):
             checks = doctor.run_checks(write_config(), **self.probes(proxy_state=lambda port, s=state: s))
-            check = self.by_name(checks, "Proxy-Regel")
+            check = self.by_name(checks, "Proxy rule")
             self.assertEqual(check.status, expected, state)
             self.assertIn(needle, check.detail, state)
 
@@ -186,10 +186,10 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(self.by_name(checks, "Cisco Secure Client").status, "warn")
 
     def test_daemon_error_state_warns(self):
-        checks = doctor.run_checks(write_config(), **self.probes(api_get=lambda c, p: {"state": "auth_failed", "message": "Anmeldung abgelehnt", "version": "0.1.0", "protocol": 1}))
+        checks = doctor.run_checks(write_config(), **self.probes(api_get=lambda c, p: {"state": "auth_failed", "message": "Login rejected", "version": "0.1.0", "protocol": 1}))
         self.assertEqual(self.by_name(checks, "Daemon").status, "warn")
-        self.assertIn("Anmeldung abgelehnt", self.by_name(checks, "Daemon").detail)
+        self.assertIn("Login rejected", self.by_name(checks, "Daemon").detail)
 
     def test_format(self):
-        text = doctor.format_checks([doctor.Check("A", "ok", "gut"), doctor.Check("B", "fail", "schlecht"), doctor.Check("C", "warn", "naja")])
-        self.assertEqual(text.splitlines(), ["[OK] A: gut", "[!!] B: schlecht", "[..] C: naja"])
+        text = doctor.format_checks([doctor.Check("A", "ok", "good"), doctor.Check("B", "fail", "bad"), doctor.Check("C", "warn", "meh")])
+        self.assertEqual(text.splitlines(), ["[OK] A: good", "[!!] B: bad", "[..] C: meh"])

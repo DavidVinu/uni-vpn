@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# uni-vpn installieren: Pakete holen, dann "uni-vpn setup".
-# Aufruf: ./install.sh [--uninstall | --update] [--dry-run] [--user UNI-ID]
+# Install uni-vpn: fetch packages, then run "uni-vpn setup".
+# Usage: ./install.sh [--uninstall | --update] [--dry-run] [--user UNIVERSITY-ID]
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
@@ -13,7 +13,7 @@ while [ $# -gt 0 ]; do
     --dry-run) extra+=(--dry-run) ;;
     --user) extra+=(--user "$2"); shift ;;
     -h|--help) sed -n '2,3p' "$0"; exit 0 ;;
-    *) echo "Unbekannte Option: $1"; exit 2 ;;
+    *) echo "Unknown option: $1"; exit 2 ;;
   esac
   shift
 done
@@ -31,15 +31,15 @@ case "$(uname -s)" in
         done
         if [ ${#missing[@]} -gt 0 ]; then
           if [ "$dry" = 1 ]; then
-            echo "-> wuerde installieren: ${missing[*]}"
+            echo "-> would install: ${missing[*]}"
           else
-            echo "-> installiere ${missing[*]} (sudo fragt nach deinem Passwort)"
+            echo "-> installing ${missing[*]} (sudo will ask for your password)"
             sudo apt-get install -y "${missing[@]}"
           fi
         fi
       else
-        # Andere Distribution: setup prueft die Binaries selbst.
-        echo "-> kein dpkg/apt-get: Pakete bitte selbst installieren (openconnect, ocproxy, secret-tool)"
+        # Other distribution: setup checks the binaries itself.
+        echo "-> no dpkg/apt-get: please install the packages yourself (openconnect, ocproxy, secret-tool)"
       fi
     fi
     ;;
@@ -47,7 +47,7 @@ case "$(uname -s)" in
     BREW=""
     for b in /opt/homebrew/bin/brew /usr/local/bin/brew; do [ -x "$b" ] && BREW=$b && break; done
     if [ -z "$BREW" ]; then
-      echo "Homebrew fehlt. Erst https://brew.sh installieren (Admin-Passwort, dauert ein paar Minuten), dann install.sh erneut."
+      echo "Homebrew is missing. Install https://brew.sh first (admin password, takes a few minutes), then run install.sh again."
       exit 1
     fi
     PREFIX=$("$BREW" --prefix)
@@ -57,13 +57,13 @@ case "$(uname -s)" in
       for f in openconnect ocproxy; do "$BREW" list --versions "$f" >/dev/null 2>&1 || missing+=("$f"); done
       [ -x "$PY" ] || missing+=(python)
       if [ ${#missing[@]} -gt 0 ]; then
-        if [ "$dry" = 1 ]; then echo "-> wuerde installieren: brew install ${missing[*]}"; else "$BREW" install "${missing[@]}"; fi
+        if [ "$dry" = 1 ]; then echo "-> would install: brew install ${missing[*]}"; else "$BREW" install "${missing[@]}"; fi
       fi
     fi
     if [ ! -x "$PY" ] && [ "$dry" = 1 ]; then PY=$(command -v python3); fi
     ;;
-  *) echo "Nicht unterstuetzt: $(uname -s)"; exit 1 ;;
+  *) echo "Not supported: $(uname -s)"; exit 1 ;;
 esac
 
-"$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' || { echo "Python >= 3.11 noetig, gefunden: $("$PY" --version)"; exit 1; }
+"$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' || { echo "Python >= 3.11 required, found: $("$PY" --version)"; exit 1; }
 exec "$PY" bin/uni-vpn "$mode" "${extra[@]:-}"

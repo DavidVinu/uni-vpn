@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Ersatz fuer openconnect in Tests.
+"""Stand-in for openconnect in tests.
 
-Umgebungsvariablen:
-  FAKE_MODE           ok (Default) | auth_fail | input_required | totp_rejected | never_ready | ignore_sigterm | exit_after_ready
-  FAKE_DELAY          Sekunden bis der Port lauscht (Default 0.2)
-  FAKE_EXIT_AFTER     bei exit_after_ready: Sekunden nach Bereitschaft (Default 0.5)
-  FAKE_PASSWORD_FILE  Datei, an die das per stdin gelesene Passwort angehaengt wird
-  FAKE_TOKEN_FILE     Datei, an die der Inhalt der --token-secret=@Datei angehaengt wird
-                      (gelesen kurz vor der Bereitschaft, wie openconnect beim Erzeugen des Codes)
+Environment variables:
+  FAKE_MODE           ok (default) | auth_fail | input_required | totp_rejected | never_ready | ignore_sigterm | exit_after_ready
+  FAKE_DELAY          seconds until the port listens (default 0.2)
+  FAKE_EXIT_AFTER     with exit_after_ready: seconds after becoming ready (default 0.5)
+  FAKE_PASSWORD_FILE  file the password read from stdin is appended to
+  FAKE_TOKEN_FILE     file the contents of --token-secret=@file are appended to
+                      (read shortly before becoming ready, like openconnect when generating the code)
 """
 import os
 import signal
@@ -52,8 +52,8 @@ def main():
     delay = float(os.environ.get("FAKE_DELAY", "0.2"))
 
     if mode == "auth_fail":
-        # Falsches Passwort (gemessen 2026-09-08): "Login failed." kommt vor jeder OTP-Abfrage,
-        # dann zeigt der Server das Formular erneut und openconnect hat kein Passwort mehr.
+        # Wrong password (measured 2026-09-08): "Login failed." comes before any OTP prompt,
+        # then the server shows the form again and openconnect has no password left.
         time.sleep(delay)
         log("Bitte geben Sie ihren Benutzernamen und ihr Passwort ein.")
         log("Login failed.")
@@ -68,8 +68,8 @@ def main():
         log("Failed to complete authentication")
         sys.exit(1)
     if mode == "totp_rejected":
-        # Falscher Schluessel (gemessen 2026-09-08): das Passwort wurde angenommen, der Code
-        # abgelehnt; der Server schickt kein zweites OTP-Formular, sondern faengt von vorn an.
+        # Wrong secret (measured 2026-09-08): the password was accepted, the code rejected;
+        # the server sends no second OTP form but starts over.
         log("Bitte geben Sie ihren Benutzernamen und ihr Passwort ein.")
         log("Bitte zweiten Faktor eingeben (OTP) / Please enter second factor (OTP).")
         log("Generating OATH TOTP token code")
@@ -86,22 +86,22 @@ def main():
 
     def on_term(signum, frame):
         if mode == "ignore_sigterm":
-            log("SIGTERM ignoriert")
+            log("SIGTERM ignored")
             return
         log("User cancelled (SIGINT/SIGTERM); exiting.")
         os._exit(0)
 
     signal.signal(signal.SIGTERM, on_term)
     signal.signal(signal.SIGINT, on_term)
-    signal.signal(signal.SIGUSR2, lambda s, f: log("SIGUSR2 empfangen"))
+    signal.signal(signal.SIGUSR2, lambda s, f: log("SIGUSR2 received"))
 
     time.sleep(delay)
     if token_path:
-        # Wie das echte openconnect beim Login mit --token-mode=totp (gemessen 2026-09-08).
+        # Like the real openconnect when logging in with --token-mode=totp (measured 2026-09-08).
         log("Bitte zweiten Faktor eingeben (OTP) / Please enter second factor (OTP).")
         log("Generating OATH TOTP token code")
     if token_path and os.environ.get("FAKE_TOKEN_FILE"):
-        # openconnect liest die Datei erst beim Erzeugen des Codes, also nach dem Start.
+        # openconnect reads the file only when generating the code, i.e. after starting.
         with open(token_path, encoding="utf-8") as handle, open(os.environ["FAKE_TOKEN_FILE"], "a", encoding="utf-8") as out:
             out.write(handle.read().rstrip("\n") + "\n")
     server = socket.socket()
