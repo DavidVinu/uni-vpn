@@ -11,6 +11,8 @@ from uni_vpn import credentials, daemon as dm
 from uni_vpn.config import Config
 from uni_vpn.tunnel import free_port
 
+from tests import posix_only
+
 FAKE = str(Path(__file__).parent / "fake_openconnect.py")
 
 
@@ -23,6 +25,7 @@ async def wait_state(d, state, timeout=6):
     raise AssertionError(f"state is {d.state.value} ({d.message}), expected {state.value}")
 
 
+@posix_only
 class DaemonHarness(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         tmp = Path(tempfile.mkdtemp())

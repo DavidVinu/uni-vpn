@@ -13,8 +13,8 @@ param(
     [string]$ForUser = ""
 )
 $ErrorActionPreference = "Stop"
-$ProgressPreference = "SilentlyContinue"
-[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12  # Invoke-WebRequest is many times slower with the progress bar
+$ProgressPreference = "SilentlyContinue"  # Invoke-WebRequest is many times slower with the progress bar
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 $Root = $PSScriptRoot
 
 $OpenConnectUrl = "https://www.infradead.org/openconnect-gui/download/openconnect-gui-1.6.2-win64.exe"

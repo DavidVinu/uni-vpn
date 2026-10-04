@@ -5,6 +5,10 @@ from unittest import mock
 
 from uni_vpn import credentials, platform as pf
 
+from tests import simulate_posix
+
+setUpModule, tearDownModule = simulate_posix()
+
 
 class GetPasswordTests(unittest.IsolatedAsyncioTestCase):
     async def test_returns_bytes_without_newline(self):

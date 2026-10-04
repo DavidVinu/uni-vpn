@@ -14,6 +14,8 @@ from unittest import mock
 from uni_vpn import tunnel as tn
 from uni_vpn.config import Config
 
+from tests import posix_only
+
 FAKE = str(Path(__file__).parent / "fake_openconnect.py")
 WRAPPER = "/nonexistent/uni-vpn-ocproxy"
 
@@ -88,6 +90,7 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(seq.verdict, first)
 
 
+@posix_only
 class TunnelTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.cfg = Config(user="u", host="vpn.example")

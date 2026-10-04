@@ -8,6 +8,10 @@ from unittest import mock
 
 from uni_vpn import platform as pf
 
+from tests import posix_only, simulate_posix
+
+setUpModule, tearDownModule = simulate_posix()
+
 
 class PathTests(unittest.TestCase):
     def test_config_dir_honours_xdg(self):
@@ -38,6 +42,7 @@ class BinaryTests(unittest.TestCase):
         self.assertEqual(pf.find_binary("tool", override=str(exe)), str(exe))
         self.assertIsNone(pf.find_binary("tool", override=str(d / "missing")))
 
+    @posix_only
     def test_find_binary_searches_path(self):
         self.assertIsNotNone(pf.find_binary("sh"))
         self.assertIsNone(pf.find_binary("definitely-not-a-binary-xyz"))

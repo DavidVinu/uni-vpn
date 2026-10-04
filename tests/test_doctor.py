@@ -7,6 +7,10 @@ from unittest import mock
 from uni_vpn import doctor
 from uni_vpn import platform as pf
 
+from tests import simulate_posix
+
+setUpModule, tearDownModule = simulate_posix()
+
 
 def write_config(text='user = "ab1"\n'):
     path = Path(tempfile.mkdtemp()) / "config.toml"

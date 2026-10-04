@@ -18,6 +18,7 @@ from uni_vpn import daemon as dm
 from uni_vpn import platform as pf
 from uni_vpn.tunnel import free_port
 
+from tests import posix_only
 from tests.test_daemon import DaemonHarness, wait_state
 
 
@@ -128,6 +129,7 @@ def file_mode(path: Path) -> int:
     return stat.S_IMODE(path.stat().st_mode)
 
 
+@posix_only
 class LogFileModeTests(unittest.TestCase):
     def test_rotated_log_file_is_private(self):
         self.addCleanup(os.umask, os.umask(0o022))

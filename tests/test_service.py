@@ -9,6 +9,10 @@ from unittest import mock
 from uni_vpn import platform as pf
 from uni_vpn import service
 
+from tests import simulate_posix
+
+setUpModule, tearDownModule = simulate_posix()
+
 
 class RenderTests(unittest.TestCase):
     def test_render_replaces_all(self):
