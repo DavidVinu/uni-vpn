@@ -1,5 +1,4 @@
 import asyncio
-import fcntl
 import io
 import json
 import logging
@@ -163,9 +162,9 @@ class DaemonCommandTests(unittest.TestCase):
         cfg_path.write_text(f'user = "u"\nsocks_port = {free_port()}\nhttp_port = {free_port()}\n')
         lock_path = self.tmp / "daemon.lock"
         lock_path.parent.mkdir(parents=True, exist_ok=True)
-        holder = open(lock_path, "w")
+        holder = cli.acquire_lock(lock_path)
+        self.assertIsNotNone(holder)
         self.addCleanup(holder.close)
-        fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
         err = io.StringIO()
         with redirect_stderr(err):
             rc = cli.main(["--config", str(cfg_path), "daemon"])

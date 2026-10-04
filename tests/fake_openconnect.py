@@ -39,7 +39,7 @@ def main():
     port = None
     token_path = None
     for arg in sys.argv[1:]:
-        if arg.startswith("--script="):
+        if arg.startswith("--script=") and arg.split()[-1].isdigit():
             port = int(arg.split()[-1])
         if arg.startswith("--token-secret=@"):
             token_path = arg[len("--token-secret=@"):]
@@ -104,6 +104,13 @@ def main():
         # openconnect reads the file only when generating the code, i.e. after starting.
         with open(token_path, encoding="utf-8") as handle, open(os.environ["FAKE_TOKEN_FILE"], "a", encoding="utf-8") as out:
             out.write(handle.read().rstrip("\n") + "\n")
+    if os.environ.get("UNI_VPN_STATE"):
+        # Windows: openconnect runs the vpnc-script, which reports the tunnel address.
+        with open(os.environ["UNI_VPN_STATE"], "w", encoding="utf-8") as handle:
+            handle.write("INTERNAL_IP4_ADDRESS=127.0.0.1\nINTERNAL_IP4_DNS=127.0.0.1\nTUNIDX=7\n")
+        log("Connected as 127.0.0.1, using SSL")
+        while True:
+            time.sleep(0.2)
     server = socket.socket()
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind(("127.0.0.1", port))

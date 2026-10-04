@@ -5,12 +5,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import ctypes
-import fcntl
 import getpass
 import json
 import os
 import re
-import resource
 import signal
 import sys
 import urllib.error
@@ -54,6 +52,10 @@ def format_status(status: dict) -> str:
 
 def harden() -> None:
     """No core dumps with the password in memory."""
+    if sys.platform == "win32":
+        return  # no core files; Windows Error Reporting is per process and off for pythonw children
+    import resource
+
     try:
         resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     except (ValueError, OSError):
@@ -180,8 +182,34 @@ def _ports_from_broken_config(path: Path | None) -> dict[str, int]:
 
 
 def install_signal_handlers(loop: asyncio.AbstractEventLoop, daemon) -> None:
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, daemon.stop)
+    for name in ("SIGTERM", "SIGINT", "SIGBREAK"):
+        sig = getattr(signal, name, None)
+        if sig is None:
+            continue
+        try:
+            loop.add_signal_handler(sig, daemon.stop)
+        except (NotImplementedError, RuntimeError, ValueError):
+            # Windows: no loop signal handlers; a plain handler hands over to the loop.
+            signal.signal(sig, lambda *_: loop.call_soon_threadsafe(daemon.stop))
+
+
+def acquire_lock(path: Path):
+    """Exclusive lock for the lifetime of the process; None if another daemon holds it."""
+    handle = open(path, "a+")  # noqa: SIM115 - stays open until the end
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        return None
+    return handle
 
 
 def cmd_daemon(args) -> int:
@@ -192,10 +220,8 @@ def cmd_daemon(args) -> int:
     os.umask(0o077)  # lock file, log and everything else readable only by the user
     lock_path = pf.lock_file()
     lock_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    lock = open(lock_path, "w")  # noqa: SIM115 - stays open until the end
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
+    lock = acquire_lock(lock_path)
+    if lock is None:
         print("uni-vpn daemon is already running", file=sys.stderr)
         return 0
     log, tail = setup_logging(pf.log_file())
@@ -207,6 +233,12 @@ def cmd_daemon(args) -> int:
         config_error = str(exc)
         log.error("%s", exc)
     log.info("uni-vpn %s starting (SOCKS %s, status %s)", __version__, cfg.socks_port, cfg.http_port)
+    if pf.IS_WINDOWS:
+        from . import windows
+
+        windows.kill_children_with_us()
+        if not windows.is_admin():
+            log.warning("Not running elevated: openconnect cannot create the Wintun adapter")
 
     async def run() -> None:
         daemon = Daemon(cfg, log, config_error=config_error, log_tail=tail)

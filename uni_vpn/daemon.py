@@ -123,10 +123,15 @@ class Daemon:
     def _make_tunnel(self) -> Tunnel:
         openconnect = pf.find_binary("openconnect", self.cfg.openconnect)
         if not openconnect:
-            raise FileNotFoundError("openconnect not found, please run install.sh")
+            raise FileNotFoundError("openconnect not found, please run the installer")
+        if pf.IS_WINDOWS:
+            from .wintunnel import WindowsTunnel
+
+            return WindowsTunnel(self.cfg, openconnect, str(pf.bin_dir() / "uni-vpn-vpnc.js"), self.log,
+                                 token_dir=self.token_dir)
         ocproxy = pf.find_binary("ocproxy", self.cfg.ocproxy)
         if not ocproxy:
-            raise FileNotFoundError("ocproxy not found, please run install.sh")
+            raise FileNotFoundError("ocproxy not found, please run the installer")
         return Tunnel(self.cfg, openconnect, self.wrapper, self.log, ocproxy=ocproxy, token_dir=self.token_dir)
 
     def _set(self, state: State, message: str) -> None:
@@ -196,6 +201,10 @@ class Daemon:
         stale = remove_stale_token_files(self.token_dir)
         if stale:
             self.log.warning("Removed %d stale secret file(s)", stale)
+        if pf.IS_WINDOWS:
+            from .wintunnel import remove_stale_state_files
+
+            remove_stale_state_files(self.token_dir)
         self.http = HttpApi(self, "127.0.0.1", self.cfg.http_port, self.log)
         try:
             await self.http.start()

@@ -31,9 +31,40 @@ def template_path() -> Path:
 
 
 def unit_target_path() -> Path:
+    if pf.IS_WINDOWS:
+        # Task Scheduler keeps its own copy; this one records what was registered.
+        return pf.config_dir() / "uni-vpn-task.xml"
     if pf.IS_MACOS:
         return Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
-    return Path.home() / ".config" / "systemd" / "user" / f"{UNIT}.service"
+    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / "systemd" / "user" / f"{UNIT}.service"
+
+
+def _schtasks(*args: str) -> list[str]:
+    return ["schtasks", *args]
+
+
+def _no_window() -> dict:
+    return {"creationflags": 0x08000000} if pf.IS_WINDOWS else {}  # CREATE_NO_WINDOW
+
+
+def _install_windows(target: Path, dry_run: bool, run) -> list[Path]:
+    from . import windows
+
+    python = windows.pythonw(pf.python_executable())
+    text = windows.render_task(python, str(pf.bin_dir() / "uni-vpn"), windows.current_user(), str(pf.repo_root()))
+    if dry_run:
+        print(f"-> would register the scheduled task {windows.TASK_NAME} ({target}) and start it")
+        return [target]
+    target.parent.mkdir(parents=True, exist_ok=True)
+    pf.state_dir().mkdir(parents=True, exist_ok=True)
+    target.write_text(text, encoding="utf-16")
+    files = [target]
+    _run_checked(run, _schtasks("/Create", "/TN", windows.TASK_NAME, "/XML", str(target), "/F"), files)
+    # Like "systemctl restart": a running old daemon makes way for the new code.
+    run(_schtasks("/End", "/TN", windows.TASK_NAME), capture_output=True, text=True, **_no_window())
+    _run_checked(run, _schtasks("/Run", "/TN", windows.TASK_NAME), files)
+    return files
 
 
 def render(template: str, mapping: dict[str, str]) -> str:
@@ -93,6 +124,8 @@ def _run_checked(run, cmd: list[str], files: list[Path]) -> None:
 
 def install(dry_run: bool = False, run=subprocess.run) -> list[Path]:
     target = unit_target_path()
+    if pf.IS_WINDOWS:
+        return _install_windows(target, dry_run, run)
     text = render_unit(pf.python_executable(), str(pf.bin_dir() / "uni-vpn"), str(pf.state_dir()),
                        pf.brew_prefix() if pf.IS_MACOS else None, extra_env=passthrough_env())
     if dry_run:
@@ -115,6 +148,13 @@ def install(dry_run: bool = False, run=subprocess.run) -> list[Path]:
 
 def uninstall(run=subprocess.run) -> None:
     target = unit_target_path()
+    if pf.IS_WINDOWS:
+        from .windows import TASK_NAME
+
+        run(_schtasks("/End", "/TN", TASK_NAME), capture_output=True, text=True, **_no_window())
+        run(_schtasks("/Delete", "/TN", TASK_NAME, "/F"), capture_output=True, text=True, **_no_window())
+        target.unlink(missing_ok=True)
+        return
     if pf.IS_MACOS:
         run(["launchctl", "bootout", _gui_domain(), str(target)], capture_output=True, text=True)
     else:
@@ -127,6 +167,14 @@ def uninstall(run=subprocess.run) -> None:
 
 def is_active(run=subprocess.run) -> bool:
     try:
+        if pf.IS_WINDOWS:
+            # The state name from PowerShell is not localized, unlike the schtasks output.
+            from .windows import TASK_NAME
+
+            result = run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                          f"(Get-ScheduledTask -TaskName '{TASK_NAME}').State"],
+                         capture_output=True, text=True, timeout=15, **_no_window())
+            return (result.stdout or "").strip() == "Running"
         if pf.IS_MACOS:
             result = run(["launchctl", "print", f"{_gui_domain()}/{LABEL}"], capture_output=True, text=True, timeout=5)
             return result.returncode == 0 and "state = running" in (result.stdout or "")
@@ -138,6 +186,26 @@ def is_active(run=subprocess.run) -> bool:
 
 def control(action: str, run=subprocess.run) -> int:
     target = unit_target_path()
+    if pf.IS_WINDOWS:
+        from .windows import TASK_NAME
+
+        if not target.exists():
+            print(f"Service file is missing ({target}), please run install.ps1")
+            return 1
+        end, start = _schtasks("/End", "/TN", TASK_NAME), _schtasks("/Run", "/TN", TASK_NAME)
+        steps = {
+            "start": [start], "stop": [end], "restart": [end, start],
+            "enable": [_schtasks("/Change", "/TN", TASK_NAME, "/ENABLE"), start],
+            "disable": [end, _schtasks("/Change", "/TN", TASK_NAME, "/DISABLE")],
+            "status": [_schtasks("/Query", "/TN", TASK_NAME, "/V", "/FO", "LIST")],
+        }[action]
+        rc = 0
+        for index, cmd in enumerate(steps):
+            result = run(cmd, text=True)
+            # "/End" on a task that is not running fails; that must not stop a restart.
+            if index == len(steps) - 1 or cmd[1] != "/End":
+                rc = rc or result.returncode
+        return rc
     if pf.IS_MACOS:
         commands = {
             "start": ["launchctl", "bootstrap", _gui_domain(), str(target)],

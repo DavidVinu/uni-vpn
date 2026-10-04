@@ -55,7 +55,31 @@ MISSING = {"password": (PasswordMissing, "No password saved"),
            "totp": (TotpMissing, "No TOTP secret saved")}
 
 
+def _windows_target(user: str, kind: str) -> str:
+    from .windows import credential_target
+
+    return credential_target(SERVICES[kind], user)
+
+
+async def _get_secret_windows(user: str, kind: str, timeout: float) -> bytes:
+    from .windows import CredentialError, cred_read
+
+    loop = asyncio.get_running_loop()
+    try:
+        out = await asyncio.wait_for(loop.run_in_executor(None, cred_read, _windows_target(user, kind)), timeout)
+    except asyncio.TimeoutError:
+        raise KeyringLocked("Credential Manager did not answer") from None
+    except CredentialError as exc:
+        raise KeyringError(str(exc)) from None
+    if not out:
+        error, message = MISSING[kind]
+        raise error(message)
+    return out
+
+
 async def get_secret(user: str, kind: str, timeout: float, command: list[str] | None = None) -> bytes:
+    if pf.IS_WINDOWS and command is None:
+        return await _get_secret_windows(user, kind, timeout)
     cmd = command or lookup_command(user, kind)
     proc = await asyncio.create_subprocess_exec(
         *cmd, stdin=asyncio.subprocess.DEVNULL,
@@ -97,6 +121,14 @@ def store_secret(user: str, kind: str, value: str, run=subprocess.run) -> None:
     if "\n" in value or "\r" in value:
         raise KeyringError("Password must not contain a line break")
     service, label = SERVICES[kind], LABELS[kind]
+    if pf.IS_WINDOWS:
+        from .windows import CredentialError, cred_write
+
+        try:
+            cred_write(_windows_target(user, kind), user, value.encode("utf-8"), comment=label)
+        except CredentialError as exc:
+            raise KeyringError(f"{label} could not be saved: {exc}") from None
+        return
     try:
         if pf.IS_MACOS:
             # Delete first, then create anew: "-U" (update) triggers a confirmation dialog
@@ -127,6 +159,10 @@ def store_totp(user: str, token: str, run=subprocess.run) -> None:
 
 def delete_secret(user: str, kind: str, run=subprocess.run) -> bool:
     service = SERVICES[kind]
+    if pf.IS_WINDOWS:
+        from .windows import cred_delete
+
+        return cred_delete(_windows_target(user, kind))
     if pf.IS_MACOS:
         cmd = [pf.SECURITY, "delete-generic-password", "-s", service, "-a", user]
     else:

@@ -172,6 +172,15 @@ class Tunnel:
             self.log.warning("Could not delete secret file %s: %s", self.token_file, exc)
         self.token_file = None
 
+    def _env(self) -> dict[str, str]:
+        env = dict(os.environ)
+        if self.ocproxy:
+            env["OCPROXY"] = self.ocproxy
+        return env
+
+    def _spawn_kwargs(self) -> dict:
+        return {"start_new_session": True}
+
     @property
     def returncode(self) -> int | None:
         return self.proc.returncode if self.proc else None
@@ -179,9 +188,7 @@ class Tunnel:
     async def start(self, password: bytes, totp: str | None = None) -> None:
         self.port = free_port()
         self.started_at = time.monotonic()
-        env = dict(os.environ)
-        if self.ocproxy:
-            env["OCPROXY"] = self.ocproxy
+        env = self._env()
         if totp:
             self._write_token_file(totp)
         try:
@@ -190,8 +197,8 @@ class Tunnel:
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
-                start_new_session=True,
                 env=env,
+                **self._spawn_kwargs(),
             )
         except OSError:
             self._remove_token_file()
@@ -266,7 +273,7 @@ class Tunnel:
         self.log.warning("pkill exit code %s (0 = matched, 1 = no match, 2 = syntax error)", result.returncode)
 
     def reconnect(self) -> None:
-        if self.proc and not self.exited.is_set():
+        if self.proc and not self.exited.is_set() and hasattr(signal, "SIGUSR2"):
             try:
                 os.kill(self.proc.pid, signal.SIGUSR2)
             except ProcessLookupError:

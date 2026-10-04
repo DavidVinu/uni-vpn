@@ -9,13 +9,23 @@ import sys
 from pathlib import Path
 
 IS_MACOS = sys.platform == "darwin"
+IS_WINDOWS = sys.platform == "win32"
 APP = "uni-vpn"
-CISCO_VPN = "/opt/cisco/secureclient/bin/vpn"
 SECURITY = "/usr/bin/security"
-SEARCH_DIRS = [
-    "/usr/sbin", "/usr/bin", "/opt/homebrew/bin", "/opt/homebrew/sbin",
-    "/usr/local/bin", "/usr/local/sbin", "/bin", "/sbin",
-]
+_PROGRAM_FILES = [os.environ.get(name) for name in ("ProgramFiles", "ProgramFiles(x86)", "ProgramW6432")]
+_PROGRAM_FILES = list(dict.fromkeys(p for p in _PROGRAM_FILES if p)) or ["C:\\Program Files", "C:\\Program Files (x86)"]
+if IS_WINDOWS:
+    CISCO_VPN = next((os.path.join(base, "Cisco", "Cisco Secure Client", "vpncli.exe") for base in _PROGRAM_FILES
+                      if os.path.isfile(os.path.join(base, "Cisco", "Cisco Secure Client", "vpncli.exe"))),
+                     os.path.join(_PROGRAM_FILES[-1], "Cisco", "Cisco Secure Client", "vpncli.exe"))
+    # openconnect.exe ships with OpenConnect-GUI (with Wintun), which install.ps1 installs.
+    SEARCH_DIRS = [os.path.join(base, name) for base in _PROGRAM_FILES for name in ("OpenConnect-GUI", "OpenConnect")]
+else:
+    CISCO_VPN = "/opt/cisco/secureclient/bin/vpn"
+    SEARCH_DIRS = [
+        "/usr/sbin", "/usr/bin", "/opt/homebrew/bin", "/opt/homebrew/sbin",
+        "/usr/local/bin", "/usr/local/sbin", "/bin", "/sbin",
+    ]
 
 
 def repo_root() -> Path:
@@ -26,12 +36,20 @@ def bin_dir() -> Path:
     return repo_root() / "bin"
 
 
+def _local_appdata() -> Path:
+    return Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local"))
+
+
 def config_dir() -> Path:
+    if IS_WINDOWS and not os.environ.get("XDG_CONFIG_HOME"):
+        return _local_appdata() / APP
     base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
     return Path(base) / APP
 
 
 def state_dir() -> Path:
+    if IS_WINDOWS and not os.environ.get("XDG_STATE_HOME"):
+        return _local_appdata() / APP / "logs"
     if IS_MACOS:
         return Path.home() / "Library" / "Logs" / APP
     base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
@@ -52,11 +70,18 @@ def find_binary(name: str, override: str | None = None) -> str | None:
     found = shutil.which(name)
     if found:
         return found
+    names = [name, name + ".exe"] if IS_WINDOWS and not name.lower().endswith(".exe") else [name]
     for directory in SEARCH_DIRS:
-        candidate = os.path.join(directory, name)
-        if os.access(candidate, os.X_OK) and os.path.isfile(candidate):
-            return candidate
+        for candidate_name in names:
+            candidate = os.path.join(directory, candidate_name)
+            if os.access(candidate, os.X_OK) and os.path.isfile(candidate):
+                return candidate
     return None
+
+
+def tunnel_helpers() -> list[str]:
+    """Programs the tunnel needs besides openconnect. Windows uses the built-in SOCKS server."""
+    return [] if IS_WINDOWS else ["ocproxy"]
 
 
 def cisco_installed() -> bool:
@@ -64,16 +89,17 @@ def cisco_installed() -> bool:
 
 
 def cisco_connected(run=subprocess.run, cscotun: Path = Path("/sys/class/net/cscotun0")) -> bool:
-    if cscotun.exists():
+    if not IS_WINDOWS and cscotun.exists():
         return True
-    if not IS_MACOS:
+    if not (IS_MACOS or IS_WINDOWS):
         # On Linux the Cisco client always creates cscotun0 when connected. "vpn state"
         # takes 2.2 s (measured 2026-09-08) and would delay every connect.
         return False
     if not cisco_installed():
         return False
+    extra = {"creationflags": 0x08000000} if IS_WINDOWS else {}  # CREATE_NO_WINDOW
     try:
-        result = run([CISCO_VPN, "state"], capture_output=True, text=True, timeout=5)
+        result = run([CISCO_VPN, "state"], capture_output=True, text=True, timeout=5, **extra)
     except (OSError, subprocess.SubprocessError):
         return False
     return "state: Connected" in (result.stdout or "")
@@ -88,3 +114,17 @@ def brew_prefix() -> str | None:
 
 def python_executable() -> str:
     return sys.executable
+
+
+def open_url(url: str, run=subprocess.run) -> bool:
+    """Open a URL in the default browser. False when there is no desktop to show it on."""
+    if not (IS_MACOS or IS_WINDOWS) and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        return False
+    try:
+        if IS_WINDOWS:
+            os.startfile(url)  # noqa: S606 - our own loopback URL
+            return True
+        result = run(["open" if IS_MACOS else "xdg-open", url], capture_output=True, timeout=15)
+        return result.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
