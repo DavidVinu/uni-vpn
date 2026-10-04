@@ -56,7 +56,8 @@ linux_packages() {
   if command -v apt-get >/dev/null && command -v dpkg >/dev/null; then
     local p
     for p in openconnect ocproxy libsecret-tools; do
-      dpkg -s "$p" >/dev/null 2>&1 || missing+=("$p")
+      # dpkg -s also succeeds for removed packages whose config files are left.
+      dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q 'ok installed' || missing+=("$p")
     done
     find_python >/dev/null || missing+=(python3)
     if [ ${#missing[@]} -gt 0 ]; then

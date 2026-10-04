@@ -20,9 +20,12 @@ src=$(find "$tmp" -mindepth 1 -maxdepth 1 -type d | head -n 1)
 mkdir -p "$APP"
 cp -R "$src/." "$APP/"
 echo "-> installed to $APP"
+# exec below replaces this shell, so the EXIT trap would never run.
+rm -rf "$tmp"
+trap - EXIT
 
 # "curl | bash" uses stdin for the script; questions must come from the terminal.
-if [ -t 1 ] && { true </dev/tty; } 2>/dev/null; then
+if { true </dev/tty; } 2>/dev/null; then
   exec "$APP/install.sh" "$@" </dev/tty
 fi
 exec "$APP/install.sh" "$@"

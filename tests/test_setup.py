@@ -1,5 +1,8 @@
 import argparse
+import io
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -118,6 +121,55 @@ class SetupTests(SetupHarness):
         rc, out = self.run_setup(user="ab123")
         self.assertEqual(rc, 0)
         self.assertIn("replaced", out)
+
+    def test_failed_proxy_registration_is_not_reported_as_success(self):
+        self.proxy_result = "failed"
+        rc, out = self.run_setup(user="ab123")
+        self.assertEqual(rc, 0)
+        self.assertNotIn("Proxy rule registered", out)
+        self.assertIn("http://127.0.0.1:1081/proxy.pac", out)
+
+    def test_user_option_on_a_rerun_changes_the_university_id(self):
+        self.run_setup(user="ab123")
+        rc, out = self.run_setup(user="cd456")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(setup.config.load(setup.config.default_path()).user, "cd456")
+
+    def test_path_hint_on_linux_mentions_logging_in_again(self):
+        with mock.patch.dict(os.environ, {"PATH": "/usr/bin"}):
+            _, out = self.run_setup(user="ab123")
+        self.assertIn("logging out and in", out)
+
+    def test_macos_command_goes_to_homebrew_bin_and_uninstall_removes_it(self):
+        brew_bin = self.home / "homebrew" / "bin"
+        brew_bin.mkdir(parents=True)
+        with mock.patch.object(pf, "IS_MACOS", True), \
+                mock.patch.object(setup, "MACOS_BIN_DIRS", (str(self.home / "missing"), str(brew_bin))):
+            self.assertEqual(setup.command_path(), brew_bin / "uni-vpn")
+            with redirect_stdout(StringIO()):
+                setup.install_command(False, lambda path: setup.record([path]))
+        self.assertTrue((brew_bin / "uni-vpn").exists())
+        self.assertIn(brew_bin / "uni-vpn", setup.recorded())
+        with redirect_stdout(StringIO()):
+            setup.uninstall(self.args(), input_fn=lambda p: "n", service_uninstall=lambda run=None: True,
+                            proxy_uninstall=lambda: "unset")
+        self.assertFalse((brew_bin / "uni-vpn").exists())
+
+    def test_windows_wrapper_uses_the_oem_code_page(self):
+        text = '@echo off\r\n"C:\\Users\\J\u00fcrgen\\python.exe" "x" %*\r\n'
+        self.assertEqual(setup.cmd_bytes(text, codec="cp850"), text.encode("cp850"))
+        fallback = setup.cmd_bytes(text, codec="ascii")
+        self.assertTrue(fallback.startswith(b"@chcp 65001 >nul\r\n@echo off"))
+        self.assertIn("J\u00fcrgen".encode("utf-8"), fallback)
+
+    def test_no_terminal_is_a_clear_error(self):
+        from uni_vpn import cli
+
+        out = StringIO()
+        with redirect_stdout(out), mock.patch.object(setup, "setup", side_effect=EOFError):
+            rc = cli.main(["setup"])
+        self.assertEqual(rc, 1)
+        self.assertIn("No terminal", out.getvalue())
 
     def test_setup_is_idempotent(self):
         self.run_setup()
@@ -293,6 +345,17 @@ class GuiSetupTests(SetupHarness):
         self.assertEqual(rc, 0, out.getvalue())
         self.assertEqual(self.stored, [("ab123", "pw")])
 
+    def test_service_that_never_answers_is_reported_instead_of_opening_the_browser(self):
+        out = StringIO()
+        with redirect_stdout(out), mock.patch.object(setup, "wait_for_port", return_value=False), \
+                mock.patch.object(doctor, "run_checks", return_value=[doctor.Check("Service", "fail", "not running")]):
+            rc = setup.setup(self.args(), service_install=self.fake_service_install, proxy_install=self.fake_proxy_install,
+                             run_doctor=True, port_open=lambda port: False,
+                             open_url=mock.Mock(side_effect=AssertionError("browser opened")), has_desktop=lambda: True)
+        self.assertEqual(rc, 1)
+        self.assertIn("uni-vpn log", out.getvalue())
+        self.assertIn("[!!] Service: not running", out.getvalue())
+
     def test_invalid_university_id_is_refused(self):
         rc, out = self.run_setup(user='ab"1')
         self.assertEqual(rc, 1)
@@ -312,7 +375,7 @@ class UninstallTests(SetupHarness):
                                  service_uninstall=lambda run=None: removed_service.append(True),
                                  delete=lambda user: deleted.append(user) or True,
                                  delete_totp=lambda user: deleted_totp.append(user) or True,
-                                 proxy_uninstall=lambda: proxy_restored.append(True) or True)
+                                 proxy_uninstall=lambda: proxy_restored.append(True) or "restored")
         self.assertEqual(rc, 0)
         self.assertEqual(removed_service, [True])
         self.assertEqual(deleted, ["ab123"])
@@ -331,8 +394,80 @@ class UninstallTests(SetupHarness):
             setup.uninstall(self.args(), input_fn=lambda p: "n", service_uninstall=lambda run=None: None,
                             delete=lambda user: deleted.append(user) or True,
                             delete_totp=lambda user: deleted.append(("totp", user)) or True,
-                            proxy_uninstall=lambda: True)
+                            proxy_uninstall=lambda: "restored")
         self.assertEqual(deleted, [])
+
+    def uninstall(self, input_fn=lambda p: "n", service_result=True, proxy_result="restored", **kwargs):
+        out = StringIO()
+        with redirect_stdout(out):
+            rc = setup.uninstall(self.args(**kwargs), input_fn=input_fn, service_uninstall=lambda run=None: service_result,
+                                 delete=lambda user: True, delete_totp=lambda user: True,
+                                 proxy_uninstall=lambda: proxy_result)
+        return rc, out.getvalue()
+
+    def test_keyring_question_without_terminal_means_no(self):
+        self.run_setup()
+
+        def no_terminal(prompt):
+            raise EOFError
+
+        rc, out = self.uninstall(input_fn=no_terminal)
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("Password deleted", out)
+
+    def test_failures_are_reported_not_hidden(self):
+        self.run_setup()
+        rc, out = self.uninstall(service_result=False, proxy_result="failed")
+        self.assertEqual(rc, 1)
+        self.assertIn("Service could not be removed", out)
+        self.assertNotIn("Service removed", out)
+        self.assertIn("Proxy setting could not be restored", out)
+        self.assertNotIn("Proxy setting restored", out)
+
+    def test_locked_daemon_lock_does_not_crash(self):
+        self.run_setup()
+        lock = pf.config_dir() / "daemon.lock"
+        lock.write_text("")
+        real_unlink = Path.unlink
+
+        def unlink(path, missing_ok=False):
+            if path == lock:
+                raise PermissionError(13, "The process cannot access the file")
+            return real_unlink(path, missing_ok=missing_ok)
+
+        with mock.patch.object(Path, "unlink", unlink):
+            rc, out = self.uninstall()
+        self.assertEqual(rc, 0, out)
+
+    def get_sh_app(self, git=False):
+        app = self.home / ".local" / "share" / "uni-vpn" / "app"
+        (app / "uni_vpn").mkdir(parents=True)
+        (app / "uni_vpn" / "__init__.py").write_text("")
+        if git:
+            (app / ".git").mkdir()
+        patch = mock.patch.object(pf, "repo_root", return_value=app.resolve())
+        patch.start()
+        self.addCleanup(patch.stop)
+        os.environ.pop("XDG_DATA_HOME", None)  # restored by the harness
+        return app
+
+    def test_removes_the_get_sh_copy(self):
+        self.run_setup()
+        app = self.get_sh_app()
+        rc, out = self.uninstall()
+        self.assertEqual(rc, 0, out)
+        self.assertFalse(app.exists())
+        self.assertFalse(app.parent.exists())
+
+    def test_keeps_a_git_clone_and_the_copy_after_a_failure(self):
+        self.run_setup()
+        app = self.get_sh_app(git=True)
+        self.uninstall()
+        self.assertTrue(app.exists())
+        shutil.rmtree(app / ".git")
+        rc, _ = self.uninstall(service_result=False)
+        self.assertEqual(rc, 1)
+        self.assertTrue(app.exists())
 
 
 class ApportTests(SetupHarness):
@@ -349,7 +484,6 @@ class ApportTests(SetupHarness):
 
 class UpdateTests(unittest.TestCase):
     def archive(self, files):
-        import io
         import zipfile
 
         buf = io.BytesIO()
@@ -357,8 +491,9 @@ class UpdateTests(unittest.TestCase):
             zf.writestr("uni-vpn-main/", "")
             for name, data in files.items():
                 zf.writestr("uni-vpn-main/" + name, data)
-        payload = buf.getvalue()
+        return self.opener(buf.getvalue())
 
+    def opener(self, payload):
         class Response(io.BytesIO):
             def __enter__(self):
                 return self
@@ -388,6 +523,66 @@ class UpdateTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             setup.download_release(target, opener=self.archive({"uni_vpn/__init__.py": "x", "../evil": "x"}))
         self.assertFalse((target.parent / "evil").exists())
+
+    def files(self, root):
+        return {p.relative_to(root).as_posix(): p.read_text() for p in root.rglob("*") if p.is_file() and not p.is_symlink()}
+
+    def test_broken_downloads_are_reported_and_change_nothing(self):
+        import zipfile
+
+        target = Path(tempfile.mkdtemp()) / "app"
+        (target / "uni_vpn").mkdir(parents=True)
+        (target / "uni_vpn" / "__init__.py").write_text("old")
+        (target / "uni_vpn" / "b.py").write_text("old")
+        empty = io.BytesIO()
+        zipfile.ZipFile(empty, "w").close()
+        good = self.archive({"uni_vpn/__init__.py": "new", "uni_vpn/b.py": "new-content-2"})(None).getvalue()
+        damaged = good.replace(b"new-content-2", b"bad-content-2")  # stored, so the CRC no longer matches
+        self.assertNotEqual(good, damaged)
+        for payload in (b"not a zip", empty.getvalue(), damaged):
+            with self.assertRaises(ValueError):
+                setup.download_release(target, opener=self.opener(payload))
+            self.assertEqual(self.files(target), {"uni_vpn/__init__.py": "old", "uni_vpn/b.py": "old"})
+        self.assertEqual(sorted(p.name for p in target.parent.iterdir()), ["app"])
+
+    def test_files_removed_upstream_are_deleted_only_under_uni_vpn_and_bin(self):
+        base = Path(tempfile.mkdtemp())
+        target = base / "app"
+        for name in ("uni_vpn/__init__.py", "uni_vpn/gone.py", "uni_vpn/sub/gone.py", "uni_vpn/__pycache__/x.pyc",
+                     "bin/old-tool", "docs/notes.md", "config.local"):
+            (target / name).parent.mkdir(parents=True, exist_ok=True)
+            (target / name).write_text("old")
+        outside = base / "outside.py"
+        outside.write_text("mine")
+        if os.name == "posix":
+            (target / "uni_vpn" / "link.py").symlink_to(outside)
+        setup.download_release(target, opener=self.archive({"uni_vpn/__init__.py": "new", "bin/uni-vpn": "#!/bin/sh\n"}))
+        self.assertEqual(self.files(target), {"uni_vpn/__init__.py": "new", "uni_vpn/__pycache__/x.pyc": "old",
+                                              "bin/uni-vpn": "#!/bin/sh\n", "docs/notes.md": "old", "config.local": "old"})
+        self.assertFalse((target / "uni_vpn" / "sub").exists())
+        self.assertEqual(outside.read_text(), "mine")
+        if os.name == "posix":
+            self.assertTrue((target / "uni_vpn" / "link.py").is_symlink())
+
+    def test_update_reports_a_broken_download(self):
+        root = Path(tempfile.mkdtemp())
+        out = StringIO()
+        with mock.patch.object(pf, "repo_root", return_value=root), redirect_stdout(out), \
+                mock.patch.object(setup.service, "control", side_effect=AssertionError("restarted")):
+            rc = setup.update(argparse.Namespace(dry_run=False),
+                              download=lambda target: setup.download_release(target, opener=self.opener(b"junk")))
+        self.assertEqual(rc, 1)
+        self.assertIn("Update failed", out.getvalue())
+
+    def test_failed_restart_is_not_reported_as_success(self):
+        root = Path(tempfile.mkdtemp())
+        out = StringIO()
+        with mock.patch.object(pf, "repo_root", return_value=root), redirect_stdout(out), \
+                mock.patch.object(setup.service, "control", lambda action, run=None: 5):
+            rc = setup.update(argparse.Namespace(dry_run=False), download=lambda target: None)
+        self.assertEqual(rc, 5)
+        self.assertNotIn("Service restarted", out.getvalue())
+        self.assertIn("failed", out.getvalue())
 
     def test_update_without_git_downloads_and_restarts(self):
         root = Path(tempfile.mkdtemp())

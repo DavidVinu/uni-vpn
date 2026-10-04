@@ -130,6 +130,18 @@ class DoctorTests(unittest.TestCase):
         self.assertIn("in use by another process", detail)
         self.assertIn("config.toml", detail)
 
+    def test_port_owner_from_localized_netstat_on_windows(self):
+        output = ("\nAktive Verbindungen\n\n  Proto  Lokale Adresse  Remoteadresse  Status  PID\n"
+                  "  TCP    127.0.0.1:50000  127.0.0.1:1080  HERGESTELLT  77\n"
+                  "  TCP    127.0.0.1:1080   0.0.0.0:0       ABH\u00d6REN     4242\n")
+
+        def run(cmd, **kwargs):
+            return subprocess.CompletedProcess(cmd, 0, output, "")
+
+        with mock.patch.object(pf, "IS_WINDOWS", True):
+            self.assertEqual(doctor.port_owner(1080, run), "PID 4242")
+            self.assertEqual(doctor.port_owner(1081, run), "")
+
     def test_openconnect_version_in_detail(self):
         def run(cmd, **kwargs):
             self.commands.append((cmd, kwargs.get("timeout")))
@@ -179,7 +191,7 @@ class DoctorTests(unittest.TestCase):
 
     def test_proxy_states(self):
         for state, expected, needle in (("ok", "ok", "proxy.pac"), ("unset", "fail", "install.sh"),
-                                        ("foreign", "warn", "another"), ("unavailable", "warn", "http://127.0.0.1:1081/proxy.pac")):
+                                        ("foreign", "warn", "another"), ("unavailable", "warn", "KDE, macOS or Windows")):
             checks = doctor.run_checks(write_config(), **self.probes(proxy_state=lambda port, s=state: s))
             check = self.by_name(checks, "Proxy rule")
             self.assertEqual(check.status, expected, state)

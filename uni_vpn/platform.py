@@ -127,7 +127,7 @@ def has_desktop() -> bool:
     return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
 
 
-def open_url(url: str, run=subprocess.run) -> bool:
+def open_url(url: str, popen=subprocess.Popen) -> bool:
     """Open a URL in the default browser. False when there is no desktop to show it on."""
     if not has_desktop():
         return False
@@ -135,7 +135,23 @@ def open_url(url: str, run=subprocess.run) -> bool:
         if IS_WINDOWS:
             os.startfile(url)  # noqa: S606 - our own loopback URL
             return True
-        result = run(["open" if IS_MACOS else "xdg-open", url], capture_output=True, timeout=15)
-        return result.returncode == 0
+        # xdg-open can stay in the foreground when it starts a new browser: no pipes the
+        # browser could inherit, and a launcher that is still running counts as success.
+        process = popen(["open" if IS_MACOS else "xdg-open", url], stdin=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        try:
+            return process.wait(timeout=3) == 0
+        except subprocess.TimeoutExpired:
+            return True
     except (OSError, subprocess.SubprocessError):
         return False
+
+
+def app_install_dir() -> Path:
+    """Where get.sh and get.ps1 put the program."""
+    if IS_WINDOWS:
+        return _local_appdata() / APP / "app"
+    if IS_MACOS:
+        return Path.home() / "Library" / "Application Support" / APP / "app"
+    base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    return Path(base) / APP / "app"

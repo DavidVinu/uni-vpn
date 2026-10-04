@@ -56,13 +56,15 @@ def port_owner(port: int, run=subprocess.run) -> str:
     """Process line from ss (Linux) or lsof (macOS) for a port in use, shortened. Empty if unknown."""
     if pf.IS_WINDOWS:
         try:
-            result = run(["netstat", "-ano", "-p", "TCP"], capture_output=True, text=True, timeout=10)
+            result = run(["netstat", "-ano", "-p", "TCP"], capture_output=True, text=True, errors="replace", timeout=10)
         except (OSError, subprocess.SubprocessError):
             return ""
+        # The state word is localized ("ABHÖREN" in German): a listening socket has no foreign address.
         for line in (result.stdout or "").splitlines():
             parts = line.split()
-            if len(parts) >= 5 and parts[1].endswith(f":{port}") and parts[3].upper() == "LISTENING":
-                return f"PID {parts[4]}"
+            if (len(parts) >= 5 and parts[0].upper() == "TCP" and parts[1].endswith(f":{port}")
+                    and parts[2] in ("0.0.0.0:0", "[::]:0")):
+                return f"PID {parts[-1]}"
         return ""
     if pf.IS_MACOS:
         cmd = ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN"]
@@ -165,7 +167,7 @@ def run_checks(cfg_path: Path | None = None, *,
     proxy_map = {"ok": ("ok", f"system reads {url}"),
                  "unset": ("fail", "not registered with the system: run install.sh again"),
                  "foreign": ("warn", "another proxy setting is active, running install.sh again replaces it"),
-                 "unavailable": ("warn", f"no GNOME or macOS proxy settings; enter it by hand in the browser: {url}")}
+                 "unavailable": ("warn", f"no GNOME, KDE, macOS or Windows proxy settings; enter it by hand in the browser: {url}")}
     checks.append(Check("Proxy rule", *proxy_map.get(proxy, ("warn", proxy))))
 
     if cisco_installed():

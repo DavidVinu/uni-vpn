@@ -1,4 +1,5 @@
-"""Register the proxy rule with the system: GNOME (gsettings) on Linux, networksetup on macOS.
+"""Register the proxy rule with the system: GNOME (gsettings) or KDE on Linux, networksetup on macOS,
+the registry on Windows.
 
 Chrome and Firefox read the system's "automatic proxy configuration" setting and fetch the
 PAC file from the daemon. The previous state is backed up and restored on removal.
@@ -39,6 +40,13 @@ def _run(cmd: list[str], run) -> subprocess.CompletedProcess:
     return run(cmd, capture_output=True, text=True, timeout=TIMEOUT)
 
 
+def _set(cmd: list[str], run) -> None:
+    """A command that changes the setting: raises CalledProcessError when it fails."""
+    result = _run(cmd, run)
+    if result.returncode != 0:
+        raise subprocess.CalledProcessError(result.returncode, cmd, result.stdout, result.stderr)
+
+
 def _gsettings_get(key: str, run) -> str | None:
     try:
         result = _run(["gsettings", "get", SCHEMA, key], run)
@@ -59,9 +67,10 @@ def _services(run) -> list[str]:
     return names
 
 
-def _kde_tools() -> tuple[str, str] | None:
-    """kreadconfig/kwriteconfig of Plasma 6 or 5, only on a KDE desktop."""
-    if "KDE" not in os.environ.get("XDG_CURRENT_DESKTOP", "").upper():
+def _kde_tools(desktop_only: bool = True) -> tuple[str, str] | None:
+    """kreadconfig/kwriteconfig of Plasma 6 or 5, only on a KDE desktop unless desktop_only is False
+    (restoring a backup, for example over SSH)."""
+    if desktop_only and "KDE" not in os.environ.get("XDG_CURRENT_DESKTOP", "").upper():
         return None
     for version in ("6", "5"):
         read, write = pf.find_binary(f"kreadconfig{version}"), pf.find_binary(f"kwriteconfig{version}")
@@ -84,12 +93,14 @@ def _kde_get(run) -> dict | None:
     return {"type": values["ProxyType"] or "0", "url": values["Proxy Config Script"]}
 
 
-def _kde_set(proxy_type: str, url: str, run) -> None:
-    tools = _kde_tools()
+def _kde_set(proxy_type: str, url: str, run, desktop_only: bool = True) -> None:
+    tools = _kde_tools(desktop_only)
     if not tools:
+        if not desktop_only:
+            raise FileNotFoundError("kwriteconfig6 or kwriteconfig5 not found")
         return
-    _run([tools[1], "--file", "kioslaverc", "--group", KDE_GROUP, "--key", "Proxy Config Script", url], run)
-    _run([tools[1], "--file", "kioslaverc", "--group", KDE_GROUP, "--key", "ProxyType", proxy_type], run)
+    _set([tools[1], "--file", "kioslaverc", "--group", KDE_GROUP, "--key", "Proxy Config Script", url], run)
+    _set([tools[1], "--file", "kioslaverc", "--group", KDE_GROUP, "--key", "ProxyType", proxy_type], run)
     # Running KDE programs re-read kioslaverc on this signal; Chrome watches the file itself.
     try:
         _run(["dbus-send", "--type=signal", "/KIO/Scheduler", "org.kde.KIO.Scheduler.reparseSlaveConfiguration",
@@ -138,11 +149,11 @@ def apply(url: str, run=subprocess.run) -> None:
         return
     if pf.IS_MACOS:
         for name in _services(run):
-            _run(["networksetup", "-setautoproxyurl", name, url], run)
+            _set(["networksetup", "-setautoproxyurl", name, url], run)
         return
     if _gsettings_get("mode", run) is not None:
-        _run(["gsettings", "set", SCHEMA, "autoconfig-url", url], run)
-        _run(["gsettings", "set", SCHEMA, "mode", "auto"], run)
+        _set(["gsettings", "set", SCHEMA, "autoconfig-url", url], run)
+        _set(["gsettings", "set", SCHEMA, "mode", "auto"], run)
     _kde_set(KDE_PAC, url, run)
 
 
@@ -155,15 +166,15 @@ def restore(saved: dict, run=subprocess.run) -> None:
     if pf.IS_MACOS:
         for name, entry in (saved.get("services") or {}).items():
             if entry.get("enabled") and entry.get("url"):
-                _run(["networksetup", "-setautoproxyurl", name, entry["url"]], run)
+                _set(["networksetup", "-setautoproxyurl", name, entry["url"]], run)
             else:
-                _run(["networksetup", "-setautoproxystate", name, "off"], run)
+                _set(["networksetup", "-setautoproxystate", name, "off"], run)
         return
     if "mode" in saved:
-        _run(["gsettings", "set", SCHEMA, "mode", saved.get("mode") or "none"], run)
-        _run(["gsettings", "set", SCHEMA, "autoconfig-url", saved.get("url") or ""], run)
+        _set(["gsettings", "set", SCHEMA, "mode", saved.get("mode") or "none"], run)
+        _set(["gsettings", "set", SCHEMA, "autoconfig-url", saved.get("url") or ""], run)
     if "kde" in saved:
-        _kde_set(str(saved["kde"].get("type") or "0"), saved["kde"].get("url") or "", run)
+        _kde_set(str(saved["kde"].get("type") or "0"), saved["kde"].get("url") or "", run, desktop_only=False)
 
 
 def refresh(http_port: int, run=subprocess.run) -> None:
@@ -178,7 +189,7 @@ def refresh(http_port: int, run=subprocess.run) -> None:
             if is_ours(proxy_get()["url"], http_port):
                 proxy_set(url)
             return
-        if _gsettings_get("mode", run) is not None:
+        if _gsettings_get("mode", run) == "auto" and is_ours(_gsettings_get("autoconfig-url", run) or "", http_port):
             _run(["gsettings", "set", SCHEMA, "autoconfig-url", url], run)
         kde = _kde_get(run)
         if kde is not None and is_ours(kde["url"], http_port):
@@ -201,7 +212,7 @@ def _is_foreign(before: dict, http_port: int) -> bool:
 
 
 def install(http_port: int, backup: Path | None = None, run=subprocess.run) -> str:
-    """Returns 'ok', 'replaced' (a foreign setting was replaced) or 'unavailable'."""
+    """Returns 'ok', 'replaced' (a foreign setting was replaced), 'unavailable' or 'failed'."""
     backup = backup or backup_path()
     before = current(run=run)
     if before is None:
@@ -209,22 +220,26 @@ def install(http_port: int, backup: Path | None = None, run=subprocess.run) -> s
     if not backup.exists():
         backup.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         backup.write_text(json.dumps(before), encoding="utf-8")
-    apply(pac_url(http_port), run=run)
+    try:
+        apply(pac_url(http_port), run=run)
+    except (OSError, subprocess.SubprocessError):
+        return "failed"
     return "replaced" if _is_foreign(before, http_port) else "ok"
 
 
-def uninstall(backup: Path | None = None, run=subprocess.run) -> bool:
+def uninstall(backup: Path | None = None, run=subprocess.run) -> str:
+    """Returns 'restored', 'unset' (no backup, so uni-vpn did not set it) or 'failed' (the backup is kept)."""
     backup = backup or backup_path()
     try:
         saved = json.loads(backup.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return False
+        return "unset"
     try:
         restore(saved, run=run)
     except (OSError, subprocess.SubprocessError):
-        return False
+        return "failed"
     backup.unlink(missing_ok=True)
-    return True
+    return "restored"
 
 
 def state(http_port: int, run=subprocess.run) -> str:

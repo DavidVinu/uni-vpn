@@ -173,7 +173,9 @@ def set_user(path: Path, user: str) -> None:
     if not valid_user(user):
         raise ConfigError(f"invalid university ID: {user!r}")
     text = path.read_text(encoding="utf-8")
-    new, count = re.subn(r'(?m)^(\s*user\s*=\s*)"[^"\n]*"', lambda m: f'{m.group(1)}"{user}"', text, count=1)
+    # A basic ("...") or literal ('...') string, as written by hand.
+    new, count = re.subn(r"""(?m)^(\s*user\s*=\s*)(?:"(?:[^"\\\n]|\\.)*"|'[^'\n]*')""",
+                         lambda m: f'{m.group(1)}"{user}"', text, count=1)
     if not count:
         head, sep, rest = text.partition("\n[")
         new = head.rstrip("\n") + f'\nuser = "{user}"\n' + (sep.lstrip("\n") and "\n[" + rest)

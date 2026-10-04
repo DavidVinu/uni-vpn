@@ -334,7 +334,7 @@ def main(argv: list[str] | None = None) -> int:
         print(str(exc))
         return 1
     except EOFError:
-        print("\nNo terminal to answer questions: run the installer in a terminal, or pass --user")
+        print("\nNo terminal to answer questions: run the installer in a terminal")
         return 1
     except KeyboardInterrupt:
         return 130

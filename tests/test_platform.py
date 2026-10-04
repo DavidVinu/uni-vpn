@@ -90,3 +90,45 @@ class CiscoTests(unittest.TestCase):
 
         with mock.patch.object(pf, "cisco_installed", return_value=True), mock.patch.object(pf, "IS_MACOS", True):
             self.assertFalse(pf.cisco_connected(run=run, cscotun=Path("/nonexistent/cscotun0")))
+
+
+class OpenUrlTests(unittest.TestCase):
+    def popen(self, wait):
+        calls = []
+
+        class Process:
+            def __init__(self, cmd, **kwargs):
+                calls.append((cmd, kwargs))
+
+            def wait(self, timeout=None):
+                return wait(timeout)
+
+        return Process, calls
+
+    def test_browser_started_by_xdg_open_does_not_block(self):
+        # xdg-open stays in the foreground when it starts the browser itself; no pipes to inherit.
+        def wait(timeout):
+            raise subprocess.TimeoutExpired("xdg-open", timeout)
+
+        popen, calls = self.popen(wait)
+        with mock.patch.object(pf, "has_desktop", return_value=True), mock.patch.object(pf, "IS_MACOS", False):
+            self.assertTrue(pf.open_url("http://127.0.0.1:1081/", popen=popen))
+        cmd, kwargs = calls[0]
+        self.assertEqual(cmd, ["xdg-open", "http://127.0.0.1:1081/"])
+        self.assertEqual(kwargs["stdout"], subprocess.DEVNULL)
+        self.assertEqual(kwargs["stderr"], subprocess.DEVNULL)
+        self.assertTrue(kwargs["start_new_session"])
+
+    def test_failing_launcher_is_reported(self):
+        popen, _ = self.popen(lambda timeout: 3)
+        with mock.patch.object(pf, "has_desktop", return_value=True):
+            self.assertFalse(pf.open_url("http://127.0.0.1:1081/", popen=popen))
+        popen, _ = self.popen(lambda timeout: 0)
+        with mock.patch.object(pf, "has_desktop", return_value=True):
+            self.assertTrue(pf.open_url("http://127.0.0.1:1081/", popen=popen))
+
+    def test_app_install_dir_matches_get_sh(self):
+        with mock.patch.object(pf, "IS_MACOS", False), mock.patch.dict(os.environ, {"XDG_DATA_HOME": "/tmp/data"}):
+            self.assertEqual(pf.app_install_dir(), Path("/tmp/data/uni-vpn/app"))
+        with mock.patch.object(pf, "IS_MACOS", True):
+            self.assertEqual(pf.app_install_dir(), Path.home() / "Library" / "Application Support" / "uni-vpn" / "app")

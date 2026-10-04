@@ -26,6 +26,8 @@ Restart any open browser once so that it reads the proxy rule.
 MANUAL_PROXY_HINT = """   The proxy rule could not be registered automatically (no GNOME, KDE, macOS or Windows proxy settings found).
    Enter it by hand in the browser: Settings -> Network/Proxy -> automatic proxy configuration (PAC):
    {url}"""
+MANUAL_PROXY_FAILED = """   Registering the proxy rule with the system failed. Enter it by hand in the browser:
+   Settings -> Network/Proxy -> automatic proxy configuration (PAC): {url}"""
 
 
 def _records_path() -> Path:
@@ -106,10 +108,26 @@ def needed_programs() -> list[str]:
     return ["openconnect"] + pf.tunnel_helpers() + ([] if (pf.IS_MACOS or pf.IS_WINDOWS) else ["secret-tool"])
 
 
+MACOS_BIN_DIRS = ("/opt/homebrew/bin", "/usr/local/bin")
+
+
 def command_path() -> Path:
     if pf.IS_WINDOWS:
         return pf.config_dir() / "bin" / "uni-vpn.cmd"
+    if pf.IS_MACOS:
+        # ~/.local/bin is not on the PATH on macOS; Homebrew's bin is.
+        for directory in MACOS_BIN_DIRS:
+            if os.path.isdir(directory) and os.access(directory, os.W_OK):
+                return Path(directory) / "uni-vpn"
     return Path.home() / ".local" / "bin" / "uni-vpn"
+
+
+def cmd_bytes(text: str, codec: str = "oem") -> bytes:
+    """cmd.exe reads batch files in the OEM code page. Paths it cannot encode: UTF-8 with chcp 65001."""
+    try:
+        return text.encode(codec)
+    except (LookupError, UnicodeEncodeError):  # "oem" exists only on Windows
+        return ("@chcp 65001 >nul\r\n" + text).encode("utf-8")
 
 
 def install_command(dry: bool, created) -> None:
@@ -127,7 +145,10 @@ def install_command(dry: bool, created) -> None:
     link.parent.mkdir(parents=True, exist_ok=True)
     if link.is_symlink() or link.exists():
         link.unlink()
-    link.write_text(wrapper, encoding="utf-8", newline="")
+    if pf.IS_WINDOWS:
+        link.write_bytes(cmd_bytes(wrapper))
+    else:
+        link.write_text(wrapper, encoding="utf-8", newline="")
     link.chmod(0o755)
     created(link)
     _say(f"Command created: {link}")
@@ -137,7 +158,11 @@ def install_command(dry: bool, created) -> None:
         if windows.add_user_path(str(link.parent)):
             print("   Open a new terminal to use the uni-vpn command")
     elif str(link.parent) not in os.environ.get("PATH", "").split(os.pathsep):
-        print(f"   Note: {link.parent} is not in PATH, open a new shell or add it to PATH")
+        if pf.IS_MACOS:
+            print(f"   Note: {link.parent} is not in PATH, add it to PATH to use the uni-vpn command")
+        else:
+            # Ubuntu's ~/.profile adds ~/.local/bin at login once it exists.
+            print(f"   Note: {link.parent} is not in PATH yet, the uni-vpn command works after logging out and in")
 
 
 def launcher_path() -> Path:
@@ -206,6 +231,16 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
     if cfg_path.exists():
         cfg = config.load(cfg_path)
         _say(f"Config found: {cfg_path} (university ID {cfg.user})")
+        if user and user != cfg.user:
+            if not config.valid_user(user):
+                print(f"Not a university ID: {user!r}")
+                return 1
+            if dry:
+                _say(f"would change the university ID to {user}")
+            else:
+                config.set_user(cfg_path, user)
+                cfg = config.load(cfg_path)
+                _say(f"University ID changed to {user}")
     elif gui and not user:
         cfg = config.Config()
     else:
@@ -260,6 +295,8 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
         result = proxy_install(cfg.http_port)
         if result == "unavailable":
             print(MANUAL_PROXY_HINT.format(url=sysproxy.pac_url(cfg.http_port)))
+        elif result == "failed":
+            print(MANUAL_PROXY_FAILED.format(url=sysproxy.pac_url(cfg.http_port)))
         elif result == "replaced":
             _say("Proxy rule registered with the system; an existing proxy setting was replaced (backed up, uninstall restores it)")
         else:
@@ -274,7 +311,12 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
     url = f"http://127.0.0.1:{cfg.http_port}/"
     if gui:
         # The service has started, but the daemon needs a moment until bind().
-        wait_for_port(cfg.http_port, port_open=port_open, timeout=15)
+        if not wait_for_port(cfg.http_port, port_open=port_open, timeout=15):
+            print(f"\nThe service did not open {url} within 15 seconds. See: uni-vpn log, uni-vpn doctor")
+            if run_doctor:
+                print()
+                print(doctor.format_checks(doctor.run_checks(cfg_path)))
+            return 1
         if getattr(args, "no_browser", False):
             # install.ps1 runs this elevated and opens the browser itself, unelevated.
             print(f"\nFinish in the browser ({url}).")
@@ -340,16 +382,28 @@ def uninstall(args, *, input_fn=input, service_uninstall=service.uninstall, dele
         for path in recorded():
             print(f"   {path}")
         return 0
-    _say("Proxy setting restored" if proxy_uninstall() else "Proxy setting was not set by uni-vpn")
-    service_uninstall()
-    _say("Service removed")
+    failed = False
+    proxy = proxy_uninstall()
+    if proxy == "failed":
+        failed = True
+        print(f"Proxy setting could not be restored, the backup stays in {sysproxy.backup_path()}")
+    else:
+        _say("Proxy setting restored" if proxy == "restored" else "Proxy setting was not set by uni-vpn")
+    if service_uninstall() is False:
+        failed = True
+        print("Service could not be removed")
+    else:
+        _say("Service removed")
     for path in recorded():
-        if path.is_dir() and not path.is_symlink():
-            shutil.rmtree(path, ignore_errors=True)  # macOS app entry
-            _say(f"deleted: {path}")
-        elif path.is_symlink() or path.exists():
-            path.unlink()
-            _say(f"deleted: {path}")
+        try:
+            if path.is_dir() and not path.is_symlink():
+                shutil.rmtree(path, ignore_errors=True)  # macOS app entry
+                _say(f"deleted: {path}")
+            elif path.is_symlink() or path.exists():
+                path.unlink()
+                _say(f"deleted: {path}")
+        except OSError as exc:
+            print(f"   Could not delete {path}: {exc.strerror or exc}")
     if pf.IS_WINDOWS:
         from . import windows
 
@@ -357,48 +411,120 @@ def uninstall(args, *, input_fn=input, service_uninstall=service.uninstall, dele
     if _records_path().exists():
         _records_path().unlink()
     for name in ("daemon.lock",):
-        stale = pf.config_dir() / name
-        if stale.exists():
-            stale.unlink()
+        try:
+            (pf.config_dir() / name).unlink(missing_ok=True)
+        except OSError:
+            pass  # Windows: still locked by a daemon that did not stop
     if user:
-        answer = "y" if getattr(args, "yes", False) else input_fn(f"Delete the password and TOTP secret for {user} from the keyring? [y/N] ").strip().lower()
+        if getattr(args, "yes", False):
+            answer = "y"
+        else:
+            try:
+                answer = input_fn(f"Delete the password and TOTP secret for {user} from the keyring? [y/N] ").strip().lower()
+            except EOFError:  # no terminal
+                print()
+                answer = "n"
         if answer in ("j", "ja", "y", "yes"):
             _say("Password deleted" if delete(user) else "Password was not in the keyring")
             _say("TOTP secret deleted" if delete_totp(user) else "TOTP secret was not in the keyring")
-    print(f"Left in place: packages (openconnect, ocproxy), the repo {pf.repo_root()} and the log in {pf.state_dir()}")
-    return 0
+    app = pf.repo_root()
+    # The copy get.sh/get.ps1 made goes too; a git clone is the user's own. After a failure it stays,
+    # so that install.sh --uninstall can run again.
+    if not failed and app == pf.app_install_dir().resolve() and not (app / ".git").exists():
+        shutil.rmtree(app, ignore_errors=True)
+        _say(f"deleted: {app}")
+        try:
+            app.parent.rmdir()
+        except OSError:
+            pass
+        print(f"Left in place: packages (openconnect, ocproxy) and the log in {pf.state_dir()}")
+    else:
+        print(f"Left in place: packages (openconnect, ocproxy), the repo {app} and the log in {pf.state_dir()}")
+    return 1 if failed else 0
 
 
 ARCHIVE_URL = "https://codeload.github.com/DavidVinu/uni-vpn/zip/refs/heads/main"
 
 
+def _archive_files(archive, root: Path) -> dict[str, tuple[str, Path]]:
+    """Relative path -> (name in the archive, destination). Refuses foreign archives and paths outside root."""
+    names = archive.namelist()
+    if not names:
+        raise ValueError("the download is empty")
+    prefix = names[0].split("/", 1)[0] + "/"
+    if prefix + "uni_vpn/__init__.py" not in names:
+        raise ValueError("the download does not look like uni-vpn")
+    files = {}
+    for name in names:
+        if not name.startswith(prefix):
+            raise ValueError(f"unexpected path in the download: {name}")
+        relative = name[len(prefix):]
+        if not relative or name.endswith("/"):
+            continue
+        destination = (root / relative).resolve()
+        if root not in destination.parents:
+            raise ValueError(f"unexpected path in the download: {name}")
+        files[relative] = (name, destination)
+    return files
+
+
+def _remove_stale(root: Path, keep: set[str]) -> None:
+    """Delete files under uni_vpn/ and bin/ that the new version no longer has. Never follows symlinks."""
+    fold = str.lower if (pf.IS_MACOS or pf.IS_WINDOWS) else str  # case-insensitive file systems
+    keep = {fold(k) for k in keep}
+    for top in ("uni_vpn", "bin"):
+        base = root / top
+        if base.is_symlink() or not base.is_dir():
+            continue
+        for dirpath, _dirs, filenames in os.walk(base, topdown=False):
+            here = Path(dirpath)
+            if "__pycache__" in here.relative_to(root).parts:
+                continue
+            for filename in filenames:
+                path = here / filename
+                if not path.is_symlink() and fold(path.relative_to(root).as_posix()) not in keep:
+                    path.unlink()
+            if here != base and not any(here.iterdir()):
+                here.rmdir()
+
+
 def download_release(target: Path, url: str = ARCHIVE_URL, opener=None) -> None:
-    """Replace the program files in target with the current main branch (installs without git)."""
+    """Replace the program files in target with the current main branch (installs without git).
+    ValueError for a broken or unexpected download, OSError when files cannot be written."""
     import io
+    import tempfile
     import urllib.request
     import zipfile
+    import zlib
 
     opener = opener or urllib.request.urlopen
     with opener(url, timeout=60) as response:
         data = response.read()
-    with zipfile.ZipFile(io.BytesIO(data)) as archive:
-        names = archive.namelist()
-        prefix = names[0].split("/", 1)[0] + "/"
-        if not any(n == prefix + "uni_vpn/__init__.py" for n in names):
-            raise ValueError("the download does not look like uni-vpn")
-        for name in names:
-            relative = name[len(prefix):]
-            if not relative or name.endswith("/"):
-                continue
-            destination = (target / relative).resolve()
-            if target.resolve() not in destination.parents:
-                raise ValueError(f"unexpected path in the download: {name}")
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            # Overwrite in place: on Windows the running service has this folder as its working
-            # directory, so the folder itself cannot be swapped.
-            destination.write_bytes(archive.read(name))
-            if relative.startswith("bin/") or relative.endswith(".sh"):
-                destination.chmod(0o755)
+    root = target.resolve()
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            files = _archive_files(archive, root)
+            if archive.testzip() is not None:
+                raise ValueError("the download is damaged, try again")
+            # Unpack everything first, next to target (same file system), so that a broken download
+            # changes nothing. Then overwrite file by file: on Windows the running service has this
+            # folder as its working directory, so the folder itself cannot be swapped.
+            staging = Path(tempfile.mkdtemp(prefix=".uni-vpn-update-", dir=root.parent))
+            try:
+                for relative, (name, _destination) in files.items():
+                    staged = staging / relative
+                    staged.parent.mkdir(parents=True, exist_ok=True)
+                    staged.write_bytes(archive.read(name))
+                    if relative.startswith("bin/") or relative.endswith(".sh"):
+                        staged.chmod(0o755)
+                for relative, (_name, destination) in files.items():
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    os.replace(staging / relative, destination)
+            finally:
+                shutil.rmtree(staging, ignore_errors=True)
+    except (zipfile.BadZipFile, zlib.error, EOFError) as exc:
+        raise ValueError(f"the download is damaged, try again ({exc})") from None
+    _remove_stale(root, set(files))
 
 
 def update(args, run=subprocess.run, download=download_release) -> int:
@@ -422,5 +548,5 @@ def update(args, run=subprocess.run, download=download_release) -> int:
             return 1
         _say("Downloaded the current version")
     rc = service.control("restart", run=run)
-    print("Service restarted.")
+    print("Service restarted." if rc == 0 else "Restarting the service failed, see: uni-vpn log")
     return rc

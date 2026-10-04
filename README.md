@@ -100,7 +100,7 @@ The app is `http://127.0.0.1:1081/`, also in the start menu, Launchpad or app gr
 | Change websites | the app, gear icon, Websites (Chrome picks it up at once, Firefox after about 10 s; on macOS and Windows restart the browser) |
 | Something is wrong | `uni-vpn doctor`, paste the output into an issue |
 | Update | `uni-vpn update` |
-| Remove | `./install.sh --uninstall` or, on Windows, `install.ps1 -Uninstall`; both also reset the proxy setting |
+| Remove | `uni-vpn uninstall` (Linux, macOS) or, on Windows, `install.ps1 -Uninstall` from `%LOCALAPPDATA%\uni-vpn\app` (it asks for administrator rights); both also reset the proxy setting |
 
 ## Troubleshooting
 
