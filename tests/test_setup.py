@@ -483,6 +483,12 @@ class ApportTests(SetupHarness):
 
 
 class UpdateTests(unittest.TestCase):
+    def setUp(self):
+        # Windows updates through get.ps1 (own test below); the rest is the POSIX path.
+        patcher = mock.patch.object(pf, "IS_WINDOWS", False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def archive(self, files):
         import zipfile
 
