@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Uni VPN
+Comment=University VPN for selected websites
+Exec=/usr/share/uni-vpn/uni-vpn-open
+Icon=network-vpn
+Categories=Network;
+Terminal=false

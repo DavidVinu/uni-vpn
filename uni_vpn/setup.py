@@ -178,10 +178,20 @@ def launcher_path() -> Path:
     return Path(base) / "applications" / "uni-vpn.desktop"
 
 
-def install_launcher(port: int, dry: bool, created, run=subprocess.run) -> None:
+def install_launcher(port: int, dry: bool, created, run=subprocess.run, packaged=pf.packaged) -> None:
     """An app entry in the start menu, Launchpad or app grid that opens the status page."""
     url = f"http://127.0.0.1:{int(port)}/"
     path = launcher_path()
+    if packaged():
+        # The installer's own app entry opens uni-vpn; one left by an earlier install would
+        # show up twice (macOS) or hide it (Linux, same name).
+        if not dry and (path.exists() or path.is_symlink()):
+            if path.is_dir() and not path.is_symlink():
+                shutil.rmtree(path, ignore_errors=True)
+            else:
+                path.unlink(missing_ok=True)
+            _say(f"Old app entry removed: {path}")
+        return
     if dry:
         _say(f"would add {path} to open {url}")
         return

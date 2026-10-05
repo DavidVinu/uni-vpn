@@ -790,3 +790,20 @@ class UpdateTests(unittest.TestCase):
             rc = setup.update(argparse.Namespace(dry_run=False), download=lambda target: calls.append(target))
         self.assertEqual(rc, 0)
         self.assertEqual(calls, [root, "restart"])
+
+
+class PackagedLauncherTests(unittest.TestCase):
+    def test_installer_app_entry_replaces_the_own_one(self):
+        data = tempfile.mkdtemp()
+        created = []
+        with mock.patch.object(setup.pf, "IS_MACOS", False), mock.patch.object(setup.pf, "IS_WINDOWS", False), \
+                mock.patch.dict(os.environ, {"XDG_DATA_HOME": data}):
+            old = setup.launcher_path()
+            old.parent.mkdir(parents=True)
+            old.write_text("[Desktop Entry]\n")
+            setup.install_launcher(1081, False, created.append, packaged=lambda: True)
+            self.assertFalse(old.exists())
+            self.assertEqual(created, [])
+            setup.install_launcher(1081, False, created.append, packaged=lambda: False)
+            self.assertTrue(old.exists())
+            self.assertEqual(created, [old])

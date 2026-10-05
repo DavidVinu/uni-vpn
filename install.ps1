@@ -12,7 +12,9 @@ param(
     [switch]$NoBrowser,
     [string]$User = "",
     [string]$University = "",
-    [string]$ForUser = ""
+    [string]$ForUser = "",
+    # Run by the Windows installer (packaging/windows): already elevated, no window to keep open.
+    [switch]$Unattended
 )
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"  # Invoke-WebRequest is many times slower with the progress bar
@@ -117,6 +119,11 @@ if ([Environment]::Is64BitOperatingSystem -eq $false -or $env:PROCESSOR_ARCHITEC
     if (-not $DryRun) { exit 1 }
 }
 
+if (-not $DryRun -and -not (Test-Admin) -and $Unattended) {
+    Write-Host "Administrator rights are required (Wintun)."
+    exit 1
+}
+
 if (-not $DryRun -and -not (Test-Admin)) {
     # One UAC prompt for the whole installation. The elevated run must be the same account,
     # because the service and the proxy setting belong to the signed-in user.
@@ -156,7 +163,7 @@ if (-not $DryRun -and -not (Test-Admin)) {
 if ($ForUser -and $ForUser -ne $env:USERNAME) {
     Write-Host "Installed as $env:USERNAME instead of $ForUser. uni-vpn has to run elevated as the signed-in user,"
     Write-Host "so install it from an account with administrator rights."
-    Read-Host "Press Enter to close"
+    if (-not $Unattended) { Read-Host "Press Enter to close" }
     exit 1
 }
 
@@ -210,7 +217,7 @@ try {
     Write-Host "Installation failed: $($_.Exception.Message)"
     $code = 1
 }
-if ($ForUser) {
+if ($ForUser -and -not $Unattended) {
     # This window was opened for the elevated run; keep it until the result has been read.
     Read-Host "Press Enter to close"
 }

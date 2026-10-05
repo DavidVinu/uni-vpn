@@ -173,8 +173,13 @@ def install(dry_run: bool = False, run=subprocess.run) -> list[Path]:
     target = unit_target_path()
     if pf.IS_WINDOWS:
         return _install_windows(target, dry_run, run)
-    text = render_unit(pf.python_executable(), str(pf.bin_dir() / "uni-vpn"), str(pf.state_dir()),
-                       pf.brew_prefix() if pf.IS_MACOS else None, extra_env=passthrough_env())
+    python = pf.python_executable()
+    extra_env = passthrough_env()
+    if pf.IS_MACOS and pf.is_bundled(python) and os.path.isfile(pf.MACOS_CA_FILE):
+        # The .pkg's Python finds no certificates of its own, the update check needs them.
+        extra_env.setdefault("SSL_CERT_FILE", pf.MACOS_CA_FILE)
+    text = render_unit(python, str(pf.bin_dir() / "uni-vpn"), str(pf.state_dir()),
+                       pf.brew_prefix() if pf.IS_MACOS else None, extra_env=extra_env)
     if dry_run:
         print(f"-> would write {target} and load the service")
         return [target]

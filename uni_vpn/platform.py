@@ -12,6 +12,8 @@ IS_MACOS = sys.platform == "darwin"
 IS_WINDOWS = sys.platform == "win32"
 APP = "uni-vpn"
 SECURITY = "/usr/bin/security"
+# The certificates macOS itself ships, in the form OpenSSL and GnuTLS read.
+MACOS_CA_FILE = "/etc/ssl/cert.pem"
 _PROGRAM_FILES = [os.environ.get(name) for name in ("ProgramFiles", "ProgramFiles(x86)", "ProgramW6432")]
 _PROGRAM_FILES = list(dict.fromkeys(p for p in _PROGRAM_FILES if p)) or ["C:\\Program Files", "C:\\Program Files (x86)"]
 if IS_WINDOWS:
@@ -26,6 +28,38 @@ else:
         "/usr/sbin", "/usr/bin", "/opt/homebrew/bin", "/opt/homebrew/sbin",
         "/usr/local/bin", "/usr/local/sbin", "/bin", "/sbin",
     ]
+
+
+# The installers (packaging/) put a read-only copy of the program here, which each user's own
+# copy in app_install_dir() starts from; on macOS also Python, openconnect and ocproxy.
+if IS_MACOS:
+    PACKAGE_DIR = "/Applications/Uni VPN.app/Contents/Resources"
+elif IS_WINDOWS:
+    PACKAGE_DIR = None  # the Windows installer installs straight into app_install_dir()
+else:
+    PACKAGE_DIR = "/usr/share/uni-vpn"
+
+
+def packaged(package_dir: str | None = None) -> bool:
+    """True when uni-vpn came from the .pkg, .deb or .rpm, which bring their own app entry."""
+    package_dir = package_dir or PACKAGE_DIR
+    return bool(package_dir) and os.path.isfile(os.path.join(package_dir, "app", "uni_vpn", "__init__.py"))
+
+
+def bundled_bin_dir(package_dir: str | None = None) -> str | None:
+    """macOS: openconnect and ocproxy from the .pkg, built for this processor."""
+    package_dir = package_dir or PACKAGE_DIR
+    if not IS_MACOS or not package_dir:
+        return None
+    directory = os.path.join(package_dir, os.uname().machine, "bin")
+    return directory if os.path.isdir(directory) else None
+
+
+def is_bundled(path: str, package_dir: str | None = None) -> bool:
+    package_dir = package_dir or PACKAGE_DIR
+    if not package_dir or IS_WINDOWS:
+        return False
+    return os.path.realpath(path).startswith(os.path.realpath(package_dir) + os.sep)
 
 
 def repo_root() -> Path:
@@ -78,6 +112,11 @@ def find_binary(name: str, override: str | None = None) -> str | None:
             override = None
     if override:
         return override if os.access(override, os.X_OK) and os.path.isfile(override) else None
+    bundled = bundled_bin_dir()
+    if bundled:
+        candidate = os.path.join(bundled, name)
+        if os.access(candidate, os.X_OK) and os.path.isfile(candidate):
+            return candidate
     found = None if IS_WINDOWS else shutil.which(name)
     if found:
         return found
