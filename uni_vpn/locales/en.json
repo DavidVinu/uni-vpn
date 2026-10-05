@@ -1,7 +1,5 @@
 {
   "app.offline": "Uni VPN is not running. Restart the computer.",
-  "app.not_running": "uni-vpn is not running",
-  "app.not_running_start": "uni-vpn is not running. Restart the computer.",
   "app.see_log": "see Settings, Log",
   "app.help": "More help",
   "app.next": "Next",

@@ -284,6 +284,25 @@ class SetupTests(DaemonHarness):
         _, _, payload = await http(self.cfg.http_port, "GET", "/status.json")
         self.assertFalse(json.loads(payload)["setup_needed"])
 
+    async def test_changing_the_account_from_settings_reconnects_and_drops_old_overrides(self):
+        d = await self.start_setup_daemon()
+        first = {"user": "ab123", "password": "pw", "secret": "", "university": "other",
+                 "profile": {"host": "vpn.example.edu", "authgroup": "staff", "mfa": "none"}}
+        status, _, payload = await http(self.cfg.http_port, "POST", "/api/setup", self.HEADERS, json.dumps(first).encode())
+        self.assertEqual(status, 200, payload)
+        await wait_state(d, dm.State.connected)
+        connects = d.connect_count
+        second = {"user": "cd456", "password": "pw2", "secret": "GEZDGNBVGY3TQOJQ", "university": "heidelberg"}
+        status, _, payload = await http(self.cfg.http_port, "POST", "/api/setup", self.HEADERS, json.dumps(second).encode())
+        self.assertEqual(status, 200, payload)
+        text = self.cfg_path.read_text()
+        self.assertNotIn("vpn.example.edu", text)
+        self.assertNotIn("authgroup", text)
+        self.assertIn('user = "cd456"', text)
+        self.assertEqual((d.cfg.user, d.cfg.university, d.cfg.host), ("cd456", "heidelberg", "vpn-ac.uni-heidelberg.de"))
+        await wait_state(d, dm.State.connected)
+        self.assertGreater(d.connect_count, connects)
+
     async def test_keyring_failure_writes_no_config_so_the_assistant_stays(self):
         def refuse(_secret):
             raise credentials.KeyringError("keyring locked")

@@ -12,7 +12,7 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from . import config, credentials, detect, doctor, service, sysproxy, totp, updater
+from . import config, credentials, desktop, detect, doctor, service, sysproxy, totp, updater
 from . import platform as pf
 from . import universities as unis
 from .tunnel import port_open as _port_open
@@ -22,7 +22,7 @@ UNIVERSITY_PROMPT = "Your university (name or part of it, Enter for Heidelberg, 
 MFA_CHOICES = {"none": "none", "totp_field": "one-time code in its own field",
                "totp_append": "one-time code after the password", "duo_push": "Duo push"}
 FINAL_HINT = """
-Status page (state, connect/disconnect, domain list): http://127.0.0.1:{port}/
+Uni VPN is in your apps (state, connect, settings), also at http://127.0.0.1:{port}/
 Restart any open browser once so that it reads the proxy rule.
 """
 MANUAL_PROXY_HINT = """   The proxy rule could not be registered automatically (no GNOME, KDE, macOS or Windows proxy settings found).
@@ -167,39 +167,6 @@ def install_command(dry: bool, created) -> None:
             print(f"   Note: {link.parent} is not in PATH yet, the uni-vpn command works after logging out and in")
 
 
-def launcher_path() -> Path:
-    if pf.IS_WINDOWS:
-        from .windows import start_menu_dir
-
-        return Path(start_menu_dir()) / "Uni VPN.url"
-    if pf.IS_MACOS:
-        return Path.home() / "Applications" / "Uni VPN.app"
-    base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
-    return Path(base) / "applications" / "uni-vpn.desktop"
-
-
-def install_launcher(port: int, dry: bool, created, run=subprocess.run) -> None:
-    """An app entry in the start menu, Launchpad or app grid that opens the status page."""
-    url = f"http://127.0.0.1:{int(port)}/"
-    path = launcher_path()
-    if dry:
-        _say(f"would add {path} to open {url}")
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if pf.IS_WINDOWS:
-        path.write_text(f"[InternetShortcut]\r\nURL={url}\r\n", encoding="utf-8", newline="")
-    elif pf.IS_MACOS:
-        result = run(["osacompile", "-o", str(path), "-e", f'open location "{url}"'], capture_output=True, text=True)
-        if result.returncode != 0:
-            print(f"   App entry could not be created: {(result.stderr or '').strip()}")
-            return
-    else:
-        path.write_text("[Desktop Entry]\nType=Application\nName=Uni VPN\nComment=University VPN for selected websites\n"
-                        f"Exec=xdg-open {url}\nIcon=network-vpn\nCategories=Network;\nTerminal=false\n", encoding="utf-8")
-    created(path)
-    _say(f"App entry created: {path}")
-
-
 def totp_hint(cfg: config.Config) -> str:
     portal = f" ({cfg.mfa_portal_url})" if cfg.mfa_portal_url else ""
     return (f"   Second factor: in your university's MFA portal{portal}, add another time-based token (TOTP) for\n"
@@ -263,9 +230,12 @@ def choose_university(input_fn, probe=detect.probe) -> tuple[str, dict] | None:
 def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=service.install,
           store=credentials.store_password, store_totp=credentials.store_totp,
           keyring_probe=doctor.keyring_state, proxy_install=sysproxy.install, run_doctor=True,
-          port_open=_port_open, open_url=None, has_desktop=None, probe=detect.probe) -> int:
+          port_open=_port_open, open_url=None, has_desktop=None, probe=detect.probe,
+          install_app=None, open_app=None) -> int:
     dry = bool(getattr(args, "dry_run", False))
     open_url = open_url or pf.open_url
+    install_app = install_app or desktop.install
+    open_app = open_app or desktop.open_app
     has_desktop = has_desktop or pf.has_desktop
     # With a desktop the browser does the rest (setup assistant); otherwise ask here.
     gui = not dry and not getattr(args, "no_gui", False) and has_desktop()
@@ -397,7 +367,7 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
         else:
             _say("Proxy rule registered with the system (Chrome, Edge and Firefox read it on their own)")
 
-    install_launcher(cfg.http_port, dry, created)
+    install_app(cfg.http_port, dry, created)
 
     if pf.cisco_installed():
         print("   Note: Cisco Secure Client is installed. Do not connect both at once; uni-vpn pauses while Cisco is connected.")
@@ -424,6 +394,10 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
         if getattr(args, "no_browser", False):
             # install.ps1 runs this elevated and opens the browser itself, unelevated (not on update).
             print(f"\nStatus page: {url}" if configured else f"\nFinish in the browser ({url}).")
+            return 0
+        if open_app(cfg.http_port, desktop.page_for(given)):
+            print("\nFinish in the Uni VPN window that just opened.")
+            print("Restart any open browser once so that it reads the proxy rule.")
             return 0
         if open_url(url):
             print(f"\nFinish in the browser window that just opened ({url}).")
@@ -509,6 +483,7 @@ def uninstall(args, *, input_fn=input, service_uninstall=service.uninstall, dele
         print("Service could not be removed")
     else:
         _say("Service removed")
+    desktop.uninstall()
     for path in recorded():
         try:
             if path.is_dir() and not path.is_symlink():

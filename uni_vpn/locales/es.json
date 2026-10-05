@@ -1,7 +1,5 @@
 {
   "app.offline": "Uni VPN no se está ejecutando. Reinicia el ordenador.",
-  "app.not_running": "uni-vpn no se está ejecutando",
-  "app.not_running_start": "uni-vpn no se está ejecutando. Reinicia el ordenador.",
   "app.see_log": "consulta Ajustes, Registro",
   "app.help": "Más ayuda",
   "app.next": "Siguiente",

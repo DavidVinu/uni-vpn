@@ -1,7 +1,5 @@
 {
   "app.offline": "Uni VPN 未运行。请重启电脑。",
-  "app.not_running": "uni-vpn 未运行",
-  "app.not_running_start": "uni-vpn 未运行。请重启电脑。",
   "app.see_log": "请查看 设置 > 日志",
   "app.help": "更多帮助",
   "app.next": "下一步",

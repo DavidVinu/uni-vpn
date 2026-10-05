@@ -1,7 +1,5 @@
 {
   "app.offline": "Uni VPN läuft nicht. Starte den Computer neu.",
-  "app.not_running": "uni-vpn läuft nicht",
-  "app.not_running_start": "uni-vpn läuft nicht. Starte den Computer neu.",
   "app.see_log": "siehe Einstellungen, Log",
   "app.help": "Weitere Hilfe",
   "app.next": "Weiter",
