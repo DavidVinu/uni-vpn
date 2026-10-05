@@ -168,7 +168,7 @@ The app is `http://127.0.0.1:1081/`, also in the start menu, Launchpad or app gr
 | Change university ID, password or TOTP secret | the app, gear icon, or `uni-vpn password`, `uni-vpn totp` |
 | Change websites | the app, gear icon, Websites (Chrome picks it up at once, Firefox after about 10 s; on macOS and Windows restart the browser) |
 | Something is wrong | `uni-vpn doctor`, paste the output into an issue |
-| Update | `uni-vpn update` |
+| Update | automatic, see below; `uni-vpn update` updates right away |
 | Remove | `uni-vpn uninstall` (Linux, macOS) or, on Windows, `install.ps1 -Uninstall` from `%ProgramFiles%\uni-vpn` (it asks for administrator rights); both also reset the proxy setting |
 
 ## Troubleshooting
@@ -208,7 +208,14 @@ The app is `http://127.0.0.1:1081/`, also in the start menu, Launchpad or app gr
   gateway and no DNS. The service runs elevated as the signed-in user (Task Scheduler,
   "uni-vpn"), because Wintun needs administrator rights. For the same reason the program sits in
   `%ProgramFiles%\uni-vpn` and runs only Python and openconnect from Program Files, so nothing
-  the user account can change runs elevated. `uni-vpn update` asks for administrator rights.
+  the user account can change runs elevated. `uni-vpn update` asks for administrator rights;
+  the automatic updates do not, the elevated service installs them itself.
+- Updates: 10 minutes after login and then every 5 hours, one request to `api.github.com`
+  asks which version is current (the branch `stable`, which only gets commits that passed
+  CI). A new version is downloaded from `codeload.github.com`, tested, and installed while
+  the tunnel is down; the service then restarts within a second. A git checkout is only
+  moved forward when it has no local changes or commits. Off: the app, gear icon,
+  "Automatic updates", or `auto_update = false` in `config.toml`.
 - Password and TOTP secret live in the GNOME keyring, the macOS keychain or the Windows
   Credential Manager, nowhere else. Setting up a university that is not listed asks its
   gateway for the login form once, without any user data. While connecting, openconnect reads the secret from a

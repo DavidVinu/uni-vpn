@@ -96,6 +96,11 @@ pre{font-size:12px;background:var(--bg);border-radius:10px;padding:10px;max-heig
 .options li[aria-selected=true]{background:var(--bg)}
 .options li:last-child{color:var(--accent)}
 #s-detect{margin:-8px 0 12px -8px}
+input.switch{appearance:none;-webkit-appearance:none;flex:none;width:44px;height:26px;padding:0;margin:0;border:0;border-radius:13px;background:var(--line);position:relative;cursor:pointer;transition:background .2s}
+input.switch:before{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3);transition:transform .2s}
+input.switch:checked{background:var(--ok)}
+input.switch:checked:before{transform:translateX(18px)}
+input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
 .offline{background:var(--bad);color:var(--on-color);border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:14px}
 </style>
 </head>
@@ -216,6 +221,7 @@ pre{font-size:12px;background:var(--bg);border-radius:10px;padding:10px;max-heig
     <p class="group">About</p>
     <div class="list">
       <details><summary><span>Log</span></summary><div class="body"><pre id="log"></pre></div></details>
+      <label class="item"><span>Automatic updates</span><input type="checkbox" class="switch" id="auto-update" role="switch"></label>
       <div class="item"><span>Version</span><span class="small" id="v-ver"></span></div>
     </div>
   </section>
@@ -225,7 +231,7 @@ pre{font-size:12px;background:var(--bg);border-radius:10px;padding:10px;max-heig
 const $ = (id) => document.getElementById(id);
 const H = {"X-Uni-VPN": "1", "Content-Type": "application/json"};
 let S = null, view = null, setupDone = false, submitting = false, setupSent = false, domainsShown = false, connectRequested = 0,
-  codeTimer = null, refreshing = false;
+  codeTimer = null, refreshing = false, autoUpdateSaving = false;
 
 async function post(path, body) {
   const r = await fetch(path, {method: "POST", headers: H, body: JSON.stringify(body || {})});
@@ -282,7 +288,8 @@ function render() {
   $("v-uni").textContent = S.university_name;
   $("v-user").textContent = S.user;
   $("d-totp").hidden = !TOTP_MODES.includes(S.mfa);
-  $("v-ver").textContent = S.version;
+  $("v-ver").textContent = S.version + (S.commit ? " (" + S.commit.slice(0, 7) + ")" : "");
+  if (!autoUpdateSaving) $("auto-update").checked = S.auto_update !== false;
   $("v-dom").textContent = (S.domains || []).length + " domains";
   // Only on change, so a selection in the log survives the next poll.
   const log = (S.log_tail || []).join("\n");
@@ -610,6 +617,16 @@ $("totpform").onsubmit = async (e) => {
   const r = await send("/api/totp", {secret: $("totp").value});
   saved("totpmsg", r, r.ok ? "Saved, check code " + r.data.code : "");
   if (r.ok) $("totp").value = "";
+  refresh();
+};
+$("auto-update").onchange = async () => {
+  const box = $("auto-update");
+  autoUpdateSaving = true;
+  box.disabled = true;
+  const r = await send("/api/auto-update", {enabled: box.checked});
+  if (!r.ok) box.checked = !box.checked;
+  box.disabled = false;
+  autoUpdateSaving = false;
   refresh();
 };
 $("domform").onsubmit = async (e) => {

@@ -54,3 +54,24 @@ jobs:
       - name: Installer dry run
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -DryRun -User citest
+
+  # Clients update themselves from "stable" (uni_vpn/updater.py): every green commit on main
+  # moves it forward. Fast-forward only, so a slower older run never moves it back.
+  promote:
+    needs: [tests, windows]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency: promote-stable
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Move stable to this commit
+        run: |
+          if git fetch --quiet origin stable 2>/dev/null && git merge-base --is-ancestor HEAD FETCH_HEAD; then
+            echo "stable is already at or past $GITHUB_SHA"
+          else
+            git push origin "HEAD:refs/heads/stable"
+          fi

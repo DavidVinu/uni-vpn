@@ -23,7 +23,12 @@ Record the environment: macOS version, chip, Homebrew version, Chrome and Firefo
 7. Restart Firefox (Settings > Network: "Use system proxy settings"), the same.
 8. Lock the screen, unlock, reload the page: does it work without a dialog?
 9. Restart the Mac, open the browser, load a page: does it connect on its own?
-10. `./install.sh --uninstall` (in the folder the installer ran from; after the one-liner that is
+10. Automatic update: `echo 0000000000000000000000000000000000000000 > ~/Library/Application\ Support/uni-vpn/app/.commit`.
+    In the app, gear icon, switch "Automatic updates" off and on again (that checks at once).
+    Within a minute `uni-vpn log` shows "Updated to ..., restarting" and the app's Version row
+    the new commit. `launchctl print gui/$(id -u)/de.davidvinu.uni-vpn` shows the same pid as
+    before (the service replaced itself in place) and no new "runs" count.
+11. `./install.sh --uninstall` (in the folder the installer ran from; after the one-liner that is
     `~/Library/Application Support/uni-vpn/app`): service gone (`launchctl print` reports an
     error), files gone.
 
