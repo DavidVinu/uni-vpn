@@ -275,6 +275,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit 1 }
           New-Item -ItemType File -Path "stage\desktop\.prebuilt" | Out-Null
           Copy-Item -Recurse openconnect-win64 stage\openconnect
+          New-Item -ItemType Directory -Force out | Out-Null
           Compress-Archive -Path openconnect-win64\* -DestinationPath out\uni-vpn-openconnect-win64.zip
           iscc.exe /Q "/DAppVersion=0.1.${{ github.run_number }}" "/DSourceDir=$PWD\stage" "/DOutputDir=$PWD\out" packaging\windows\uni-vpn.iss
           if ($LASTEXITCODE -ne 0) { exit 1 }
