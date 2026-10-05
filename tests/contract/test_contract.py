@@ -27,7 +27,7 @@ import urllib.request
 from pathlib import Path
 
 from uni_vpn import config as config_mod
-from uni_vpn import pac, totp
+from uni_vpn import messages, pac, totp
 from uni_vpn import universities as unis
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -37,15 +37,25 @@ SECRET = "JBSWY3DPEHPK3PXP"
 # Reachable with a valid certificate from CI; the service checks the network with a TLS handshake.
 PROBE_HOST = os.environ.get("UNI_VPN_CONTRACT_HOST", "github.com")
 
+# POST /api/repair is part of the contract too, but it starts the installer, so it is only
+# covered by each core's own tests.
 # Every key the app reads from /status.json. A core may add keys, never drop one.
 STATUS_KEYS = {
     "protocol", "version", "state", "message", "since", "host", "user", "university", "university_name",
     "mfa", "mfa_portal_url", "mfa_steps", "socks_port", "http_port", "idle_minutes", "active_connections",
     "bytes_in", "bytes_out", "connects", "last_error", "domains", "pac_url", "pac_refresh", "log_tail",
-    "setup_needed", "busy", "error_kind", "platform", "elevated",
+    "setup_needed", "busy", "error_kind", "platform", "elevated", "message_id", "action",
 }
 STATES = {"idle", "offline", "blocked", "connecting", "connected", "disconnecting", "auth_failed", "keyring",
           "error"}
+
+
+def message_id(text: str) -> str | None:
+    """The catalog id of an English status text."""
+    for value in vars(messages).values():
+        if isinstance(value, messages.Message) and value == text:
+            return value.id
+    return None
 
 
 def free_port() -> int:
@@ -184,6 +194,7 @@ class ContractTest(unittest.TestCase):
         self.assertTrue(status["setup_needed"])
         self.assertEqual(status["state"], "idle")
         self.assertEqual(status["message"], "Setup needed")
+        self.assertEqual(status["message_id"], message_id("Setup needed"))
         self.assertEqual(status["platform"], "linux")
         self.assertIsNone(status["elevated"])
         code, headers, page = self.request("GET", "/")
@@ -337,6 +348,9 @@ class ContractTest(unittest.TestCase):
             self.skipTest(f"no direct connection to {PROBE_HOST}")
         self.assertEqual(status["state"], "auth_failed")
         self.assertEqual(status["error_kind"], "password")
+        self.assertEqual(status["action"], "password")
+        self.assertEqual(status["message_id"], message_id(status["message"]))
+        self.assertIsNotNone(status["message_id"])
         self.assertIn(status["state"], STATES)
 
 
