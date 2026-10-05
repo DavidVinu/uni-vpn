@@ -1,4 +1,5 @@
 """Translations: one flat JSON catalog per language in locales/, English (en.json) is the source.
+en-cli.json holds the terminal's English where it names a command.
 
 The service keeps speaking English (log, command line). Messages the app shows are Text values:
 plain English strings that also remember their catalog key and arguments, so status.json and
@@ -36,6 +37,17 @@ def catalogs() -> dict:
     return {"languages": [list(entry) for entry in LANGUAGES], "catalogs": {code: catalog(code) for code in CODES}}
 
 
+@cache
+def terminal() -> dict[str, str]:
+    """English for the log and the command line where it differs from the app: it may name commands,
+    the app never does (the user clicks instead)."""
+    return json.loads((LOCALES_DIR / "en-cli.json").read_text(encoding="utf-8"))
+
+
+def english(key: str) -> str:
+    return terminal().get(key) or catalog(SOURCE)[key]
+
+
 class Text(str):
     """English text that remembers its catalog key and arguments."""
 
@@ -43,7 +55,7 @@ class Text(str):
     args: dict
 
     def __new__(cls, key: str, **args) -> Text:
-        self = super().__new__(cls, catalog(SOURCE)[key].format_map({k: _plain(v) for k, v in args.items()}))
+        self = super().__new__(cls, english(key).format_map({k: _plain(v) for k, v in args.items()}))
         self.key = key
         self.args = args
         return self

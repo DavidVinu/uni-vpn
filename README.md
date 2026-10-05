@@ -241,7 +241,8 @@ Languages: English, German, French, Spanish, Chinese (Simplified and Traditional
 university language in the list. The app's text lives in `uni_vpn/locales/<code>.json`,
 `en.json` is the source; a new language is a copy of it plus an entry in `uni_vpn/i18n.py`.
 Messages from the service stay English in the log and on the command line, the app shows them
-translated (`message_t` in `status.json`, `error_t` in API errors).
+translated (`message_t` in `status.json`, `error_t` in API errors). The app never tells anyone
+to run a command; where the terminal names one, its wording lives in `en-cli.json`.
 
 ## License
 

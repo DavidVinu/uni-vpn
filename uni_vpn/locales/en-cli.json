@@ -1,0 +1,14 @@
+{
+  "state.port_in_use": "Port {port} is in use, run uni-vpn doctor",
+  "state.wintun_admin": "Needs administrator rights (Wintun): run the installer again",
+  "state.no_password": "No password stored: uni-vpn password",
+  "state.no_totp": "No TOTP secret stored: uni-vpn totp",
+  "state.password_encoding": "{error}. Change the password (uni-vpn password)",
+  "state.login_failed_exit": "Login failed (openconnect exit code 1), see uni-vpn log",
+  "tunnel.password_rejected": "Login rejected: check your password (uni-vpn password)",
+  "tunnel.totp_rejected": "One-time code rejected: check the computer's clock, otherwise re-enter the TOTP secret (uni-vpn totp)",
+  "tunnel.append_rejected": "Login rejected: check your password, then the computer's clock (uni-vpn password)",
+  "tunnel.duo_rejected": "Login rejected: check your password, or the Duo request was denied or not answered in time (uni-vpn password)",
+  "tunnel.auth_rejected": "Login rejected: check your password (uni-vpn password). If it is correct, the server asked for something uni-vpn does not know, see uni-vpn log",
+  "tunnel.totp_invalid": "TOTP secret unusable, enter it again (uni-vpn totp)"
+}

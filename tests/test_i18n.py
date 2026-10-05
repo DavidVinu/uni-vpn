@@ -33,6 +33,16 @@ class CatalogTests(unittest.TestCase):
                     self.assertEqual(placeholders(cat[key]), placeholders(text), key)
                     self.assertTrue(cat[key].strip(), key)
 
+    def test_the_app_never_asks_for_a_command(self):
+        # Anyone must manage with clicks alone; commands are for the terminal (en-cli.json).
+        command = re.compile(r"uni-vpn (service|doctor|password|totp|log|setup|update|status)\b|\b(run|Run):")
+        for code in i18n.CODES:
+            for key, text in i18n.catalog(code).items():
+                self.assertIsNone(command.search(text), (code, key))
+        for key, text in i18n.terminal().items():
+            self.assertIn(key, i18n.catalog("en"))
+            self.assertEqual(placeholders(text), placeholders(i18n.catalog("en")[key]), key)
+
     def test_university_steps_match_the_list(self):
         for code in i18n.CODES:
             for key, text in i18n.catalog(code).items():
