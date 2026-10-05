@@ -336,7 +336,23 @@ func reply(c net.Conn, code byte, ip net.IP, port int) error {
 		copy(msg[4:8], v4)
 	}
 	_, err := c.Write(msg)
+	if code != RepOK && err == nil {
+		lingerClose(c)
+	}
 	return err
+}
+
+// lingerClose ends a failed handshake so the client still reads the reply: closing with unread
+// request bytes in the buffer sends a reset, and Windows then drops the reply before the
+// client sees it.
+func lingerClose(c net.Conn) {
+	tc, ok := c.(*net.TCPConn)
+	if !ok {
+		return
+	}
+	_ = tc.CloseWrite()
+	_ = tc.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+	_, _ = io.Copy(io.Discard, tc)
 }
 
 // decodeASCIIReplace is bytes.decode("ascii", errors="replace").
