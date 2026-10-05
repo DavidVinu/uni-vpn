@@ -300,6 +300,25 @@ def set_values(path: Path, values: dict) -> None:
         path.write_text(new, encoding="utf-8")
 
 
+def remove_keys(path: Path, keys) -> None:
+    """Delete top-level keys from an existing config.toml, keeping everything else. Used when
+    the university changes: overrides that belonged to the old profile must not stay behind."""
+    text = path.read_text(encoding="utf-8")
+    table = re.search(r"(?m)^[ \t]*\[", text)
+    head, rest = (text[:table.start()], text[table.start():]) if table else (text, "")
+    for key in keys:
+        head = re.sub(rf"(?m)^[ \t]*{re.escape(key)}[ \t]*=[ \t]*{_VALUE}[ \t]*(?:#[^\n]*)?(?:\n|$)", "", head)
+    new = head + rest
+    try:
+        written = tomllib.loads(new)
+    except tomllib.TOMLDecodeError:
+        written = {"": None}
+    if any(key in written for key in keys) or "" in written:
+        raise ConfigError(f"could not remove {', '.join(keys)} from {path}, please edit it by hand")
+    if new != text:
+        path.write_text(new, encoding="utf-8")
+
+
 _PORT_LINE = re.compile(r"^\s*(socks_port|http_port)\s*=\s*([0-9]{1,5})\s*(#.*)?$")
 
 

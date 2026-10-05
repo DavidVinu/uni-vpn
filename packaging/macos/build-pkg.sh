@@ -20,12 +20,30 @@ for arch in arm64 x86_64; do
 done
 "$repo/packaging/stage-app.sh" "$resources/app"
 cp "$repo/packaging/uni-vpn-open" "$resources/"
-cat > "$app/Contents/MacOS/Uni VPN" <<'SCRIPT'
-#!/bin/sh
-exec "$(dirname "$0")/../Resources/uni-vpn-open" "$@"
-SCRIPT
-chmod 755 "$app/Contents/MacOS/Uni VPN" "$resources/uni-vpn-open"
-sed "s/@VERSION@/$version/g" "$repo/packaging/macos/Info.plist" > "$app/Contents/Info.plist"
+chmod 755 "$resources/uni-vpn-open"
+
+# The app window and menu bar item (app/macos), for both processors in one file.
+for target in arm64-apple-macos11 x86_64-apple-macos11; do
+  xcrun swiftc -O -target "$target" -o "$work/app-$target" "$repo/app/macos/main.swift"
+done
+lipo -create -output "$app/Contents/MacOS/Uni VPN" "$work"/app-*
+# Info.plist and icon exactly as uni_vpn/desktop.py makes them for a self-built app.
+(cd "$repo" && python3 - "$app" "$version" <<'PY'
+import plistlib, sys
+from uni_vpn import desktop
+info = desktop.info_plist(1081)
+info["CFBundleShortVersionString"] = info["CFBundleVersion"] = sys.argv[2]
+with open(sys.argv[1] + "/Contents/Info.plist", "wb") as handle:
+    plistlib.dump(info, handle)
+PY
+)
+iconset="$work/AppIcon.iconset"
+mkdir -p "$iconset"
+for size in 16 32 128 256 512; do
+  sips -z $size $size "$repo/app/icon.png" --out "$iconset/icon_${size}x${size}.png" >/dev/null
+  sips -z $((size * 2)) $((size * 2)) "$repo/app/icon.png" --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
+done
+iconutil -c icns "$iconset" -o "$resources/AppIcon.icns"
 plutil -lint "$app/Contents/Info.plist"
 
 if [ -n "${MACOS_APP_IDENTITY:-}" ]; then
@@ -47,7 +65,7 @@ pkgbuild --root "$work/root" --component-plist "$work/components.plist" \
 sed "s/@VERSION@/$version/g" "$repo/packaging/macos/distribution.xml" > "$work/distribution.xml"
 sign=()
 [ -n "${MACOS_INSTALLER_IDENTITY:-}" ] && sign=(--sign "$MACOS_INSTALLER_IDENTITY" --timestamp)
-productbuild --distribution "$work/distribution.xml" --package-path "$work" "${sign[@]}" "$output"
+productbuild --distribution "$work/distribution.xml" --package-path "$work" ${sign[@]+"${sign[@]}"} "$output"
 
 if [ -n "${MACOS_NOTARY_PROFILE:-}" ]; then
   xcrun notarytool submit "$output" --keychain-profile "$MACOS_NOTARY_PROFILE" --wait

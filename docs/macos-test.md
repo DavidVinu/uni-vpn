@@ -28,7 +28,14 @@ Record the environment: macOS version, chip, Homebrew version, Chrome and Firefo
     Within a minute `uni-vpn log` shows "Updated to ..., restarting" and the app's Version row
     the new commit. `launchctl print gui/$(id -u)/de.davidvinu.uni-vpn` shows the same pid as
     before (the service replaced itself in place) and no new "runs" count.
-11. `./install.sh --uninstall` (in the folder the installer ran from; after the one-liner that is
+11. App: the installer ends with a "Uni VPN" window (not a browser tab) and a shield in the
+    menu bar. Close the window: the Dock icon goes, the shield stays. Shield menu: Connect,
+    Disconnect, "Settings…" opens the window at Settings, "Quit Uni VPN" removes the shield.
+    Open "Uni VPN" from Launchpad: the window comes back, with a Dock icon. Cmd+, opens
+    Settings, Cmd+V pastes into the password field, the "MFA portal" link opens in Safari or
+    Chrome. Settings > University: pick another one, sign in, back in Settings with the new
+    name. Log out and in: the shield is back without a window.
+12. `./install.sh --uninstall` (in the folder the installer ran from; after the one-liner that is
     `~/Library/Application Support/uni-vpn/app`): service gone (`launchctl print` reports an
     error), files gone.
 

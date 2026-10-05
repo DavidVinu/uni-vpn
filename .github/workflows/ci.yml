@@ -32,6 +32,15 @@ jobs:
           open("/tmp/uni-vpn.plist", "w").write(service.render_unit("/opt/homebrew/bin/python3", "/tmp/uni-vpn", "/tmp/logs", "/opt/homebrew"))
           EOF
           plutil -lint /tmp/uni-vpn.plist
+      - name: Build the macOS app
+        if: runner.os == 'macOS'
+        run: |
+          swiftc -O -o /tmp/uni-vpn-app app/macos/main.swift
+          python3 -c "import plistlib; from uni_vpn import desktop; plistlib.dump(desktop.info_plist(1081), open('/tmp/Info.plist', 'wb'))"
+          plutil -lint /tmp/Info.plist
+      - name: Linux app syntax
+        if: runner.os == 'Linux'
+        run: python3 -m py_compile app/linux/uni-vpn-app.py
 
   windows:
     runs-on: windows-latest
@@ -56,6 +65,13 @@ jobs:
       - name: Installer dry run
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -DryRun -User citest
+      - name: Build the Windows app
+        shell: powershell
+        run: |
+          python -c "import pathlib, urllib.request; from uni_vpn import desktop; desktop.extract_webview2(urllib.request.urlopen(desktop.WEBVIEW2_URL).read(), pathlib.Path('build'))"
+          $csc = python -c "from uni_vpn import desktop; print(desktop.csc_path())"
+          & $csc /nologo /target:winexe /optimize+ /win32icon:app\windows\uni-vpn.ico "/out:build\Uni VPN.exe" /lib:build /r:Microsoft.Web.WebView2.Core.dll /r:Microsoft.Web.WebView2.WinForms.dll /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll app\windows\UniVpn.cs
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
   # Clients update themselves from "stable" (uni_vpn/updater.py): every green commit on main
   # moves it forward. Fast-forward only, so a slower older run never moves it back.
@@ -165,6 +181,8 @@ jobs:
           curl -fsS http://127.0.0.1:1081/status.json >/dev/null
           grep -q "/Applications/Uni VPN.app/Contents/Resources/" "$HOME/Library/LaunchAgents/de.davidvinu.uni-vpn.plist"
           grep -q SSL_CERT_FILE "$HOME/Library/LaunchAgents/de.davidvinu.uni-vpn.plist"
+          grep -q "/Applications/Uni VPN.app/Contents/MacOS/Uni VPN" "$HOME/Library/LaunchAgents/de.davidvinu.uni-vpn.app.plist"
+          lipo -archs "/Applications/Uni VPN.app/Contents/MacOS/Uni VPN"
           test -f "$HOME/Library/Application Support/uni-vpn/app/uni_vpn/__init__.py"
       - uses: actions/upload-artifact@v4
         with:
@@ -225,6 +243,10 @@ jobs:
         run: |
           & "$env:ProgramFiles\Git\bin\bash.exe" packaging/stage-app.sh stage
           if ($LASTEXITCODE -ne 0) { exit 1 }
+          # The app window, ready built: users need no compiler and no SDK download.
+          python -c "import sys; sys.path.insert(0, 'stage'); from uni_vpn import desktop; sys.exit(desktop.build_windows_app())"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          New-Item -ItemType File -Path "stage\desktop\.prebuilt" | Out-Null
           iscc.exe /Q "/DAppVersion=0.1.${{ github.run_number }}" "/DSourceDir=$PWD\stage" "/DOutputDir=$PWD\out" packaging\windows\uni-vpn.iss
           if ($LASTEXITCODE -ne 0) { exit 1 }
       # Switches on by itself once the Azure Trusted Signing secrets exist (see docs/superpowers/specs).
@@ -255,6 +277,10 @@ jobs:
           }
           if (-not $ok) { throw "the service did not start" }
           if (-not (Test-Path "$env:ProgramFiles\uni-vpn\.commit")) { throw ".commit is missing" }
+          if (-not (Test-Path "$env:ProgramFiles\uni-vpn\python\pythonw.exe")) { throw "Python is not in uni-vpn's folder" }
+          if (-not (Get-Process "Uni VPN" -ErrorAction SilentlyContinue)) { Write-Host "note: the tray app is not running" }
+          $lnk = Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter "Uni VPN.lnk"
+          if (-not $lnk) { throw "no Start menu entry" }
       - name: Uninstall it like a user would
         shell: powershell
         run: |

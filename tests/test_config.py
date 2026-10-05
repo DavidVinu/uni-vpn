@@ -182,6 +182,24 @@ class SetValuesTests(unittest.TestCase):
         self.assertEqual((cfg.user, cfg.university, cfg.no_external_auth, cfg.tick), ("cd2", "bonn", False, 5))
 
 
+class RemoveKeysTests(unittest.TestCase):
+    def test_removes_top_level_keys_and_keeps_tables_and_comments(self):
+        path = Path(tempfile.mkdtemp()) / "config.toml"
+        path.write_text('# mine\nhost = "vpn.example.edu"  # old\nuser = "ab1"\nno_external_auth = true\n'
+                        '[timing]\nhost = "x"\n', encoding="utf-8")
+        config.remove_keys(path, ["host", "no_external_auth", "authgroup"])
+        text = path.read_text(encoding="utf-8")
+        self.assertEqual(text, '# mine\nuser = "ab1"\n[timing]\nhost = "x"\n')
+
+    def test_unknown_forms_are_refused_instead_of_breaking_the_file(self):
+        path = Path(tempfile.mkdtemp()) / "config.toml"
+        original = 'host = """vpn.example.edu"""\n'
+        path.write_text(original, encoding="utf-8")
+        with self.assertRaises(config.ConfigError):
+            config.remove_keys(path, ["host"])
+        self.assertEqual(path.read_text(encoding="utf-8"), original)
+
+
 class SetUserTests(unittest.TestCase):
     def test_unknown_forms_are_refused_instead_of_breaking_the_file(self):
         for line in ('user = """ab1"""', '"user" = "ab1"'):

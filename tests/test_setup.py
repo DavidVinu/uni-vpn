@@ -35,6 +35,15 @@ class SetupHarness(unittest.TestCase):
             patch = mock.patch.object(pf, name, value)
             patch.start()
             self.addCleanup(patch.stop)
+        # The native app: never built or started by a test, the browser entry stands in for it.
+        from uni_vpn import desktop
+        for name, value in (("install", lambda port, dry, created, run=None: desktop._browser_entry(
+                                 port, dry, created, run or mock.Mock(return_value=subprocess.CompletedProcess([], 0)))),
+                            ("open_app", lambda port, page="", run=None: False),
+                            ("uninstall", lambda run=None: None)):
+            patch = mock.patch.object(desktop, name, value)
+            patch.start()
+            self.addCleanup(patch.stop)
         self.stored = []
         self.stored_totp = []
         self.installed = []
@@ -791,19 +800,3 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(calls, [root, "restart"])
 
-
-class PackagedLauncherTests(unittest.TestCase):
-    def test_installer_app_entry_replaces_the_own_one(self):
-        data = tempfile.mkdtemp()
-        created = []
-        with mock.patch.object(setup.pf, "IS_MACOS", False), mock.patch.object(setup.pf, "IS_WINDOWS", False), \
-                mock.patch.dict(os.environ, {"XDG_DATA_HOME": data}):
-            old = setup.launcher_path()
-            old.parent.mkdir(parents=True)
-            old.write_text("[Desktop Entry]\n")
-            setup.install_launcher(1081, False, created.append, packaged=lambda: True)
-            self.assertFalse(old.exists())
-            self.assertEqual(created, [])
-            setup.install_launcher(1081, False, created.append, packaged=lambda: False)
-            self.assertTrue(old.exists())
-            self.assertEqual(created, [old])

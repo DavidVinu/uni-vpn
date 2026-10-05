@@ -241,7 +241,7 @@ class Daemon:
 
     async def complete_setup(self, user: str, password: str, token: str | None,
                              university: str = unis.DEFAULT_ID, overrides: dict | None = None) -> None:
-        """First run from the setup assistant: config.toml, the secrets, then a test connection.
+        """The setup assistant, on first run or from Settings: config.toml, the secrets, then a test connection.
         Raises unis.FieldError naming the step to change, ValueError otherwise."""
         user = user.strip()
         if not config_mod.valid_user(user):
@@ -258,13 +258,19 @@ class Daemon:
         loop = asyncio.get_running_loop()
         # Secrets first: if the keyring refuses, no config.toml exists yet and the assistant
         # stays the way in after a restart.
-        previous_user = self.cfg.user
+        previous_user, previous_university = self.cfg.user, self.cfg.university
+        # Settings, Account runs the assistant again: the tunnel of the old account goes.
+        if not self.needs_setup and self.tunnel:
+            await self.request_disconnect()
         self.cfg.user = user
         try:
             await loop.run_in_executor(None, self.password_setter, password)
             if profile.needs_totp:
                 await loop.run_in_executor(None, self.totp_setter, token)
             if path.exists():
+                if university != previous_university:
+                    stale = [key for key in unis.PROFILE_FIELDS if key not in overrides]
+                    await loop.run_in_executor(None, config_mod.remove_keys, path, stale)
                 values = {"user": user, "university": university, **overrides}
                 await loop.run_in_executor(None, config_mod.set_values, path, values)
             else:

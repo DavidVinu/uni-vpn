@@ -8,7 +8,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
 "$here/../stage-app.sh" "$stage/app"
-cp "$here/../uni-vpn-open" "$here/uni-vpn.desktop" "$here/de.davidvinu.uni_vpn.metainfo.xml" "$stage/"
+cp "$here/../uni-vpn-open" "$here/de.davidvinu.UniVPN.desktop" "$here/de.davidvinu.UniVPN.metainfo.xml" "$here/../../app/icon.svg" "$stage/"
 cd "$stage"
 export VERSION="$version"
 nfpm package --config "$here/nfpm.yaml" --packager deb --target "$out/uni-vpn.deb"

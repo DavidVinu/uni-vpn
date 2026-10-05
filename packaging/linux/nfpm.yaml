@@ -22,10 +22,13 @@ contents:
     dst: /usr/share/uni-vpn/uni-vpn-open
     file_info:
       mode: 0755
-  - src: ./uni-vpn.desktop
-    dst: /usr/share/applications/uni-vpn.desktop
-  - src: ./de.davidvinu.uni_vpn.metainfo.xml
-    dst: /usr/share/metainfo/de.davidvinu.uni_vpn.metainfo.xml
+  # Same name as the entry setup writes for each user, which then takes its place.
+  - src: ./de.davidvinu.UniVPN.desktop
+    dst: /usr/share/applications/de.davidvinu.UniVPN.desktop
+  - src: ./de.davidvinu.UniVPN.metainfo.xml
+    dst: /usr/share/metainfo/de.davidvinu.UniVPN.metainfo.xml
+  - src: ./icon.svg
+    dst: /usr/share/icons/hicolor/scalable/apps/de.davidvinu.UniVPN.svg
 overrides:
   deb:
     depends:
@@ -33,9 +36,18 @@ overrides:
       - openconnect
       - ocproxy
       - libsecret-tools
+      # The app window (app/linux); without it the browser opens instead.
+      - python3-gi
+      - gir1.2-webkit2-4.1 | gir1.2-webkit2-4.0
+    recommends:
+      - gir1.2-ayatanaappindicator3-0.1
   rpm:
     depends:
       - python3 >= 3.11
       - openconnect
       - ocproxy
       - /usr/bin/secret-tool
+      - python3-gobject
+      - webkit2gtk4.1
+    recommends:
+      - libayatana-appindicator-gtk3

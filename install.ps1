@@ -24,8 +24,12 @@ $AppDir = Join-Path $env:ProgramFiles "uni-vpn"
 
 $OpenConnectUrl = "https://www.infradead.org/openconnect-gui/download/openconnect-gui-1.6.2-win64.exe"
 $OpenConnectSha256 = "de08d8968e40e219932d01025521f879178ec99246802db488c0fdac9fcef11a"
+# python.org's embeddable package, inside uni-vpn's own folder: it never meets a Python the
+# user installed (with the same version already installed, the regular installer does nothing).
 $PythonVersion = "3.12.10"
-$PythonUrl = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-amd64.exe"
+$PythonUrl = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-embed-amd64.zip"
+$PythonSha256 = "4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3"
+$BundledPython = Join-Path $AppDir "python\python.exe"
 
 function Say($text) { Write-Host "-> $text" }
 
@@ -40,7 +44,7 @@ function Find-Python([switch]$Anywhere) {
     $ErrorActionPreference = "Continue"
     # Only a Python in Program Files: a per-user one could be changed by any program of the user
     # and the service runs it elevated.
-    $candidates = @()
+    $candidates = @($BundledPython)
     $bases = @($env:ProgramFiles)
     if ($Anywhere) { $bases += "$env:LOCALAPPDATA\Programs\Python" }
     foreach ($base in $bases) {
@@ -79,23 +83,23 @@ function Get-Download($url, $target) {
 }
 
 function Install-Python {
-    $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
-    if ($winget) {
-        Say "installing Python 3.12 with winget"
-        & $winget.Source install --exact --id Python.Python.3.12 --scope machine --silent `
-            --accept-package-agreements --accept-source-agreements | Out-Host
-        if (Find-Python) { return }
+    $zip = Join-Path $env:TEMP "python-$PythonVersion-embed-amd64.zip"
+    Get-Download $PythonUrl $zip
+    $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()
+    if ($hash -ne $PythonSha256) {
+        Remove-Item $zip -ErrorAction SilentlyContinue
+        throw "Python download checksum mismatch ($hash)"
     }
-    $installer = Join-Path $env:TEMP "python-$PythonVersion-amd64.exe"
-    Get-Download $PythonUrl $installer
-    $signature = Get-AuthenticodeSignature $installer
+    $target = Split-Path $BundledPython
+    Say "installing Python $PythonVersion to $target"
+    if (Test-Path $target) { Remove-Item $target -Recurse -Force }
+    Expand-Archive -Path $zip -DestinationPath $target -Force
+    Remove-Item $zip -ErrorAction SilentlyContinue
+    $signature = Get-AuthenticodeSignature $BundledPython
     if ($signature.Status -ne "Valid" -or $signature.SignerCertificate.Subject -notmatch "Python Software Foundation") {
-        throw "The Python installer is not signed by the Python Software Foundation"
+        Remove-Item $target -Recurse -Force -ErrorAction SilentlyContinue
+        throw "python.exe is not signed by the Python Software Foundation"
     }
-    Say "installing Python $PythonVersion"
-    $process = Start-Process -FilePath $installer -ArgumentList "/quiet", "InstallAllUsers=1", "PrependPath=0", "Include_test=0" -Wait -PassThru
-    Remove-Item $installer -ErrorAction SilentlyContinue
-    if ($process.ExitCode -ne 0) { throw "Python installer failed with exit code $($process.ExitCode)" }
 }
 
 function Install-OpenConnect {
@@ -131,7 +135,7 @@ if (-not $DryRun -and -not (Test-Admin)) {
     if ($Uninstall) { $arguments += "-Uninstall" }
     if ($Update) { $arguments += "-Update" }
     if ($NoGui) { $arguments += "-NoGui" }
-    # The browser must not run elevated: this window opens it once the elevated part is done.
+    # The app must not run elevated: this window opens it once the elevated part is done.
     $arguments += "-NoBrowser"
     if ($User) { $arguments += @("-User", "`"$User`"") }
     if ($University) { $arguments += @("-University", "`"$University`"") }
@@ -154,8 +158,16 @@ if (-not $DryRun -and -not (Test-Admin)) {
         $query = @()
         if ($User) { $query += "user=$([uri]::EscapeDataString($User))" }
         if ($University) { $query += "university=$([uri]::EscapeDataString($University))" }
-        if ($query.Count -gt 0 -and -not (Test-Path $config)) { $url += "?" + ($query -join "&") }
-        Start-Process $url
+        $prefill = if ($query.Count -gt 0 -and -not (Test-Path $config)) { $query -join "&" } else { "" }
+        $app = Join-Path $AppDir "desktop\Uni VPN.exe"
+        if (Test-Path $app) {
+            $appArgs = @("--port", "$port")
+            if ($prefill) { $appArgs += @("--page", "`"&$prefill`"") }
+            Start-Process -FilePath $app -ArgumentList $appArgs
+        } else {
+            if ($prefill) { $url += "?" + $prefill }
+            Start-Process $url
+        }
     }
     exit $process.ExitCode
 }
@@ -168,11 +180,13 @@ if ($ForUser -and $ForUser -ne $env:USERNAME) {
 }
 
 function Copy-App {
-    # A fresh copy in Program Files, without files the new version no longer has.
+    # A fresh copy in Program Files, without files the new version no longer has; "desktop"
+    # (the app window) and "python" (Install-Python) are not part of the download.
     if ([IO.Path]::GetFullPath($Root).TrimEnd("\") -ieq [IO.Path]::GetFullPath($AppDir).TrimEnd("\")) { return }
     if ($DryRun) { Say "would copy uni-vpn to $AppDir"; return }
     Say "copying uni-vpn to $AppDir"
-    & robocopy.exe $Root $AppDir /MIR /XD .git __pycache__ /R:2 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+    # "desktop" holds the app that setup builds; it is not in the download and stays.
+    & robocopy.exe $Root $AppDir /MIR /XD .git __pycache__ desktop python /R:2 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "Copying to $AppDir failed (robocopy $LASTEXITCODE)" }
 }
 
