@@ -61,13 +61,15 @@ def _disconnect_daemon(timeout: float = 15, sleep=time.sleep) -> None:
     except (config.ConfigError, OSError):
         port = 1081
     base = f"http://127.0.0.1:{port}"
+    # Never through a proxy: http_proxy or the Windows registry proxy would swallow the request.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
         request = urllib.request.Request(f"{base}/api/disconnect", data=b"{}", method="POST",
                                          headers={"X-Uni-VPN": "1", "Content-Type": "application/json"})
-        urllib.request.urlopen(request, timeout=3).close()
+        opener.open(request, timeout=3).close()
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            with urllib.request.urlopen(f"{base}/status.json", timeout=3) as response:
+            with opener.open(f"{base}/status.json", timeout=3) as response:
                 if json.load(response).get("state") not in ("connected", "connecting", "disconnecting"):
                     return
             sleep(0.3)
@@ -131,10 +133,20 @@ def _check_value(name: str, value: str) -> str:
     return value
 
 
+def _systemd_exec(value: str) -> str:
+    # ExecStart= expands specifiers (%h) and variables ($HOME); %% and $$ are the literals.
+    return value.replace("%", "%%").replace("$", "$$")
+
+
+def _systemd_env(value: str) -> str:
+    # Environment= expands specifiers but not variables ($ has no special meaning there).
+    return value.replace("%", "%%")
+
+
 def _extra_env_block(extra_env: dict[str, str]) -> str:
     if pf.IS_MACOS:
         return "\n".join(f"    <key>{escape(key)}</key>\n    <string>{escape(value)}</string>" for key, value in extra_env.items())
-    return "\n".join(f'Environment="{key}={value}"' for key, value in extra_env.items())
+    return "\n".join(f'Environment="{key}={_systemd_env(value)}"' for key, value in extra_env.items())
 
 
 def render_unit(python: str, uni_vpn: str, log_dir: str, brew_prefix: str | None = None,
@@ -143,8 +155,11 @@ def render_unit(python: str, uni_vpn: str, log_dir: str, brew_prefix: str | None
     if brew_prefix:
         path_env = f"{brew_prefix}/bin:{brew_prefix}/sbin:{path_env}"
     extra_env = {key: _check_value(key, value) for key, value in (extra_env or {}).items()}
-    mapping = {"PYTHON": _check_value("python", python), "UNI_VPN": _check_value("uni-vpn", uni_vpn),
-               "LOG_DIR": log_dir, "PATH": path_env, "EXTRA_ENV": _extra_env_block(extra_env)}
+    python, uni_vpn = _check_value("python", python), _check_value("uni-vpn", uni_vpn)
+    # launchd reads XML, systemd its own escapes; each value is written for the file it lands in.
+    quote = escape if pf.IS_MACOS else _systemd_exec
+    mapping = {"PYTHON": quote(python), "UNI_VPN": quote(uni_vpn), "LOG_DIR": escape(log_dir),
+               "PATH": escape(path_env), "EXTRA_ENV": _extra_env_block(extra_env)}
     template = template_path().read_text(encoding="utf-8")
     if not extra_env:
         template = template.replace("@EXTRA_ENV@\n", "")
@@ -213,15 +228,19 @@ def uninstall(run=subprocess.run) -> bool:
                       **_no_window()).returncode != 0
         target.unlink(missing_ok=True)
         return result.returncode == 0 or missing
-    if pf.IS_MACOS:
-        run(["launchctl", "bootout", _gui_domain(), str(target)], capture_output=True, text=True)
+    stop = (["launchctl", "bootout", _gui_domain(), str(target)] if pf.IS_MACOS
+            else ["systemctl", "--user", "disable", "--now", UNIT])
+    try:
+        run(stop, capture_output=True, text=True)
+    except OSError:
+        stopped = False  # no systemctl/launchctl: the service may still be loaded
     else:
-        run(["systemctl", "--user", "disable", "--now", UNIT], capture_output=True, text=True)
+        stopped = True
     if target.exists():
         target.unlink()
-    if not pf.IS_MACOS:
+    if not pf.IS_MACOS and stopped:
         run(["systemctl", "--user", "daemon-reload"], capture_output=True, text=True)
-    return True
+    return stopped
 
 
 def is_active(run=subprocess.run) -> bool:

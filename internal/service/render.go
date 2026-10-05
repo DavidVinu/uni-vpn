@@ -92,13 +92,22 @@ func checkValue(name, value string) error {
 	return nil
 }
 
+// systemdExec escapes for ExecStart=, which expands specifiers (%h) and variables ($HOME);
+// %% and $$ are the literals.
+func systemdExec(value string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(value, "%", "%%"), "$", "$$")
+}
+
+// systemdEnv escapes for Environment=, which expands specifiers but not variables.
+func systemdEnv(value string) string { return strings.ReplaceAll(value, "%", "%%") }
+
 func extraEnvBlock(macOS bool, extraEnv []Pair) string {
 	lines := make([]string, len(extraEnv))
 	for i, kv := range extraEnv {
 		if macOS {
 			lines[i] = "    <key>" + winsys.XMLEscape(kv.Key) + "</key>\n    <string>" + winsys.XMLEscape(kv.Value) + "</string>"
 		} else {
-			lines[i] = `Environment="` + kv.Key + "=" + kv.Value + `"`
+			lines[i] = `Environment="` + kv.Key + "=" + systemdEnv(kv.Value) + `"`
 		}
 	}
 	return strings.Join(lines, "\n")
@@ -126,7 +135,16 @@ func renderWith(macOS bool, template string, programs []Pair, logDir, brewPrefix
 			return "", err
 		}
 	}
-	mapping := append(programs, Pair{"LOG_DIR", logDir}, Pair{"PATH", pathEnv},
+	// launchd reads XML, systemd its own escapes; each value is written for the file it lands in.
+	quote := systemdExec
+	if macOS {
+		quote = winsys.XMLEscape
+	}
+	mapping := make([]Pair, 0, len(programs)+3)
+	for _, kv := range programs {
+		mapping = append(mapping, Pair{kv.Key, quote(kv.Value)})
+	}
+	mapping = append(mapping, Pair{"LOG_DIR", winsys.XMLEscape(logDir)}, Pair{"PATH", winsys.XMLEscape(pathEnv)},
 		Pair{"EXTRA_ENV", extraEnvBlock(macOS, extraEnv)})
 	if len(extraEnv) == 0 {
 		template = strings.Replace(template, "@EXTRA_ENV@\n", "", -1)

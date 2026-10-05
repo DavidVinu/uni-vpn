@@ -207,6 +207,7 @@ func (m *Manager) port() int {
 // outright, and the session would stay open on the server until it times out.
 func (m *Manager) disconnectDaemon(timeout time.Duration) {
 	base := fmt.Sprintf("http://127.0.0.1:%d", m.port())
+	// Never through a proxy: HTTP_PROXY or the Windows registry proxy would swallow the request.
 	client := &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{Proxy: nil}}
 	defer client.CloseIdleConnections()
 	req, err := http.NewRequest("POST", base+"/api/disconnect", strings.NewReader("{}"))
@@ -388,8 +389,9 @@ func (m *Manager) Install(dryRun bool) ([]string, error) {
 	return files, nil
 }
 
-// Uninstall stops and removes the service. False if it could not be removed; the error is
-// for a command that could not run or a file that could not be deleted.
+// Uninstall stops and removes the service. False if it could not be removed (also without
+// systemctl/launchctl); the error is for a file that could not be deleted or a schtasks that
+// could not run.
 func (m *Manager) Uninstall() (bool, error) {
 	target := m.UnitTargetPath()
 	if m.windows() {
@@ -415,18 +417,18 @@ func (m *Manager) Uninstall() (bool, error) {
 	} else {
 		args = []string{"systemctl", "--user", "disable", "--now", UnitName}
 	}
-	if _, err := m.Run(Cmd{Args: args, Capture: true}); err != nil {
-		return false, err
-	}
+	// No systemctl/launchctl: the service may still be loaded, so report it, but remove the file.
+	_, err := m.Run(Cmd{Args: args, Capture: true})
+	stopped := err == nil
 	if err := os.Remove(target); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return false, err
 	}
-	if !m.macOS() {
+	if !m.macOS() && stopped {
 		if _, err := m.Run(Cmd{Args: []string{"systemctl", "--user", "daemon-reload"}, Capture: true}); err != nil {
 			return false, err
 		}
 	}
-	return true, nil
+	return stopped, nil
 }
 
 // IsActive reports whether the service runs.

@@ -555,3 +555,33 @@ func TestInstallCreatesPrivateBackupDir(t *testing.T) {
 		t.Fatal(st.Mode(), err)
 	}
 }
+
+func TestBackupThatIsNotAnObjectCountsAsUnset(t *testing.T) {
+	for _, text := range []string{"[1]", "null", `"x"`, "3"} {
+		backup := tempBackup(t, "proxy-backup.json")
+		os.WriteFile(backup, []byte(text), 0o600)
+		r := &runner{}
+		if got, err := gnome(r.run).Uninstall(backup); got != "unset" || err != nil || len(r.calls) != 0 {
+			t.Fatal(text, got, err, r.calls)
+		}
+	}
+}
+
+func TestBackupWithKDENullRestoresTheRest(t *testing.T) {
+	backup := tempBackup(t, "proxy-backup.json")
+	os.WriteFile(backup, []byte(`{"mode": "none", "url": "", "kde": null}`), 0o600)
+	r := &runner{}
+	s := gnome(r.run)
+	s.FindBinary = func(name string) string { return "/usr/bin/" + name }
+	if got, err := s.Uninstall(backup); got != "restored" || err != nil {
+		t.Fatal(got, err)
+	}
+	if !r.called("gsettings", "set", "org.gnome.system.proxy", "mode", "none") {
+		t.Fatal(r.calls)
+	}
+	for _, c := range r.calls {
+		if strings.Contains(c[0], "kwriteconfig") {
+			t.Fatal(r.calls)
+		}
+	}
+}

@@ -1,8 +1,11 @@
+import json
 import os
 import plistlib
 import subprocess
 import tempfile
+import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
@@ -76,6 +79,22 @@ class RenderTests(unittest.TestCase):
         self.assertEqual(data["ProgramArguments"], ["/opt/homebrew/bin/python3", "/Users/x/uni-vpn/bin/uni-vpn", "daemon"])
         self.assertTrue(data["EnvironmentVariables"]["PATH"].startswith("/opt/homebrew/bin:"))
         self.assertTrue(data["KeepAlive"])
+
+    def test_launchd_plist_escapes_xml_in_paths(self):
+        with mock.patch.object(pf, "IS_MACOS", True):
+            text = service.render_unit("/opt/R&D <py>/python3", "/Users/x/R&D <1>/uni-vpn",
+                                       "/Users/x/Logs & more", brew_prefix="/opt/homebrew")
+        data = plistlib.loads(text.encode())
+        self.assertEqual(data["ProgramArguments"], ["/opt/R&D <py>/python3", "/Users/x/R&D <1>/uni-vpn", "daemon"])
+        self.assertEqual(data["StandardOutPath"], "/Users/x/Logs & more/launchd.log")
+
+    def test_systemd_unit_keeps_percent_and_dollar_literal(self):
+        # ExecStart= expands %h and $HOME, Environment= only specifiers.
+        with mock.patch.object(pf, "IS_MACOS", False):
+            text = service.render_unit("/usr/bin/python3", "/home/x/100%/$HOME/uni-vpn", "/home/x/state",
+                                       extra_env={"XDG_CONFIG_HOME": "/home/x/50%/$cfg"})
+        self.assertIn('ExecStart="/usr/bin/python3" "/home/x/100%%/$$HOME/uni-vpn" daemon', text)
+        self.assertIn('Environment="XDG_CONFIG_HOME=/home/x/50%%/$cfg"', text)
 
 
 @posix_only  # systemd and launchd paths, which must not contain backslashes
@@ -174,9 +193,55 @@ class InstallTests(unittest.TestCase):
         self.assertFalse(unit.exists())
         self.assertIn(["systemctl", "--user", "disable", "--now", "uni-vpn"], self.calls)
 
+    def test_uninstall_without_systemctl_or_launchctl_is_false(self):
+        def run_missing(cmd, **kwargs):
+            raise FileNotFoundError(2, "No such file or directory", cmd[0])
+
+        for is_macos in (False, True):
+            with mock.patch.object(pf, "IS_MACOS", is_macos), mock.patch.object(Path, "home", return_value=self.home):
+                unit = service.unit_target_path()
+                unit.parent.mkdir(parents=True, exist_ok=True)
+                unit.write_text("x")
+                self.assertFalse(service.uninstall(run=run_missing))
+                self.assertFalse(unit.exists())
+
     def test_is_active(self):
         def run(cmd, **kwargs):
             return subprocess.CompletedProcess(cmd, 0, "active\n", "")
 
         with mock.patch.object(pf, "IS_MACOS", False):
             self.assertTrue(service.is_active(run=run))
+
+
+class DisconnectTests(unittest.TestCase):
+    def test_disconnect_never_goes_through_a_proxy(self):
+        # http_proxy points nowhere; the request to the daemon must still arrive.
+        seen = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                seen.append(("POST", self.path, self.headers.get("X-Uni-VPN")))
+                self.send_response(200)
+                self.end_headers()
+
+            def do_GET(self):
+                seen.append(("GET", self.path, None))
+                body = json.dumps({"state": "idle"}).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        env = {key: value for key, value in os.environ.items() if key.lower() != "no_proxy"}
+        env.update(http_proxy="http://127.0.0.1:9", HTTP_PROXY="http://127.0.0.1:9")
+        cfg = mock.Mock(http_port=server.server_address[1])
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch("uni_vpn.config.load", return_value=cfg):
+            service._disconnect_daemon(sleep=lambda s: None)
+        self.assertEqual(seen, [("POST", "/api/disconnect", "1"), ("GET", "/status.json", None)])

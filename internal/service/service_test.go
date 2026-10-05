@@ -111,6 +111,35 @@ func TestSystemdUnitExtraEnv(t *testing.T) {
 	}
 }
 
+func TestLaunchdPlistEscapesXMLInPaths(t *testing.T) {
+	py := mustRender(RenderPythonUnit(true, "/opt/R&D <py>/python3", "/Users/x/R&D <1>/uni-vpn", "/Users/x/Logs & more", "/opt/homebrew", nil))
+	if args := parsePlist(t, py).Args; !reflect.DeepEqual(args, []string{"/opt/R&D <py>/python3", "/Users/x/R&D <1>/uni-vpn", "daemon"}) {
+		t.Fatal(args)
+	}
+	if !strings.Contains(py, "<string>/Users/x/Logs &amp; more/launchd.log</string>") {
+		t.Fatal(py)
+	}
+	gobin := mustRender(RenderUnit(true, "/Users/x/R&D <1>/uni-vpn", "/Users/x/Logs & more", "/opt/homebrew", nil))
+	if args := parsePlist(t, gobin).Args; !reflect.DeepEqual(args, []string{"/Users/x/R&D <1>/uni-vpn", "daemon"}) {
+		t.Fatal(args)
+	}
+}
+
+func TestSystemdUnitKeepsPercentAndDollarLiteral(t *testing.T) {
+	// ExecStart= expands %h and $HOME, Environment= only specifiers.
+	env := []Pair{{"XDG_CONFIG_HOME", "/home/x/50%/$cfg"}}
+	py := mustRender(RenderPythonUnit(false, "/usr/bin/python3", "/home/x/100%/$HOME/uni-vpn", "/home/x/state", "", env))
+	gobin := mustRender(RenderUnit(false, "/home/x/100%/$HOME/uni-vpn", "/home/x/state", "", env))
+	for text, want := range map[string]string{
+		py:    `ExecStart="/usr/bin/python3" "/home/x/100%%/$$HOME/uni-vpn" daemon`,
+		gobin: `ExecStart="/home/x/100%%/$$HOME/uni-vpn" daemon`,
+	} {
+		if !strings.Contains(text, want) || !strings.Contains(text, `Environment="XDG_CONFIG_HOME=/home/x/50%%/$cfg"`) {
+			t.Fatal(text)
+		}
+	}
+}
+
 // plist is a minimal reader for the plists we render: the top dict's keys and values.
 type plist struct {
 	Label     string
@@ -439,6 +468,49 @@ func TestUninstallRemovesUnit(t *testing.T) {
 	}
 	if !r.called("systemctl", "--user", "disable", "--now", "uni-vpn") {
 		t.Fatal(r.calls)
+	}
+}
+
+func TestUninstallWithoutSystemctlOrLaunchctlIsFalse(t *testing.T) {
+	setupHome(t)
+	for _, goos := range []string{"linux", "darwin"} {
+		m, _ := manager(goos, &recorder{reply: func(Cmd) (Result, error) {
+			return Exec(Cmd{Args: []string{"/nonexistent/tool"}})
+		}})
+		unit := m.UnitTargetPath()
+		os.MkdirAll(filepath.Dir(unit), 0o700)
+		os.WriteFile(unit, []byte("x"), 0o600)
+		if ok, err := m.Uninstall(); ok || err != nil {
+			t.Fatal(goos, ok, err)
+		}
+		if _, err := os.Stat(unit); err == nil {
+			t.Fatal(goos, "unit left")
+		}
+	}
+}
+
+func TestDisconnectNeverGoesThroughAProxy(t *testing.T) {
+	var mu sync.Mutex
+	var seen []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		mu.Lock()
+		seen = append(seen, req.Method+" "+req.URL.Path)
+		mu.Unlock()
+		fmt.Fprint(w, `{"state": "idle"}`)
+	}))
+	defer srv.Close()
+	port, _ := strconv.Atoi(srv.URL[strings.LastIndex(srv.URL, ":")+1:])
+	for _, k := range []string{"HTTP_PROXY", "http_proxy"} {
+		t.Setenv(k, "http://127.0.0.1:9")
+	}
+	for _, k := range []string{"NO_PROXY", "no_proxy"} {
+		t.Setenv(k, "")
+	}
+	m, _ := manager("windows", &recorder{})
+	m.HTTPPort = func() (int, error) { return port, nil }
+	m.disconnectDaemon(time.Second)
+	if !reflect.DeepEqual(seen, []string{"POST /api/disconnect", "GET /status.json"}) {
+		t.Fatal(seen)
 	}
 }
 
