@@ -24,9 +24,13 @@ class PathTests(unittest.TestCase):
             self.assertEqual(pf.config_dir(), Path.home() / ".config" / "uni-vpn")
 
     def test_state_dir_platform(self):
-        with mock.patch.object(pf, "IS_MACOS", True):
+        with mock.patch.object(pf, "IS_MACOS", True), mock.patch.dict(os.environ):
+            os.environ.pop("XDG_STATE_HOME", None)
             self.assertEqual(pf.state_dir(), Path.home() / "Library" / "Logs" / "uni-vpn")
         with mock.patch.object(pf, "IS_MACOS", False), mock.patch.dict(os.environ, {"XDG_STATE_HOME": "/tmp/st"}):
+            self.assertEqual(pf.state_dir(), Path("/tmp/st/uni-vpn"))
+        # An override wins on macOS too, so a test daemon never writes into the real log folder.
+        with mock.patch.object(pf, "IS_MACOS", True), mock.patch.dict(os.environ, {"XDG_STATE_HOME": "/tmp/st"}):
             self.assertEqual(pf.state_dir(), Path("/tmp/st/uni-vpn"))
 
     def test_repo_root_contains_bin(self):

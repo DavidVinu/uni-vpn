@@ -50,7 +50,7 @@ def config_dir() -> Path:
 def state_dir() -> Path:
     if IS_WINDOWS and not os.environ.get("XDG_STATE_HOME"):
         return _local_appdata() / APP / "logs"
-    if IS_MACOS:
+    if IS_MACOS and not os.environ.get("XDG_STATE_HOME"):
         return Path.home() / "Library" / "Logs" / APP
     base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
     return Path(base) / APP

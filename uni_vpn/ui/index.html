@@ -302,7 +302,8 @@ function render() {
   $("v-uni").textContent = S.university_name;
   $("v-user").textContent = S.user;
   $("d-totp").hidden = !TOTP_MODES.includes(S.mfa);
-  $("v-ver").textContent = S.version + (S.commit ? " (" + S.commit.slice(0, 7) + ")" : "");
+  $("v-ver").textContent = S.version;
+  $("v-ver").title = S.commit ? S.commit.slice(0, 7) : "";
   if (!autoUpdateSaving) $("auto-update").checked = S.auto_update !== false;
   $("v-dom").textContent = (S.domains || []).length + " domains";
   // Only on change, so a selection in the log survives the next poll.
