@@ -263,6 +263,17 @@ def cmd_service(args) -> int:
     return service.control(args.action)
 
 
+def cmd_app(args) -> int:
+    from . import desktop
+
+    cfg = _load(args)
+    page = "#settings" if args.settings else ""
+    if desktop.open_app(cfg.http_port, page) or pf.open_url(f"http://127.0.0.1:{cfg.http_port}/"):
+        return 0
+    print(f"No desktop to show the app on; the page is http://127.0.0.1:{cfg.http_port}/")
+    return 1
+
+
 def cmd_doctor(args) -> int:
     from . import doctor
 
@@ -305,6 +316,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("log", help="Show the last log lines")
     p.add_argument("-n", "--lines", type=int, default=200)
     p.set_defaults(func=cmd_log)
+    p = sub.add_parser("app", help="Open the Uni VPN window")
+    p.add_argument("--settings", action="store_true", help="open it at Settings")
+    p.set_defaults(func=cmd_app)
     sub.add_parser("doctor", help="Self-diagnosis").set_defaults(func=cmd_doctor)
     sub.add_parser("daemon", help="Run the service in the foreground (used by the background service)").set_defaults(func=cmd_daemon)
     p = sub.add_parser("service", help="Control the service")

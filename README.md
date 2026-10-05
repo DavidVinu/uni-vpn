@@ -79,8 +79,11 @@ username_suffix = "@student-net.ethz.ch"
 
 A small Python daemon (standard library only) runs as a background service and offers the
 VPN as a SOCKS5 proxy on `127.0.0.1:1080`. A PAC rule in the system proxy settings sends the
-listed domains there and everything else directly. The app at `http://127.0.0.1:1081/`
-shows the state, connects or disconnects by hand and holds the settings.
+listed domains there and everything else directly. The Uni VPN app shows the state, connects
+or disconnects by hand and holds the settings: a small window of its own around the page on
+`http://127.0.0.1:1081/` (WKWebView on macOS, WebView2 on Windows, WebKitGTK on Linux), plus an
+icon in the menu bar, notification area or panel that starts at login. The installer builds
+it on the machine (`app/`, `uni_vpn/desktop.py`).
 
 - Linux and macOS: `openconnect --script-tun` with `ocproxy`, so the VPN never becomes a
   network interface. No root, no routes, no DNS changes.
@@ -159,13 +162,17 @@ settings. `uni-vpn doctor` prints it.
 
 ## Usage
 
-The app is `http://127.0.0.1:1081/`, also in the start menu, Launchpad or app grid as
-"Uni VPN". The `uni-vpn` command does the same in a terminal (Windows: new terminals only).
+Open "Uni VPN" from the start menu, Launchpad or app grid, or click the shield icon in the
+menu bar (macOS), notification area (Windows) or panel (Linux). The icon shows whether the VPN
+is connected; its menu connects, disconnects and opens Settings. Closing the window keeps the
+icon. The `uni-vpn` command does the same in a terminal (Windows: new terminals only); `uni-vpn
+app` opens the window. Without the app (no Swift compiler on macOS, no WebKitGTK on Linux) the
+entry opens `http://127.0.0.1:1081/` in the browser instead.
 
 | What | How |
 |---|---|
 | Status, connect, disconnect | the app, or `uni-vpn status`, `uni-vpn connect`, `uni-vpn disconnect` |
-| Change university ID, password or TOTP secret | the app, gear icon, or `uni-vpn password`, `uni-vpn totp` |
+| Change university, username, password or one-time code secret | the app, Settings (gear icon or the icon's menu), Account |
 | Change websites | the app, gear icon, Websites (Chrome picks it up at once, Firefox after about 10 s; on macOS and Windows restart the browser) |
 | Something is wrong | `uni-vpn doctor`, paste the output into an issue |
 | Update | nothing to do, uni-vpn updates itself (see below) |
@@ -225,6 +232,9 @@ The app is `http://127.0.0.1:1081/`, also in the start menu, Launchpad or app gr
 | Role model | Pattern taken |
 |---|---|
 | Mullvad VPN, Tailscale | main screen with one state, one button, settings behind a gear |
+| Tailscale (macOS) | menu bar icon that shows the state, menu with state, Connect/Disconnect, Settings…, Quit; Dock icon only while the window is open |
+| Cisco Secure Client, Mullvad VPN (Windows) | notification area icon: left click opens the small fixed window, right click the menu; closing the window keeps the icon; Exit at the bottom |
+| macOS System Settings | Account rows open their page, the back arrow returns; Cmd+, opens Settings |
 | Google sign-in | one question per card, Next bottom right, Back bottom left, inline errors |
 | Google Authenticator | the check code with a countdown ring |
 | iOS and macOS Settings | grouped settings list, hints behind info icons |

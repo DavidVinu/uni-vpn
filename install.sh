@@ -54,6 +54,27 @@ find_python() {
   return 1
 }
 
+# The app window (WebKitGTK) and its panel icon. Optional: without them the app opens in the browser.
+linux_app_packages() {
+  [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || return 0
+  local packages=()
+  if command -v apt-get >/dev/null && command -v dpkg >/dev/null; then
+    local webkit=gir1.2-webkit2-4.1
+    apt-cache show "$webkit" >/dev/null 2>&1 || webkit=gir1.2-webkit2-4.0
+    local p
+    for p in python3-gi "$webkit" gir1.2-ayatanaappindicator3-0.1; do
+      dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q 'ok installed' || packages+=("$p")
+    done
+    [ ${#packages[@]} -eq 0 ] || run_root apt-get install -y "${packages[@]}" || true
+  elif command -v dnf >/dev/null; then
+    run_root dnf install -y python3-gobject webkit2gtk4.1 libayatana-appindicator-gtk3 || true
+  elif command -v zypper >/dev/null; then
+    run_root zypper --non-interactive install python3-gobject typelib-1_0-WebKit2-4_1 typelib-1_0-AyatanaAppIndicator3-0_1 || true
+  elif command -v pacman >/dev/null; then
+    run_root pacman -S --needed --noconfirm python-gobject webkit2gtk-4.1 libayatana-appindicator || true
+  fi
+}
+
 linux_packages() {
   local missing=()
   if command -v apt-get >/dev/null && command -v dpkg >/dev/null; then
@@ -92,6 +113,7 @@ linux_packages() {
   else
     echo "-> unknown package manager: install openconnect, ocproxy, secret-tool (libsecret) and Python >= 3.11 yourself"
   fi
+  linux_app_packages
   if ! command -v systemctl >/dev/null || ! systemctl --user show-environment >/dev/null 2>&1; then
     if [ "$dry" = 0 ]; then
       echo "No systemd user session found. uni-vpn runs as a systemd user service; log in to a desktop session and try again."
