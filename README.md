@@ -91,8 +91,26 @@ shows the state, connects or disconnects by hand and holds the settings.
 
 ## Installation
 
-One line in a terminal. It installs what is missing, then opens the setup assistant in the
-browser.
+Download the file for your computer and open it:
+
+| Computer | Download |
+|---|---|
+| Mac | [uni-vpn.pkg](https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn.pkg) |
+| Windows | [uni-vpn-setup.exe](https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn-setup.exe) |
+| Ubuntu, Debian, Mint | [uni-vpn.deb](https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn.deb) |
+| Fedora | [uni-vpn.rpm](https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn.rpm) |
+
+The setup assistant opens by itself afterwards. On Linux, open "Uni VPN" from your apps once
+the installation is done.
+
+Until the installers are signed: on a Mac, if it says the file "cannot be opened", open System
+Settings, Privacy & Security, and click "Open Anyway". On Windows, click "More info", then
+"Run anyway".
+
+### From a terminal
+
+For developers, or computers the downloads do not cover. It installs what is missing, then
+opens the setup assistant in the browser.
 
 Linux and macOS:
 
