@@ -1,0 +1,145 @@
+{
+  "version": 1,
+  "universities": [
+    {
+      "id": "heidelberg",
+      "name": "Heidelberg University",
+      "country": "DE",
+      "host": "vpn-ac.uni-heidelberg.de",
+      "useragent": "AnyConnect Linux_64 5.1.18.314",
+      "no_external_auth": false,
+      "mfa": "totp_field",
+      "mfa_portal_url": "https://mfa.uni-heidelberg.de/",
+      "mfa_steps": [
+        "Open the {portal}. It only opens on campus or with Cisco VPN.",
+        "Choose \"Soft-Token (zeitbasiert)\", then \"Einrichten\".",
+        "Click \"Tokendetails einblenden\" and copy the line starting with otpauth://.",
+        "Paste it below, then type the code shown here into the portal's \"Testen\" field."
+      ],
+      "default_domains": ["sogo.uni-heidelberg.de", "elearning-med.uni-heidelberg.de", "cip.dmed.uni-heidelberg.de"],
+      "aliases": ["Universitaet Heidelberg", "Ruprecht-Karls-Universitaet", "URZ"],
+      "verified": true,
+      "notes": "Tested end to end, see docs/e2e.md. The OTP form comes after the password form."
+    },
+    {
+      "id": "ethz",
+      "name": "ETH Zurich",
+      "country": "CH",
+      "host": "sslvpn.ethz.ch",
+      "authgroup": "staff-net",
+      "username_suffix": "@staff-net.ethz.ch",
+      "useragent": "AnyConnect",
+      "mfa": "totp_field",
+      "aliases": ["ETH Zuerich", "Eidgenoessische Technische Hochschule"],
+      "notes": "Students: authgroup = \"student-net\", username_suffix = \"@student-net.ethz.ch\"."
+    },
+    {
+      "id": "bremen",
+      "name": "University of Bremen",
+      "country": "DE",
+      "host": "vpn.uni-bremen.de",
+      "useragent": "AnyConnect",
+      "mfa": "totp_field",
+      "aliases": ["Universitaet Bremen"],
+      "notes": "Without 2FA the second field stays empty, which uni-vpn cannot send yet."
+    },
+    {
+      "id": "muenster",
+      "name": "University of Muenster",
+      "country": "DE",
+      "host": "vpn.uni-muenster.de",
+      "mfa": "totp_field",
+      "aliases": ["Universitaet Muenster", "WWU"]
+    },
+    {
+      "id": "marburg",
+      "name": "University of Marburg",
+      "country": "DE",
+      "host": "vpn.uni-marburg.de",
+      "authgroup": "unimr-vpn-staff-Passwort+2FA",
+      "mfa": "totp_append",
+      "aliases": ["Philipps-Universitaet Marburg"],
+      "notes": "Students: authgroup = \"unimr-vpn-students-Passwort+2FA\"."
+    },
+    {
+      "id": "stanford",
+      "name": "Stanford University",
+      "country": "US",
+      "host": "su-vpn.stanford.edu",
+      "authgroup": "Stanford",
+      "mfa": "duo_push",
+      "notes": "The default group CardinalKey is SAML; the group Stanford is a password form with Duo."
+    },
+    {
+      "id": "harvard-fasrc",
+      "name": "Harvard FAS Research Computing",
+      "country": "US",
+      "host": "vpn.rc.fas.harvard.edu",
+      "username_suffix": "@fasrc",
+      "mfa": "totp_field",
+      "aliases": ["Harvard University", "FASRC"]
+    },
+    {
+      "id": "stuttgart",
+      "name": "University of Stuttgart",
+      "country": "DE",
+      "host": "vpn.tik.uni-stuttgart.de",
+      "username_suffix": "@uni-stuttgart.de",
+      "mfa": "none",
+      "aliases": ["Universitaet Stuttgart"],
+      "notes": "Students type the whole name, st123456@stud.uni-stuttgart.de."
+    },
+    {
+      "id": "bonn",
+      "name": "University of Bonn",
+      "country": "DE",
+      "host": "unibn-vpn.uni-bonn.de",
+      "useragent": "AnyConnect",
+      "mfa": "none",
+      "aliases": ["Universitaet Bonn"]
+    },
+    {
+      "id": "mannheim",
+      "name": "University of Mannheim",
+      "country": "DE",
+      "host": "vpn.uni-mannheim.de",
+      "mfa": "none",
+      "aliases": ["Universitaet Mannheim"]
+    },
+    {
+      "id": "kassel",
+      "name": "University of Kassel",
+      "country": "DE",
+      "host": "univpn.uni-kassel.de",
+      "useragent": "AnyConnect Windows 5.1.18.314",
+      "os": "win",
+      "mfa": "none",
+      "aliases": ["Universitaet Kassel"],
+      "notes": "Needs a Windows client identity; the exact user agent is a guess."
+    },
+    {
+      "id": "tu-dresden",
+      "name": "TU Dresden",
+      "country": "DE",
+      "host": "vpn2.zih.tu-dresden.de",
+      "mfa": "none",
+      "aliases": ["Technische Universitaet Dresden", "ZIH"]
+    },
+    {
+      "id": "fu-berlin",
+      "name": "Freie Universitaet Berlin",
+      "country": "DE",
+      "host": "vpn.fu-berlin.de",
+      "useragent": "AnyConnectLinux",
+      "mfa": "saml",
+      "aliases": ["FU Berlin"]
+    },
+    {
+      "id": "oxford",
+      "name": "University of Oxford",
+      "country": "GB",
+      "host": "vpn.ox.ac.uk",
+      "mfa": "saml"
+    }
+  ]
+}
