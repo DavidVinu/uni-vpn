@@ -275,7 +275,11 @@ jobs:
           foreach ($i in 1..30) {
             try { Invoke-WebRequest -UseBasicParsing http://127.0.0.1:1081/status.json | Out-Null; $ok = $true; break } catch { Start-Sleep 1 }
           }
-          if (-not $ok) { throw "the service did not start" }
+          if (-not $ok) {
+            Get-ChildItem "$env:ProgramFiles", "${env:ProgramFiles(x86)}" | Format-Table -AutoSize | Out-String | Write-Host
+            Get-ChildItem "$env:ProgramFiles", "${env:ProgramFiles(x86)}" -Recurse -Depth 2 -Filter "openconnect*.exe" -ErrorAction SilentlyContinue | ForEach-Object FullName
+            throw "the service did not start"
+          }
           if (-not (Test-Path "$env:ProgramFiles\uni-vpn\.commit")) { throw ".commit is missing" }
           if (-not (Test-Path "$env:ProgramFiles\uni-vpn\python\pythonw.exe")) { throw "Python is not in uni-vpn's folder" }
           if (-not (Get-Process "Uni VPN" -ErrorAction SilentlyContinue)) { Write-Host "note: the tray app is not running" }

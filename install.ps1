@@ -114,6 +114,7 @@ function Install-OpenConnect {
     $process = Start-Process -FilePath $installer -ArgumentList "/S" -Wait -PassThru
     Remove-Item $installer -ErrorAction SilentlyContinue
     if ($process.ExitCode -ne 0) { throw "OpenConnect installer failed with exit code $($process.ExitCode)" }
+    if (-not (Find-OpenConnect)) { throw "OpenConnect was not found after installing it" }
 }
 
 $mode = if ($Uninstall) { "uninstall" } elseif ($Update) { "update" } else { "setup" }
