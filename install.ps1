@@ -124,7 +124,7 @@ if (-not $DryRun -and -not (Test-Admin)) {
     if ($Uninstall) { $arguments += "-Uninstall" }
     if ($Update) { $arguments += "-Update" }
     if ($NoGui) { $arguments += "-NoGui" }
-    # The browser must not run elevated: this window opens it once the elevated part is done.
+    # The app must not run elevated: this window opens it once the elevated part is done.
     $arguments += "-NoBrowser"
     if ($User) { $arguments += @("-User", "`"$User`"") }
     if ($University) { $arguments += @("-University", "`"$University`"") }
@@ -147,8 +147,16 @@ if (-not $DryRun -and -not (Test-Admin)) {
         $query = @()
         if ($User) { $query += "user=$([uri]::EscapeDataString($User))" }
         if ($University) { $query += "university=$([uri]::EscapeDataString($University))" }
-        if ($query.Count -gt 0 -and -not (Test-Path $config)) { $url += "?" + ($query -join "&") }
-        Start-Process $url
+        $prefill = if ($query.Count -gt 0 -and -not (Test-Path $config)) { $query -join "&" } else { "" }
+        $app = Join-Path $AppDir "desktop\Uni VPN.exe"
+        if (Test-Path $app) {
+            $appArgs = @("--port", "$port")
+            if ($prefill) { $appArgs += @("--page", "`"&$prefill`"") }
+            Start-Process -FilePath $app -ArgumentList $appArgs
+        } else {
+            if ($prefill) { $url += "?" + $prefill }
+            Start-Process $url
+        }
     }
     exit $process.ExitCode
 }
@@ -165,7 +173,8 @@ function Copy-App {
     if ([IO.Path]::GetFullPath($Root).TrimEnd("\") -ieq [IO.Path]::GetFullPath($AppDir).TrimEnd("\")) { return }
     if ($DryRun) { Say "would copy uni-vpn to $AppDir"; return }
     Say "copying uni-vpn to $AppDir"
-    & robocopy.exe $Root $AppDir /MIR /XD .git __pycache__ /R:2 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+    # "desktop" holds the app that setup builds; it is not in the download and stays.
+    & robocopy.exe $Root $AppDir /MIR /XD .git __pycache__ desktop /R:2 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "Copying to $AppDir failed (robocopy $LASTEXITCODE)" }
 }
 

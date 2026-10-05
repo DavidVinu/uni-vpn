@@ -41,7 +41,13 @@ Note: Windows version and build, CPU, Python version, Chrome, Edge and Firefox v
     the new commit. `Get-ScheduledTask uni-vpn` stays "Running", Task Manager shows two
     `pythonw.exe` (the old one waits for the new one). No UAC prompt.
 14. `uni-vpn service stop`: both `pythonw.exe` are gone.
-15. `install.ps1 -Uninstall` (one UAC prompt): task gone, proxy setting reset,
+15. App: the installer ends with a "Uni VPN" window (not a browser tab) with its own taskbar
+    button, and a shield in the notification area (maybe behind the ^ arrow). Left click on the
+    shield opens the window, right click shows Connect/Disconnect, Settings, Exit. Closing the
+    window keeps the shield. Start menu "Uni VPN" brings the window back. Task Manager: "Uni
+    VPN.exe" runs without "Elevated". Settings > University: pick another one, sign in, back in
+    Settings with the new name. Sign out and in: the shield is back without a window.
+16. `install.ps1 -Uninstall` (one UAC prompt): task gone, proxy setting reset,
     `uni-vpn` no longer on the PATH in new terminals, Start menu entry gone. Answer "y" to the
     keyring question: Control Panel, Credential Manager, Windows Credentials then shows no
     `uni-vpn` entries.

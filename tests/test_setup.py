@@ -35,6 +35,15 @@ class SetupHarness(unittest.TestCase):
             patch = mock.patch.object(pf, name, value)
             patch.start()
             self.addCleanup(patch.stop)
+        # The native app: never built or started by a test, the browser entry stands in for it.
+        from uni_vpn import desktop
+        for name, value in (("install", lambda port, dry, created, run=None: desktop._browser_entry(
+                                 port, dry, created, run or mock.Mock(return_value=subprocess.CompletedProcess([], 0)))),
+                            ("open_app", lambda port, page="", run=None: False),
+                            ("uninstall", lambda run=None: None)):
+            patch = mock.patch.object(desktop, name, value)
+            patch.start()
+            self.addCleanup(patch.stop)
         self.stored = []
         self.stored_totp = []
         self.installed = []
