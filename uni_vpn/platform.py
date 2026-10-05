@@ -20,8 +20,10 @@ if IS_WINDOWS:
     CISCO_VPN = next((os.path.join(base, "Cisco", "Cisco Secure Client", "vpncli.exe") for base in _PROGRAM_FILES
                       if os.path.isfile(os.path.join(base, "Cisco", "Cisco Secure Client", "vpncli.exe"))),
                      os.path.join(_PROGRAM_FILES[-1], "Cisco", "Cisco Secure Client", "vpncli.exe"))
-    # openconnect.exe ships with OpenConnect-GUI (with Wintun), which install.ps1 installs.
-    SEARCH_DIRS = [os.path.join(base, name) for base in _PROGRAM_FILES for name in ("OpenConnect-GUI", "OpenConnect")]
+    # openconnect.exe with Wintun comes with uni-vpn (packaging/windows/build-openconnect.sh);
+    # a separately installed OpenConnect still counts.
+    SEARCH_DIRS = [os.path.join(_PROGRAM_FILES[0], APP, "openconnect")] + [
+        os.path.join(base, name) for base in _PROGRAM_FILES for name in ("OpenConnect-GUI", "OpenConnect")]
 else:
     CISCO_VPN = "/opt/cisco/secureclient/bin/vpn"
     SEARCH_DIRS = [

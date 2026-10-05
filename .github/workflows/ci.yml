@@ -238,6 +238,18 @@ jobs:
             if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress | Out-Null }
             Add-Content $env:GITHUB_PATH "${env:ProgramFiles(x86)}\Inno Setup 6"
           }
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          install: mingw-w64-ucrt-x86_64-openconnect unzip
+      - name: openconnect.exe with its libraries and Wintun
+        shell: msys2 {0}
+        run: packaging/windows/build-openconnect.sh openconnect-win64
+      - name: openconnect.exe runs on its own
+        shell: cmd
+        run: |
+          set PATH=C:\Windows\System32
+          openconnect-win64\openconnect.exe --version
       - name: Build uni-vpn-setup.exe
         shell: powershell
         run: |
@@ -247,6 +259,8 @@ jobs:
           python -c "import sys; sys.path.insert(0, 'stage'); from uni_vpn import desktop; sys.exit(desktop.build_windows_app())"
           if ($LASTEXITCODE -ne 0) { exit 1 }
           New-Item -ItemType File -Path "stage\desktop\.prebuilt" | Out-Null
+          Copy-Item -Recurse openconnect-win64 stage\openconnect
+          Compress-Archive -Path openconnect-win64\* -DestinationPath out\uni-vpn-openconnect-win64.zip
           iscc.exe /Q "/DAppVersion=0.1.${{ github.run_number }}" "/DSourceDir=$PWD\stage" "/DOutputDir=$PWD\out" packaging\windows\uni-vpn.iss
           if ($LASTEXITCODE -ne 0) { exit 1 }
       # Switches on by itself once the Azure Trusted Signing secrets exist (see docs/superpowers/specs).
@@ -282,6 +296,7 @@ jobs:
           }
           if (-not (Test-Path "$env:ProgramFiles\uni-vpn\.commit")) { throw ".commit is missing" }
           if (-not (Test-Path "$env:ProgramFiles\uni-vpn\python\pythonw.exe")) { throw "Python is not in uni-vpn's folder" }
+          if (-not (Test-Path "$env:ProgramFiles\uni-vpn\openconnect\wintun.dll")) { throw "Wintun is missing" }
           if (-not (Get-Process "Uni VPN" -ErrorAction SilentlyContinue)) { Write-Host "note: the tray app is not running" }
           $lnk = Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter "Uni VPN.lnk"
           if (-not $lnk) { throw "no Start menu entry" }
@@ -296,7 +311,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: installer-windows
-          path: out/uni-vpn-setup.exe
+          path: |
+            out/uni-vpn-setup.exe
+            out/uni-vpn-openconnect-win64.zip
           retention-days: 7
 
   publish:
@@ -329,4 +346,6 @@ jobs:
             gh release create latest --title "Uni VPN" --latest \
               --notes "Download the file for your computer and open it: uni-vpn.pkg (Mac), uni-vpn-setup.exe (Windows), uni-vpn.deb (Ubuntu, Debian, Mint) or uni-vpn.rpm (Fedora)."
           fi
-          gh release upload latest out/uni-vpn.pkg out/uni-vpn-setup.exe out/uni-vpn.deb out/uni-vpn.rpm --clobber
+          # uni-vpn-openconnect-win64.zip: what install.ps1 downloads when run without the installer.
+          gh release upload latest out/uni-vpn.pkg out/uni-vpn-setup.exe out/uni-vpn.deb out/uni-vpn.rpm \
+            out/uni-vpn-openconnect-win64.zip --clobber

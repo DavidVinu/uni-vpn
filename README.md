@@ -135,8 +135,8 @@ What the installer adds when missing:
 - Linux: `openconnect`, `ocproxy`, `secret-tool` and Python 3.11+ through apt, dnf, zypper
   or pacman (sudo asks for your password). On Arch, `ocproxy` comes from the AUR.
 - macOS: Homebrew (it asks first), then `openconnect`, `ocproxy` and Python.
-- Windows: Python 3.12 (python.org's embeddable package, inside uni-vpn's folder) and OpenConnect with
-  Wintun (the OpenConnect-GUI 1.6.2 installer, checked against its SHA-256).
+- Windows: Python 3.12 (python.org's embeddable package) and `openconnect.exe` with Wintun (built
+  by uni-vpn's CI from MSYS2), both inside uni-vpn's folder.
 
 The assistant then asks one thing per step: your university, user name and password, the TOTP
 secret if your university uses one (see below, with a live check code), done. Restart open browsers once afterwards.

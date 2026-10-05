@@ -22,8 +22,10 @@ $ProgressPreference = "SilentlyContinue"  # Invoke-WebRequest is many times slow
 $Root = $PSScriptRoot
 $AppDir = Join-Path $env:ProgramFiles "uni-vpn"
 
-$OpenConnectUrl = "https://www.infradead.org/openconnect-gui/download/openconnect-gui-1.6.2-win64.exe"
-$OpenConnectSha256 = "de08d8968e40e219932d01025521f879178ec99246802db488c0fdac9fcef11a"
+# openconnect.exe, its libraries and Wintun, built by CI (packaging/windows/build-openconnect.sh).
+# The Windows installer ships the folder; this download is for installs without it.
+$OpenConnectUrl = "https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn-openconnect-win64.zip"
+$OpenConnectDir = Join-Path $AppDir "openconnect"
 # python.org's embeddable package, inside uni-vpn's own folder: it never meets a Python the
 # user installed (with the same version already installed, the regular installer does nothing).
 $PythonVersion = "3.12.10"
@@ -68,12 +70,8 @@ function Find-Python([switch]$Anywhere) {
 }
 
 function Find-OpenConnect {
-    foreach ($base in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
-        foreach ($name in @("OpenConnect-GUI", "OpenConnect")) {
-            $exe = Join-Path $base "$name\openconnect.exe"
-            if ($base -and (Test-Path $exe) -and (Test-Path (Join-Path $base "$name\wintun.dll"))) { return $exe }
-        }
-    }
+    $exe = Join-Path $OpenConnectDir "openconnect.exe"
+    if ((Test-Path $exe) -and (Test-Path (Join-Path $OpenConnectDir "wintun.dll"))) { return $exe }
     return $null
 }
 
@@ -103,17 +101,17 @@ function Install-Python {
 }
 
 function Install-OpenConnect {
-    $installer = Join-Path $env:TEMP "openconnect-gui-setup.exe"
-    Get-Download $OpenConnectUrl $installer
-    $hash = (Get-FileHash -Algorithm SHA256 $installer).Hash.ToLower()
-    if ($hash -ne $OpenConnectSha256) {
-        Remove-Item $installer -ErrorAction SilentlyContinue
-        throw "OpenConnect installer checksum mismatch ($hash)"
+    $zip = Join-Path $env:TEMP "uni-vpn-openconnect-win64.zip"
+    Get-Download $OpenConnectUrl $zip
+    Say "installing OpenConnect (openconnect.exe and Wintun) to $OpenConnectDir"
+    if (Test-Path $OpenConnectDir) { Remove-Item $OpenConnectDir -Recurse -Force }
+    Expand-Archive -Path $zip -DestinationPath $OpenConnectDir -Force
+    Remove-Item $zip -ErrorAction SilentlyContinue
+    $signature = Get-AuthenticodeSignature (Join-Path $OpenConnectDir "wintun.dll")
+    if ($signature.Status -ne "Valid" -or $signature.SignerCertificate.Subject -notmatch "WireGuard") {
+        Remove-Item $OpenConnectDir -Recurse -Force -ErrorAction SilentlyContinue
+        throw "wintun.dll is not signed by WireGuard"
     }
-    Say "installing OpenConnect (openconnect.exe and Wintun)"
-    $process = Start-Process -FilePath $installer -ArgumentList "/S" -Wait -PassThru
-    Remove-Item $installer -ErrorAction SilentlyContinue
-    if ($process.ExitCode -ne 0) { throw "OpenConnect installer failed with exit code $($process.ExitCode)" }
     if (-not (Find-OpenConnect)) { throw "OpenConnect was not found after installing it" }
 }
 
@@ -182,12 +180,12 @@ if ($ForUser -and $ForUser -ne $env:USERNAME) {
 
 function Copy-App {
     # A fresh copy in Program Files, without files the new version no longer has; "desktop"
-    # (the app window) and "python" (Install-Python) are not part of the download.
+    # (the app window), "python" and "openconnect" (Install-*) are not part of the download.
     if ([IO.Path]::GetFullPath($Root).TrimEnd("\") -ieq [IO.Path]::GetFullPath($AppDir).TrimEnd("\")) { return }
     if ($DryRun) { Say "would copy uni-vpn to $AppDir"; return }
     Say "copying uni-vpn to $AppDir"
     # "desktop" holds the app that setup builds; it is not in the download and stays.
-    & robocopy.exe $Root $AppDir /MIR /XD .git __pycache__ desktop python /R:2 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+    & robocopy.exe $Root $AppDir /MIR /XD .git __pycache__ desktop python openconnect /R:2 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "Copying to $AppDir failed (robocopy $LASTEXITCODE)" }
 }
 
