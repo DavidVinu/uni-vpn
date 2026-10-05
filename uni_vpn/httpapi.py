@@ -7,6 +7,7 @@ import json
 import time
 import logging
 import re
+import urllib.parse
 from pathlib import Path
 
 from . import config as config_mod
@@ -104,7 +105,7 @@ class HttpApi:
             await self._respond(writer, 403, "text/plain", b"forbidden", headers)
             return
         try:
-            status, ctype, payload = await self._route(method, path, headers, body)
+            status, ctype, payload = await self._route(method, path, headers, body, target.partition("?")[2])
         except Exception as exc:  # noqa: BLE001 - the status page must never die
             self.log.exception("HTTP error: %s", exc)
             status, ctype, payload = 500, "text/plain", b"internal error"
@@ -129,14 +130,19 @@ class HttpApi:
             pass
         writer.close()
 
-    async def _route(self, method: str, path: str, headers: dict[str, str], body: bytes):
+    async def _route(self, method: str, path: str, headers: dict[str, str], body: bytes, query: str = ""):
         if method == "OPTIONS":
             return 204, "text/plain", b""
         if method == "GET":
             if path == "/":
                 return 200, "text/html", status_page()
             if path == "/status.json":
-                return 200, "application/json", json.dumps(self.daemon.status()).encode()
+                payload = self.daemon.status()
+                # The native app's menus ask with their system languages: ?menu=de-DE,en
+                wanted = urllib.parse.parse_qs(query).get("menu")
+                if wanted:
+                    payload["menu"] = i18n.menu(i18n.negotiate(payload.get("language", ""), wanted[0]))
+                return 200, "application/json", json.dumps(payload, ensure_ascii=False).encode()
             if path == "/proxy.pac":
                 return 200, "application/x-ns-proxy-autoconfig", self.daemon.pac().encode()
             if path == "/locales.json":

@@ -102,6 +102,26 @@ def of(exc: BaseException) -> str:
     return str(exc)
 
 
+def negotiate(setting: str, accepted: str) -> str:
+    """The language to use: the setting, else the first system language we have ("de-DE,en"), else
+    English. Same rule as the page's systemLanguage()."""
+    if setting in CODES:
+        return setting
+    for tag in accepted.replace("_", "-").split(","):
+        base, *rest = tag.strip().split(";")[0].lower().split("-")
+        if base == "zh":
+            return "zh-Hant" if "hans" not in rest and {"hant", "tw", "hk", "mo"} & set(rest) else "zh-Hans"
+        if base in CODES:
+            return base
+    return SOURCE
+
+
+def menu(code: str) -> dict[str, str]:
+    """Texts for the menu bar and tray menus of the native app, which have no page to translate them."""
+    texts = {**catalog(SOURCE), **catalog(code)}
+    return {key: text for key, text in texts.items() if key.startswith(("menu.", "look."))}
+
+
 def valid(code: str) -> bool:
     """A language setting: "" follows the system, otherwise one of CODES."""
     return code == "" or code in CODES

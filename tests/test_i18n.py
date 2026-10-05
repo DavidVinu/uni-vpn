@@ -105,6 +105,24 @@ class TextTests(unittest.TestCase):
         self.assertEqual(asdict(result)["error"], detect.NOT_CISCO)
 
 
+class NegotiateTests(unittest.TestCase):
+    def test_like_the_page(self):
+        self.assertEqual(i18n.negotiate("", "de-DE,en"), "de")
+        self.assertEqual(i18n.negotiate("", "ja-JP,fr-CA"), "fr")
+        self.assertEqual(i18n.negotiate("", "zh-Hant-HK"), "zh-Hant")
+        self.assertEqual(i18n.negotiate("", "zh_HK"), "zh-Hant")
+        self.assertEqual(i18n.negotiate("", "zh-Hans-HK"), "zh-Hans")
+        self.assertEqual(i18n.negotiate("", "zh-CN"), "zh-Hans")
+        self.assertEqual(i18n.negotiate("", "ja"), "en")
+        self.assertEqual(i18n.negotiate("es", "de"), "es")
+
+    def test_menu_has_every_state_and_item(self):
+        menu = i18n.menu("de")
+        self.assertEqual(menu["menu.connect"], "Verbinden")
+        self.assertEqual(menu["look.idle"], "Nicht verbunden")
+        self.assertNotIn("settings.title", menu)
+
+
 class ConfigTests(unittest.TestCase):
     def test_language_key(self):
         path = Path(tempfile.mkdtemp()) / "config.toml"
@@ -128,6 +146,12 @@ class ApiTests(DaemonHarness):
         state = json.loads((await http(self.cfg.http_port, "GET", "/status.json"))[2])
         self.assertEqual(state["language"], "")
         self.assertEqual(state["message_t"]["key"], "state.not_connected")
+
+    async def test_menu_for_the_native_app(self):
+        await self.start_daemon()
+        state = json.loads((await http(self.cfg.http_port, "GET", "/status.json?menu=fr-CA%2Cen"))[2])
+        self.assertEqual(state["menu"]["menu.disconnect"], "Se déconnecter")
+        self.assertNotIn("menu", json.loads((await http(self.cfg.http_port, "GET", "/status.json"))[2]))
 
     async def test_language_setting(self):
         path = Path(tempfile.mkdtemp()) / "config.toml"

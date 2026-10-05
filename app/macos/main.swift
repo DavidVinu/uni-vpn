@@ -14,23 +14,22 @@ struct Status {
     var state = "unknown"
     var busy = false
     var reachable = false
+    var menu: [String: String] = [:]
     var on: Bool { state == "connected" || (busy && state != "disconnecting") }
-    var label: String {
-        if !reachable { return "Not running" }
-        switch state {
-        case "connected": return "Connected"
-        case "connecting": return "Connecting"
-        case "disconnecting": return "Disconnecting"
-        case "idle": return "Not connected"
-        case "offline": return "No network"
-        case "blocked": return "Paused"
-        case "auth_failed": return "Sign-in failed"
-        case "keyring": return "Action needed"
-        case "error": return "Error"
-        default: return state
-        }
-    }
 }
+
+// English until the service answers with the menus in the user's language (status.json?menu=).
+var texts: [String: String] = [
+    "look.connected": "Connected", "look.connecting": "Connecting", "look.disconnecting": "Disconnecting",
+    "look.idle": "Not connected", "look.offline": "No network", "look.blocked": "Paused",
+    "look.auth_failed": "Sign-in failed", "look.keyring": "Action needed", "look.error": "Error",
+    "menu.not_running": "Not running", "menu.connect": "Connect", "menu.disconnect": "Disconnect",
+    "menu.open": "Open Uni VPN", "menu.settings": "Settings", "menu.quit": "Quit Uni VPN",
+    "menu.about": "About Uni VPN", "menu.hide": "Hide Uni VPN", "menu.edit": "Edit", "menu.undo": "Undo",
+    "menu.redo": "Redo", "menu.cut": "Cut", "menu.copy": "Copy", "menu.paste": "Paste",
+    "menu.select_all": "Select All", "menu.window": "Window", "menu.minimize": "Minimize", "menu.close": "Close",
+]
+func t(_ key: String) -> String { texts[key] ?? key }
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate, NSMenuDelegate {
     var window: NSWindow?
@@ -38,7 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     let menu = NSMenu()
     let stateItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-    let toggleItem = NSMenuItem(title: "Connect", action: #selector(AppDelegate.toggle), keyEquivalent: "")
+    let toggleItem = NSMenuItem(title: t("menu.connect"), action: #selector(AppDelegate.toggle), keyEquivalent: "")
     var status = Status()
     var pending: String?
     var launched = false
@@ -46,16 +45,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     var lastStart = Date.distantPast
 
     func applicationDidFinishLaunching(_ note: Notification) {
-        buildMainMenu()
+        buildMenus()
         stateItem.isEnabled = false
         toggleItem.target = self
-        menu.addItem(stateItem)
-        menu.addItem(toggleItem)
-        menu.addItem(.separator())
-        menu.addItem(item("Open Uni VPN", #selector(openMain), ""))
-        menu.addItem(item("Settings…", #selector(openSettings), ","))
-        menu.addItem(.separator())
-        menu.addItem(item("Quit Uni VPN", #selector(quit), "q"))
         menu.delegate = self
         statusItem.menu = menu
         render()
@@ -73,28 +65,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         return entry
     }
 
+    // The menu bar item's menu and the app's main menu, again whenever the language changes.
     // Without an Edit menu, Cmd+C/V/X/A do nothing in the page's text fields.
-    func buildMainMenu() {
+    func buildMenus() {
+        menu.removeAllItems()
+        menu.addItem(stateItem)
+        menu.addItem(toggleItem)
+        menu.addItem(.separator())
+        menu.addItem(item(t("menu.open"), #selector(openMain), ""))
+        menu.addItem(item(t("menu.settings") + "…", #selector(openSettings), ","))
+        menu.addItem(.separator())
+        menu.addItem(item(t("menu.quit"), #selector(quit), "q"))
         let main = NSMenu()
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "About Uni VPN", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: t("menu.about"), action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(item("Settings…", #selector(openSettings), ","))
+        appMenu.addItem(item(t("menu.settings") + "…", #selector(openSettings), ","))
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Hide Uni VPN", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(withTitle: t("menu.hide"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(.separator())
-        appMenu.addItem(item("Quit Uni VPN", #selector(quit), "q"))
-        let editMenu = NSMenu(title: "Edit")
-        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
-        editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+        appMenu.addItem(item(t("menu.quit"), #selector(quit), "q"))
+        let editMenu = NSMenu(title: t("menu.edit"))
+        editMenu.addItem(withTitle: t("menu.undo"), action: Selector(("undo:")), keyEquivalent: "z")
+        editMenu.addItem(withTitle: t("menu.redo"), action: Selector(("redo:")), keyEquivalent: "Z")
         editMenu.addItem(.separator())
-        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
-        let windowMenu = NSMenu(title: "Window")
-        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
-        windowMenu.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        editMenu.addItem(withTitle: t("menu.cut"), action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: t("menu.copy"), action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: t("menu.paste"), action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: t("menu.select_all"), action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        let windowMenu = NSMenu(title: t("menu.window"))
+        windowMenu.addItem(withTitle: t("menu.minimize"), action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: t("menu.close"), action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         for sub in [appMenu, editMenu, windowMenu] {
             let holder = NSMenuItem()
             holder.submenu = sub
@@ -196,14 +197,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         image?.isTemplate = true
         statusItem.button?.image = image
         statusItem.button?.appearsDisabled = !status.reachable
-        statusItem.button?.toolTip = "Uni VPN: " + status.label
-        stateItem.title = status.label
-        toggleItem.title = status.on ? "Disconnect" : "Connect"
+        if status.menu.contains(where: { texts[$0.key] != $0.value }) {
+            texts.merge(status.menu) { _, new in new }
+            buildMenus()
+        }
+        let label = status.reachable ? texts["look." + status.state] ?? status.state : t("menu.not_running")
+        statusItem.button?.toolTip = "Uni VPN: " + label
+        stateItem.title = label
+        toggleItem.title = t(status.on ? "menu.disconnect" : "menu.connect")
         toggleItem.isEnabled = status.reachable && status.state != "disconnecting"
     }
 
     func poll() {
-        var request = URLRequest(url: base.appendingPathComponent("status.json"))
+        let languages = Locale.preferredLanguages.joined(separator: ",")
+        var parts = URLComponents(url: base.appendingPathComponent("status.json"), resolvingAgainstBaseURL: false)!
+        parts.queryItems = [URLQueryItem(name: "menu", value: languages)]
+        var request = URLRequest(url: parts.url!)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.timeoutInterval = 3
         URLSession.shared.dataTask(with: request) { [weak self] data, _, _ in
@@ -211,6 +220,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
             if let data = data, let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
                 next.state = json["state"] as? String ?? "unknown"
                 next.busy = json["busy"] as? Bool ?? false
+                next.menu = json["menu"] as? [String: String] ?? [:]
                 next.reachable = true
             }
             DispatchQueue.main.async {

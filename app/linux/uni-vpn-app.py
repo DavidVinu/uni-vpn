@@ -9,11 +9,13 @@ Arguments: --port N, --hidden (sign-in: panel icon only), --page P ("#settings",
 """
 
 import json
+import locale
 import os
 import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 import urllib.request
 
 import gi
@@ -40,11 +42,23 @@ except (ValueError, ImportError):
         AppIndicator = None
 
 APP_ID = "de.davidvinu.UniVPN"
-LABELS = {"connected": "Connected", "connecting": "Connecting", "disconnecting": "Disconnecting",
-          "idle": "Not connected", "offline": "No network", "blocked": "Paused",
-          "auth_failed": "Sign-in failed", "keyring": "Action needed", "error": "Error"}
+# English until the service answers with the menu in the user's language (status.json?menu=).
+TEXTS = {"look.connected": "Connected", "look.connecting": "Connecting", "look.disconnecting": "Disconnecting",
+         "look.idle": "Not connected", "look.offline": "No network", "look.blocked": "Paused",
+         "look.auth_failed": "Sign-in failed", "look.keyring": "Action needed", "look.error": "Error",
+         "menu.not_running": "Not running", "menu.connect": "Connect", "menu.disconnect": "Disconnect",
+         "menu.open": "Open Uni VPN", "menu.settings": "Settings", "menu.quit_short": "Quit"}
 # The loopback API needs no proxy, and the system proxy is uni-vpn's own rule.
 OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def system_languages():
+    """The desktop's languages, most wanted first: LANGUAGE="de:en", else LC_ALL, LC_MESSAGES, LANG."""
+    for name in ("LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"):
+        value = os.environ.get(name, "")
+        if value and value not in ("C", "POSIX"):
+            return ",".join(part.split(".")[0] for part in value.split(":"))
+    return locale.getlocale()[0] or "en"
 
 
 def option(args, name):
@@ -98,15 +112,15 @@ class App(Gtk.Application):
         menu = Gtk.Menu()
         self.items["state"] = Gtk.MenuItem(label="")
         self.items["state"].set_sensitive(False)
-        self.items["toggle"] = Gtk.MenuItem(label="Connect")
+        self.items["toggle"] = Gtk.MenuItem(label=TEXTS["menu.connect"])
         self.items["toggle"].connect("activate", lambda _item: self.toggle())
         entries = [self.items["state"], self.items["toggle"], Gtk.SeparatorMenuItem()]
-        for label, page in (("Open Uni VPN", "#main"), ("Settings", "#settings")):
-            entry = Gtk.MenuItem(label=label)
+        for key, page in (("menu.open", "#main"), ("menu.settings", "#settings")):
+            entry = self.items[key] = Gtk.MenuItem(label=TEXTS[key])
             entry.connect("activate", lambda _item, p=page: self.show(p))
             entries.append(entry)
         entries.append(Gtk.SeparatorMenuItem())
-        quit_item = Gtk.MenuItem(label="Quit")
+        quit_item = self.items["menu.quit_short"] = Gtk.MenuItem(label=TEXTS["menu.quit_short"])
         quit_item.connect("activate", lambda _item: self.quit())
         entries.append(quit_item)
         for entry in entries:
@@ -124,7 +138,8 @@ class App(Gtk.Application):
     def poll(self):
         def fetch():
             try:
-                with OPENER.open(self.base + "status.json", timeout=3) as response:
+                url = self.base + "status.json?menu=" + urllib.parse.quote(system_languages())
+                with OPENER.open(url, timeout=3) as response:
                     data = json.loads(response.read().decode("utf-8"))
             except (OSError, ValueError):
                 data = None
@@ -149,14 +164,17 @@ class App(Gtk.Application):
         self.reachable = data is not None
         self.start_service_if_down()
         self.status = data or {}
+        TEXTS.update(self.status.get("menu") or {})
         state = self.status.get("state", "")
-        label = LABELS.get(state, state) if self.reachable else "Not running"
+        label = TEXTS.get("look." + state, state) if self.reachable else TEXTS["menu.not_running"]
         if self.indicator:
             connected = state == "connected"
             self.indicator.set_icon_full("network-vpn-symbolic" if connected else "network-vpn-disconnected-symbolic",
                                          "Uni VPN: " + label)
             self.items["state"].set_label(label)
-            self.items["toggle"].set_label("Disconnect" if self.on() else "Connect")
+            self.items["toggle"].set_label(TEXTS["menu.disconnect" if self.on() else "menu.connect"])
+            for key in ("menu.open", "menu.settings", "menu.quit_short"):
+                self.items[key].set_label(TEXTS[key])
             self.items["toggle"].set_sensitive(self.reachable and state != "disconnecting")
         return False
 

@@ -9,6 +9,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.Globalization;
 using System.Drawing.Drawing2D;
 using System.IO;
 using System.IO.Pipes;
@@ -79,7 +80,18 @@ class TrayApp : ApplicationContext
     readonly string baseUrl;
     readonly NotifyIcon icon = new NotifyIcon();
     readonly ToolStripMenuItem stateItem = new ToolStripMenuItem();
-    readonly ToolStripMenuItem toggleItem = new ToolStripMenuItem("Connect");
+    readonly ToolStripMenuItem toggleItem = new ToolStripMenuItem();
+    readonly ToolStripMenuItem openItem = new ToolStripMenuItem();
+    readonly ToolStripMenuItem settingsItem = new ToolStripMenuItem();
+    readonly ToolStripMenuItem exitItem = new ToolStripMenuItem();
+    // English until the service answers with the menu in the user's language (status.json?menu=).
+    static readonly Dictionary<string, string> texts = new Dictionary<string, string> {
+        {"look.connected", "Connected"}, {"look.connecting", "Connecting"}, {"look.disconnecting", "Disconnecting"},
+        {"look.idle", "Not connected"}, {"look.offline", "No network"}, {"look.blocked", "Paused"},
+        {"look.auth_failed", "Sign-in failed"}, {"look.keyring", "Action needed"}, {"look.error", "Error"},
+        {"menu.not_running", "Not running"}, {"menu.connect", "Connect"}, {"menu.disconnect", "Disconnect"},
+        {"menu.open", "Open Uni VPN"}, {"menu.settings", "Settings"}, {"menu.exit", "Exit"},
+    };
     readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
     readonly SynchronizationContext ui;
     MainWindow window;
@@ -103,13 +115,14 @@ class TrayApp : ApplicationContext
         menu.Items.Add(stateItem);
         menu.Items.Add(toggleItem);
         menu.Items.Add(new ToolStripSeparator());
-        ToolStripMenuItem open = new ToolStripMenuItem("Open Uni VPN");
-        open.Font = new Font(open.Font, FontStyle.Bold);  // the default action, as on a double click
-        open.Click += delegate { Show("#main"); };
-        menu.Items.Add(open);
-        menu.Items.Add("Settings", null, delegate { Show("#settings"); });
+        openItem.Font = new Font(openItem.Font, FontStyle.Bold);  // the default action, as on a double click
+        openItem.Click += delegate { Show("#main"); };
+        menu.Items.Add(openItem);
+        settingsItem.Click += delegate { Show("#settings"); };
+        menu.Items.Add(settingsItem);
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Exit", null, delegate { Exit(); });
+        exitItem.Click += delegate { Exit(); };
+        menu.Items.Add(exitItem);
         menu.Opening += delegate { Poll(); };
         icon.ContextMenuStrip = menu;
         icon.MouseClick += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) Show(""); };
@@ -190,6 +203,9 @@ class TrayApp : ApplicationContext
                     object value;
                     state = json.TryGetValue("state", out value) ? Convert.ToString(value) : "unknown";
                     busy = json.TryGetValue("busy", out value) && value is bool && (bool)value;
+                    if (json.TryGetValue("menu", out value) && value is Dictionary<string, object>)
+                        foreach (KeyValuePair<string, object> entry in (Dictionary<string, object>)value)
+                            texts[entry.Key] = Convert.ToString(entry.Value);
                 }
                 catch (Exception)
                 {
@@ -200,7 +216,8 @@ class TrayApp : ApplicationContext
             Render();
             StartServiceIfDown();
         };
-        client.DownloadStringAsync(new Uri(baseUrl + "status.json"));
+        string languages = CultureInfo.CurrentUICulture.Name + "," + CultureInfo.InstalledUICulture.Name;
+        client.DownloadStringAsync(new Uri(baseUrl + "status.json?menu=" + Uri.EscapeDataString(languages)));
     }
 
     // Nobody should need a terminal: a stopped service is started again from here.
@@ -230,29 +247,27 @@ class TrayApp : ApplicationContext
         client.UploadStringAsync(new Uri(baseUrl + (On ? "api/disconnect" : "api/connect")), "POST", "{}");
     }
 
+    static string T(string key)
+    {
+        string text;
+        return texts.TryGetValue(key, out text) ? text : key;
+    }
+
     static string Label(string state, bool reachable)
     {
-        if (!reachable) return "Not running";
-        switch (state)
-        {
-            case "connected": return "Connected";
-            case "connecting": return "Connecting";
-            case "disconnecting": return "Disconnecting";
-            case "idle": return "Not connected";
-            case "offline": return "No network";
-            case "blocked": return "Paused";
-            case "auth_failed": return "Sign-in failed";
-            case "keyring": return "Action needed";
-            case "error": return "Error";
-            default: return state;
-        }
+        if (!reachable) return T("menu.not_running");
+        string text;
+        return texts.TryGetValue("look." + state, out text) ? text : state;
     }
 
     void Render()
     {
         string label = Label(state, reachable);
         stateItem.Text = label;
-        toggleItem.Text = On ? "Disconnect" : "Connect";
+        toggleItem.Text = T(On ? "menu.disconnect" : "menu.connect");
+        openItem.Text = T("menu.open");
+        settingsItem.Text = T("menu.settings");
+        exitItem.Text = T("menu.exit");
         toggleItem.Enabled = reachable && state != "disconnecting";
         icon.Text = "Uni VPN: " + label;
         Icon old = icon.Icon;
