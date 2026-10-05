@@ -223,3 +223,16 @@ class MacKeychainRoundtrip(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(credentials.delete_password(user))
         with self.assertRaises(credentials.PasswordMissing):
             await credentials.get_password(user, 10)
+
+
+class KeychainTextTest(unittest.TestCase):
+    def test_hex_output_for_non_ascii_is_decoded(self):
+        self.assertEqual(credentials.keychain_text("pässwort".encode().hex().encode()), "pässwort".encode())
+
+    def test_plain_and_hex_looking_passwords_stay(self):
+        self.assertEqual(credentials.keychain_text(b"6162"), b"6162")
+        self.assertEqual(credentials.keychain_text(b"secret"), b"secret")
+
+    def test_line_break_in_user_is_refused(self):
+        with self.assertRaises(credentials.KeyringError):
+            credentials.store_secret("ab\nadd-generic-password", "password", "pw", run=lambda *a, **k: None)

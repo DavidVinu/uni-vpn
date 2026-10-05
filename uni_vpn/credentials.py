@@ -7,6 +7,7 @@ entry with an extra attribute would also match the search for the password.
 from __future__ import annotations
 
 import asyncio
+import re
 import subprocess
 
 from . import platform as pf
@@ -96,7 +97,24 @@ async def get_secret(user: str, kind: str, timeout: float, command: list[str] | 
         raise error(message)
     if pf.IS_MACOS and out.endswith(b"\n"):
         out = out[:-1]
+    if pf.IS_MACOS and command is None:
+        out = keychain_text(out)
     return out
+
+
+_HEX = re.compile(rb"^(?:[0-9a-f]{2})+$")
+
+
+def keychain_text(out: bytes) -> bytes:
+    """`security -w` prints a secret as hex when it holds anything but printable ASCII, for
+    example "ä". A password that merely looks like hex decodes to printable ASCII, which
+    security would have printed as it is, so that case keeps the original."""
+    if not _HEX.match(out):
+        return out
+    decoded = bytes.fromhex(out.decode())
+    if all(0x20 <= b < 0x7f for b in decoded):
+        return out
+    return decoded
 
 
 async def get_password(user: str, timeout: float, command: list[str] | None = None) -> bytes:
@@ -120,6 +138,8 @@ def store_secret(user: str, kind: str, value: str, run=subprocess.run) -> None:
     # --passwd-on-stdin exactly one line. The CLI and HTTP API reject this earlier.
     if "\n" in value or "\r" in value:
         raise KeyringError("Password must not contain a line break")
+    if "\n" in user or "\r" in user:
+        raise KeyringError("University ID must not contain a line break")
     service, label = SERVICES[kind], LABELS[kind]
     if pf.IS_WINDOWS:
         from .windows import CredentialError, cred_write
