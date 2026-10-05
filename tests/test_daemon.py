@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 import tempfile
@@ -528,6 +529,80 @@ class FailureTests(DaemonHarness):
         self.assertEqual(d.state, dm.State.error)
         self.assertIn("line 2", d.message)
         self.assertIsNone(await d.acquire())
+
+
+class ProfileTests(DaemonHarness):
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        self.argsfile = Path(tempfile.mkdtemp()) / "args"
+        os.environ["FAKE_ARGS_FILE"] = str(self.argsfile)
+
+    def last_args(self):
+        return json.loads(self.argsfile.read_text().splitlines()[-1])
+
+    async def test_without_totp_no_secret_is_read(self):
+        self.cfg.mfa = "none"
+        self.totp = credentials.TotpMissing("x")
+        d = await self.start_daemon()
+        await d.request_connect()
+        await wait_state(d, dm.State.connected)
+        self.assertEqual(self.pw_lines(), ["pw-s3cret"])
+        self.assertFalse(self.tokenfile.exists())
+        self.assertFalse([a for a in self.last_args() if a.startswith("--token")])
+
+    async def test_saml_is_refused_before_anything_starts(self):
+        self.cfg.mfa = "saml"
+        d = await self.start_daemon()
+        await d.request_connect()
+        await wait_state(d, dm.State.auth_failed)
+        self.assertIn("browser", d.message)
+        self.assertEqual(self.pw_lines(), [])
+        self.assertFalse(self.argsfile.exists())
+
+    async def test_totp_append_sends_password_and_code_in_one_line(self):
+        self.cfg.mfa = "totp_append"
+        with mock.patch("uni_vpn.tunnel.totp_mod.code", return_value="123456"):
+            d = await self.start_daemon()
+            await d.request_connect()
+            await wait_state(d, dm.State.connected)
+        self.assertEqual(self.pw_lines(), ["pw-s3cret123456"])
+        self.assertFalse(self.tokenfile.exists())
+
+    async def test_duo_push_sends_push_and_needs_no_secret(self):
+        self.cfg.mfa = "duo_push"
+        self.totp = credentials.TotpMissing("x")
+        d = await self.start_daemon()
+        await d.request_connect()
+        await wait_state(d, dm.State.connected)
+        self.assertEqual(self.pw_lines(), ["pw-s3cret", "push"])
+        self.assertNotIn("--non-inter", self.last_args())
+
+    async def test_profile_flags_reach_openconnect(self):
+        self.cfg.authgroup = "staff-net"
+        self.cfg.username_suffix = "@staff-net.ethz.ch"
+        d = await self.start_daemon()
+        await d.request_connect()
+        await wait_state(d, dm.State.connected)
+        self.assertIn("--authgroup=staff-net", self.last_args())
+        self.assertIn("--user=u@staff-net.ethz.ch", self.last_args())
+
+    async def test_otp_wait_only_with_totp(self):
+        self.cfg.mfa = "none"
+        d = await self.start_daemon()
+        d.last_otp_step = int(1000.0 // 30)
+        self.assertEqual(self.real_otp_wait(d, now=1000.0), 0)
+
+    async def test_status_names_university_and_second_factor(self):
+        self.cfg.default_domains = ["intranet.example.edu"]
+        d = await self.start_daemon()
+        s = d.status()
+        self.assertEqual(s["university"], "heidelberg")
+        self.assertEqual(s["university_name"], "Heidelberg University")
+        self.assertEqual(s["mfa"], "totp_field")
+        self.assertEqual(s["mfa_portal_url"], "https://mfa.uni-heidelberg.de/")
+        self.assertTrue(s["mfa_steps"])
+        self.assertEqual(s["domains"], ["intranet.example.edu"], "no domains.txt: the profile's defaults")
+        self.assertIn("intranet.example.edu", d.pac())
 
 
 class StatusTests(DaemonHarness):
