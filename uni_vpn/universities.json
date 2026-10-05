@@ -140,6 +140,162 @@
       "country": "GB",
       "host": "vpn.ox.ac.uk",
       "mfa": "saml"
+    },
+    {
+      "id": "tamu",
+      "name": "Texas A&M University",
+      "country": "US",
+      "host": "connect.tamu.edu",
+      "authgroup": "tunnel_tamu_traffic",
+      "mfa": "duo_push",
+      "aliases": ["TAMU"],
+      "notes": "Profile from the university's documentation, not tested. Full tunnel group: tunnel_all_traffic. Duo pushes automatically."
+    },
+    {
+      "id": "ucf",
+      "name": "University of Central Florida",
+      "country": "US",
+      "host": "secure.vpn.ucf.edu",
+      "authgroup": "UCF Students",
+      "mfa": "duo_push",
+      "aliases": ["UCF"],
+      "notes": "Profile from the university's documentation, not tested. Duo push or call only."
+    },
+    {
+      "id": "osu",
+      "name": "Ohio State University",
+      "country": "US",
+      "host": "vpn.service.osu.edu",
+      "authgroup": "OSUnet",
+      "mfa": "duo_push",
+      "aliases": ["OSU", "The Ohio State University"],
+      "notes": "Profile from the university's documentation, not tested. "
+    },
+    {
+      "id": "utexas",
+      "name": "University of Texas at Austin",
+      "country": "US",
+      "host": "vpn.utexas.edu",
+      "mfa": "duo_push",
+      "aliases": ["UT Austin"],
+      "notes": "Profile from the university's documentation, not tested. "
+    },
+    {
+      "id": "asu",
+      "name": "Arizona State University",
+      "country": "US",
+      "host": "sslvpn.asu.edu",
+      "usergroup": "2fa",
+      "mfa": "duo_push",
+      "aliases": ["ASU"],
+      "notes": "Profile from the university's documentation, not tested. "
+    },
+    {
+      "id": "ufl",
+      "name": "University of Florida",
+      "country": "US",
+      "host": "vpn.ufl.edu",
+      "username_suffix": "@ufl.edu",
+      "mfa": "duo_push",
+      "aliases": ["UF"],
+      "notes": "Profile from the university's documentation, not tested. Unit groups use the suffix @ufl.edu/<unit>."
+    },
+    {
+      "id": "umn",
+      "name": "University of Minnesota",
+      "country": "US",
+      "host": "vpn.umn.edu",
+      "authgroup": "UMN - Split Tunnel - General Access VPN Pool",
+      "mfa": "duo_push",
+      "aliases": ["UMN"],
+      "notes": "Profile from the university's documentation, not tested. Full tunnel group: AnyConnect-UofMvpnFull."
+    },
+    {
+      "id": "uiuc",
+      "name": "University of Illinois Urbana-Champaign",
+      "country": "US",
+      "host": "vpn.illinois.edu",
+      "authgroup": "OpenConnect1 (Split)",
+      "mfa": "duo_push",
+      "aliases": ["UIUC", "Illinois"],
+      "notes": "Profile from the university's documentation, not tested. The university documents OpenConnect groups: OpenConnect2 (All), OpenConnect3 (Public)."
+    },
+    {
+      "id": "uga",
+      "name": "University of Georgia",
+      "country": "US",
+      "host": "remote.uga.edu",
+      "authgroup": "01 Default",
+      "username_suffix": "@uga.edu",
+      "mfa": "duo_push",
+      "aliases": ["UGA"],
+      "notes": "Profile from the university's documentation, not tested. "
+    },
+    {
+      "id": "unc",
+      "name": "University of North Carolina at Chapel Hill",
+      "country": "US",
+      "host": "vpn.unc.edu",
+      "authgroup": "UNCCampus",
+      "mfa": "duo_push",
+      "aliases": ["UNC"],
+      "notes": "Profile from the university's documentation, not tested. "
+    },
+    {
+      "id": "ncsu",
+      "name": "North Carolina State University",
+      "country": "US",
+      "host": "vpn.ncsu.edu",
+      "mfa": "duo_push",
+      "aliases": ["NC State"],
+      "notes": "Profile from the university's documentation, not tested. "
+    },
+    {
+      "id": "uwaterloo",
+      "name": "University of Waterloo",
+      "country": "CA",
+      "host": "cn-vpn.uwaterloo.ca",
+      "authgroup": "UW-General-Campus",
+      "mfa": "duo_push",
+      "aliases": ["Waterloo"],
+      "notes": "Profile from the university's documentation, not tested. "
+    },
+    {
+      "id": "uottawa",
+      "name": "University of Ottawa",
+      "country": "CA",
+      "host": "uovpn.uottawa.ca",
+      "usergroup": "uottawa",
+      "mfa": "duo_push",
+      "aliases": ["Universite d'Ottawa"],
+      "notes": "Profile from the university's documentation, not tested. Microsoft Authenticator push. Graduate students: usergroup students."
+    },
+    {
+      "id": "carleton",
+      "name": "Carleton University",
+      "country": "CA",
+      "host": "cuvpn.carleton.ca",
+      "usergroup": "mfa",
+      "mfa": "duo_push",
+      "notes": "Profile from the university's documentation, not tested. Microsoft Authenticator push."
+    },
+    {
+      "id": "hku",
+      "name": "University of Hong Kong",
+      "country": "HK",
+      "host": "vpn2fa.hku.hk",
+      "mfa": "duo_push",
+      "aliases": ["HKU"],
+      "notes": "Profile from the university's documentation, not tested. Microsoft Authenticator push; SMS codes are not supported by uni-vpn."
+    },
+    {
+      "id": "ugr",
+      "name": "University of Granada",
+      "country": "ES",
+      "host": "vpn.ugr.es",
+      "mfa": "none",
+      "aliases": ["Universidad de Granada", "UGR"],
+      "notes": "Profile from the university's documentation, not tested. User name is the full address cuenta@ugr.es."
     }
   ]
 }

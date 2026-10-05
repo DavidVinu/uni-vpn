@@ -22,11 +22,27 @@ on the machine keeps its normal connection.
 | University of Mannheim | vpn.uni-mannheim.de | none | profile only |
 | University of Kassel | univpn.uni-kassel.de | none | profile only |
 | TU Dresden | vpn2.zih.tu-dresden.de | none | profile only |
+| Texas A&M University | connect.tamu.edu | Duo push | profile only |
+| University of Central Florida | secure.vpn.ucf.edu | Duo push | profile only |
+| Ohio State University | vpn.service.osu.edu | Duo push | profile only |
+| University of Texas at Austin | vpn.utexas.edu | Duo push | profile only |
+| Arizona State University | sslvpn.asu.edu | Duo push | profile only |
+| University of Florida | vpn.ufl.edu | Duo push | profile only |
+| University of Minnesota | vpn.umn.edu | Duo push | profile only |
+| University of Illinois Urbana-Champaign | vpn.illinois.edu | Duo push | profile only |
+| University of Georgia | remote.uga.edu | Duo push | profile only |
+| University of North Carolina at Chapel Hill | vpn.unc.edu | Duo push | profile only |
+| North Carolina State University | vpn.ncsu.edu | Duo push | profile only |
+| University of Waterloo | cn-vpn.uwaterloo.ca | Duo push | profile only |
+| University of Ottawa | uovpn.uottawa.ca | Microsoft push | profile only |
+| Carleton University | cuvpn.carleton.ca | Microsoft push | profile only |
+| University of Hong Kong | vpn2fa.hku.hk | Microsoft push | profile only |
+| University of Granada | vpn.ugr.es | none | profile only |
 | Freie Universitaet Berlin | vpn.fu-berlin.de | browser sign-in (SAML) | not supported yet |
 | University of Oxford | vpn.ox.ac.uk | browser sign-in (SAML) | not supported yet |
 
-"Profile only" means the values come from the university's documentation and a look at its
-login form, but nobody has logged in with uni-vpn yet. If it works for you, or if your
+"Profile only" means the values come from the university's documentation, for some also from a
+look at its login form, but nobody has logged in with uni-vpn yet. If it works for you, or if your
 university is missing, open an issue or a pull request against `uni_vpn/universities.json`.
 Not listed: choose "Not listed" in the setup assistant and enter the VPN address; uni-vpn reads
 the gateway's login form and fills in what it can. Every value can be changed in
