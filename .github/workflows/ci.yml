@@ -224,7 +224,21 @@ jobs:
           path: out/uni-vpn.*
           retention-days: 7
 
+  windows-openconnect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container: fedora:42
+    steps:
+      - uses: actions/checkout@v4
+      - run: packaging/windows/build-openconnect.sh openconnect-win64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openconnect-win64
+          path: openconnect-win64
+          retention-days: 3
+
   windows-installer:
+    needs: windows-openconnect
     runs-on: windows-latest
     timeout-minutes: 30
     env:
@@ -238,18 +252,19 @@ jobs:
             if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress | Out-Null }
             Add-Content $env:GITHUB_PATH "${env:ProgramFiles(x86)}\Inno Setup 6"
           }
-      - uses: msys2/setup-msys2@v2
+      - uses: actions/download-artifact@v4
         with:
-          msystem: UCRT64
-          install: mingw-w64-ucrt-x86_64-openconnect unzip
-      - name: openconnect.exe with its libraries and Wintun
-        shell: msys2 {0}
-        run: packaging/windows/build-openconnect.sh openconnect-win64
-      - name: openconnect.exe runs on its own
-        shell: cmd
+          name: openconnect-win64
+          path: openconnect-win64
+      # Runs with nothing else on PATH and checks the gateway's certificate against Windows' own.
+      - name: openconnect.exe reaches a university gateway
+        shell: bash
         run: |
-          set PATH=C:\Windows\System32
-          openconnect-win64\openconnect.exe --version
+          out=$(env PATH=/c/Windows/System32 openconnect-win64/openconnect.exe --non-inter --authenticate \
+            --protocol=anyconnect vpn-ac.uni-heidelberg.de </dev/null 2>&1 || true)
+          echo "$out" | tail -n 5
+          if echo "$out" | grep -qi "certificate.*fail\|verify failed"; then exit 1; fi
+          echo "$out" | grep -q "Connected to" || { echo "openconnect did not reach the gateway"; exit 1; }
       - name: Build uni-vpn-setup.exe
         shell: powershell
         run: |
