@@ -127,10 +127,12 @@ jobs:
           echo "$out" | grep -q "Connected to" || { echo "openconnect did not reach the gateway"; exit 1; }
           env -i SSL_CERT_FILE=/etc/ssl/cert.pem runtime/$arch/python/bin/python3 -I -c \
             'import urllib.request; urllib.request.urlopen("https://codeload.github.com/DavidVinu/uni-vpn/zip/main", timeout=30)'
+      # As a tar: artifacts lose the executable flag and links otherwise.
+      - run: tar -czf runtime-$(uname -m).tar.gz -C runtime .
       - uses: actions/upload-artifact@v4
         with:
           name: macos-runtime-${{ matrix.runner }}
-          path: runtime
+          path: runtime-*.tar.gz
           retention-days: 3
 
   macos-pkg:
@@ -144,8 +146,9 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           pattern: macos-runtime-*
-          path: runtime
+          path: runtime-tar
           merge-multiple: true
+      - run: mkdir runtime && for f in runtime-tar/*.tar.gz; do tar -xzf "$f" -C runtime; done && ls -l runtime/*/python/bin/python3
       # Switches on by itself once the Apple Developer secrets exist (see docs/superpowers/specs).
       - name: Signing keychain
         if: env.MACOS_CERTIFICATES_P12 != ''
@@ -308,7 +311,15 @@ jobs:
       - name: Install it like a user would
         shell: powershell
         run: |
-          $process = Start-Process -FilePath out\uni-vpn-setup.exe -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/LOG=install-setup.log" -Wait -PassThru
+          $process = Start-Process -FilePath out\uni-vpn-setup.exe -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/LOG=install-setup.log" -PassThru
+          if (-not $process.WaitForExit(300000)) {
+            Write-Host "The installer did not finish within 5 minutes"
+            Get-CimInstance Win32_Process | Where-Object { $_.Name -match "uni|python|powershell|cmd|robocopy|msiexec|openconnect|schtasks|setup|explorer|curl|csc" } |
+              Format-Table ProcessId, ParentProcessId, CommandLine -AutoSize -Wrap | Out-String -Width 400 | Write-Host
+            Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\install.log" -ErrorAction SilentlyContinue
+            Get-Content install-setup.log -Tail 30 -ErrorAction SilentlyContinue
+            exit 1
+          }
           Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\install.log" -ErrorAction SilentlyContinue
           if ($process.ExitCode -ne 0) { Get-Content install-setup.log; exit 1 }
           $ok = $false

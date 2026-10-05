@@ -40,7 +40,7 @@ fail() {
   if [ "$(uname -s)" = Darwin ]; then
     osascript - "$title" "$detail" >/dev/null 2>&1 <<'APPLESCRIPT'
 on run argv
-  display alert (item 1 of argv) message (item 2 of argv) as critical
+  display alert (item 1 of argv) message (item 2 of argv) as critical giving up after 300
 end run
 APPLESCRIPT
   elif command -v zenity >/dev/null 2>&1; then
