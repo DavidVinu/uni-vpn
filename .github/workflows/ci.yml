@@ -83,6 +83,7 @@ jobs:
 
   macos-runtime:
     strategy:
+      fail-fast: false
       matrix:
         # Homebrew's openconnect needs the macOS its bottle was built for, or newer.
         runner: [macos-14, macos-15-intel]
