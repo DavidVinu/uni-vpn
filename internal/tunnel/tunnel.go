@@ -51,6 +51,12 @@ type PasswordEncodingError struct{ Msg string }
 
 func (e *PasswordEncodingError) Error() string { return e.Msg }
 
+// TOTPSecretError: the TOTP secret is missing or no code can be computed from it
+// (totp_append). The daemon reports it as a final auth_failed with TOTPUnusable.
+type TOTPSecretError struct{ Msg string }
+
+func (e *TOTPSecretError) Error() string { return e.Msg }
+
 // Hooks let the Windows tunnel replace parts of the POSIX behaviour. Nil means the default.
 type Hooks struct {
 	Command       func(port int) []string
@@ -272,7 +278,7 @@ func (t *Tunnel) StdinBytes(password []byte, totp string) ([]byte, error) {
 	switch t.Cfg.MFA {
 	case "totp_append":
 		if totp == "" {
-			return nil, errors.New("totp_append needs a TOTP secret")
+			return nil, &TOTPSecretError{"totp_append needs a TOTP secret"}
 		}
 		if t.TOTPCode == nil {
 			return nil, errors.New("totp_append needs a TOTP code function")
@@ -280,7 +286,7 @@ func (t *Tunnel) StdinBytes(password []byte, totp string) ([]byte, error) {
 		now := time.Now()
 		code, err := t.TOTPCode(totp, now)
 		if err != nil {
-			return nil, err
+			return nil, &TOTPSecretError{err.Error()}
 		}
 		t.mu.Lock()
 		t.otpGeneratedAt = time.Now()
@@ -367,6 +373,20 @@ func (t *Tunnel) Start(password []byte, totp string) error {
 	return nil
 }
 
+// readLine returns the next line including its newline; bytes beyond limit are dropped.
+func readLine(br *bufio.Reader, limit int) ([]byte, error) {
+	var kept []byte
+	for {
+		part, err := br.ReadSlice('\n')
+		if len(kept) < limit {
+			kept = append(kept, part[:min(len(part), limit-len(kept))]...)
+		}
+		if err != bufio.ErrBufferFull {
+			return kept, err
+		}
+	}
+}
+
 func decodeReplace(b []byte) string {
 	if utf8.Valid(b) {
 		return string(b)
@@ -387,7 +407,7 @@ func decodeReplace(b []byte) string {
 func (t *Tunnel) readOutput(r io.ReadCloser, cmd *exec.Cmd) {
 	br := bufio.NewReader(r)
 	for {
-		line, err := br.ReadBytes('\n')
+		line, err := readLine(br, MaxLine)
 		if len(line) > 0 {
 			t.handleLine(strings.TrimRightFunc(decodeReplace(line), unicode.IsSpace))
 		}

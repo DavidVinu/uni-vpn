@@ -19,9 +19,12 @@ const (
 		"If it is correct, the server asked for something uni-vpn does not know, see uni-vpn log"
 	SAMLRequired     = "This university signs in through a browser (SAML), uni-vpn does not support that yet"
 	HostScanRequired = "The server requires HostScan (CSD), uni-vpn does not support that"
+	TOTPUnusable     = "TOTP secret unusable, enter it again (uni-vpn totp)"
 	OTPGenerated     = "Generating OATH TOTP token code"
 	LoginFailed      = "Login failed"
 	TokenPrefix      = "totp-"
+	// MaxLine cuts longer output lines (the Python core's asyncio readline limit).
+	MaxLine = 64 * 1024
 )
 
 // States a verdict can carry; the daemon uses them as its state names.
@@ -49,7 +52,7 @@ type Marker struct {
 // Markers are checked in order; the first match wins.
 var Markers = []Marker{
 	{"Server is rejecting the soft token", StateAuthFailed, TOTPRejected},
-	{"Soft token string is invalid", StateAuthFailed, "TOTP secret unusable, enter it again (uni-vpn totp)"},
+	{"Soft token string is invalid", StateAuthFailed, TOTPUnusable},
 	{"User input required in non-interactive mode", StateAuthFailed, AuthRejected},
 	{"Server asked us to run CSD", StateAuthFailed, HostScanRequired},
 	{"Cisco Secure Desktop", StateAuthFailed, HostScanRequired},

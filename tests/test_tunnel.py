@@ -158,8 +158,14 @@ class ProfileCommandTests(unittest.TestCase):
         t = self.make(mfa="totp_append")
         t.stdin_bytes(b"pw", TOKEN)
         self.assertLess(abs(t.otp_generated_at - time.time()), 5)
-        with self.assertRaises(ValueError):
+        with self.assertRaises(tn.TotpSecretError):
             self.make(mfa="totp_append").stdin_bytes(b"pw", None)
+
+    def test_totp_append_with_a_malformed_secret_names_the_secret(self):
+        with self.assertRaises(tn.TotpSecretError):
+            self.make(mfa="totp_append").stdin_bytes(b"pw", "base32:!!!")
+        with self.assertRaises(tn.TotpSecretError):
+            self.make(mfa="totp_append").stdin_bytes(b"pw", "nonsense")
 
 
 @posix_only
@@ -421,6 +427,46 @@ class TunnelTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.3)
         self.assertTrue(any("SIGUSR2" in line for line in t.stderr_tail))
         await t.stop(2)
+
+
+    def test_kill_wrapper_without_pkill_does_not_raise(self):
+        t = self.make()
+        t.port = 4321
+        with mock.patch.object(tn.subprocess, "run", side_effect=FileNotFoundError(2, "No such file", "pkill")):
+            with self.assertLogs(self.log, "WARNING") as logs:
+                t._kill_wrapper()
+        self.assertTrue(any("pkill failed" in line for line in logs.output), logs.output)
+
+    async def test_overlong_output_line_is_cut_and_the_reader_goes_on(self):
+        script = Path(tempfile.mkdtemp()) / "openconnect"
+        script.write_text(f"#!{sys.executable}\nimport sys\nsys.stdin.read()\n"
+                          "sys.stderr.write('x' * 200000 + '\\n' + 'Login failed.\\n')\nsys.exit(1)\n")
+        script.chmod(0o755)
+        t = tn.Tunnel(self.cfg, str(script), WRAPPER, self.log, token_dir=self.token_dir)
+        await t.start(b"x")
+        self.assertFalse(await t.wait_ready(5))
+        await asyncio.wait_for(t.exited.wait(), 3)
+        self.assertEqual(t.returncode, 1)
+        self.assertEqual(t.stderr_tail[0], "x" * tn.MAX_LINE)
+        self.assertEqual(t.classification, ("auth_failed", tn.PASSWORD_REJECTED))
+
+
+class ReadLineTests(unittest.IsolatedAsyncioTestCase):
+    async def read_all(self, data, limit=8):
+        stream = asyncio.StreamReader(limit=limit)
+        stream.feed_data(data)
+        stream.feed_eof()
+        lines = []
+        while line := await tn.read_line(stream, limit):
+            lines.append(line)
+        return lines
+
+    async def test_lines_like_readline(self):
+        self.assertEqual(await self.read_all(b"ab\ncd\n\nlast"), [b"ab\n", b"cd\n", b"\n", b"last"])
+        self.assertEqual(await self.read_all(b""), [])
+
+    async def test_overlong_lines_are_cut(self):
+        self.assertEqual(await self.read_all(b"0123456789abcdef\nok\n" + b"z" * 30), [b"01234567", b"ok\n", b"zzzzzzzz"])
 
 
 class PortTests(unittest.TestCase):

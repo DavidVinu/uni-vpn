@@ -1,7 +1,9 @@
 package tunnel
 
 import (
+	"bufio"
 	"bytes"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -257,3 +259,32 @@ func newLogger(w io.Writer) *slog.Logger {
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
+
+func TestReadLineCutsOverlongLines(t *testing.T) {
+	br := bufio.NewReaderSize(strings.NewReader("0123456789abcdefghijklmnopqrstuv\nok\n"+strings.Repeat("z", 30)), 16)
+	var got []string
+	for {
+		line, err := readLine(br, 8)
+		if len(line) > 0 {
+			got = append(got, string(line))
+		}
+		if err != nil {
+			break
+		}
+	}
+	if !slices.Equal(got, []string{"01234567", "ok\n", "zzzzzzzz"}) {
+		t.Fatalf("%q", got)
+	}
+}
+
+func TestTOTPAppendWithAMalformedSecretIsATOTPSecretError(t *testing.T) {
+	tn := makeProfile(t, func(c *Config) { c.MFA = "totp_append" })
+	tn.TOTPCode = func(string, time.Time) (string, error) { return "", errors.New("Secret is not valid Base32") }
+	var se *TOTPSecretError
+	if _, err := tn.StdinBytes([]byte("pw"), "base32:!!!"); !errors.As(err, &se) || se.Msg != "Secret is not valid Base32" {
+		t.Fatal(err)
+	}
+	if _, err := makeProfile(t, func(c *Config) { c.MFA = "totp_append" }).StdinBytes([]byte("pw"), ""); !errors.As(err, &se) {
+		t.Fatal(err)
+	}
+}
