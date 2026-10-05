@@ -14,6 +14,9 @@ class DomainListTests(unittest.TestCase):
                          ["sogo.uni-heidelberg.de", "elearning-med.uni-heidelberg.de", "cip.dmed.uni-heidelberg.de",
                           "heico.uni-heidelberg.de"])
 
+    def test_defaults_route_heico_login(self):
+        self.assertTrue(pac.matches("heico.uni-heidelberg.de", pac.DEFAULT_DOMAINS))
+
     def test_parse_normalizes_and_reports_errors_with_line_numbers(self):
         text = "Sogo.Uni-Heidelberg.DE\n# comment\n\n*.example.org  # wildcard\nsogo.uni-heidelberg.de\nnot valid\nhttp://x.y\n"
         domains, errors = pac.parse_domain_list(text)
