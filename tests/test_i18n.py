@@ -6,7 +6,7 @@ import unittest
 from dataclasses import asdict
 from pathlib import Path
 
-from uni_vpn import config, detect, i18n, tunnel
+from uni_vpn import config, detect, i18n, messages
 from uni_vpn import universities as unis
 
 from tests.test_daemon import DaemonHarness
@@ -34,14 +34,11 @@ class CatalogTests(unittest.TestCase):
                     self.assertTrue(cat[key].strip(), key)
 
     def test_the_app_never_asks_for_a_command(self):
-        # Anyone must manage with clicks alone; commands are for the terminal (en-cli.json).
+        # Anyone must manage with clicks alone.
         command = re.compile(r"uni-vpn (service|doctor|password|totp|log|setup|update|status)\b|\b(run|Run):")
         for code in i18n.CODES:
             for key, text in i18n.catalog(code).items():
                 self.assertIsNone(command.search(text), (code, key))
-        for key, text in i18n.terminal().items():
-            self.assertIn(key, i18n.catalog("en"))
-            self.assertLessEqual(placeholders(i18n.catalog("en")[key]), placeholders(text), key)
 
     def test_university_steps_match_the_list(self):
         for code in i18n.CODES:
@@ -81,18 +78,19 @@ class CatalogTests(unittest.TestCase):
 
 class TextTests(unittest.TestCase):
     def test_is_the_english_text(self):
-        text = i18n.t("state.port_in_use", port=1080)
-        self.assertEqual(text, "Port 1080 is in use, run uni-vpn doctor")
+        text = i18n.t("domains.not_hostname", line=3, text="x y")
+        self.assertEqual(text, 'Line 3: "x y" is not a website')
         self.assertIsInstance(text, str)
-        self.assertEqual(i18n.as_json(text), {"key": "state.port_in_use", "args": {"port": 1080}})
+        self.assertEqual(i18n.as_json(text), {"key": "domains.not_hostname", "args": {"line": 3, "text": "x y"}})
+        self.assertEqual(i18n.as_json(messages.PORT_IN_USE), {"key": "msg.port_in_use", "args": {}})
         self.assertIsNone(i18n.as_json("plain"))
 
     def test_nested_and_lists(self):
-        text = i18n.t("state.not_connected_because", reason=tunnel.PASSWORD_REJECTED)
-        self.assertEqual(text, "Not connected (Login rejected: check your password (uni-vpn password))")
-        self.assertEqual(i18n.as_json(text)["args"]["reason"], {"key": "tunnel.password_rejected", "args": {}})
+        text = i18n.t("detect.unreachable", host=i18n.t("setup.not_listed"))
+        self.assertEqual(text, "Can't reach Not listed")
+        self.assertEqual(i18n.as_json(text)["args"]["host"], {"key": "setup.not_listed", "args": {}})
         lines = i18n.t("app.lines", lines=[i18n.t("domains.not_hostname", line=2, text="a b"), "plain"])
-        self.assertEqual(lines, "line 2: 'a b' is not a hostname\nplain")
+        self.assertEqual(lines, 'Line 2: "a b" is not a website\nplain')
         self.assertEqual(i18n.as_json(lines)["args"]["lines"][1], "plain")
 
     def test_survives_copies_and_exceptions(self):
@@ -145,7 +143,8 @@ class ApiTests(DaemonHarness):
         self.assertEqual(data["catalogs"]["fr"]["settings.language"], "Langue")
         state = json.loads((await http(self.cfg.http_port, "GET", "/status.json"))[2])
         self.assertEqual(state["language"], "")
-        self.assertEqual(state["message_t"]["key"], "state.not_connected")
+        self.assertEqual(state["message_t"]["key"], "msg.not_connected")
+        self.assertEqual(state["message_id"], "msg.not_connected")
 
     async def test_menu_for_the_native_app(self):
         await self.start_daemon()

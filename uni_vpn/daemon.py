@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import random
 import ssl
 import time
@@ -11,14 +12,14 @@ from enum import Enum
 from pathlib import Path
 from typing import Awaitable, Callable
 
-from . import PROTOCOL, __version__, credentials, pac, sysproxy
+from . import PROTOCOL, __version__, credentials, pac, repair, sysproxy
+from . import i18n
+from . import messages as M
 from . import platform as pf
 from . import config as config_mod
 from . import universities as unis
 from .config import Config
 from .forwarder import Forwarder
-from . import i18n
-from .i18n import t
 from .tunnel import SAML_REQUIRED, PasswordEncodingError, Tunnel, remove_stale_token_files
 from .updater import UpdateError, Updater
 
@@ -38,7 +39,7 @@ class State(str, Enum):
 FINAL_STATES = {State.auth_failed, State.keyring}
 RETRY_STATES = {State.offline, State.blocked, State.error}
 OTP_STEP = 30  # seconds per one-time code (RFC 6238, same as openconnect)
-BLOCKED_MESSAGE = t("state.blocked")
+BLOCKED_MESSAGE = M.BLOCKED
 
 
 async def wait_event(event: asyncio.Event, timeout: float) -> bool:
@@ -115,7 +116,7 @@ class Daemon:
         self.restart_requested = False
 
         self.state = State.idle
-        self.message = t("state.not_connected")
+        self.message: str = M.NOT_CONNECTED
         self.since = time.time()
         self.last_error: dict | None = None
         self.failures = 0
@@ -141,17 +142,22 @@ class Daemon:
         self.started = asyncio.Event()
         self.forwarder = Forwarder("127.0.0.1", cfg.socks_port, self.acquire, self.note_activity,
                                    cfg.halfclose_grace, self.log)
+        # The installer started by the Repair button, while it runs.
+        self.repair_process = None
+        self._repair_watch: asyncio.Task | None = None
         if needs_setup:
-            self.message = t("state.setup_needed")
+            self.message = M.SETUP_NEEDED
         elif config_error:
-            self._set(State.error, t("state.config_error", error=config_error))
+            # The setup assistant is the way out: it writes a new file and keeps the broken one.
+            self.log.error("Configuration error: %s", config_error)
+            self._set(State.error, M.SETTINGS_BROKEN)
 
     # --- Helpers ----------------------------------------------------------
 
     def _make_tunnel(self) -> Tunnel:
         openconnect = pf.find_binary("openconnect", self.cfg.openconnect)
         if not openconnect:
-            raise FileNotFoundError("openconnect not found, please run the installer")
+            raise FileNotFoundError("openconnect not found")
         if pf.IS_WINDOWS:
             from .wintunnel import WindowsTunnel
 
@@ -159,7 +165,7 @@ class Daemon:
                                  token_dir=self.token_dir)
         ocproxy = pf.find_binary("ocproxy", self.cfg.ocproxy)
         if not ocproxy:
-            raise FileNotFoundError("ocproxy not found, please run the installer")
+            raise FileNotFoundError("ocproxy not found")
         return Tunnel(self.cfg, openconnect, self.wrapper, self.log, ocproxy=ocproxy, token_dir=self.token_dir)
 
     def _set(self, state: State, message: str) -> None:
@@ -196,8 +202,10 @@ class Daemon:
             "update_pending": self.updater.pending,
             "state": self.state.value,
             "message": self.message,
-            # Key and arguments of the message, so the app can show it in the user's language.
+            # The catalog key of the message (locales/<lang>.json), also in message_t with its arguments.
+            "message_id": M.key_of(self.message),
             "message_t": i18n.as_json(self.message),
+            "action": self.action(),
             "since": self.since,
             "host": self.cfg.host,
             "user": self.cfg.user,
@@ -218,7 +226,8 @@ class Daemon:
             "pac_url": sysproxy.pac_url(self.cfg.http_port),
             "pac_refresh": "manual" if pf.IS_MACOS else "auto",
             "log_tail": list(self.log_tail)[-30:],
-            "setup_needed": self.needs_setup,
+            "setup_needed": self.needs_setup or bool(self.config_error),
+            "repairing": self.repairing(),
             # A connect loop is running (also while retrying in offline, blocked or error).
             "busy": self._loop_task is not None and not self._loop_task.done(),
             "error_kind": self.error_kind(),
@@ -233,16 +242,48 @@ class Daemon:
 
         return is_admin()
 
+    def action(self) -> str | None:
+        """The fix the app offers for the current message (messages.ACTIONS), None if there is none."""
+        if self.repairing():
+            return None
+        return M.action_of(self.message)
+
     def error_kind(self) -> str | None:
         """Which factor the current error is about, so the page can offer the right fix."""
         if self.state not in (State.auth_failed, State.keyring):
             return None
-        text = self.message.lower()
-        if "one-time code" in text or "totp" in text:
-            return "totp"
-        if "password" in text:
-            return "password"
-        return None
+        action = self.action()
+        return action if action in ("password", "totp") else None
+
+    # --- Repair -----------------------------------------------------------
+
+    def repairing(self) -> bool:
+        return self.repair_process is not None and self.repair_process.poll() is None
+
+    async def start_repair(self) -> None:
+        """Run the installer again (the Repair button). It reinstalls what is missing and restarts
+        the service; the operating system asks for permission where it needs to."""
+        if self.repairing():
+            return
+        loop = asyncio.get_running_loop()
+        self.log.info("Repair requested")
+        try:
+            self.repair_process = await loop.run_in_executor(None, repair.start)
+        except OSError as exc:
+            self.log.error("Repair could not start: %s", exc)
+            self._set(self.state, M.REPAIR_FAILED)
+            return
+        self._set(self.state, M.REPAIRING)
+        self._repair_watch = asyncio.create_task(self._watch_repair(self.repair_process))
+
+    async def _watch_repair(self, process) -> None:
+        # A successful repair restarts the service, so normally this daemon ends before it.
+        code = await asyncio.get_running_loop().run_in_executor(None, process.wait)
+        self.log.info("Repair finished with exit code %s", code)
+        if code != 0 and self.message == M.REPAIRING:
+            self._set(self.state, M.REPAIR_FAILED)
+        elif code == 0 and self.message == M.REPAIRING:
+            self._set(State.idle, M.NOT_CONNECTED)
 
     async def complete_setup(self, user: str, password: str, token: str | None,
                              university: str = unis.DEFAULT_ID, overrides: dict | None = None) -> None:
@@ -250,15 +291,13 @@ class Daemon:
         Raises unis.FieldError naming the step to change, ValueError otherwise."""
         user = user.strip()
         if not config_mod.valid_user(user):
-            raise unis.FieldError("user", t("setup.invalid_user"))
-        if self.config_error and not self.needs_setup:
-            raise ValueError(t("setup.fix_config", error=self.config_error))
+            raise unis.FieldError("user", i18n.t("setup.invalid_user"))
         overrides = config_mod.check_overrides(overrides or {})
         profile = config_mod.profile_config(university, overrides)
         if profile.mfa == "saml":
             raise unis.FieldError("university", SAML_REQUIRED)
         if profile.needs_totp and not token:
-            raise unis.FieldError("totp", t("totp.empty"))
+            raise unis.FieldError("totp", i18n.t("totp.empty"))
         path = self.config_path or config_mod.default_path()
         loop = asyncio.get_running_loop()
         # Secrets first: if the keyring refuses, no config.toml exists yet and the assistant
@@ -272,6 +311,12 @@ class Daemon:
             await loop.run_in_executor(None, self.password_setter, password)
             if profile.needs_totp:
                 await loop.run_in_executor(None, self.totp_setter, token)
+            broken = bool(self.config_error) and path.exists()
+            if broken:
+                # Unreadable: start over, but keep the old file for whoever wants to look at it.
+                backup = path.with_name(path.name + ".broken")
+                await loop.run_in_executor(None, os.replace, path, backup)
+                self.log.warning("Unreadable %s moved to %s", path, backup)
             if path.exists():
                 if university != previous_university:
                     stale = [key for key in unis.PROFILE_FIELDS if key not in overrides]
@@ -280,6 +325,11 @@ class Daemon:
                 await loop.run_in_executor(None, config_mod.set_values, path, values)
             else:
                 await loop.run_in_executor(None, config_mod.write_initial, path, user, university, overrides)
+                # Ports the old file set stay: the system's proxy rule and this daemon use them.
+                ports = {key: getattr(self.cfg, key) for key in ("socks_port", "http_port")
+                         if getattr(self.cfg, key) != getattr(config_mod.Config(), key)}
+                if broken and ports:
+                    await loop.run_in_executor(None, config_mod.set_values, path, ports)
         except config_mod.ConfigError as exc:
             self.cfg.user = previous_user
             raise ValueError(str(exc)) from exc
@@ -315,7 +365,7 @@ class Daemon:
     async def set_domains(self, text: str) -> list[str]:
         domains, errors = pac.parse_domain_list(text)
         if errors:
-            raise ValueError(t("app.lines", lines=errors))
+            raise ValueError(i18n.t("app.lines", lines=errors))
         pac.write_domains(self.domains_path, domains)
         self.log.info("Domain list saved: %s", ", ".join(domains) or "(empty)")
         await asyncio.get_running_loop().run_in_executor(None, self.proxy_refresh, self.cfg.http_port)
@@ -339,11 +389,7 @@ class Daemon:
         except OSError as exc:
             self.log.error("Status port %s not available: %s", self.cfg.http_port, exc)
             self.http = None
-        try:
-            await self.forwarder.start()
-        except OSError as exc:
-            self.log.error("SOCKS port %s not available: %s", self.cfg.socks_port, exc)
-            self._set(State.error, t("state.port_in_use", port=self.cfg.socks_port))
+        await self._bind_forwarder()
         ticker = asyncio.create_task(self._ticker())
         updates = asyncio.create_task(self._auto_update())
         self.started.set()
@@ -362,6 +408,20 @@ class Daemon:
 
     def stop(self) -> None:
         self._stop.set()
+
+    async def _bind_forwarder(self) -> None:
+        """The browser's port. If another program holds it, the ticker tries again until it is free."""
+        retry = self.message == M.PORT_IN_USE
+        try:
+            await self.forwarder.start()
+        except OSError as exc:
+            if not retry:
+                self.log.error("SOCKS port %s not available: %s", self.cfg.socks_port, exc)
+                self._set(State.error, M.PORT_IN_USE)
+            return
+        if retry:
+            self.log.info("SOCKS port %s is free again", self.cfg.socks_port)
+            self._set(State.idle, M.NOT_CONNECTED)
 
     # --- Demand -----------------------------------------------------------
 
@@ -402,7 +462,7 @@ class Daemon:
         self.explicit = True
         self.failures = 0
         if self.state in FINAL_STATES or self.state in RETRY_STATES:
-            self._set(State.idle, t("state.not_connected"))
+            self._set(State.idle, M.NOT_CONNECTED)
         self.note_activity()
         self._ensure_loop()
         self._wake.set()
@@ -414,7 +474,7 @@ class Daemon:
         self._wake.set()
         tunnel = self.tunnel
         if tunnel:
-            self._set(State.disconnecting, t("state.disconnecting"))
+            self._set(State.disconnecting, M.DISCONNECTING)
             await self.forwarder.close_all()
             await tunnel.stop(self.cfg.stop_grace)  # the loop may have dropped self.tunnel meanwhile
             return
@@ -425,7 +485,7 @@ class Daemon:
             except asyncio.CancelledError:
                 pass
         if self.state not in FINAL_STATES:
-            self._set(State.idle, t("state.not_connected"))
+            self._set(State.idle, M.NOT_CONNECTED)
 
     async def set_password(self, password: str) -> None:
         await asyncio.get_running_loop().run_in_executor(None, self.password_setter, password)
@@ -444,7 +504,7 @@ class Daemon:
         cfg = self.cfg
         while self.has_demand():
             if self._elevated() is False:
-                self._final(State.error, t("state.wintun_admin"))
+                self._final(State.error, M.NOT_ELEVATED)
                 return
             if cfg.mfa == "saml":
                 self._final(State.auth_failed, SAML_REQUIRED)
@@ -454,52 +514,56 @@ class Daemon:
                 await self._sleep(cfg.retry_interval)
                 continue
             if not await self.probe():
-                self._set(State.offline, t("state.offline"))
+                self._set(State.offline, M.OFFLINE)
                 await self._sleep(cfg.retry_interval)
                 continue
             wait = self._otp_wait()
             if wait:
-                self._set(State.connecting, t("state.otp_wait"))
+                self._set(State.connecting, M.WAITING_FOR_CODE)
                 await self._sleep(wait)
                 continue  # checks Cisco, network and demand again, then fetches the secrets
             generation = self._secrets_gen
             try:
                 password = await self.password_getter()
             except credentials.PasswordMissing:
-                self._final(State.keyring, t("state.no_password"))
+                self._final(State.keyring, M.PASSWORD_MISSING)
                 return
             except credentials.KeyringLocked:
-                self._final(State.keyring, t("state.keyring_locked"))
+                self._final(State.keyring, M.KEYRING_LOCKED)
                 return
             except credentials.KeyringError as exc:
-                self._final(State.keyring, str(exc))
+                self.log.error("Password not readable: %s", exc)
+                self._final(State.keyring, M.PASSWORD_UNREADABLE)
                 return
             totp = None
             if cfg.needs_totp:
                 try:
                     totp = (await self.totp_getter()).decode("ascii").strip()
                 except credentials.TotpMissing:
-                    self._final(State.keyring, t("state.no_totp"))
+                    self._final(State.keyring, M.TOTP_MISSING)
                     return
                 except credentials.KeyringLocked:
-                    self._final(State.keyring, t("state.keyring_locked"))
+                    self._final(State.keyring, M.KEYRING_LOCKED)
                     return
                 except (credentials.KeyringError, UnicodeDecodeError) as exc:
-                    self._final(State.keyring, t("state.totp_unreadable", error=exc))
+                    self.log.error("TOTP secret not readable: %s", exc)
+                    self._final(State.keyring, M.TOTP_UNREADABLE)
                     return
 
-            self._set(State.connecting, t("state.connecting"))
+            self._set(State.connecting, M.CONNECTING)
             try:
                 tunnel = self.tunnel_factory()
                 self.tunnel = tunnel
                 await tunnel.start(password, totp)
             except PasswordEncodingError as exc:
                 self.tunnel = None
-                self._final(State.keyring, t("state.password_encoding", error=exc))
+                self.log.error("%s", exc)
+                self._final(State.keyring, M.PASSWORD_UNSUPPORTED)
                 return
             except OSError as exc:
                 self.tunnel = None
-                self._final(State.error, t("state.openconnect_start", error=exc))
+                self.log.error("Could not start openconnect: %s", exc)
+                self._final(State.error, M.PROGRAM_MISSING if isinstance(exc, FileNotFoundError) else M.START_FAILED)
                 return
             finally:
                 del password, totp
@@ -526,13 +590,15 @@ class Daemon:
                     continue  # a request_connect in the meantime takes effect via has_demand()
                 if not tunnel.exited.is_set():
                     await tunnel.stop(cfg.stop_grace)
-                    state, message = State.error, t("state.timeout")
+                    state, message = State.error, M.TOO_SLOW
                 elif tunnel.classification:
                     state, message = State(tunnel.classification[0]), tunnel.classification[1]
                 elif tunnel.returncode == 1:
-                    state, message = State.auth_failed, t("state.login_failed_exit")
+                    self.log.error("Login failed (openconnect exit code 1)")
+                    state, message = State.auth_failed, M.AUTH_REJECTED
                 else:
-                    state, message = State.error, t("state.openconnect_exit", code=tunnel.returncode)
+                    self.log.error("openconnect exited with code %s", tunnel.returncode)
+                    state, message = State.error, M.CONNECT_FAILED
                 self.tunnel = None
                 if state == State.auth_failed:
                     self._final(state, message)
@@ -544,7 +610,7 @@ class Daemon:
 
             self.failures = 0
             self.log.info("Tunnel ready after %.1f s", (tunnel.ready_at or 0) - (tunnel.started_at or 0))
-            self._set(State.connected, t("state.connected"))
+            self._set(State.connected, M.CONNECTED)
             # The "connect now" request is fulfilled. From here on only real use counts,
             # the idle timer handles the rest.
             self.explicit = False
@@ -555,10 +621,12 @@ class Daemon:
             if tunnel.stopped_by_us:
                 self._after_stop()
                 continue  # a request_connect in the meantime takes effect via has_demand()
-            message = tunnel.classification[1] if tunnel.classification else t("state.dropped", code=tunnel.returncode)
+            if not tunnel.classification:
+                self.log.warning("Tunnel dropped (exit code %s)", tunnel.returncode)
+            message = tunnel.classification[1] if tunnel.classification else M.CONNECTION_LOST
             self.last_error = {"message": message, "at": time.time()}
             if not self.has_demand():
-                self._set(State.idle, t("state.not_connected_because", reason=message))
+                self._set(State.idle, message)
                 return
             self._set(State.error, message)
             if not await self._backoff():
@@ -566,14 +634,14 @@ class Daemon:
         # `blocked` stays until the ticker sees Cisco disconnected, so the popup keeps
         # explaining why nothing works.
         if self.state in (State.offline, State.error, State.connecting, State.disconnecting):
-            self._set(State.idle, t("state.not_connected"))
+            self._set(State.idle, M.NOT_CONNECTED)
 
     def _after_stop(self) -> None:
         if self.paused_by_cisco:
             self.paused_by_cisco = False
             self._set(State.blocked, BLOCKED_MESSAGE)
         else:
-            self._set(State.idle, t("state.disconnected"))
+            self._set(State.idle, M.DISCONNECTED)
 
     def _otp_wait(self, now: float | None = None) -> float:
         """Seconds until the next one-time code window, 0 if the current code is still unused."""
@@ -605,7 +673,7 @@ class Daemon:
         if not i18n.valid(code):
             raise ValueError(f"unknown language {code!r}")
         if self.needs_setup or not self.config_path or not self.config_path.exists():
-            raise ValueError(t("setup.finish_first"))
+            raise ValueError(i18n.t("setup.finish_first"))
         await asyncio.get_running_loop().run_in_executor(
             None, lambda: config_mod.set_values(self.config_path, {"language": code}))
         self.cfg.language = code
@@ -613,7 +681,7 @@ class Daemon:
 
     async def set_auto_update(self, enabled: bool) -> None:
         if self.needs_setup or not self.config_path or not self.config_path.exists():
-            raise ValueError(t("setup.finish_first"))
+            raise ValueError(i18n.t("setup.finish_first"))
         await asyncio.get_running_loop().run_in_executor(
             None, lambda: config_mod.set_values(self.config_path, {"auto_update": enabled}))
         self.cfg.auto_update = enabled
@@ -669,12 +737,15 @@ class Daemon:
         else:
             awake = time.monotonic
         last_awake, last_wall = awake(), time.time()
-        last_cisco = time.monotonic()
+        last_cisco = last_bind = time.monotonic()
         while True:
             await asyncio.sleep(self.cfg.tick)
             mono, wall, now_awake = time.monotonic(), time.time(), awake()
             jump = (wall - last_wall) - (now_awake - last_awake)
             last_awake, last_wall = now_awake, wall
+            if not self.forwarder.listening and mono - last_bind >= self.cfg.retry_interval:
+                last_bind = mono
+                await self._bind_forwarder()
             if mono - last_cisco >= self.cfg.retry_interval and self.state in (State.connected, State.blocked):
                 last_cisco = mono
                 # In the executor: "vpn state" takes 2 s on macOS and must not stall the forwarder.
@@ -687,7 +758,7 @@ class Daemon:
                     await self.forwarder.close_all()
                     await tunnel.stop(self.cfg.stop_grace)
                 elif not cisco and self.state == State.blocked and (self._loop_task is None or self._loop_task.done()):
-                    self._set(State.idle, t("state.not_connected"))
+                    self._set(State.idle, M.NOT_CONNECTED)
             if jump > 30:
                 self.log.info("Resume detected (clock jumped by %.0f s)", jump)
                 tunnel = self.tunnel
@@ -695,7 +766,7 @@ class Daemon:
                     # Stop cleanly instead of SIGUSR2: the state machine then goes through
                     # disconnecting -> idle and reconnects if there is demand.
                     self.log.info("Resume detected, reconnecting the tunnel")
-                    self._set(State.disconnecting, t("state.resume"))
+                    self._set(State.disconnecting, M.DISCONNECTING)
                     await self.forwarder.close_all()
                     await tunnel.stop(self.cfg.stop_grace)
             if self.state == State.connected and self.tunnel and mono - self.last_activity > self.cfg.idle_minutes * 60:
@@ -703,6 +774,6 @@ class Daemon:
                 self.explicit = False
                 self.demand_until = 0.0
                 tunnel = self.tunnel
-                self._set(State.disconnecting, t("state.idle_disconnect"))
+                self._set(State.disconnecting, M.DISCONNECTING)
                 await self.forwarder.close_all()
                 await tunnel.stop(self.cfg.stop_grace)

@@ -116,7 +116,7 @@ input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
 </head>
 <body>
 <div class="wrap">
-  <div class="offline" id="offline" role="alert" data-t="app.offline" hidden></div>
+  <div class="offline" id="offline" role="alert" data-t="msg.not_running" hidden></div>
 
   <!-- Setup assistant -->
   <section id="setup" hidden>
@@ -328,14 +328,13 @@ function step(id, focusId) {
   if (focus) focus.focus();
 }
 
-// The service's messages name terminal commands; here the buttons do that.
-function clean(text) {
-  return String(text || "").replace(/ \(uni-vpn [a-z]+\)/g, "").replace("see uni-vpn log", t("app.see_log"));
-}
 
 function err(id, text) { $(id).textContent = text || ""; $(id).hidden = !text; }
 
 // --- status ------------------------------------------------------------------
+// Message ids (messages.py) whose state label says it all.
+const QUIET = ["not_connected", "disconnected", "connecting", "connected", "disconnecting", "setup_needed"].map((id) => "msg." + id);
+const FIX = {password: "main.update_password", totp: "main.update_totp", repair: "main.repair"};
 const LOOK = {
   connected: "ok", connecting: "warn busy", disconnecting: "warn busy", idle: "", offline: "warn", blocked: "warn",
   auth_failed: "bad", keyring: "bad", error: "bad",
@@ -344,16 +343,19 @@ const LOOK = {
 function render() {
   $("badge").className = "badge " + (LOOK[S.state] || "");
   $("state").textContent = S.state in LOOK ? t("look." + S.state) : S.state;
-  // Normal states speak for themselves; only show the daemon's text when it explains something.
-  const quiet = ["connected", "idle", "connecting", "disconnecting"].includes(S.state) && !/\(/.test(S.message);
+  // Normal states speak for themselves; only show the service's text when it explains something.
+  const quiet = QUIET.includes(S.message_id);
   const hint = {idle: t("main.hint.idle"), connected: t("main.hint.connected")}[S.state];
-  $("msg").textContent = quiet ? hint || "\u00a0" : clean(tr(S.message, S.message_t));
-  const fix = {password: t("main.update_password"), totp: t("main.update_totp")}[S.error_kind];
+  $("msg").textContent = quiet ? hint || "\u00a0" : tr(S.message, S.message_t);
+  // Role model Tailscale: the problem in one sentence, the fix on the button below it.
+  const fix = FIX[S.action] ? t(FIX[S.action]) : "";
   $("fix").hidden = !fix;
   $("fix").textContent = fix || "";
-  // With a wrong password or secret, fixing it is the way forward; retrying stays possible.
+  $("fix").disabled = !!S.repairing;
+  // With a fix offered, it is the way forward; retrying stays possible.
+  const stopped = ["auth_failed", "keyring"].includes(S.state);
   $("toggle").className = fix ? "btn text" : "btn primary big";
-  $("toggle").textContent = t(isOn() ? "main.disconnect" : fix ? "main.try_again" : "main.connect");
+  $("toggle").textContent = t(isOn() ? "main.disconnect" : fix || stopped ? "main.try_again" : "main.connect");
   $("toggle").disabled = S.state === "disconnecting";
   $("v-uni").textContent = S.university_name;
   $("v-user").textContent = S.user;
@@ -603,7 +605,7 @@ async function submitSetup() {
                                   secret: needsTotp() ? $("s-totp").value.trim() : "", university: uni.id,
                                   profile: profileOverrides()});
   } catch (e) {
-    r = {ok: false, data: null, text: t("app.offline")};
+    r = {ok: false, data: null, text: t("msg.not_running")};
   } finally {
     submitting = false;
   }
@@ -633,7 +635,7 @@ function setupProgress() {
     const totp = S.error_kind === "totp";
     setupDone = false;
     step(totp ? "step2" : "step1", totp ? "s-totp" : "s-pw");
-    err(totp ? "s2-err" : "s1-err", clean(tr(S.message, S.message_t)));
+    err(totp ? "s2-err" : "s1-err", tr(S.message, S.message_t));
     return;
   }
   if (S.state === "idle" && !S.busy && settled) {
@@ -642,8 +644,8 @@ function setupProgress() {
     post("/api/connect").catch(() => {});
   }
   const stuck = ["offline", "blocked", "error"].includes(S.state);
-  const waiting = S.state === "connecting" && /one-time code/.test(S.message);
-  $("s3-msg").textContent = stuck || waiting ? clean(tr(S.message, S.message_t)) : t("setup.waiting");
+  const waiting = S.message_id === "msg.waiting_for_code";
+  $("s3-msg").textContent = stuck || waiting ? tr(S.message, S.message_t) : t("setup.waiting");
   $("s3-skip").hidden = !stuck;
 }
 
@@ -664,9 +666,15 @@ $("toggle").onclick = async () => {
   try { await post(on ? "/api/disconnect" : "/api/connect"); } catch (e) { /* the banner says it */ }
   refresh();
 };
-$("fix").onclick = () => {
+$("fix").onclick = async () => {
+  if (S.action === "repair") {
+    $("fix").disabled = true;
+    await send("/api/repair");  // the status says how it goes
+    refresh();
+    return;
+  }
   show("settings");
-  const d = $(S.error_kind === "totp" ? "d-totp" : "d-pw");
+  const d = $(S.action === "totp" ? "d-totp" : "d-pw");
   d.open = true;
   d.querySelector("input").focus();
 };
@@ -715,7 +723,7 @@ $("cancel-change").onclick = () => { if (!submitting) endChange(); };
 $("close-settings").onclick = () => { show("main"); render(); };
 
 async function send(path, body) {
-  try { return await post(path, body); } catch (e) { return {ok: false, data: null, text: t("app.offline")}; }
+  try { return await post(path, body); } catch (e) { return {ok: false, data: null, text: t("msg.not_running")}; }
 }
 
 function saved(id, r, okText) {

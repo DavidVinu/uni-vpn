@@ -1,9 +1,10 @@
 import asyncio
 import json
 import time
+from unittest import mock
 
 from uni_vpn import daemon as dm
-from uni_vpn import config, credentials, detect, pac, totp
+from uni_vpn import config, credentials, detect, messages, pac, totp
 from uni_vpn.httpapi import allowed_origin
 
 from tests.test_daemon import DaemonHarness, wait_state
@@ -181,7 +182,7 @@ class ApiTests(DaemonHarness):
                                             {"X-Uni-VPN": "1", "Content-Type": "application/json"}, body)
             self.assertEqual(status, 400, repr(password))
             answer = json.loads(payload)
-            self.assertEqual(answer["error"], "Password must not contain a line break")
+            self.assertEqual(answer["error"], "The password must be on one line")
             self.assertEqual(answer["error_t"], {"key": "password.line_break", "args": {}})
         self.assertEqual(self.stored, [])
         self.assertEqual(d.state, dm.State.idle)
@@ -355,13 +356,27 @@ class SetupTests(DaemonHarness):
         status, _, _ = await http(self.cfg.http_port, "POST", "/api/totp/check", self.HEADERS, b'{"secret": "nope!"}')
         self.assertEqual(status, 400)
 
+    async def test_repair_button_starts_the_repair(self):
+        d = await self.start_daemon()
+        with mock.patch.object(d, "start_repair") as start:
+            status, _, _ = await http(self.cfg.http_port, "POST", "/api/repair", self.HEADERS, b"{}")
+        self.assertEqual(status, 200)
+        start.assert_awaited_once()
+
     async def test_error_kind_names_the_factor(self):
         d = await self.start_daemon()
-        d._set(dm.State.auth_failed, "One-time code rejected: check the clock")
+        d._set(dm.State.auth_failed, messages.TOTP_REJECTED)
         self.assertEqual(d.status()["error_kind"], "totp")
-        d._set(dm.State.keyring, "No password stored: uni-vpn password")
+        self.assertEqual(d.status()["action"], "totp")
+        self.assertEqual(d.status()["message_id"], "msg.totp_rejected")
+        d._set(dm.State.keyring, messages.PASSWORD_MISSING)
         self.assertEqual(d.status()["error_kind"], "password")
-        d._set(dm.State.idle, "Not connected")
+        d._set(dm.State.idle, messages.NOT_CONNECTED)
+        self.assertIsNone(d.status()["error_kind"])
+        self.assertIsNone(d.status()["action"])
+        # A repair is offered as an action, but it is not about a factor.
+        d._set(dm.State.error, messages.PROGRAM_MISSING)
+        self.assertEqual(d.status()["action"], "repair")
         self.assertIsNone(d.status()["error_kind"])
 
 
@@ -404,7 +419,7 @@ class UniversitySetupTests(SetupTests):
                             ({"university": "heidelberg"}, "totp")):
             status, data = await self.post_setup({"user": "ab123", "password": "pw", **body})
             self.assertEqual((status, data["field"]), (400, field), body)
-        self.assertIn("browser", (await self.post_setup({"user": "ab1", "password": "pw", "university": "fu-berlin"}))[1]["error"])
+        self.assertEqual(messages.SAML_REQUIRED, (await self.post_setup({"user": "ab1", "password": "pw", "university": "fu-berlin"}))[1]["error"])
         self.assertFalse(self.cfg_path.exists())
         self.assertEqual(self.stored, [])
 
@@ -509,7 +524,7 @@ class PacTests(DaemonHarness):
         body = json.dumps({"text": "sogo.uni-heidelberg.de\nbroken\n"}).encode()
         status, _, payload = await http(self.cfg.http_port, "POST", "/api/domains", self.HEADERS, body)
         self.assertEqual(status, 400)
-        self.assertIn(b"line 2", payload)
+        self.assertIn(b"Line 2", payload)
         self.assertFalse(self.domains_path.exists())
         self.assertEqual(self.refreshed, [])
 

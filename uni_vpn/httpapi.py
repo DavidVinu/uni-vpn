@@ -159,6 +159,8 @@ class HttpApi:
             await self.daemon.request_connect()
         elif path == "/api/disconnect":
             await self.daemon.request_disconnect()
+        elif path == "/api/repair":
+            await self.daemon.start_repair()
         elif path == "/api/password":
             try:
                 data = json.loads(body.decode("utf-8"))

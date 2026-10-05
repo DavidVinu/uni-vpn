@@ -248,6 +248,8 @@ http_port = 1081         # status page http://127.0.0.1:1081
 def toml_value(value) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
     # A JSON string is a valid TOML basic string.
     return json.dumps(str(value), ensure_ascii=False)
 
@@ -282,7 +284,7 @@ def set_user(path: Path, user: str) -> None:
 
 
 # A basic ("...") or literal ('...') string or a boolean, as written by hand.
-_VALUE = r"""(?:"(?:[^"\\\n]|\\.)*"|'[^'\n]*'|true|false)"""
+_VALUE = r"""(?:"(?:[^"\\\n]|\\.)*"|'[^'\n]*'|true|false|[0-9]+\b)"""
 
 
 def set_values(path: Path, values: dict) -> None:

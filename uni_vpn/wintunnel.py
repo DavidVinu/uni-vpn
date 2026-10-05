@@ -16,6 +16,7 @@ import logging
 import time
 from pathlib import Path
 
+from . import messages
 from . import platform as pf
 from .config import Config
 from .socks import SocksServer
@@ -116,7 +117,7 @@ class WindowsTunnel(Tunnel):
             elif values.get("ERROR"):
                 # The script could not set up the adapter; without it nothing would work.
                 self.log.error("Tunnel setup failed: %s", values["ERROR"])
-                self.classification = ("error", f"Tunnel setup failed: {values['ERROR']}")
+                self.classification = ("error", messages.START_FAILED)
                 await self._end_process(self.cfg.stop_grace)
                 return
             address, dns = values.get("INTERNAL_IP4_ADDRESS"), dns_servers(values)
@@ -129,7 +130,7 @@ class WindowsTunnel(Tunnel):
                     raise
                 except OSError as exc:
                     self.log.error("SOCKS server on port %s failed: %s", self.port, exc)
-                    self.classification = ("error", f"Local proxy port {self.port} not available: {exc}")
+                    self.classification = ("error", messages.CONNECT_FAILED)
                     await self._end_process(self.cfg.stop_grace)
                     return
                 self.socks = server  # only now: wait_ready() takes it as the ready signal

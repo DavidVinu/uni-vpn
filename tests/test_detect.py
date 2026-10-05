@@ -124,11 +124,9 @@ class RequestTests(unittest.TestCase):
 
         d = detect.probe("vpn.example.edu", opener=refused)
         self.assertFalse(d.reachable)
-        self.assertIn("Could not reach vpn.example.edu", d.error)
-        self.assertIn("Connection refused", d.error)
+        self.assertIn("Can't reach vpn.example.edu", d.error)
         d = detect.probe("vpn.example.edu", opener=not_found)
         self.assertTrue(d.reachable)
-        self.assertIn("404", d.error)
 
     def test_invalid_input_raises_before_any_request(self):
         def opener(request, timeout):
