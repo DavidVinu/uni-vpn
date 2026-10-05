@@ -9,7 +9,7 @@ from pathlib import Path
 from xml.dom import minidom
 from unittest import mock
 
-from uni_vpn import windows, wintunnel
+from uni_vpn import messages, windows, wintunnel
 from uni_vpn.config import Config
 
 FAKE = str(Path(__file__).parent / "fake_openconnect.py")
@@ -135,7 +135,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(await self.tunnel.wait_ready(5))
         self.assertTrue(self.tunnel.exited.is_set())
         self.assertFalse(self.tunnel.stopped_by_us)
-        self.assertEqual(self.tunnel.classification, ("error", "Tunnel setup failed: netsh add route failed"))
+        self.assertEqual(self.tunnel.classification, ("error", messages.START_FAILED))
         self.assertIsNone(self.tunnel.socks)
 
     async def test_stop_before_the_process_exists_ends_the_attempt(self):
