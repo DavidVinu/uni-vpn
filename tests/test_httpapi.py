@@ -1,9 +1,10 @@
 import asyncio
 import json
 import time
+from unittest import mock
 
 from uni_vpn import daemon as dm
-from uni_vpn import config, credentials, detect, pac, totp
+from uni_vpn import config, credentials, detect, messages, pac, totp
 from uni_vpn.httpapi import allowed_origin
 
 from tests.test_daemon import DaemonHarness, wait_state
@@ -282,6 +283,25 @@ class SetupTests(DaemonHarness):
         _, _, payload = await http(self.cfg.http_port, "GET", "/status.json")
         self.assertFalse(json.loads(payload)["setup_needed"])
 
+    async def test_changing_the_account_from_settings_reconnects_and_drops_old_overrides(self):
+        d = await self.start_setup_daemon()
+        first = {"user": "ab123", "password": "pw", "secret": "", "university": "other",
+                 "profile": {"host": "vpn.example.edu", "authgroup": "staff", "mfa": "none"}}
+        status, _, payload = await http(self.cfg.http_port, "POST", "/api/setup", self.HEADERS, json.dumps(first).encode())
+        self.assertEqual(status, 200, payload)
+        await wait_state(d, dm.State.connected)
+        connects = d.connect_count
+        second = {"user": "cd456", "password": "pw2", "secret": "GEZDGNBVGY3TQOJQ", "university": "heidelberg"}
+        status, _, payload = await http(self.cfg.http_port, "POST", "/api/setup", self.HEADERS, json.dumps(second).encode())
+        self.assertEqual(status, 200, payload)
+        text = self.cfg_path.read_text()
+        self.assertNotIn("vpn.example.edu", text)
+        self.assertNotIn("authgroup", text)
+        self.assertIn('user = "cd456"', text)
+        self.assertEqual((d.cfg.user, d.cfg.university, d.cfg.host), ("cd456", "heidelberg", "vpn-ac.uni-heidelberg.de"))
+        await wait_state(d, dm.State.connected)
+        self.assertGreater(d.connect_count, connects)
+
     async def test_keyring_failure_writes_no_config_so_the_assistant_stays(self):
         def refuse(_secret):
             raise credentials.KeyringError("keyring locked")
@@ -334,13 +354,27 @@ class SetupTests(DaemonHarness):
         status, _, _ = await http(self.cfg.http_port, "POST", "/api/totp/check", self.HEADERS, b'{"secret": "nope!"}')
         self.assertEqual(status, 400)
 
+    async def test_repair_button_starts_the_repair(self):
+        d = await self.start_daemon()
+        with mock.patch.object(d, "start_repair") as start:
+            status, _, _ = await http(self.cfg.http_port, "POST", "/api/repair", self.HEADERS, b"{}")
+        self.assertEqual(status, 200)
+        start.assert_awaited_once()
+
     async def test_error_kind_names_the_factor(self):
         d = await self.start_daemon()
-        d._set(dm.State.auth_failed, "One-time code rejected: check the clock")
+        d._set(dm.State.auth_failed, messages.TOTP_REJECTED)
         self.assertEqual(d.status()["error_kind"], "totp")
-        d._set(dm.State.keyring, "No password stored: uni-vpn password")
+        self.assertEqual(d.status()["action"], "totp")
+        self.assertEqual(d.status()["message_id"], "totp_rejected")
+        d._set(dm.State.keyring, messages.PASSWORD_MISSING)
         self.assertEqual(d.status()["error_kind"], "password")
-        d._set(dm.State.idle, "Not connected")
+        d._set(dm.State.idle, messages.NOT_CONNECTED)
+        self.assertIsNone(d.status()["error_kind"])
+        self.assertIsNone(d.status()["action"])
+        # A repair is offered as an action, but it is not about a factor.
+        d._set(dm.State.error, messages.PROGRAM_MISSING)
+        self.assertEqual(d.status()["action"], "repair")
         self.assertIsNone(d.status()["error_kind"])
 
 
@@ -383,7 +417,7 @@ class UniversitySetupTests(SetupTests):
                             ({"university": "heidelberg"}, "totp")):
             status, data = await self.post_setup({"user": "ab123", "password": "pw", **body})
             self.assertEqual((status, data["field"]), (400, field), body)
-        self.assertIn("browser", (await self.post_setup({"user": "ab1", "password": "pw", "university": "fu-berlin"}))[1]["error"])
+        self.assertEqual(messages.SAML_REQUIRED, (await self.post_setup({"user": "ab1", "password": "pw", "university": "fu-berlin"}))[1]["error"])
         self.assertFalse(self.cfg_path.exists())
         self.assertEqual(self.stored, [])
 

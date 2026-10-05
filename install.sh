@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Install uni-vpn on Linux or macOS: fetch packages, then run "uni-vpn setup".
-# Usage: ./install.sh [--uninstall | --update] [--dry-run] [--no-gui] [--user UNIVERSITY-ID] [--university ID]
+# Usage: ./install.sh [--uninstall | --update | --repair] [--dry-run] [--no-gui] [--user UNIVERSITY-ID] [--university ID]
+# --repair: what the app's Repair button runs, without a terminal: installs what is missing,
+# asks for the password in a dialog (pkexec) and opens no browser.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
@@ -11,6 +13,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --uninstall) mode=uninstall ;;
     --update) mode=update ;;
+    --repair) extra+=(--no-browser) ;;
     --dry-run) extra+=(--dry-run); dry=1 ;;
     --no-gui) extra+=(--no-gui) ;;
     --user)
@@ -35,7 +38,12 @@ say() { echo "-> $*"; }
 
 run_root() {
   if [ "$dry" = 1 ]; then say "would run: $*"; return 0; fi
-  if [ "$(id -u)" = 0 ]; then "$@"; else
+  if [ "$(id -u)" = 0 ]; then "$@"
+  elif [ ! -t 0 ] && command -v pkexec >/dev/null; then
+    # No terminal (the app's Repair button): the desktop asks for the password in a dialog.
+    say "$* (a dialog asks for your password)"
+    pkexec "$@"
+  else
     say "$* (sudo asks for your password)"
     sudo "$@"
   fi
@@ -54,6 +62,27 @@ find_python() {
   return 1
 }
 
+# The app window (WebKitGTK) and its panel icon. Optional: without them the app opens in the browser.
+linux_app_packages() {
+  [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || return 0
+  local packages=()
+  if command -v apt-get >/dev/null && command -v dpkg >/dev/null; then
+    local webkit=gir1.2-webkit2-4.1
+    apt-cache show "$webkit" >/dev/null 2>&1 || webkit=gir1.2-webkit2-4.0
+    local p
+    for p in python3-gi "$webkit" gir1.2-ayatanaappindicator3-0.1; do
+      dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q 'ok installed' || packages+=("$p")
+    done
+    [ ${#packages[@]} -eq 0 ] || run_root apt-get install -y "${packages[@]}" || true
+  elif command -v dnf >/dev/null; then
+    run_root dnf install -y python3-gobject webkit2gtk4.1 libayatana-appindicator-gtk3 || true
+  elif command -v zypper >/dev/null; then
+    run_root zypper --non-interactive install python3-gobject typelib-1_0-WebKit2-4_1 typelib-1_0-AyatanaAppIndicator3-0_1 || true
+  elif command -v pacman >/dev/null; then
+    run_root pacman -S --needed --noconfirm python-gobject webkit2gtk-4.1 libayatana-appindicator || true
+  fi
+}
+
 linux_packages() {
   local missing=()
   if command -v apt-get >/dev/null && command -v dpkg >/dev/null; then
@@ -64,8 +93,8 @@ linux_packages() {
     done
     find_python >/dev/null || missing+=(python3)
     if [ ${#missing[@]} -gt 0 ]; then
-      run_root apt-get update -qq || true
-      run_root apt-get install -y "${missing[@]}"
+      # One call, so a password dialog comes up once.
+      run_root sh -c 'apt-get update -qq || true; exec apt-get install -y "$@"' sh "${missing[@]}"
     fi
     # Ubuntu 22.04 and Debian 11 ship Python 3.10; 3.11 is a separate package there.
     if [ "$dry" = 0 ] && ! find_python >/dev/null; then
@@ -92,6 +121,7 @@ linux_packages() {
   else
     echo "-> unknown package manager: install openconnect, ocproxy, secret-tool (libsecret) and Python >= 3.11 yourself"
   fi
+  linux_app_packages
   if ! command -v systemctl >/dev/null || ! systemctl --user show-environment >/dev/null 2>&1; then
     if [ "$dry" = 0 ]; then
       echo "No systemd user session found. uni-vpn runs as a systemd user service; log in to a desktop session and try again."

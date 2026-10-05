@@ -77,10 +77,17 @@ input:focus,textarea:focus,select:focus{border-color:var(--accent);box-shadow:0 
 .list>:first-child{border-top:0}
 .list summary,.list .item{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;cursor:pointer;list-style:none}
 .list summary::-webkit-details-marker{display:none}
-.list summary .val{color:var(--muted);max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.list .val{color:var(--muted);max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .list summary:after{content:"";width:8px;height:8px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(-45deg);margin-left:10px;transition:transform .2s}
 .list details[open] summary:after{transform:rotate(45deg)}
 .list .item{cursor:default}
+.list button.item{width:100%;font:inherit;color:inherit;background:none;border-left:0;border-right:0;border-bottom:0;text-align:left;cursor:pointer}
+.list button.item .val{display:flex;align-items:center}
+.list button.item .val:after{content:"";flex:none;width:8px;height:8px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(-45deg);margin-left:10px}
+body.app{-webkit-user-select:none;user-select:none;cursor:default}
+body.app input,body.app textarea,body.app pre{-webkit-user-select:text;user-select:text}
+body.app .brand{visibility:hidden}
+body.app #setup .bar:has(#cancel-change[hidden]){display:none}
 .list .body{padding:0 16px 16px}
 .list .body .btn{margin-top:10px}
 .group{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:0 0 6px 16px}
@@ -106,11 +113,11 @@ input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
 </head>
 <body>
 <div class="wrap">
-  <div class="offline" id="offline" role="alert" hidden>Uni VPN is not running. Restart the computer, or run: uni-vpn service start</div>
+  <div class="offline" id="offline" role="alert" hidden>Uni VPN is not running. Restart the computer to start it again.</div>
 
   <!-- Setup assistant -->
   <section id="setup" hidden>
-    <div class="bar"><h1>Uni VPN</h1></div>
+    <div class="bar"><button class="icon-btn" id="cancel-change" aria-label="Back" hidden><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button><h1 class="brand">Uni VPN</h1><span style="width:40px"></span></div>
     <div class="card">
       <form id="step0" autocomplete="off">
         <p class="step"></p>
@@ -183,7 +190,7 @@ input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
 
   <!-- Status -->
   <section id="main" hidden>
-    <div class="bar"><h1>Uni VPN</h1>
+    <div class="bar"><h1 class="brand">Uni VPN</h1>
       <button class="icon-btn" id="open-settings" aria-label="Settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button></div>
     <div class="card center">
       <div class="badge" id="badge"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
@@ -199,8 +206,8 @@ input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
     <div class="bar"><button class="icon-btn" id="close-settings" aria-label="Back"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button><h1>Settings</h1><span style="width:40px"></span></div>
     <p class="group">Account</p>
     <div class="list">
-      <div class="item"><span>University</span><span class="small" id="v-uni"></span></div>
-      <div class="item"><span>Username</span><span class="small" id="v-user"></span></div>
+      <button class="item" type="button" id="row-uni"><span>University</span><span class="val" id="v-uni"></span></button>
+      <button class="item" type="button" id="row-user"><span>Username</span><span class="val" id="v-user"></span></button>
       <details id="d-pw"><summary><span>Password</span></summary><div class="body">
         <form id="pwform"><div class="input"><input type="password" id="pw" autocomplete="current-password" aria-label="Password">
           <button type="button" class="icon-btn reveal" data-for="pw" aria-label="Show password"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
@@ -231,7 +238,12 @@ input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
 const $ = (id) => document.getElementById(id);
 const H = {"X-Uni-VPN": "1", "Content-Type": "application/json"};
 let S = null, view = null, setupDone = false, submitting = false, setupSent = false, domainsShown = false, connectRequested = 0,
-  codeTimer = null, refreshing = false, autoUpdateSaving = false;
+  codeTimer = null, refreshing = false, autoUpdateSaving = false, changing = false;
+// Inside the Uni VPN app window (not a browser tab): no page title, no browser context menu.
+if (new URLSearchParams(location.search).has("app")) {
+  document.body.classList.add("app");
+  document.addEventListener("contextmenu", (e) => { if (!e.target.closest("input, textarea, pre")) e.preventDefault(); });
+}
 
 async function post(path, body) {
   const r = await fetch(path, {method: "POST", headers: H, body: JSON.stringify(body || {})});
@@ -244,6 +256,8 @@ async function post(path, body) {
 function show(id) {
   for (const s of ["setup", "main", "settings"]) $(s).hidden = s !== id;
   view = id;
+  // The app's menu opens #main or #settings; cleared so that the next request is a change again.
+  if (location.hash) history.replaceState(null, "", location.pathname + location.search);
 }
 
 function step(id, focusId) {
@@ -253,16 +267,16 @@ function step(id, focusId) {
   if (focus) focus.focus();
 }
 
-// The service's messages name terminal commands; here the buttons do that.
-function clean(text) {
-  return String(text || "").replace(/ \(uni-vpn [a-z]+\)/g, "").replace("see uni-vpn log", "see Settings, Log");
-}
+const NOT_RUNNING = "Uni VPN is not running. Restart the computer to start it again.";
 
 const WAITING = "Testing the connection. This can take a minute.";
 
 function err(id, text) { $(id).textContent = text || ""; $(id).hidden = !text; }
 
 // --- status ------------------------------------------------------------------
+// Message ids (messages.py) whose state label says it all.
+const QUIET = ["not_connected", "disconnected", "connecting", "connected", "disconnecting", "setup_needed"];
+const FIX = {password: "Update password", totp: "Update second factor", repair: "Repair"};
 const LOOK = {
   connected: ["ok", "Connected"], connecting: ["warn busy", "Connecting"], disconnecting: ["warn busy", "Disconnecting"],
   idle: ["", "Not connected"], offline: ["warn", "No network"], blocked: ["warn", "Paused"],
@@ -273,17 +287,20 @@ function render() {
   const [cls, label] = LOOK[S.state] || ["", S.state];
   $("badge").className = "badge " + cls;
   $("state").textContent = label;
-  // Normal states speak for themselves; only show the daemon's text when it explains something.
-  const quiet = ["connected", "idle", "connecting", "disconnecting"].includes(S.state) && !/\(/.test(S.message);
+  // Normal states speak for themselves; only show the service's text when it explains something.
+  const quiet = QUIET.includes(S.message_id);
   const hint = {idle: "Connects by itself when you open a university website.",
                 connected: "University websites go through the VPN."}[S.state];
-  $("msg").textContent = quiet ? hint || "\u00a0" : clean(S.message);
-  const fix = {password: "Update password", totp: "Update second factor"}[S.error_kind];
+  $("msg").textContent = quiet ? hint || "\u00a0" : S.message;
+  // Role model Tailscale: the problem in one sentence, the fix on the button below it.
+  const fix = FIX[S.action];
   $("fix").hidden = !fix;
   $("fix").textContent = fix || "";
-  // With a wrong password or secret, fixing it is the way forward; retrying stays possible.
+  $("fix").disabled = !!S.repairing;
+  // With a fix offered, it is the way forward; retrying stays possible.
+  const stopped = ["auth_failed", "keyring"].includes(S.state);
   $("toggle").className = fix ? "btn text" : "btn primary big";
-  $("toggle").textContent = isOn() ? "Disconnect" : fix ? "Try again" : "Connect";
+  $("toggle").textContent = isOn() ? "Disconnect" : fix || stopped ? "Try again" : "Connect";
   $("toggle").disabled = S.state === "disconnecting";
   $("v-uni").textContent = S.university_name;
   $("v-user").textContent = S.user;
@@ -317,11 +334,13 @@ async function refresh() {
     if (view !== "setup") { show("setup"); await loadUniversities(); step(uni ? "step1" : "step0", uni && $("s-user").value ? "s-pw" : null); }
     return;
   }
-  if (view === "setup" && !setupSent) {
+  if (view === "setup" && !setupSent && !changing) {
     show("main");  // set up meanwhile in another tab or with the command line
   }
   if (view === "setup") { setupProgress(); return; }
-  if (view === null) show("main");
+  if (view === null) {
+    if (location.hash === "#settings") openSettings(); else show("main");
+  }
   render();
 }
 
@@ -330,7 +349,7 @@ async function refresh() {
 const USER_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(@[A-Za-z0-9][A-Za-z0-9.-]{0,252})?$/;
 const TOTP_MODES = ["totp_field", "totp_append"];
 const OTHER = {id: "other", name: "Not listed", country: "", mfa: "none", mfa_portal_url: "", mfa_steps: []};
-const SAML = "This university signs in through a browser, uni-vpn does not support that yet.";
+const SAML = "Your university signs in through a web page. Uni VPN cannot do that yet.";
 const GENERIC_STEPS = ["Open your university's {portal} and add a time-based token (TOTP) for this computer.",
   "Copy the line starting with otpauth://, or the letters after secret=.", "Paste it below."];
 let UNIS = null, uni = null, active = -1, detectSeq = 0;
@@ -525,7 +544,7 @@ async function submitSetup() {
                                   secret: needsTotp() ? $("s-totp").value.trim() : "", university: uni.id,
                                   profile: profileOverrides()});
   } catch (e) {
-    r = {ok: false, data: null, text: "uni-vpn is not running. Run: uni-vpn service start"};
+    r = {ok: false, data: null, text: NOT_RUNNING};
   } finally {
     submitting = false;
   }
@@ -549,13 +568,13 @@ async function submitSetup() {
 
 function setupProgress() {
   if (!setupDone || $("step3").hidden) return;
-  if (S.state === "connected") { finish(); return; }
+  if (S.state === "connected") { if (changing) endChange(); else finish(); return; }
   const settled = Date.now() - connectRequested > 1500;
   if (["auth_failed", "keyring"].includes(S.state) && settled) {
     const totp = S.error_kind === "totp";
     setupDone = false;
     step(totp ? "step2" : "step1", totp ? "s-totp" : "s-pw");
-    err(totp ? "s2-err" : "s1-err", clean(S.message));
+    err(totp ? "s2-err" : "s1-err", S.message);
     return;
   }
   if (S.state === "idle" && !S.busy && settled) {
@@ -564,8 +583,8 @@ function setupProgress() {
     post("/api/connect").catch(() => {});
   }
   const stuck = ["offline", "blocked", "error"].includes(S.state);
-  const waiting = S.state === "connecting" && /one-time code/.test(S.message);
-  $("s3-msg").textContent = stuck || waiting ? clean(S.message) : WAITING;
+  const waiting = S.message_id === "waiting_for_code";
+  $("s3-msg").textContent = stuck || waiting ? S.message : WAITING;
   $("s3-skip").hidden = !stuck;
 }
 
@@ -578,7 +597,7 @@ function finish() {
     : "Add the websites that should go through the university under Settings, Websites.";
   step("step4");
 }
-$("s3-skip").onclick = () => { if (setupDone) finish(); };
+$("s3-skip").onclick = () => { if (setupDone) { if (changing) endChange(); else finish(); } };
 $("s4-done").onclick = () => { show("main"); render(); refresh(); };
 
 // --- main and settings -----------------------------------------------------
@@ -588,17 +607,64 @@ $("toggle").onclick = async () => {
   try { await post(on ? "/api/disconnect" : "/api/connect"); } catch (e) { /* the banner says it */ }
   refresh();
 };
-$("fix").onclick = () => {
+$("fix").onclick = async () => {
+  if (S.action === "repair") {
+    $("fix").disabled = true;
+    await send("/api/repair");  // the status says how it goes
+    refresh();
+    return;
+  }
   show("settings");
-  const d = $(S.error_kind === "totp" ? "d-totp" : "d-pw");
+  const d = $(S.action === "totp" ? "d-totp" : "d-pw");
   d.open = true;
   d.querySelector("input").focus();
 };
-$("open-settings").onclick = () => { domainsShown = false; show("settings"); render(); };
+function openSettings() { domainsShown = false; show("settings"); render(); }
+$("open-settings").onclick = openSettings;
+window.addEventListener("hashchange", () => {
+  const target = location.hash.slice(1);
+  if (!S || S.setup_needed || !["main", "settings"].includes(target)) return;
+  if (changing && !submitting) endChange();
+  if (changing) return;
+  if (target === "settings") openSettings(); else { show("main"); render(); }
+});
+
+// Account rows: the assistant again, prefilled, back to Settings when done. Role model: macOS
+// System Settings (a row opens its page, the back arrow returns without saving).
+async function startChange(first) {
+  changing = true;
+  setupDone = setupSent = false;
+  await loadUniversities();
+  const current = UNIS.find((u) => u.id === S.university);
+  if (current) {
+    pick(current);
+  } else {
+    pick(OTHER);
+    $("s-host").value = S.host || "";
+  }
+  $("s-user").value = S.user || "";
+  $("s-pw").value = $("s-totp").value = "";
+  $("s-code").hidden = true;
+  $("step2").querySelector("[type=submit]").disabled = true;
+  for (const id of ["s0-err", "s1-err", "s2-err"]) err(id, "");
+  $("cancel-change").hidden = false;
+  show("setup");
+  step(first);
+}
+function endChange() {
+  changing = setupDone = setupSent = false;
+  clearInterval(codeTimer);
+  $("s-pw").value = $("s-totp").value = "";
+  $("cancel-change").hidden = true;
+  openSettings();
+}
+$("row-uni").onclick = () => startChange("step0");
+$("row-user").onclick = () => startChange("step1");
+$("cancel-change").onclick = () => { if (!submitting) endChange(); };
 $("close-settings").onclick = () => { show("main"); render(); };
 
 async function send(path, body) {
-  try { return await post(path, body); } catch (e) { return {ok: false, data: null, text: "uni-vpn is not running"}; }
+  try { return await post(path, body); } catch (e) { return {ok: false, data: null, text: NOT_RUNNING}; }
 }
 
 function saved(id, r, okText) {

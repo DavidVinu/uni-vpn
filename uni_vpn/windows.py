@@ -211,7 +211,8 @@ def kill_children_with_us() -> bool:
     if not job:
         return False
     info = _JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
-    info.BasicLimitInformation.LimitFlags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    # KILL_ON_JOB_CLOSE, and BREAKAWAY_OK for the installer the Repair button starts (repair.py).
+    info.BasicLimitInformation.LimitFlags = 0x2000 | 0x800
     if not kernel32.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info)):
         kernel32.CloseHandle(job)
         return False

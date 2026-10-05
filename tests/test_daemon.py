@@ -8,7 +8,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from uni_vpn import credentials, daemon as dm
+from uni_vpn import config as config_mod
+from uni_vpn import credentials, daemon as dm, messages
 from uni_vpn.config import Config
 from uni_vpn.tunnel import free_port
 
@@ -240,7 +241,7 @@ class FailureTests(DaemonHarness):
         d = await self.start_daemon()
         await d.request_connect()
         await wait_state(d, dm.State.auth_failed)
-        self.assertIn("uni-vpn log", d.message)
+        self.assertIs(d.message, messages.AUTH_REJECTED)
 
     async def test_tunnel_dies_with_demand_reconnects(self):
         os.environ["FAKE_MODE"] = "exit_after_ready"
@@ -256,7 +257,7 @@ class FailureTests(DaemonHarness):
             await asyncio.sleep(0.05)
         self.assertGreaterEqual(len(self.pw_lines()), 2)
         self.assertIsNotNone(d.last_error)
-        self.assertIn("exit code 1", d.last_error["message"])
+        self.assertIs(d.last_error["message"], messages.CONNECTION_LOST)
 
     async def test_tunnel_dies_without_demand_goes_idle(self):
         os.environ["FAKE_MODE"] = "exit_after_ready"
@@ -270,14 +271,14 @@ class FailureTests(DaemonHarness):
         await wait_state(d, dm.State.idle, timeout=4)
         await asyncio.sleep(0.5)
         self.assertEqual(len(self.pw_lines()), 1)
-        self.assertIn("exit code 1", d.last_error["message"])
+        self.assertIs(d.last_error["message"], messages.CONNECTION_LOST)
 
     async def test_password_missing(self):
         self.password = credentials.PasswordMissing("x")
         d = await self.start_daemon()
         await d.request_connect()
         await wait_state(d, dm.State.keyring)
-        self.assertIn("uni-vpn password", d.message)
+        self.assertIs(d.message, messages.PASSWORD_MISSING)
         self.assertEqual(self.pw_lines(), [])
 
     async def test_totp_secret_reaches_openconnect(self):
@@ -292,7 +293,7 @@ class FailureTests(DaemonHarness):
         d = await self.start_daemon()
         await d.request_connect()
         await wait_state(d, dm.State.keyring)
-        self.assertIn("uni-vpn totp", d.message)
+        self.assertIs(d.message, messages.TOTP_MISSING)
         self.assertEqual(self.pw_lines(), [], "openconnect must not start without a secret")
 
     async def test_set_totp_stores_and_connects(self):
@@ -310,7 +311,7 @@ class FailureTests(DaemonHarness):
         d = await self.start_daemon()
         await d.request_connect()
         await wait_state(d, dm.State.auth_failed)
-        self.assertIn("One-time code", d.message)
+        self.assertIs(d.message, messages.TOTP_REJECTED)
         await asyncio.sleep(0.5)
         self.assertEqual(len(self.pw_lines()), 1, "no automatic second attempt")
 
@@ -496,7 +497,7 @@ class FailureTests(DaemonHarness):
         with mock.patch.object(d, "_elevated", return_value=False):
             await d.request_connect()
             await wait_state(d, dm.State.error)
-        self.assertIn("administrator", d.message)
+        self.assertIs(d.message, messages.NOT_ELEVATED)
         self.assertEqual(self.pw_lines(), [])
 
     async def test_cisco_blocked_then_released(self):
@@ -522,13 +523,111 @@ class FailureTests(DaemonHarness):
         d = await self.start_daemon()
         await d.request_connect()
         await wait_state(d, dm.State.error)
-        self.assertIn("openconnect", d.message)
+        self.assertIs(d.message, messages.PROGRAM_MISSING)
+        self.assertEqual(d.status()["action"], "repair")
 
     async def test_config_error_daemon(self):
         d = await self.start_daemon(config_error="config.toml line 2: broken")
         self.assertEqual(d.state, dm.State.error)
-        self.assertIn("line 2", d.message)
+        self.assertIs(d.message, messages.SETTINGS_BROKEN)
+        self.assertTrue(d.status()["setup_needed"])
         self.assertIsNone(await d.acquire())
+
+
+class SelfRepairTests(DaemonHarness):
+    async def test_port_in_use_is_retried_until_it_is_free(self):
+        import socket
+
+        blocker = socket.socket()
+        blocker.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        blocker.bind(("127.0.0.1", self.cfg.socks_port))
+        blocker.listen()
+        try:
+            d = await self.start_daemon()
+            self.assertIs(d.message, messages.PORT_IN_USE)
+            self.assertEqual(d.state, dm.State.error)
+        finally:
+            blocker.close()
+        await wait_state(d, dm.State.idle)
+        self.assertIs(d.message, messages.NOT_CONNECTED)
+        self.assertTrue(d.forwarder.listening)
+        reader, writer = await self.client()
+        writer.write(b"hello")
+        await writer.drain()
+        self.assertEqual(await asyncio.wait_for(reader.readexactly(5), 4), b"hello")
+        writer.close()
+
+    async def test_setup_after_a_broken_config_keeps_the_old_file(self):
+        cfg_path = Path(tempfile.mkdtemp()) / "config.toml"
+        cfg_path.write_text("user = \"ab1\"\nthis is not toml\n", encoding="utf-8")
+        d = await self.start_daemon(config_error="line 2: broken", config_path=cfg_path)
+        self.assertTrue(d.status()["setup_needed"])
+        await d.complete_setup("cd234", "pw", "base32:GEZDGNBVGY3TQOJQ")
+        self.assertIn("this is not toml", (cfg_path.parent / "config.toml.broken").read_text(encoding="utf-8"))
+        written = config_mod.load(cfg_path)
+        self.assertEqual(written.user, "cd234")
+        # The daemon keeps listening where it did, so the new file names the same ports.
+        self.assertEqual((written.socks_port, written.http_port), (self.cfg.socks_port, self.cfg.http_port))
+        self.assertFalse(d.status()["setup_needed"])
+        await wait_state(d, dm.State.connected)
+
+
+class FakeProcess:
+    def __init__(self):
+        self.code = None
+        self.done = __import__("threading").Event()
+
+    def poll(self):
+        return self.code
+
+    def wait(self):
+        self.done.wait(5)
+        return self.code
+
+    def finish(self, code):
+        self.code = code
+        self.done.set()
+
+
+class RepairTests(DaemonHarness):
+    async def test_repair_runs_the_installer_and_reports_a_failure(self):
+        process = FakeProcess()
+        with mock.patch.object(dm.repair, "start", return_value=process) as start:
+            d = await self.start_daemon()
+            d._set(dm.State.error, messages.PROGRAM_MISSING)
+            self.assertEqual(d.status()["action"], "repair")
+            await d.start_repair()
+            await d.start_repair()  # a second click while it runs starts nothing
+        self.assertEqual(start.call_count, 1)
+        self.assertIs(d.message, messages.REPAIRING)
+        self.assertTrue(d.status()["repairing"])
+        self.assertIsNone(d.status()["action"])
+        process.finish(1)
+        for _ in range(60):
+            if d.message is messages.REPAIR_FAILED:
+                break
+            await asyncio.sleep(0.05)
+        self.assertIs(d.message, messages.REPAIR_FAILED)
+        self.assertFalse(d.status()["repairing"])
+        self.assertEqual(d.status()["action"], "repair")
+
+    async def test_repair_that_cannot_start_says_so(self):
+        with mock.patch.object(dm.repair, "start", side_effect=FileNotFoundError("powershell.exe")):
+            d = await self.start_daemon()
+            d._set(dm.State.error, messages.PROGRAM_MISSING)
+            await d.start_repair()
+        self.assertIs(d.message, messages.REPAIR_FAILED)
+        self.assertEqual(d.status()["action"], "repair")
+
+    async def test_repair_that_succeeds_without_a_restart_clears_the_error(self):
+        process = FakeProcess()
+        with mock.patch.object(dm.repair, "start", return_value=process):
+            d = await self.start_daemon()
+            d._set(dm.State.error, messages.NOT_ELEVATED)
+            await d.start_repair()
+        process.finish(0)
+        await wait_state(d, dm.State.idle)
+        self.assertIs(d.message, messages.NOT_CONNECTED)
 
 
 class ProfileTests(DaemonHarness):
@@ -555,7 +654,7 @@ class ProfileTests(DaemonHarness):
         d = await self.start_daemon()
         await d.request_connect()
         await wait_state(d, dm.State.auth_failed)
-        self.assertIn("browser", d.message)
+        self.assertIs(d.message, messages.SAML_REQUIRED)
         self.assertEqual(self.pw_lines(), [])
         self.assertFalse(self.argsfile.exists())
 
@@ -574,7 +673,7 @@ class ProfileTests(DaemonHarness):
         d = await self.start_daemon()
         await d.request_connect()
         await wait_state(d, dm.State.keyring)
-        self.assertEqual(d.message, "No TOTP secret stored: uni-vpn totp")
+        self.assertEqual(d.message, messages.TOTP_MISSING)
         self.assertEqual(self.pw_lines(), [], "openconnect must not start without a secret")
 
     async def test_totp_append_with_a_malformed_secret_is_a_final_auth_failure(self):
@@ -583,7 +682,7 @@ class ProfileTests(DaemonHarness):
         d = await self.start_daemon()
         await d.request_connect()
         await wait_state(d, dm.State.auth_failed)
-        self.assertEqual(d.message, "TOTP secret unusable, enter it again (uni-vpn totp)")
+        self.assertEqual(d.message, messages.TOTP_UNUSABLE)
         self.assertIsNone(d.tunnel)
         self.assertEqual(self.pw_lines(), [])
 

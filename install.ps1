@@ -1,5 +1,7 @@
 # Install uni-vpn on Windows: Python and OpenConnect (with Wintun) if missing, then "uni-vpn setup".
-# Usage: powershell -ExecutionPolicy Bypass -File install.ps1 [-Uninstall | -Update] [-DryRun] [-NoGui] [-User UNIVERSITY-ID] [-University ID]
+# Usage: powershell -ExecutionPolicy Bypass -File install.ps1 [-Uninstall | -Update | -Repair] [-DryRun] [-NoGui] [-User UNIVERSITY-ID] [-University ID]
+# -Repair: what the app's Repair button runs: installs what is missing, registers the service
+# again and opens no browser.
 # Needs an administrator account: Wintun, the virtual network adapter openconnect uses on
 # Windows, can only be created with administrator rights. The program goes to
 # %ProgramFiles%\uni-vpn: the service runs it elevated, so only administrators may change it.
@@ -7,6 +9,7 @@
 param(
     [switch]$Uninstall,
     [switch]$Update,
+    [switch]$Repair,
     [switch]$DryRun,
     [switch]$NoGui,
     [switch]$NoBrowser,
@@ -111,6 +114,7 @@ function Install-OpenConnect {
 }
 
 $mode = if ($Uninstall) { "uninstall" } elseif ($Update) { "update" } else { "setup" }
+if ($Repair) { $NoBrowser = $true }
 
 if ([Environment]::Is64BitOperatingSystem -eq $false -or $env:PROCESSOR_ARCHITECTURE -eq "ARM64") {
     Write-Host "uni-vpn needs 64-bit Windows on an Intel or AMD processor (OpenConnect has no ARM build)."
@@ -123,8 +127,9 @@ if (-not $DryRun -and -not (Test-Admin)) {
     $arguments = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$PSCommandPath`"", "-ForUser", "`"$env:USERNAME`"")
     if ($Uninstall) { $arguments += "-Uninstall" }
     if ($Update) { $arguments += "-Update" }
+    if ($Repair) { $arguments += "-Repair" }
     if ($NoGui) { $arguments += "-NoGui" }
-    # The browser must not run elevated: this window opens it once the elevated part is done.
+    # The app must not run elevated: this window opens it once the elevated part is done.
     $arguments += "-NoBrowser"
     if ($User) { $arguments += @("-User", "`"$User`"") }
     if ($University) { $arguments += @("-University", "`"$University`"") }
@@ -135,7 +140,7 @@ if (-not $DryRun -and -not (Test-Admin)) {
         Write-Host "Administrator rights are required (Wintun). Run this from an administrator account."
         exit 1
     }
-    if ($process.ExitCode -eq 0 -and $mode -eq "setup" -and -not $NoGui) {
+    if ($process.ExitCode -eq 0 -and $mode -eq "setup" -and -not $NoGui -and -not $Repair) {
         $port = 1081
         $config = Join-Path $env:LOCALAPPDATA "uni-vpn\config.toml"
         if (Test-Path $config) {
@@ -147,8 +152,16 @@ if (-not $DryRun -and -not (Test-Admin)) {
         $query = @()
         if ($User) { $query += "user=$([uri]::EscapeDataString($User))" }
         if ($University) { $query += "university=$([uri]::EscapeDataString($University))" }
-        if ($query.Count -gt 0 -and -not (Test-Path $config)) { $url += "?" + ($query -join "&") }
-        Start-Process $url
+        $prefill = if ($query.Count -gt 0 -and -not (Test-Path $config)) { $query -join "&" } else { "" }
+        $app = Join-Path $AppDir "desktop\Uni VPN.exe"
+        if (Test-Path $app) {
+            $appArgs = @("--port", "$port")
+            if ($prefill) { $appArgs += @("--page", "`"&$prefill`"") }
+            Start-Process -FilePath $app -ArgumentList $appArgs
+        } else {
+            if ($prefill) { $url += "?" + $prefill }
+            Start-Process $url
+        }
     }
     exit $process.ExitCode
 }
@@ -165,7 +178,8 @@ function Copy-App {
     if ([IO.Path]::GetFullPath($Root).TrimEnd("\") -ieq [IO.Path]::GetFullPath($AppDir).TrimEnd("\")) { return }
     if ($DryRun) { Say "would copy uni-vpn to $AppDir"; return }
     Say "copying uni-vpn to $AppDir"
-    & robocopy.exe $Root $AppDir /MIR /XD .git __pycache__ /R:2 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+    # "desktop" holds the app that setup builds; it is not in the download and stays.
+    & robocopy.exe $Root $AppDir /MIR /XD .git __pycache__ desktop /R:2 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "Copying to $AppDir failed (robocopy $LASTEXITCODE)" }
 }
 
@@ -210,7 +224,7 @@ try {
     Write-Host "Installation failed: $($_.Exception.Message)"
     $code = 1
 }
-if ($ForUser) {
+if ($ForUser -and -not ($Repair -and $code -eq 0)) {
     # This window was opened for the elevated run; keep it until the result has been read.
     Read-Host "Press Enter to close"
 }
