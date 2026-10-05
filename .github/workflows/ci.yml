@@ -71,6 +71,40 @@ jobs:
           & $csc /nologo /target:winexe /optimize+ /win32icon:app\windows\uni-vpn.ico "/out:build\Uni VPN.exe" /lib:build /r:Microsoft.Web.WebView2.Core.dll /r:Microsoft.Web.WebView2.WinForms.dll /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll app\windows\UniVpn.cs
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
+  go:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      # LF line endings on Windows too, otherwise gofmt flags every file.
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        shell: bash
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then echo "$unformatted"; exit 1; fi
+      - name: go vet
+        run: go vet ./...
+      - name: go test -race
+        if: runner.os != 'Windows'
+        run: go test -race ./...
+      # The race detector needs cgo and a C toolchain on Windows.
+      - name: go test
+        if: runner.os == 'Windows'
+        run: go test ./...
+      - name: Contract tests against the Go core
+        if: runner.os == 'Linux'
+        run: |
+          go build -o /tmp/uni-vpn-go ./cmd/uni-vpn
+          UNI_VPN_CORE="/tmp/uni-vpn-go daemon" python3 -m unittest tests.contract.test_contract -v
+
   # Clients update themselves from "stable" (uni_vpn/updater.py): every green commit on main
   # moves it forward. Fast-forward only, so a slower older run never moves it back.
   promote:

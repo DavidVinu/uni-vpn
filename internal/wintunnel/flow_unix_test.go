@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DavidVinu/uni-vpn/internal/messages"
 	"github.com/DavidVinu/uni-vpn/internal/tunnel"
 	"github.com/DavidVinu/uni-vpn/internal/tunnel/fakeoc"
 )
@@ -130,7 +131,7 @@ func TestScriptErrorEndsTheAttemptWithItsMessage(t *testing.T) {
 	if !tn.HasExited() || tn.StoppedByUs() || up(tn) {
 		t.Fatal("state")
 	}
-	if v, _ := tn.Classification(); v != (tunnel.Verdict{State: "error", Message: "Tunnel setup failed: netsh add route failed"}) {
+	if v, _ := tn.Classification(); v != (tunnel.Verdict{State: "error", Message: messages.StartFailed.Text}) {
 		t.Fatal(v)
 	}
 }
@@ -242,8 +243,7 @@ func TestSocksPortTakenEndsTheAttempt(t *testing.T) {
 		t.Fatal("ready")
 	}
 	v, _ := tn.Classification()
-	want := "Local proxy port " + strconv.Itoa(tn.Port()) + " not available: "
-	if v.State != "error" || len(v.Message) <= len(want) || v.Message[:len(want)] != want {
+	if v != (tunnel.Verdict{State: "error", Message: messages.ConnectFailed.Text}) {
 		t.Fatal(v)
 	}
 }

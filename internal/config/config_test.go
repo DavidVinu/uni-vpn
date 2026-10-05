@@ -433,3 +433,49 @@ func TestBackoffRejectsBooleans(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestRemoveKeysKeepsTablesAndComments(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("# mine\nhost = \"vpn.example.edu\"  # old\nuser = \"ab1\"\nno_external_auth = true\n"+
+		"[timing]\nhost = \"x\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemoveKeys(path, []string{"host", "no_external_auth", "authgroup"}); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(path); string(data) != "# mine\nuser = \"ab1\"\n[timing]\nhost = \"x\"\n" {
+		t.Fatalf("%q", data)
+	}
+}
+
+func TestRemoveKeysRefusesUnknownForms(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	original := "host = \"\"\"vpn.example.edu\"\"\"\n"
+	if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var ce *ConfigError
+	if err := RemoveKeys(path, []string{"host"}); !errors.As(err, &ce) {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(path); string(data) != original {
+		t.Fatalf("%q", data)
+	}
+}
+
+func TestSetValuesWritesAndReplacesPorts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := WriteInitial(path, "ab1", "heidelberg", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetValues(path, []Setting{{"socks_port", 2080}, {"http_port", 2081}}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SocksPort != 2080 || cfg.HTTPPort != 2081 {
+		t.Fatal(cfg.SocksPort, cfg.HTTPPort)
+	}
+}

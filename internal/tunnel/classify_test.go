@@ -3,7 +3,12 @@ package tunnel
 import (
 	"strings"
 	"testing"
+
+	"github.com/DavidVinu/uni-vpn/internal/messages"
 )
+
+// action is the fix the app offers for a verdict's message.
+func action(v Verdict) string { return messages.ByText(v.Message).Action }
 
 func mustClassify(t *testing.T, line string) Verdict {
 	t.Helper()
@@ -15,13 +20,13 @@ func mustClassify(t *testing.T, line string) Verdict {
 }
 
 func TestMarkers(t *testing.T) {
-	if v := mustClassify(t, "User input required in non-interactive mode"); v.State != "auth_failed" || !strings.Contains(v.Message, "uni-vpn log") {
+	if v := mustClassify(t, "User input required in non-interactive mode"); v.State != "auth_failed" || v.Message != messages.AuthRejected.Text {
 		t.Fatal(v)
 	}
-	if !strings.Contains(mustClassify(t, "Failed to complete authentication").Message, "password") {
+	if action(mustClassify(t, "Failed to complete authentication")) != "password" {
 		t.Fatal()
 	}
-	if !strings.Contains(mustClassify(t, "Error: Server asked us to run CSD hostscan.").Message, "HostScan") {
+	if mustClassify(t, "Error: Server asked us to run CSD hostscan.").Message != messages.HostScanRequired.Text {
 		t.Fatal()
 	}
 	if mustClassify(t, "SAML authentication required").State != "auth_failed" {
@@ -44,18 +49,16 @@ func TestWrongPasswordAndInputRequiredShareMessage(t *testing.T) {
 	if in.State != "auth_failed" || af.State != "auth_failed" || in.Message != af.Message {
 		t.Fatal(in, af)
 	}
-	for _, s := range []string{"password", "uni-vpn password", "uni-vpn log"} {
-		if !strings.Contains(in.Message, s) {
-			t.Fatal(s)
-		}
+	if !strings.Contains(in.Message, "password") || action(in) != "password" {
+		t.Fatal(in)
 	}
 }
 
-func TestInvalidSoftTokenStringNamesTheCommand(t *testing.T) {
+func TestInvalidSoftTokenStringOffersTheSecondFactor(t *testing.T) {
 	// Real openconnect 9.12 with a broken secret file: "Invalid base32 token string",
 	// then "Soft token string is invalid", exit code 1 before any network contact.
 	v := mustClassify(t, "Soft token string is invalid")
-	if v.State != "auth_failed" || !strings.Contains(v.Message, "uni-vpn totp") {
+	if v.State != "auth_failed" || action(v) != "totp" {
 		t.Fatal(v)
 	}
 }
@@ -68,10 +71,8 @@ func TestRejectedSoftTokenNamesTheSecondFactor(t *testing.T) {
 	if v.State != "auth_failed" {
 		t.Fatal(v)
 	}
-	for _, s := range []string{"One-time code", "uni-vpn totp", "clock"} {
-		if !strings.Contains(v.Message, s) {
-			t.Fatal(s)
-		}
+	if !strings.Contains(v.Message, "one-time code") || !strings.Contains(v.Message, "clock") || action(v) != "totp" {
+		t.Fatal(v)
 	}
 }
 
@@ -82,7 +83,8 @@ func TestLoginFailedBeforeOTPMeansPassword(t *testing.T) {
 		t.Fatal()
 	}
 	v, _ := seq.Feed("Login failed.")
-	if v.State != "auth_failed" || !strings.Contains(v.Message, "uni-vpn password") || strings.Contains(v.Message, "One-time code") {
+	if v.State != "auth_failed" || !strings.Contains(v.Message, "password") || action(v) != "password" ||
+		strings.Contains(v.Message, "one-time code") {
 		t.Fatal(v)
 	}
 }
@@ -96,8 +98,7 @@ func TestLoginFailedAfterOTPMeansSecondFactor(t *testing.T) {
 		t.Fatal()
 	}
 	v, _ := seq.Feed("Login failed.")
-	if v.State != "auth_failed" || !strings.Contains(v.Message, "One-time code") ||
-		!strings.Contains(v.Message, "uni-vpn totp") || strings.Contains(v.Message, "uni-vpn password") {
+	if v.State != "auth_failed" || !strings.Contains(v.Message, "one-time code") || action(v) != "totp" {
 		t.Fatal(v)
 	}
 }
@@ -116,11 +117,8 @@ func TestLoginFailedIsWordedByTheSecondFactor(t *testing.T) {
 		t.Fatal()
 	}
 	for _, m := range []string{AppendRejected, DuoRejected} {
-		if !strings.Contains(m, "uni-vpn password") {
+		if messages.ByText(m).Action != "password" {
 			t.Fatal(m)
-		}
-		if strings.Contains(strings.ToLower(m), "totp") {
-			t.Fatal("the page would offer the TOTP fix")
 		}
 	}
 }
@@ -128,11 +126,11 @@ func TestLoginFailedIsWordedByTheSecondFactor(t *testing.T) {
 func TestUnsupportedLoginMethodsSaySoWithoutNamingAUniversity(t *testing.T) {
 	for _, line := range []string{"SAML authentication required", "Opening external browser for authentication"} {
 		v := mustClassify(t, line)
-		if v.State != "auth_failed" || !strings.Contains(v.Message, "browser") || !strings.Contains(v.Message, "not support") {
+		if v.State != "auth_failed" || v.Message != messages.SAMLRequired.Text {
 			t.Fatal(v)
 		}
 	}
-	if !strings.Contains(mustClassify(t, "Error: Server asked us to run CSD hostscan.").Message, "not support") {
+	if !strings.Contains(mustClassify(t, "Error: Server asked us to run CSD hostscan.").Message, "cannot do that yet") {
 		t.Fatal()
 	}
 	for _, m := range Markers {

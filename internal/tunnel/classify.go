@@ -1,6 +1,10 @@
 package tunnel
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/DavidVinu/uni-vpn/internal/messages"
+)
 
 // Measured on 2026-09-08 against Heidelberg's ASA: it rejects a wrong password with "Login failed."
 // before it asks for the OTP. With a wrong one-time code the OTP prompt comes first
@@ -8,21 +12,23 @@ import "strings"
 // again, stdin is closed, "User input required", then "Failed to complete authentication".
 // So the order decides which factor was wrong; without a separate OTP step the profile's
 // second factor decides how to word it.
-const (
-	PasswordRejected = "Login rejected: check your password (uni-vpn password)"
-	TOTPRejected     = "One-time code rejected: check the computer's clock, otherwise re-enter the TOTP secret (uni-vpn totp)"
-	AppendRejected   = "Login rejected: check your password, then the computer's clock (uni-vpn password)"
-	DuoRejected      = "Login rejected: check your password, or the Duo request was denied or not answered in time " +
-		"(uni-vpn password)"
+// The texts come from package messages, like uni_vpn/tunnel.py takes them from messages.py.
+var (
+	PasswordRejected = messages.PasswordRejected.Text
+	TOTPRejected     = messages.TOTPRejected.Text
+	AppendRejected   = messages.AppendRejected.Text
+	DuoRejected      = messages.DuoRejected.Text
 	// Without a preceding "Login failed." the server asked for something uni-vpn cannot fill in.
-	AuthRejected = "Login rejected: check your password (uni-vpn password). " +
-		"If it is correct, the server asked for something uni-vpn does not know, see uni-vpn log"
-	SAMLRequired     = "This university signs in through a browser (SAML), uni-vpn does not support that yet"
-	HostScanRequired = "The server requires HostScan (CSD), uni-vpn does not support that"
-	TOTPUnusable     = "TOTP secret unusable, enter it again (uni-vpn totp)"
-	OTPGenerated     = "Generating OATH TOTP token code"
-	LoginFailed      = "Login failed"
-	TokenPrefix      = "totp-"
+	AuthRejected     = messages.AuthRejected.Text
+	SAMLRequired     = messages.SAMLRequired.Text
+	HostScanRequired = messages.HostScanRequired.Text
+	TOTPUnusable     = messages.TOTPUnusable.Text
+)
+
+const (
+	OTPGenerated = "Generating OATH TOTP token code"
+	LoginFailed  = "Login failed"
+	TokenPrefix  = "totp-"
 	// MaxLine cuts longer output lines (the Python core's asyncio readline limit).
 	MaxLine = 64 * 1024
 )
@@ -59,7 +65,7 @@ var Markers = []Marker{
 	{"SAML", StateAuthFailed, SAMLRequired},
 	{"external browser", StateAuthFailed, SAMLRequired},
 	{"Failed to complete authentication", StateAuthFailed, AuthRejected},
-	{"certificate", StateError, "Certificate problem on the server"},
+	{"certificate", StateError, messages.ServerUntrusted.Text},
 }
 
 // ClassifyLine returns the verdict of the first marker found in line.

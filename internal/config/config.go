@@ -44,9 +44,12 @@ type Config struct {
 	Host        string
 	User        string
 	IdleMinutes float64
-	SocksPort   int
-	HTTPPort    int
-	Useragent   string
+	// IdleMinutesInt: config.toml wrote idle_minutes as an integer, so Python reports it as
+	// an int (15), not as the default float (15.0).
+	IdleMinutesInt bool
+	SocksPort      int
+	HTTPPort       int
+	Useragent      string
 	// Profile (universities.json), each field can be overridden in config.toml
 	University     string
 	UniversityName string
@@ -247,6 +250,8 @@ func (k kind) accepts(v any) bool {
 // number is Python's float(v) for an int or float; a bool counts as 0 or 1, as in Python.
 func number(v any) (float64, bool) {
 	switch v := v.(type) {
+	case int: // values handed to SetValues
+		return float64(v), true
 	case int64:
 		return float64(v), true
 	case float64:
@@ -517,6 +522,7 @@ func (c *Config) setTop(key string, value any) {
 		c.AutoUpdate = value.(bool)
 	case "idle_minutes":
 		c.IdleMinutes, _ = number(value)
+		_, c.IdleMinutesInt = value.(int64)
 	case "socks_port":
 		c.SocksPort = int(value.(int64))
 	case "http_port":
@@ -557,13 +563,18 @@ http_port = 1081         # status page http://127.0.0.1:1081
 # ocproxy = "/usr/bin/ocproxy"
 `
 
-// TOMLValue writes a value for config.toml: a bool as is, anything else as a string.
+// TOMLValue writes a value for config.toml: a bool or an int as is, anything else as a string.
 func TOMLValue(value any) string {
-	if b, ok := value.(bool); ok {
-		if b {
+	switch v := value.(type) {
+	case bool:
+		if v {
 			return "true"
 		}
 		return "false"
+	case int:
+		return strconv.Itoa(v)
+	case int64:
+		return strconv.FormatInt(v, 10)
 	}
 	s, ok := value.(string)
 	if !ok {
@@ -657,8 +668,8 @@ func SetUser(path, user string) error {
 	return SetValues(path, []Setting{{"user", user}})
 }
 
-// A basic ("...") or literal ('...') string or a boolean, as written by hand.
-const valueRE = `(?:"(?:[^"\\\n]|\\.)*"|'[^'\n]*'|true|false)`
+// A basic ("...") or literal ('...') string, a boolean or an integer, as written by hand.
+const valueRE = `(?:"(?:[^"\\\n]|\\.)*"|'[^'\n]*'|true|false|[0-9]+\b)`
 
 // pyEqual is Python's == between a decoded TOML value and a str or bool.
 func pyEqual(a, b any) bool {
@@ -709,6 +720,43 @@ func SetValues(path string, values []Setting) error {
 			return &ConfigError{Message: fmt.Sprintf("could not change %s in %s, please edit it by hand",
 				strings.Join(keys, ", "), path)}
 		}
+	}
+	if updated != text {
+		return writeText(path, updated)
+	}
+	return nil
+}
+
+var tableStart = regexp.MustCompile(`(?m)^[ \t]*\[`)
+
+// RemoveKeys deletes top-level keys from an existing config.toml, keeping everything else.
+// Used when the university changes: overrides that belonged to the old profile must not
+// stay behind.
+func RemoveKeys(path string, keys []string) error {
+	text, err := readText(path)
+	if err != nil {
+		return err
+	}
+	head, rest := text, ""
+	if loc := tableStart.FindStringIndex(text); loc != nil {
+		head, rest = text[:loc[0]], text[loc[0]:]
+	}
+	for _, key := range keys {
+		re := regexp.MustCompile(`(?m)^[ \t]*` + regexp.QuoteMeta(key) + `[ \t]*=[ \t]*` + valueRE +
+			`[ \t]*(?:#[^\n]*)?(?:\n|$)`)
+		head = re.ReplaceAllLiteralString(head, "")
+	}
+	updated := head + rest
+	written, _, err := decode(updated)
+	broken := err != nil
+	for _, key := range keys {
+		if _, ok := written[key]; ok {
+			broken = true
+		}
+	}
+	if broken {
+		return &ConfigError{Message: fmt.Sprintf("could not remove %s from %s, please edit it by hand",
+			strings.Join(keys, ", "), path)}
 	}
 	if updated != text {
 		return writeText(path, updated)

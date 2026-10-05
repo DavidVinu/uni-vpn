@@ -163,7 +163,7 @@ func TestRejectedSoftTokenIsClassified(t *testing.T) {
 		t.Fatal(code, ok)
 	}
 	v, ok := tn.Classification()
-	if !ok || v.State != "auth_failed" || !strings.Contains(v.Message, "One-time code") || strings.Contains(v.Message, "uni-vpn password") {
+	if !ok || v != (Verdict{"auth_failed", TOTPRejected}) {
 		t.Fatal(v)
 	}
 	at := tn.OTPGeneratedAt()
@@ -263,7 +263,7 @@ func TestAuthFail(t *testing.T) {
 		t.Fatal(code)
 	}
 	v, _ := tn.Classification()
-	if v.State != "auth_failed" || !strings.Contains(v.Message, "uni-vpn password") || strings.Contains(v.Message, "One-time code") {
+	if v != (Verdict{"auth_failed", PasswordRejected}) {
 		t.Fatal(v)
 	}
 	if !slices.ContainsFunc(tn.StderrTail(), func(l string) bool { return strings.Contains(l, "Failed to complete") }) {
@@ -281,7 +281,7 @@ func TestInputRequiredMessage(t *testing.T) {
 	}
 	v, _ := tn.Classification()
 	// Finding 6: a wrong password produces the same sequence of lines.
-	if v.State != "auth_failed" || !strings.Contains(v.Message, "uni-vpn log") || !strings.Contains(v.Message, "password") {
+	if v != (Verdict{"auth_failed", AuthRejected}) || !strings.Contains(v.Message, "password") {
 		t.Fatal(v)
 	}
 }

@@ -23,6 +23,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/DavidVinu/uni-vpn/internal/messages"
 	"github.com/DavidVinu/uni-vpn/internal/platform"
 	"github.com/DavidVinu/uni-vpn/internal/tunnel"
 )
@@ -278,7 +279,7 @@ func (w *Tunnel) serveWhenUp(ctx context.Context) {
 		} else if e != "" {
 			// The script could not set up the adapter; without it nothing would work.
 			w.logf(slog.LevelError, "Tunnel setup failed: %s", e)
-			w.SetClassification(tunnel.Verdict{State: tunnel.StateError, Message: "Tunnel setup failed: " + e})
+			w.SetClassification(tunnel.Verdict{State: tunnel.StateError, Message: messages.StartFailed.Text})
 			w.endProcess(w.Cfg.StopGrace)
 			return
 		}
@@ -290,8 +291,7 @@ func (w *Tunnel) serveWhenUp(ctx context.Context) {
 					return
 				}
 				w.logf(slog.LevelError, "SOCKS server on port %d failed: %v", port, err)
-				w.SetClassification(tunnel.Verdict{State: tunnel.StateError,
-					Message: fmt.Sprintf("Local proxy port %d not available: %v", port, err)})
+				w.SetClassification(tunnel.Verdict{State: tunnel.StateError, Message: messages.ConnectFailed.Text})
 				w.endProcess(w.Cfg.StopGrace)
 				return
 			}
