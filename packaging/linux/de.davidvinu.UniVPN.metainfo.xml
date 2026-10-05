@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>de.davidvinu.UniVPN</id>
+  <name>Uni VPN</name>
+  <summary>Your university's VPN, only for university websites</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>AGPL-3.0-or-later</project_license>
+  <description>
+    <p>Opens your university's websites through its VPN when you need them. Everything else stays on your normal connection.</p>
+  </description>
+  <launchable type="desktop-id">de.davidvinu.UniVPN.desktop</launchable>
+  <url type="homepage">https://github.com/DavidVinu/uni-vpn</url>
+  <categories>
+    <category>Network</category>
+  </categories>
+</component>

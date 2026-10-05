@@ -178,6 +178,10 @@ class Tunnel:
             # "exec" so that dash does not leave an sh running next to ocproxy.
             f"--script=exec {shlex.quote(self.wrapper)} {port}",
         ]
+        if pf.IS_MACOS and pf.is_bundled(self.openconnect) and os.path.isfile(pf.MACOS_CA_FILE):
+            # The .pkg's openconnect was built against Homebrew's certificate file, which a Mac
+            # without Homebrew does not have; macOS keeps the same certificates here.
+            cmd.append(f"--cafile={pf.MACOS_CA_FILE}")
         return cmd + self.token_args() + [self.cfg.host]
 
     def _write_token_file(self, totp: str) -> None:

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+  <title>Uni VPN</title>
+  <options customize="never" require-scripts="false" hostArchitectures="arm64,x86_64"/>
+  <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
+  <allowed-os-versions>
+    <os-version min="14.0"/>
+  </allowed-os-versions>
+  <choices-outline>
+    <line choice="de.davidvinu.uni-vpn"/>
+  </choices-outline>
+  <choice id="de.davidvinu.uni-vpn" visible="false">
+    <pkg-ref id="de.davidvinu.uni-vpn"/>
+  </choice>
+  <pkg-ref id="de.davidvinu.uni-vpn" version="@VERSION@" onConclusion="none">uni-vpn-component.pkg</pkg-ref>
+</installer-gui-script>

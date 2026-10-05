@@ -19,7 +19,9 @@ jobs:
       - name: Unit tests
         run: python3 -m unittest discover -s tests -t . -v
       - name: Shell syntax
-        run: bash -n install.sh get.sh
+        run: |
+          bash -n install.sh get.sh packaging/stage-app.sh packaging/macos/*.sh packaging/linux/build.sh
+          sh -n packaging/uni-vpn-open packaging/macos/scripts/postinstall
       - name: Installer dry run
         run: ./install.sh --dry-run --user citest
       - name: Check launchd plist
@@ -91,3 +93,295 @@ jobs:
           else
             git push origin "HEAD:refs/heads/stable"
           fi
+
+  # --- Installers: built on every push, published from main once the tests pass ------------
+  # Download links: https://github.com/DavidVinu/uni-vpn/releases/latest/download/<file>
+
+  macos-runtime:
+    strategy:
+      fail-fast: false
+      matrix:
+        # Homebrew's openconnect needs the macOS its bottle was built for, or newer.
+        runner: [macos-14, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build openconnect, ocproxy and Python for this processor
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+        run: packaging/macos/build-runtime.sh runtime
+      - name: Works without Homebrew's certificate file
+        run: |
+          arch=$(uname -m)
+          # The users' Macs have no Homebrew: hide the certificate file GnuTLS was built with.
+          store=$(strings runtime/$arch/lib/libgnutls*.dylib | grep -m 1 -E '^/.*/(cert|ca-bundle)\.pem$' || true)
+          echo "built-in certificate file: ${store:-none}"
+          if [ -n "$store" ] && [ -e "$store" ]; then sudo mv "$store" "$store.hidden"; fi
+          out=$(runtime/$arch/bin/openconnect --cafile=/etc/ssl/cert.pem --non-inter --authenticate \
+            --protocol=anyconnect vpn-ac.uni-heidelberg.de </dev/null 2>&1 || true)
+          echo "$out" | tail -n 5
+          if echo "$out" | grep -qi "certificate.*fail\|verify failed"; then exit 1; fi
+          echo "$out" | grep -q "Connected to" || { echo "openconnect did not reach the gateway"; exit 1; }
+          env -i SSL_CERT_FILE=/etc/ssl/cert.pem runtime/$arch/python/bin/python3 -I -c \
+            'import urllib.request; urllib.request.urlopen("https://codeload.github.com/DavidVinu/uni-vpn/zip/main", timeout=30)'
+      # As a tar: artifacts lose the executable flag and links otherwise.
+      - run: tar -czf runtime-$(uname -m).tar.gz -C runtime .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-runtime-${{ matrix.runner }}
+          path: runtime-*.tar.gz
+          retention-days: 3
+
+  macos-pkg:
+    needs: macos-runtime
+    runs-on: macos-14
+    timeout-minutes: 30
+    env:
+      MACOS_CERTIFICATES_P12: ${{ secrets.MACOS_CERTIFICATES_P12 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: macos-runtime-*
+          path: runtime-tar
+          merge-multiple: true
+      - run: mkdir runtime && for f in runtime-tar/*.tar.gz; do tar -xzf "$f" -C runtime; done && ls -l runtime/*/python/bin/python3
+      # Switches on by itself once the Apple Developer secrets exist (see docs/superpowers/specs).
+      - name: Signing keychain
+        if: env.MACOS_CERTIFICATES_P12 != ''
+        env:
+          MACOS_CERTIFICATES_PASSWORD: ${{ secrets.MACOS_CERTIFICATES_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          security create-keychain -p ci "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p ci "$keychain"
+          echo "$MACOS_CERTIFICATES_P12" | base64 --decode > "$RUNNER_TEMP/certificates.p12"
+          security import "$RUNNER_TEMP/certificates.p12" -k "$keychain" -P "$MACOS_CERTIFICATES_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/productbuild
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci "$keychain"
+          security list-keychains -d user -s "$keychain" login.keychain
+          xcrun notarytool store-credentials uni-vpn --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" --keychain "$keychain"
+          {
+            echo "MACOS_APP_IDENTITY=Developer ID Application"
+            echo "MACOS_INSTALLER_IDENTITY=Developer ID Installer"
+            echo "MACOS_NOTARY_PROFILE=uni-vpn"
+          } >> "$GITHUB_ENV"
+      - name: Build uni-vpn.pkg
+        run: packaging/macos/build-pkg.sh runtime "0.1.${{ github.run_number }}" uni-vpn.pkg
+      - name: Install it like a user would
+        run: |
+          sudo installer -pkg uni-vpn.pkg -target / </dev/null &
+          pid=$!
+          for i in $(seq 240); do kill -0 $pid 2>/dev/null || break; sleep 1; done
+          if kill -0 $pid 2>/dev/null; then
+            echo "The installer did not finish within 4 minutes"
+            ps -axo pid,ppid,etime,command | grep -iE "uni|python|installer|launchctl|sudo|osascript|lsregister|open" | grep -v grep
+            cat "$HOME/Library/Logs/uni-vpn/setup.log" || true
+            sudo tail -n 40 /var/log/install.log
+            exit 1
+          fi
+          wait $pid
+          cat "$HOME/Library/Logs/uni-vpn/setup.log" || true
+          for i in $(seq 30); do curl -fsS http://127.0.0.1:1081/status.json && break; sleep 1; done
+          curl -fsS http://127.0.0.1:1081/status.json >/dev/null
+          grep -q "/Applications/Uni VPN.app/Contents/Resources/" "$HOME/Library/LaunchAgents/de.davidvinu.uni-vpn.plist"
+          grep -q SSL_CERT_FILE "$HOME/Library/LaunchAgents/de.davidvinu.uni-vpn.plist"
+          grep -q "/Applications/Uni VPN.app/Contents/MacOS/Uni VPN" "$HOME/Library/LaunchAgents/de.davidvinu.uni-vpn.app.plist"
+          lipo -archs "/Applications/Uni VPN.app/Contents/MacOS/Uni VPN"
+          test -f "$HOME/Library/Application Support/uni-vpn/app/uni_vpn/__init__.py"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-macos
+          path: uni-vpn.pkg
+          retention-days: 7
+
+  linux-packages:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: nfpm
+        run: |
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.43.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Build uni-vpn.deb and uni-vpn.rpm
+        run: packaging/linux/build.sh "0.1.${{ github.run_number }}" out
+      - name: Install the .deb like a user would
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ./out/uni-vpn.deb
+          desktop-file-validate /usr/share/applications/uni-vpn.desktop || true
+          sudo loginctl enable-linger "$USER"
+          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          for i in $(seq 20); do systemctl --user show-environment >/dev/null 2>&1 && break; sleep 1; done
+          # What the app menu entry runs; no screen here, so the assistant is not opened.
+          DISPLAY=:99 /usr/share/uni-vpn/uni-vpn-open || { cat ~/.local/state/uni-vpn/setup.log; exit 1; }
+          cat ~/.local/state/uni-vpn/setup.log
+          curl -fsS http://127.0.0.1:1081/status.json >/dev/null
+          test -f ~/.local/share/uni-vpn/app/.commit
+      - name: Install the .rpm on Fedora
+        run: |
+          docker run --rm -v "$PWD/out:/out" fedora:latest sh -c \
+            'dnf install -y -q /out/uni-vpn.rpm && python3 -I /usr/share/uni-vpn/app/bin/uni-vpn --help >/dev/null'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-linux
+          path: out/uni-vpn.*
+          retention-days: 7
+
+  windows-openconnect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container: fedora:42
+    steps:
+      - uses: actions/checkout@v4
+      - run: packaging/windows/build-openconnect.sh openconnect-win64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openconnect-win64
+          path: openconnect-win64
+          retention-days: 3
+
+  windows-installer:
+    needs: windows-openconnect
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inno Setup
+        shell: powershell
+        run: |
+          if (-not (Get-Command iscc.exe -ErrorAction SilentlyContinue)) {
+            if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress | Out-Null }
+            Add-Content $env:GITHUB_PATH "${env:ProgramFiles(x86)}\Inno Setup 6"
+          }
+      - uses: actions/download-artifact@v4
+        with:
+          name: openconnect-win64
+          path: openconnect-win64
+      # Runs with nothing else on PATH and checks the gateway's certificate against Windows' own.
+      - name: openconnect.exe reaches a university gateway
+        shell: bash
+        run: |
+          out=$(env PATH=/c/Windows/System32 openconnect-win64/openconnect.exe --non-inter --authenticate \
+            --protocol=anyconnect vpn-ac.uni-heidelberg.de </dev/null 2>&1 || true)
+          echo "$out" | tail -n 5
+          if echo "$out" | grep -qi "certificate.*fail\|verify failed"; then exit 1; fi
+          echo "$out" | grep -q "Connected to" || { echo "openconnect did not reach the gateway"; exit 1; }
+      - name: Build uni-vpn-setup.exe
+        shell: powershell
+        run: |
+          & "$env:ProgramFiles\Git\bin\bash.exe" packaging/stage-app.sh stage
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          # The app window, ready built: users need no compiler and no SDK download.
+          python -c "import sys; sys.path.insert(0, 'stage'); from uni_vpn import desktop; sys.exit(desktop.build_windows_app())"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          New-Item -ItemType File -Path "stage\desktop\.prebuilt" | Out-Null
+          Copy-Item -Recurse openconnect-win64 stage\openconnect
+          New-Item -ItemType Directory -Force out | Out-Null
+          Compress-Archive -Path openconnect-win64\* -DestinationPath out\uni-vpn-openconnect-win64.zip
+          iscc.exe /Q "/DAppVersion=0.1.${{ github.run_number }}" "/DSourceDir=$PWD\stage" "/DOutputDir=$PWD\out" packaging\windows\uni-vpn.iss
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      # Switches on by itself once the Azure Trusted Signing secrets exist (see docs/superpowers/specs).
+      - name: Sign
+        if: env.AZURE_CLIENT_ID != ''
+        uses: azure/trusted-signing-action@v0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_SIGNING_PROFILE }}
+          files-folder: out
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+      - name: Install it like a user would
+        shell: powershell
+        run: |
+          $process = Start-Process -FilePath out\uni-vpn-setup.exe -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/LOG=install-setup.log" -PassThru
+          if (-not $process.WaitForExit(300000)) {
+            Write-Host "The installer did not finish within 5 minutes"
+            Get-CimInstance Win32_Process | Where-Object { $_.Name -match "uni|python|powershell|cmd|robocopy|msiexec|openconnect|schtasks|setup|explorer|curl|csc" } |
+              Format-Table ProcessId, ParentProcessId, CommandLine -AutoSize -Wrap | Out-String -Width 400 | Write-Host
+            Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\install.log" -ErrorAction SilentlyContinue
+            Get-Content install-setup.log -Tail 30 -ErrorAction SilentlyContinue
+            exit 1
+          }
+          Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\install.log" -ErrorAction SilentlyContinue
+          if ($process.ExitCode -ne 0) { Get-Content install-setup.log; exit 1 }
+          $ok = $false
+          foreach ($i in 1..30) {
+            try { Invoke-WebRequest -UseBasicParsing http://127.0.0.1:1081/status.json | Out-Null; $ok = $true; break } catch { Start-Sleep 1 }
+          }
+          if (-not $ok) {
+            Get-ChildItem "$env:ProgramFiles", "${env:ProgramFiles(x86)}" | Format-Table -AutoSize | Out-String | Write-Host
+            Get-ChildItem "$env:ProgramFiles", "${env:ProgramFiles(x86)}" -Recurse -Depth 2 -Filter "openconnect*.exe" -ErrorAction SilentlyContinue | ForEach-Object FullName
+            throw "the service did not start"
+          }
+          if (-not (Test-Path "$env:ProgramFiles\uni-vpn\.commit")) { throw ".commit is missing" }
+          if (-not (Test-Path "$env:ProgramFiles\uni-vpn\python\pythonw.exe")) { throw "Python is not in uni-vpn's folder" }
+          if (-not (Test-Path "$env:ProgramFiles\uni-vpn\openconnect\wintun.dll")) { throw "Wintun is missing" }
+          if (-not (Get-Process "Uni VPN" -ErrorAction SilentlyContinue)) { Write-Host "note: the tray app is not running" }
+          $lnk = Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter "Uni VPN.lnk"
+          if (-not $lnk) { throw "no Start menu entry" }
+      - name: Uninstall it like a user would
+        shell: powershell
+        run: |
+          $process = Start-Process -FilePath "$env:ProgramFiles\uni-vpn\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES" -Wait -PassThru
+          Start-Sleep 5
+          if (Test-Path "$env:ProgramFiles\uni-vpn\uni_vpn") { throw "files are left in Program Files" }
+          if (Get-ScheduledTask -TaskName uni-vpn -ErrorAction SilentlyContinue) { throw "the task is still registered" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-windows
+          path: |
+            out/uni-vpn-setup.exe
+            out/uni-vpn-openconnect-win64.zip
+          retention-days: 7
+
+  publish:
+    needs: [promote, macos-pkg, linux-packages, windows-installer]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency: publish-installers
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: installer-*
+          path: out
+          merge-multiple: true
+      # One release whose files are always the newest green main, like the "stable" branch.
+      - name: Replace the files of the "latest" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A slower older run must not replace newer files.
+          git fetch --quiet origin main
+          if [ "$(git rev-parse FETCH_HEAD)" != "$GITHUB_SHA" ] && git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD; then
+            echo "main has moved on, the newer run publishes"; exit 0
+          fi
+          git tag -f latest "$GITHUB_SHA"
+          git push -f origin refs/tags/latest
+          if ! gh release view latest >/dev/null 2>&1; then
+            gh release create latest --title "Uni VPN" --latest \
+              --notes "Download the file for your computer and open it: uni-vpn.pkg (Mac), uni-vpn-setup.exe (Windows), uni-vpn.deb (Ubuntu, Debian, Mint) or uni-vpn.rpm (Fedora)."
+          fi
+          # uni-vpn-openconnect-win64.zip: what install.ps1 downloads when run without the installer.
+          gh release upload latest out/uni-vpn.pkg out/uni-vpn-setup.exe out/uni-vpn.deb out/uni-vpn.rpm \
+            out/uni-vpn-openconnect-win64.zip --clobber
