@@ -3,10 +3,11 @@ import json
 import time
 
 from uni_vpn import daemon as dm
-from uni_vpn import credentials, pac, totp
+from uni_vpn import config, credentials, detect, pac, totp
 from uni_vpn.httpapi import allowed_origin
 
 from tests.test_daemon import DaemonHarness, wait_state
+from tests.test_detect import fixture
 
 
 async def http(port, method, path, headers=None, body=b""):
@@ -330,6 +331,104 @@ class SetupTests(DaemonHarness):
         self.assertEqual(d.status()["error_kind"], "password")
         d._set(dm.State.idle, "Not connected")
         self.assertIsNone(d.status()["error_kind"])
+
+
+class UniversitySetupTests(SetupTests):
+    async def post_setup(self, body):
+        status, _, payload = await http(self.cfg.http_port, "POST", "/api/setup", self.HEADERS, json.dumps(body).encode())
+        return status, json.loads(payload)
+
+    async def test_university_without_totp_needs_no_secret(self):
+        self.totp = credentials.TotpMissing("x")
+        d = await self.start_setup_daemon()
+        status, data = await self.post_setup({"user": "ab123", "password": "pw", "university": "bonn"})
+        self.assertEqual(status, 200, data)
+        self.assertIsNone(data["code"])
+        self.assertIn('university = "bonn"', self.cfg_path.read_text())
+        self.assertEqual(self.stored, ["pw"])
+        self.assertEqual(self.stored_totp, [])
+        self.assertEqual((d.cfg.host, d.cfg.mfa, d.cfg.university_name), ("unibn-vpn.uni-bonn.de", "none", "University of Bonn"))
+        await wait_state(d, dm.State.connected)
+
+    async def test_unlisted_university_writes_its_profile(self):
+        self.totp = credentials.TotpMissing("x")
+        d = await self.start_setup_daemon()
+        profile = {"host": "VPN.Example.edu", "usergroup": "staff", "authgroup": "Staff (Split)", "mfa": "none"}
+        status, data = await self.post_setup({"user": "ab123", "password": "pw", "secret": "", "university": "other",
+                                              "profile": profile})
+        self.assertEqual(status, 200, data)
+        cfg = config.load(self.cfg_path)
+        self.assertEqual((cfg.university, cfg.host, cfg.usergroup, cfg.authgroup, cfg.mfa),
+                         ("other", "vpn.example.edu", "staff", "Staff (Split)", "none"))
+        self.assertEqual(d.cfg.host, "vpn.example.edu")
+        await wait_state(d, dm.State.connected)
+
+    async def test_errors_name_the_university_step(self):
+        await self.start_setup_daemon()
+        for body, field in (({"university": "fu-berlin"}, "university"),
+                            ({"university": "nowhere"}, "university"),
+                            ({"university": "other", "profile": {}}, "host"),
+                            ({"university": "other", "profile": {"host": "vpn.example.edu", "mfa": "sms"}}, "mfa"),
+                            ({"university": "heidelberg"}, "totp")):
+            status, data = await self.post_setup({"user": "ab123", "password": "pw", **body})
+            self.assertEqual((status, data["field"]), (400, field), body)
+        self.assertIn("browser", (await self.post_setup({"user": "ab1", "password": "pw", "university": "fu-berlin"}))[1]["error"])
+        self.assertFalse(self.cfg_path.exists())
+        self.assertEqual(self.stored, [])
+
+    async def test_user_with_a_realm_is_accepted(self):
+        self.totp = credentials.TotpMissing("x")
+        await self.start_setup_daemon()
+        status, data = await self.post_setup({"user": "st1@stud.uni-stuttgart.de", "password": "pw", "university": "stuttgart"})
+        self.assertEqual(status, 200, data)
+        self.assertEqual(config.load(self.cfg_path).login_name, "st1@stud.uni-stuttgart.de")
+
+
+class DetectTests(DaemonHarness):
+    HEADERS = {"X-Uni-VPN": "1", "Content-Type": "application/json"}
+
+    async def test_universities_json_lists_the_registry_without_notes(self):
+        await self.start_daemon()
+        status, _, payload = await http(self.cfg.http_port, "GET", "/universities.json")
+        self.assertEqual(status, 200)
+        data = json.loads(payload)
+        self.assertEqual(data["default"], "heidelberg")
+        heidelberg = next(u for u in data["universities"] if u["id"] == "heidelberg")
+        self.assertEqual(heidelberg["mfa_portal_url"], "https://mfa.uni-heidelberg.de/")
+        self.assertFalse([u for u in data["universities"] if "notes" in u])
+        self.assertIn("fu-berlin", [u["id"] for u in data["universities"]])
+
+    async def test_detect_runs_the_probe_and_returns_the_suggestion(self):
+        d = await self.start_daemon()
+        calls = []
+
+        def fake(host, usergroup="", group=""):
+            calls.append((host, usergroup, group))
+            return detect.parse_reply(fixture("bremen.xml"), host, usergroup)
+
+        d.http.detector = fake
+        body = json.dumps({"host": "https://VPN.uni-bremen.de/", "group": "Tunnel-Uni-Bremen"}).encode()
+        status, _, payload = await http(self.cfg.http_port, "POST", "/api/detect", self.HEADERS, body)
+        self.assertEqual(status, 200, payload)
+        data = json.loads(payload)
+        self.assertEqual(calls, [("vpn.uni-bremen.de", "", "Tunnel-Uni-Bremen")])
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["groups"], ["Tunnel-All-Traffic", "Tunnel-Uni-Bremen"])
+        self.assertEqual(data["suggestion"]["mfa"], "totp_field")
+
+    async def test_detect_refuses_bad_input_without_probing(self):
+        d = await self.start_daemon()
+        d.http.detector = lambda *a: self.fail("no probe for invalid input")
+        for body, status_expected in ((b'{"host": "not a host"}', 400), (b'{"host": 5}', 400), (b"[]", 400),
+                                      (b'{"host": "vpn.example.edu", "group": "a\nb"}', 400)):
+            status, _, _ = await http(self.cfg.http_port, "POST", "/api/detect", self.HEADERS, body)
+            self.assertEqual(status, status_expected, body)
+
+    async def test_detect_needs_csrf_header(self):
+        await self.start_daemon()
+        status, _, _ = await http(self.cfg.http_port, "POST", "/api/detect", {"Content-Type": "application/json"},
+                                  b'{"host": "vpn.example.edu"}')
+        self.assertEqual(status, 403)
 
 
 class PacTests(DaemonHarness):
