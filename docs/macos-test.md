@@ -1,25 +1,33 @@
-# macOS-Smoke-Test (Checkliste fuer eine Person mit Mac)
+# macOS smoke test (checklist for someone with a Mac)
 
-Bis diese Liste einmal komplett durchlaufen wurde, gilt macOS als experimentell.
+Until this list has been run through completely once, macOS counts as experimental.
 
-Umgebung notieren: macOS-Version, Chip, Homebrew-Version, Chrome- und Firefox-Version.
+Record the environment: macOS version, chip, Homebrew version, Chrome and Firefox version.
 
-1. Frisches Benutzerkonto oder zumindest kein vorhandenes `~/.config/uni-vpn`.
-2. Homebrew nach https://brew.sh installieren.
-3. `git clone https://github.com/DavidVinu/uni-vpn.git ~/uni-vpn && ~/uni-vpn/install.sh`
-   Erwartung: fragt Uni-ID und Passwort, zeigt `[OK]` fuer Python, openconnect, ocproxy, Dienst,
-   Ports, Keyring. Notieren, ob macOS einen Dialog zeigt (Anmeldeobjekt, Firewall, Schluesselbund).
-4. `uni-vpn status` zeigt `idle`. `launchctl print gui/$(id -u)/de.davidvinu.uni-vpn` zeigt
+1. Fresh user account, or at least no existing `~/.config/uni-vpn`.
+2. Do not install anything beforehand. If Homebrew is missing, the installer offers to install it
+   itself ("Install Homebrew now? It asks for your Mac password."). Note whether it was offered.
+3. `curl -fsSL https://raw.githubusercontent.com/DavidVinu/uni-vpn/main/get.sh | bash`
+   (or `./install.sh` in a clone).
+   Expectation: installs Homebrew if accepted, then openconnect and ocproxy, sets up the service
+   and the proxy rule, and opens the browser assistant at http://127.0.0.1:1081/: university ID
+   and password, then the TOTP secret with a live check code, then "All set". `uni-vpn doctor`
+   afterwards shows `[OK]` for Python, openconnect, ocproxy, service, ports, keyring, second factor, proxy rule.
+   Note every dialog macOS shows (Mac password for Homebrew, Command Line Tools, login item,
+   firewall, keychain).
+4. `uni-vpn status` shows `idle`. `launchctl print gui/$(id -u)/de.davidvinu.uni-vpn` shows
    `state = running`.
-5. `curl -s --socks5-hostname 127.0.0.1:1080 https://ifconfig.me` liefert eine Uni-Adresse.
-   Falls ein Schluesselbund-Dialog erscheint: "Immer erlauben" waehlen und notieren.
-6. Chrome neu starten, `https://sogo.uni-heidelberg.de` oeffnen, Statusseite `http://127.0.0.1:1081/` zeigt `connected`; `https://ifconfig.me` zeigt die normale Adresse. Systemeinstellungen > Netzwerk > WLAN > Details > Proxies: "Automatische Proxy-Konfiguration" zeigt auf `http://127.0.0.1:1081/proxy.pac`.
-7. Firefox neu starten (Einstellungen > Netzwerk: "Proxy-Einstellungen des Systems verwenden"), dasselbe.
-8. Bildschirm sperren, entsperren, Seite neu laden: geht es ohne Dialog?
-9. Neustart des Macs, Browser oeffnen, Seite laden: verbindet von selbst?
-10. `~/uni-vpn/install.sh --uninstall`: Dienst weg (`launchctl print` meldet Fehler), Dateien weg.
+5. `curl -s --socks5-hostname 127.0.0.1:1080 https://ifconfig.me` returns a university address.
+   If a keychain dialog appears: choose "Always Allow" and note it.
+6. Restart Chrome, open `https://sogo.uni-heidelberg.de`, status page `http://127.0.0.1:1081/` shows `connected`; `https://ifconfig.me` shows the normal address. System Settings > Network > Wi-Fi > Details > Proxies: "Automatic proxy configuration" points to `http://127.0.0.1:1081/proxy.pac`.
+7. Restart Firefox (Settings > Network: "Use system proxy settings"), the same.
+8. Lock the screen, unlock, reload the page: does it work without a dialog?
+9. Restart the Mac, open the browser, load a page: does it connect on its own?
+10. `./install.sh --uninstall` (in the folder the installer ran from; after the one-liner that is
+    `~/Library/Application Support/uni-vpn/app`): service gone (`launchctl print` reports an
+    error), files gone.
 
-Ergebnis als Issue oder Pull Request mit ausgefuellter Tabelle:
+Report the result as an issue or pull request with the table filled in:
 
-| Schritt | Ergebnis | Dialoge |
+| Step | Result | Dialogs |
 |---|---|---|

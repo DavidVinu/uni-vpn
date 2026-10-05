@@ -1,7 +1,7 @@
-"""Domainliste und PAC-Datei (Proxy Auto-Config) fuer die Browser.
+"""Domain list and PAC file (Proxy Auto-Config) for the browsers.
 
-Die Browser holen sich die Regel vom Daemon (`/proxy.pac`): gelistete Hosts und ihre
-Subdomains gehen ueber SOCKS5 127.0.0.1:<socks_port>, alles andere direkt.
+The browsers fetch the rule from the daemon (`/proxy.pac`): listed hosts and their
+subdomains go via SOCKS5 127.0.0.1:<socks_port>, everything else direct.
 """
 
 from __future__ import annotations
@@ -13,13 +13,13 @@ from pathlib import Path
 DEFAULT_DOMAINS = [
     "sogo.uni-heidelberg.de",
     "elearning-med.uni-heidelberg.de",
-    # elearning-med bindet von dort matomo.js ein; der Host ist nur im Uni-Netz erreichbar
-    # und der Browser wartet sonst bis zum Verbindungs-Timeout (Chrome: 136 s).
+    # elearning-med embeds matomo.js from there; the host is reachable only on the university
+    # network, and otherwise the browser waits until the connection times out (Chrome: 136 s).
     "cip.dmed.uni-heidelberg.de",
 ]
 _LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
 HOST_RE = re.compile(rf"^(?=.{{1,253}}$){_LABEL}(?:\.{_LABEL})+$")
-HEADER = "# uni-vpn: Domains, die ueber die Uni laufen. Eine je Zeile, gilt auch fuer Subdomains, # leitet Kommentare ein.\n"
+HEADER = "# uni-vpn: domains that go through the university. One per line, also covers subdomains, # starts a comment.\n"
 
 
 def normalize_host(value: str) -> str:
@@ -27,7 +27,7 @@ def normalize_host(value: str) -> str:
 
 
 def parse_domain_list(text: str) -> tuple[list[str], list[str]]:
-    """(Domains, Fehler). Fehler nennen die Zeile, damit die Statusseite sie anzeigen kann."""
+    """(domains, errors). Errors name the line so the status page can show them."""
     domains: list[str] = []
     errors: list[str] = []
     seen: set[str] = set()
@@ -38,7 +38,7 @@ def parse_domain_list(text: str) -> tuple[list[str], list[str]]:
         if line.startswith("*."):
             line = line[2:]
         if not HOST_RE.fullmatch(line):
-            errors.append(f"Zeile {number}: '{raw.strip()}' ist kein Hostname")
+            errors.append(f"line {number}: '{raw.strip()}' is not a hostname")
             continue
         if line not in seen:
             seen.add(line)
@@ -78,7 +78,7 @@ def domains_path() -> Path:
 
 
 def read_domains(path: Path) -> list[str]:
-    """Fehlt die Datei, gilt die Vorbelegung; ungueltige Zeilen werden uebergangen."""
+    """If the file is missing, the defaults apply; invalid lines are skipped."""
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:

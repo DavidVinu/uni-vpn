@@ -1,5 +1,5 @@
 [Unit]
-Description=Uni VPN (openconnect + ocproxy bei Bedarf)
+Description=Uni VPN (openconnect + ocproxy on demand)
 PartOf=graphical-session.target
 After=graphical-session.target
 StartLimitIntervalSec=0

@@ -1,8 +1,9 @@
-"""Selbstdiagnose. Gibt keine Geheimnisse aus, Ausgabe ist fuer GitHub-Issues gedacht."""
+"""Self-diagnosis. Prints no secrets; the output is meant for GitHub issues."""
 
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -43,7 +44,7 @@ def _first_line(text: str) -> str:
 
 
 def openconnect_version(path: str, run=subprocess.run) -> str:
-    """Erste Zeile von 'openconnect --version', leer wenn nicht abfragbar."""
+    """First line of 'openconnect --version', empty if it cannot be queried."""
     try:
         result = run([path, "--version"], capture_output=True, text=True, timeout=5)
     except (OSError, subprocess.SubprocessError):
@@ -52,7 +53,19 @@ def openconnect_version(path: str, run=subprocess.run) -> str:
 
 
 def port_owner(port: int, run=subprocess.run) -> str:
-    """Prozesszeile aus ss (Linux) bzw. lsof (macOS) fuer einen belegten Port, gekuerzt. Leer, wenn unbekannt."""
+    """Process line from ss (Linux) or lsof (macOS) for a port in use, shortened. Empty if unknown."""
+    if pf.IS_WINDOWS:
+        try:
+            result = run(["netstat", "-ano", "-p", "TCP"], capture_output=True, text=True, errors="replace", timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        # The state word is localized ("ABHÖREN" in German): a listening socket has no foreign address.
+        for line in (result.stdout or "").splitlines():
+            parts = line.split()
+            if (len(parts) >= 5 and parts[0].upper() == "TCP" and parts[1].endswith(f":{port}")
+                    and parts[2] in ("0.0.0.0:0", "[::]:0")):
+                return f"PID {parts[-1]}"
+        return ""
     if pf.IS_MACOS:
         cmd = ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN"]
     else:
@@ -76,27 +89,33 @@ def run_checks(cfg_path: Path | None = None, *,
     checks: list[Check] = []
     major, minor = python_version[0], python_version[1]
     checks.append(Check("Python", "ok" if (major, minor) >= (3, 11) else "fail",
-                        f"{major}.{minor} ({sys.executable})" + ("" if (major, minor) >= (3, 11) else ", mindestens 3.11 noetig")))
+                        f"{major}.{minor} ({sys.executable})" + ("" if (major, minor) >= (3, 11) else ", at least 3.11 required")))
 
     cfg = config.Config()
     try:
         cfg = config.load(cfg_path)
-        checks.append(Check("Konfiguration", "ok", f"{cfg.path}, Uni-ID {cfg.user}, Host {cfg.host}"))
+        checks.append(Check("Config", "ok", f"{cfg.path}, university ID {cfg.user}, host {cfg.host}"))
     except config.ConfigError as exc:
-        checks.append(Check("Konfiguration", "fail", str(exc)))
+        checks.append(Check("Config", "fail", str(exc)))
 
-    for name, override in (("openconnect", cfg.openconnect), ("ocproxy", cfg.ocproxy)):
+    programs = [("openconnect", cfg.openconnect)] + [(name, cfg.ocproxy) for name in pf.tunnel_helpers()]
+    for name, override in programs:
         found = find_binary(name, override)
-        detail = found or "nicht gefunden, install.sh ausfuehren"
+        detail = found or "not found, run install.sh"
         if found and name == "openconnect":
             version = openconnect_version(found, run)
             detail = f"{found}, {version}" if version else found
         checks.append(Check(name, "ok" if found else "fail", detail))
-    if not pf.IS_MACOS:
+    if pf.IS_WINDOWS:
+        found = find_binary("openconnect", cfg.openconnect)
+        wintun = bool(found) and os.path.isfile(os.path.join(os.path.dirname(found), "wintun.dll"))
+        checks.append(Check("Wintun", "ok" if wintun else "fail",
+                            "wintun.dll next to openconnect" if wintun else "wintun.dll missing, run install.ps1 again"))
+    elif not pf.IS_MACOS:
         found = find_binary("secret-tool")
-        checks.append(Check("secret-tool", "ok" if found else "fail", found or "nicht gefunden, install.sh ausfuehren (libsecret-tools)"))
+        checks.append(Check("secret-tool", "ok" if found else "fail", found or "not found, run install.sh (libsecret-tools)"))
 
-    # Erst den Daemon fragen: antwortet er, gehoeren die Ports uns, egal ob systemd/launchd ihn gestartet hat.
+    # Ask the daemon first: if it answers, the ports are ours, whether or not systemd/launchd started it.
     daemon_status: dict | None = None
     try:
         daemon_status = api_get(cfg, "/status.json")
@@ -106,69 +125,75 @@ def run_checks(cfg_path: Path | None = None, *,
 
     active = is_active()
     if active:
-        checks.append(Check("Dienst", "ok", "laeuft"))
+        checks.append(Check("Service", "ok", "running"))
     elif daemon_up:
-        checks.append(Check("Dienst", "warn", "Daemon laeuft, aber nicht als Dienst (von Hand gestartet?)"))
+        checks.append(Check("Service", "warn", "Daemon running, but not as a service (started by hand?)"))
     else:
-        checks.append(Check("Dienst", "fail", "laeuft nicht: uni-vpn service start, Log: uni-vpn log"))
+        checks.append(Check("Service", "fail", "not running: uni-vpn service start, log: uni-vpn log"))
 
     for label, port in (("Port %d" % cfg.socks_port, cfg.socks_port), ("Port %d" % cfg.http_port, cfg.http_port)):
         in_use = port_in_use(port)
         if daemon_up and in_use:
-            checks.append(Check(label, "ok", "gebunden (uni-vpn)"))
+            checks.append(Check(label, "ok", "bound (uni-vpn)"))
         elif daemon_up:
-            checks.append(Check(label, "fail", "Daemon antwortet, Port aber nicht gebunden, siehe uni-vpn log"))
+            checks.append(Check(label, "fail", "daemon answers, but the port is not bound, see uni-vpn log"))
         elif active and in_use:
-            checks.append(Check(label, "ok", "gebunden"))
+            checks.append(Check(label, "ok", "bound"))
         elif active:
-            checks.append(Check(label, "fail", "Dienst laeuft, Port aber nicht gebunden, siehe uni-vpn log"))
+            checks.append(Check(label, "fail", "service running, but the port is not bound, see uni-vpn log"))
         elif in_use:
             owner = port_owner(port, run)
-            checks.append(Check(label, "fail", "belegt von anderem Prozess" + (f": {owner}" if owner else "")
-                                + ", Port in config.toml aendern"))
+            checks.append(Check(label, "fail", "in use by another process" + (f": {owner}" if owner else "")
+                                + ", change the port in config.toml"))
         else:
-            checks.append(Check(label, "warn", "frei, Dienst laeuft nicht"))
+            checks.append(Check(label, "warn", "free, service not running"))
 
     if cfg.user:
         state = keyring_probe(cfg.user)
-        mapping = {"present": ("ok", "Passwort hinterlegt"),
-                   "missing": ("fail", "kein Passwort hinterlegt: uni-vpn password"),
-                   "locked": ("warn", "Schluesselbund gesperrt oder keine Antwort")}
-        status, detail = mapping.get(state, ("fail", state.replace("error:", "Fehler: ")))
+        mapping = {"present": ("ok", "password stored"),
+                   "missing": ("fail", "no password stored: uni-vpn password"),
+                   "locked": ("warn", "keyring locked or not responding")}
+        status, detail = mapping.get(state, ("fail", state.replace("error:", "error: ")))
         checks.append(Check("Keyring", status, detail))
         state = keyring_probe(cfg.user, kind="totp")
-        mapping = {"present": ("ok", "TOTP-Schluessel hinterlegt"),
-                   "missing": ("fail", "kein TOTP-Schluessel hinterlegt: uni-vpn totp"),
-                   "locked": ("warn", "Schluesselbund gesperrt oder keine Antwort")}
-        status, detail = mapping.get(state, ("fail", state.replace("error:", "Fehler: ")))
-        checks.append(Check("Zweiter Faktor", status, detail))
+        mapping = {"present": ("ok", "TOTP secret stored"),
+                   "missing": ("fail", "no TOTP secret stored: uni-vpn totp"),
+                   "locked": ("warn", "keyring locked or not responding")}
+        status, detail = mapping.get(state, ("fail", state.replace("error:", "error: ")))
+        checks.append(Check("Second factor", status, detail))
 
     url = sysproxy.pac_url(cfg.http_port)
     proxy = proxy_state(cfg.http_port)
-    proxy_map = {"ok": ("ok", f"System liest {url}"),
-                 "unset": ("fail", "nicht im System eingetragen: install.sh erneut ausfuehren"),
-                 "foreign": ("warn", "eine andere Proxy-Einstellung ist aktiv, install.sh erneut ausfuehren ersetzt sie"),
-                 "unavailable": ("warn", f"keine GNOME- oder macOS-Proxyverwaltung; im Browser von Hand eintragen: {url}")}
-    checks.append(Check("Proxy-Regel", *proxy_map.get(proxy, ("warn", proxy))))
+    proxy_map = {"ok": ("ok", f"system reads {url}"),
+                 "unset": ("fail", "not registered with the system: run install.sh again"),
+                 "foreign": ("warn", "another proxy setting is active, running install.sh again replaces it"),
+                 "unavailable": ("warn", f"no GNOME, KDE, macOS or Windows proxy settings; enter it by hand in the browser: {url}")}
+    checks.append(Check("Proxy rule", *proxy_map.get(proxy, ("warn", proxy))))
 
     if cisco_installed():
         connected = cisco_connected()
         checks.append(Check("Cisco Secure Client", "warn" if connected else "ok",
-                            "verbunden, uni-vpn pausiert solange" if connected else "installiert, getrennt"))
+                            "connected, uni-vpn pauses while it is" if connected else "installed, disconnected"))
     else:
-        checks.append(Check("Cisco Secure Client", "ok", "nicht installiert"))
+        checks.append(Check("Cisco Secure Client", "ok", "not installed"))
+
+    if daemon_status and pf.IS_WINDOWS and daemon_status.get("elevated") is not None:
+        elevated = daemon_status["elevated"]
+        checks.append(Check("Administrator rights", "ok" if elevated else "fail",
+                            "service runs elevated" if elevated
+                            else "service is not elevated, Wintun needs it: run install.ps1 from an administrator account"))
 
     if daemon_status:
         bad = daemon_status["state"] in ("auth_failed", "keyring", "error", "blocked")
         checks.append(Check("Daemon", "warn" if bad else "ok",
-                            f"{daemon_status['state']}: {daemon_status['message']} (Version {daemon_status['version']})"))
+                            f"{daemon_status['state']}: {daemon_status['message']} (version {daemon_status['version']})"))
     else:
-        checks.append(Check("Daemon", "fail", "Statusseite nicht erreichbar"))
+        checks.append(Check("Daemon", "fail", "status page not reachable"))
 
     browsers = [name for name in ("google-chrome", "google-chrome-stable", "chromium", "firefox", "brave-browser")
                 if find_binary(name)]
-    checks.append(Check("Browser", "ok", ", ".join(browsers) if browsers else "keiner im PATH gefunden (macOS: normal)"))
-    checks.append(Check("uni-vpn", "ok", f"Version {__version__}, Repo {pf.repo_root()}"))
+    checks.append(Check("Browser", "ok", ", ".join(browsers) if browsers else "none found in PATH (normal on macOS and Windows)"))
+    checks.append(Check("uni-vpn", "ok", f"version {__version__}, repo {pf.repo_root()}"))
     return checks
 
 

@@ -39,9 +39,9 @@ class ForwarderTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_pipes_both_directions_and_counts(self):
         reader, writer = await asyncio.open_connection("127.0.0.1", self.fwd.port)
-        writer.write(b"hallo")
+        writer.write(b"hello")
         await writer.drain()
-        self.assertEqual(await reader.readexactly(5), b"hallo")
+        self.assertEqual(await reader.readexactly(5), b"hello")
         self.assertEqual(self.fwd.active, 1)
         self.assertEqual(self.fwd.bytes_out, 5)
         self.assertEqual(self.fwd.bytes_in, 5)
@@ -60,7 +60,8 @@ class ForwarderTests(unittest.IsolatedAsyncioTestCase):
     async def test_unreachable_target_closes(self):
         self.target = free_port()
         reader, writer = await asyncio.open_connection("127.0.0.1", self.fwd.port)
-        self.assertEqual(await asyncio.wait_for(reader.read(10), 2), b"")
+        # Windows retries a refused connection to localhost for about 2 s.
+        self.assertEqual(await asyncio.wait_for(reader.read(10), 5), b"")
         writer.close()
 
     async def test_close_all(self):

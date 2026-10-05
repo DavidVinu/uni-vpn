@@ -8,6 +8,10 @@ from unittest import mock
 
 from uni_vpn import platform as pf
 
+from tests import posix_only, simulate_posix
+
+setUpModule, tearDownModule = simulate_posix()
+
 
 class PathTests(unittest.TestCase):
     def test_config_dir_honours_xdg(self):
@@ -38,9 +42,42 @@ class BinaryTests(unittest.TestCase):
         self.assertEqual(pf.find_binary("tool", override=str(exe)), str(exe))
         self.assertIsNone(pf.find_binary("tool", override=str(d / "missing")))
 
+    @posix_only
     def test_find_binary_searches_path(self):
         self.assertIsNotNone(pf.find_binary("sh"))
         self.assertIsNone(pf.find_binary("definitely-not-a-binary-xyz"))
+
+
+class AdminOnlyBinaryTests(unittest.TestCase):
+    """Windows: the elevated service must only run programs from Program Files."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.program_files = self.tmp / "Program Files"
+        self.tool = self.program_files / "OpenConnect-GUI" / "openconnect"
+        self.tool.parent.mkdir(parents=True)
+        self.user_tool = self.tmp / "user" / "openconnect"
+        self.user_tool.parent.mkdir()
+        for path in (self.tool, self.user_tool):
+            path.write_text("#!/bin/sh\n")
+            path.chmod(0o755)
+        for patcher in (mock.patch.object(pf, "IS_WINDOWS", True),
+                        mock.patch.object(pf, "_PROGRAM_FILES", [str(self.program_files)]),
+                        mock.patch.object(pf, "SEARCH_DIRS", [str(self.tool.parent)]),
+                        mock.patch.dict(os.environ, {"PATH": str(self.user_tool.parent)})):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_path_and_user_writable_override_are_ignored(self):
+        self.assertTrue(pf.admin_only(str(self.tool)))
+        self.assertFalse(pf.admin_only(str(self.user_tool)))
+        self.assertFalse(pf.admin_only(str(self.tmp / "Program Files Evil" / "x")))
+        self.assertEqual(pf.find_binary("openconnect"), str(self.tool))
+        self.assertEqual(pf.find_binary("openconnect", str(self.user_tool)), str(self.tool))
+        self.assertEqual(pf.find_binary("openconnect", str(self.tool)), str(self.tool))
+
+    def test_app_goes_to_program_files(self):
+        self.assertEqual(pf.app_install_dir(), self.program_files / "uni-vpn")
 
 
 class CiscoTests(unittest.TestCase):
@@ -58,8 +95,8 @@ class CiscoTests(unittest.TestCase):
             self.assertTrue(pf.cisco_connected(run=run, cscotun=Path("/nonexistent/cscotun0")))
 
     def test_linux_never_asks_the_cisco_cli(self):
-        # "vpn state" braucht 2,2 s (gemessen 2026-09-08) und verzoegert jeden Aufbau; auf Linux
-        # legt der Cisco-Client bei Verbindung immer cscotun0 an, das reicht als Erkennung.
+        # "vpn state" takes 2.2 s (measured 2026-09-08) and delays every connect; on Linux the
+        # Cisco client always creates cscotun0 when connected, which is enough for detection.
         calls = []
 
         def run(cmd, **kwargs):
@@ -85,3 +122,45 @@ class CiscoTests(unittest.TestCase):
 
         with mock.patch.object(pf, "cisco_installed", return_value=True), mock.patch.object(pf, "IS_MACOS", True):
             self.assertFalse(pf.cisco_connected(run=run, cscotun=Path("/nonexistent/cscotun0")))
+
+
+class OpenUrlTests(unittest.TestCase):
+    def popen(self, wait):
+        calls = []
+
+        class Process:
+            def __init__(self, cmd, **kwargs):
+                calls.append((cmd, kwargs))
+
+            def wait(self, timeout=None):
+                return wait(timeout)
+
+        return Process, calls
+
+    def test_browser_started_by_xdg_open_does_not_block(self):
+        # xdg-open stays in the foreground when it starts the browser itself; no pipes to inherit.
+        def wait(timeout):
+            raise subprocess.TimeoutExpired("xdg-open", timeout)
+
+        popen, calls = self.popen(wait)
+        with mock.patch.object(pf, "has_desktop", return_value=True), mock.patch.object(pf, "IS_MACOS", False):
+            self.assertTrue(pf.open_url("http://127.0.0.1:1081/", popen=popen))
+        cmd, kwargs = calls[0]
+        self.assertEqual(cmd, ["xdg-open", "http://127.0.0.1:1081/"])
+        self.assertEqual(kwargs["stdout"], subprocess.DEVNULL)
+        self.assertEqual(kwargs["stderr"], subprocess.DEVNULL)
+        self.assertTrue(kwargs["start_new_session"])
+
+    def test_failing_launcher_is_reported(self):
+        popen, _ = self.popen(lambda timeout: 3)
+        with mock.patch.object(pf, "has_desktop", return_value=True):
+            self.assertFalse(pf.open_url("http://127.0.0.1:1081/", popen=popen))
+        popen, _ = self.popen(lambda timeout: 0)
+        with mock.patch.object(pf, "has_desktop", return_value=True):
+            self.assertTrue(pf.open_url("http://127.0.0.1:1081/", popen=popen))
+
+    def test_app_install_dir_matches_get_sh(self):
+        with mock.patch.object(pf, "IS_MACOS", False), mock.patch.dict(os.environ, {"XDG_DATA_HOME": "/tmp/data"}):
+            self.assertEqual(pf.app_install_dir(), Path("/tmp/data/uni-vpn/app"))
+        with mock.patch.object(pf, "IS_MACOS", True):
+            self.assertEqual(pf.app_install_dir(), Path.home() / "Library" / "Application Support" / "uni-vpn" / "app")

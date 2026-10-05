@@ -1,4 +1,4 @@
-"""Logging: Datei mit Rotation (0600), Log-Tail fuer die Statusseite, stderr fuer journal/launchd."""
+"""Logging: rotating file (0600), log tail for the status page, stderr for journal/launchd."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 class PrivateRotatingFileHandler(RotatingFileHandler):
-    """Legt die Logdatei mit 0600 an, auch nach jeder Rotation und unabhaengig von der Umask."""
+    """Creates the log file with mode 0600, also after every rotation and regardless of the umask."""
 
     def _open(self):
         fd = os.open(self.baseFilename, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
@@ -38,7 +38,7 @@ def setup_logging(path: Path | None, level: int = logging.INFO) -> tuple[logging
     if path:
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         handler = PrivateRotatingFileHandler(path, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
-        os.chmod(path, 0o600)  # bestehende Datei aus frueheren Versionen
+        os.chmod(path, 0o600)  # existing file from earlier versions
         handler.setFormatter(fmt)
         logger.addHandler(handler)
     stream = logging.StreamHandler()

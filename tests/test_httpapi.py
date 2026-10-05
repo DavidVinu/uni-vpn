@@ -1,8 +1,9 @@
 import asyncio
 import json
+import time
 
 from uni_vpn import daemon as dm
-from uni_vpn import pac, totp
+from uni_vpn import credentials, pac, totp
 from uni_vpn.httpapi import allowed_origin
 
 from tests.test_daemon import DaemonHarness, wait_state
@@ -10,7 +11,7 @@ from tests.test_daemon import DaemonHarness, wait_state
 
 async def http(port, method, path, headers=None, body=b""):
     reader, writer = await asyncio.open_connection("127.0.0.1", port)
-    # Eigene Host- oder Content-Length-Header des Aufrufers ersetzen die Standardwerte.
+    # The caller's own Host or Content-Length headers replace the defaults.
     hdrs = {"Host": "127.0.0.1", "Content-Length": str(len(body))}
     for key, value in (headers or {}).items():
         hdrs = {k: v for k, v in hdrs.items() if k.lower() != key.lower()}
@@ -31,12 +32,14 @@ class OriginTests(DaemonHarness):
     async def test_allowed_origin(self):
         self.assertTrue(allowed_origin(None, 1081))
         self.assertTrue(allowed_origin("http://127.0.0.1:1081", 1081))
-        # Ohne Extension gibt es keinen fremden Origin mehr, der POSTen darf.
+        self.assertTrue(allowed_origin("http://localhost:1081", 1081))
+        self.assertFalse(allowed_origin("http://localhost:9999", 1081))
+        # Without the extension there is no longer any foreign origin allowed to POST.
         self.assertFalse(allowed_origin("chrome-extension://abcdef", 1081))
         self.assertFalse(allowed_origin("moz-extension://1234-5678", 1081))
         self.assertFalse(allowed_origin("https://evil.example", 1081))
         self.assertFalse(allowed_origin("http://127.0.0.1:9999", 1081))
-        # "null" senden sandboxed iframes und data:-Seiten: kein vertrauenswuerdiger Origin.
+        # Sandboxed iframes and data: pages send "null": not a trustworthy origin.
         self.assertFalse(allowed_origin("null", 1081))
         self.assertFalse(allowed_origin("chrome-extension://abc\nX-Injected: 1", 1081))
         self.assertFalse(allowed_origin("chrome-extension://abc\r\n", 1081))
@@ -153,11 +156,11 @@ class ApiTests(DaemonHarness):
 
     async def test_password_endpoint(self):
         d = await self.start_daemon()
-        body = json.dumps({"password": "neu"}).encode()
+        body = json.dumps({"password": "new"}).encode()
         status, _, _ = await http(self.cfg.http_port, "POST", "/api/password",
                                   {"X-Uni-VPN": "1", "Content-Type": "application/json"}, body)
         self.assertEqual(status, 200)
-        self.assertEqual(self.stored, ["neu"])
+        self.assertEqual(self.stored, ["new"])
         await wait_state(d, dm.State.connected)
 
     async def test_password_endpoint_rejects_bad_json(self):
@@ -176,7 +179,7 @@ class ApiTests(DaemonHarness):
             status, _, payload = await http(self.cfg.http_port, "POST", "/api/password",
                                             {"X-Uni-VPN": "1", "Content-Type": "application/json"}, body)
             self.assertEqual(status, 400, repr(password))
-            self.assertEqual(payload.decode(), "Passwort darf keinen Zeilenumbruch enthalten")
+            self.assertEqual(payload.decode(), "Password must not contain a line break")
         self.assertEqual(self.stored, [])
         self.assertEqual(d.state, dm.State.idle)
 
@@ -231,7 +234,102 @@ class TotpEndpointTests(DaemonHarness):
         await wait_state(d, dm.State.connected)
         _, _, payload = await http(self.cfg.http_port, "GET", "/status.json")
         self.assertNotIn(b"GEZDGNBVGY3TQOJQ", payload)
-        self.assertNotIn(b"geheim", payload)
+        self.assertNotIn(b"pw-s3cret", payload)
+
+
+class SetupTests(DaemonHarness):
+    HEADERS = {"X-Uni-VPN": "1", "Content-Type": "application/json"}
+
+    async def start_setup_daemon(self):
+        import tempfile
+        from pathlib import Path
+
+        self.cfg_path = Path(tempfile.mkdtemp()) / "uni-vpn" / "config.toml"
+        self.cfg.user = ""
+        return await self.start_daemon(config_error="missing", config_path=self.cfg_path, needs_setup=True)
+
+    async def test_status_reports_setup_needed_and_connect_is_refused(self):
+        d = await self.start_setup_daemon()
+        _, _, payload = await http(self.cfg.http_port, "GET", "/status.json")
+        data = json.loads(payload)
+        self.assertTrue(data["setup_needed"])
+        self.assertEqual(data["state"], "idle")
+        await d.request_connect()
+        self.assertEqual(self.pw_lines(), [])
+
+    async def test_setup_writes_config_stores_secrets_and_connects(self):
+        d = await self.start_setup_daemon()
+        body = json.dumps({"user": "ab123", "password": "pw", "secret": "GEZDGNBVGY3TQOJQ"}).encode()
+        status, _, payload = await http(self.cfg.http_port, "POST", "/api/setup", self.HEADERS, body)
+        self.assertEqual(status, 200, payload)
+        self.assertEqual(json.loads(payload)["code"], totp.code("base32:GEZDGNBVGY3TQOJQ"))
+        self.assertIn('user = "ab123"', self.cfg_path.read_text())
+        self.assertEqual(self.stored, ["pw"])
+        self.assertEqual(self.stored_totp, ["base32:GEZDGNBVGY3TQOJQ"])
+        await wait_state(d, dm.State.connected)
+        _, _, payload = await http(self.cfg.http_port, "GET", "/status.json")
+        self.assertFalse(json.loads(payload)["setup_needed"])
+
+    async def test_keyring_failure_writes_no_config_so_the_assistant_stays(self):
+        def refuse(_secret):
+            raise credentials.KeyringError("keyring locked")
+
+        d = await self.start_setup_daemon()
+        d.totp_setter = refuse
+        body = json.dumps({"user": "ab123", "password": "pw", "secret": "GEZDGNBVGY3TQOJQ"}).encode()
+        status, _, payload = await http(self.cfg.http_port, "POST", "/api/setup", self.HEADERS, body)
+        self.assertEqual(status, 500)
+        self.assertIn(b"keyring locked", payload)
+        self.assertFalse(self.cfg_path.exists())
+        self.assertTrue(d.needs_setup)
+        self.assertEqual(d.cfg.user, "")
+
+    async def test_check_code_marks_the_window_as_used(self):
+        # The assistant asks to type the check code into the MFA portal, which uses it up.
+        d = await self.start_setup_daemon()
+        body = json.dumps({"secret": "GEZDGNBVGY3TQOJQ"}).encode()
+        status, _, _ = await http(self.cfg.http_port, "POST", "/api/totp/check", self.HEADERS, body)
+        self.assertEqual(status, 200)
+        self.assertEqual(d.last_otp_step, int(time.time() // 30))
+
+    async def test_setup_rejects_bad_input_without_writing(self):
+        await self.start_setup_daemon()
+        for body in ({"user": "ab 1\"", "password": "pw", "secret": "GEZDGNBVGY3TQOJQ"},
+                     {"user": "ab1", "password": "", "secret": "GEZDGNBVGY3TQOJQ"},
+                     {"user": "ab1", "password": "a\nb", "secret": "GEZDGNBVGY3TQOJQ"},
+                     {"user": "ab1", "password": "pw", "secret": "0189"},
+                     {"user": "ab1", "password": "pw"}):
+            status, _, _ = await http(self.cfg.http_port, "POST", "/api/setup", self.HEADERS, json.dumps(body).encode())
+            self.assertEqual(status, 400, body)
+        self.assertFalse(self.cfg_path.exists())
+        self.assertEqual(self.stored, [])
+
+    async def test_setup_needs_csrf_header(self):
+        await self.start_setup_daemon()
+        body = json.dumps({"user": "ab1", "password": "pw", "secret": "GEZDGNBVGY3TQOJQ"}).encode()
+        status, _, _ = await http(self.cfg.http_port, "POST", "/api/setup", {"Content-Type": "application/json"}, body)
+        self.assertEqual(status, 403)
+
+    async def test_totp_check_shows_code_without_storing(self):
+        await self.start_daemon()
+        body = json.dumps({"secret": "otpauth://totp/x?secret=GEZDGNBVGY3TQOJQ"}).encode()
+        status, _, payload = await http(self.cfg.http_port, "POST", "/api/totp/check", self.HEADERS, body)
+        self.assertEqual(status, 200, payload)
+        data = json.loads(payload)
+        self.assertEqual(len(data["code"]), 6)
+        self.assertTrue(1 <= data["remaining"] <= 30)
+        self.assertEqual(self.stored_totp, [])
+        status, _, _ = await http(self.cfg.http_port, "POST", "/api/totp/check", self.HEADERS, b'{"secret": "nope!"}')
+        self.assertEqual(status, 400)
+
+    async def test_error_kind_names_the_factor(self):
+        d = await self.start_daemon()
+        d._set(dm.State.auth_failed, "One-time code rejected: check the clock")
+        self.assertEqual(d.status()["error_kind"], "totp")
+        d._set(dm.State.keyring, "No password stored: uni-vpn password")
+        self.assertEqual(d.status()["error_kind"], "password")
+        d._set(dm.State.idle, "Not connected")
+        self.assertIsNone(d.status()["error_kind"])
 
 
 class PacTests(DaemonHarness):
@@ -265,7 +363,7 @@ class PacTests(DaemonHarness):
 
     async def test_domains_endpoint_writes_file_refreshes_proxy_and_updates_pac(self):
         await self.start_daemon()
-        body = json.dumps({"text": "Example.ORG\n# Kommentar\nsogo.uni-heidelberg.de\n"}).encode()
+        body = json.dumps({"text": "Example.ORG\n# comment\nsogo.uni-heidelberg.de\n"}).encode()
         status, _, payload = await http(self.cfg.http_port, "POST", "/api/domains", self.HEADERS, body)
         self.assertEqual(status, 200, payload)
         self.assertEqual(json.loads(payload)["domains"], ["example.org", "sogo.uni-heidelberg.de"])
@@ -277,10 +375,10 @@ class PacTests(DaemonHarness):
 
     async def test_domains_endpoint_rejects_invalid_lines_and_changes_nothing(self):
         await self.start_daemon()
-        body = json.dumps({"text": "sogo.uni-heidelberg.de\nkaputt\n"}).encode()
+        body = json.dumps({"text": "sogo.uni-heidelberg.de\nbroken\n"}).encode()
         status, _, payload = await http(self.cfg.http_port, "POST", "/api/domains", self.HEADERS, body)
         self.assertEqual(status, 400)
-        self.assertIn(b"Zeile 2", payload)
+        self.assertIn(b"line 2", payload)
         self.assertFalse(self.domains_path.exists())
         self.assertEqual(self.refreshed, [])
 

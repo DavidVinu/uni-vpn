@@ -1,4 +1,4 @@
-"""SOCKS-Passthrough: nimmt Browserverbindungen an und reicht Bytes an ocproxy durch."""
+"""SOCKS passthrough: accepts browser connections and passes the bytes on to ocproxy."""
 
 from __future__ import annotations
 
@@ -32,15 +32,15 @@ class Forwarder:
             self._server.close()
         await self.close_all()
         if self._server:
-            # Ab Python 3.13 wartet wait_closed() auf alle Handler; die enden nach close_all().
+            # Since Python 3.13 wait_closed() waits for all handlers; they finish after close_all().
             try:
                 await asyncio.wait_for(self._server.wait_closed(), 5)
             except asyncio.TimeoutError:
-                self.log.warning("Forwarder: Verbindungen nicht rechtzeitig geschlossen")
+                self.log.warning("Forwarder: connections not closed in time")
 
     async def close_all(self) -> None:
-        # Handler, die noch auf ein Ziel warten, zuerst abbrechen: sonst halten sie den
-        # Bedarf (active > 0) und stossen nach dem Trennen sofort einen Neuaufbau an.
+        # Cancel handlers still waiting for a target first: otherwise they keep up the
+        # demand (active > 0) and trigger a reconnect right after disconnecting.
         waiting = list(self._waiting)
         for task in waiting:
             task.cancel()
@@ -69,7 +69,7 @@ class Forwarder:
             try:
                 upstream_reader, upstream_writer = await asyncio.open_connection("127.0.0.1", target)
             except OSError as exc:
-                self.log.warning("ocproxy-Port %s nicht erreichbar: %s", target, exc)
+                self.log.warning("ocproxy port %s not reachable: %s", target, exc)
                 self.rejected += 1
                 return
             self._writers.add(upstream_writer)

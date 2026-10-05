@@ -14,6 +14,8 @@ from unittest import mock
 from uni_vpn import tunnel as tn
 from uni_vpn.config import Config
 
+from tests import posix_only
+
 FAKE = str(Path(__file__).parent / "fake_openconnect.py")
 WRAPPER = "/nonexistent/uni-vpn-ocproxy"
 
@@ -22,61 +24,61 @@ class ClassifyTests(unittest.TestCase):
     def test_markers(self):
         self.assertEqual(tn.classify_line("User input required in non-interactive mode")[0], "auth_failed")
         self.assertIn("uni-vpn log", tn.classify_line("User input required in non-interactive mode")[1])
-        self.assertIn("Passwort", tn.classify_line("Failed to complete authentication")[1])
+        self.assertIn("password", tn.classify_line("Failed to complete authentication")[1])
         self.assertIn("HostScan", tn.classify_line("Error: Server asked us to run CSD hostscan.")[1])
         self.assertEqual(tn.classify_line("SAML authentication required")[0], "auth_failed")
         self.assertEqual(tn.classify_line("Server certificate verify failed")[0], "error")
         self.assertIsNone(tn.classify_line("Connected as 10.0.0.2"))
 
     def test_wrong_password_and_input_required_share_message(self):
-        # Feststellung 6: ein falsches Passwort erzeugt bei --non-inter zuerst
-        # "User input required", dann "Failed to complete authentication".
-        # Beide Marker muessen dieselbe ehrliche Meldung liefern.
+        # Finding 6: with --non-inter a wrong password first produces
+        # "User input required", then "Failed to complete authentication".
+        # Both markers must yield the same honest message.
         input_required = tn.classify_line("User input required in non-interactive mode")
         auth_failed = tn.classify_line("Failed to complete authentication")
         self.assertEqual(input_required[0], "auth_failed")
         self.assertEqual(auth_failed[0], "auth_failed")
         self.assertEqual(input_required[1], auth_failed[1])
-        self.assertIn("Passwort", input_required[1])
+        self.assertIn("password", input_required[1])
         self.assertIn("uni-vpn password", input_required[1])
         self.assertIn("uni-vpn log", input_required[1])
 
     def test_invalid_soft_token_string_names_the_command(self):
-        # Echtes openconnect 9.12 bei kaputter Schluesseldatei: "Invalid base32 token string",
-        # dann "Soft token string is invalid", Exit 1 vor jedem Netzkontakt.
+        # Real openconnect 9.12 with a broken secret file: "Invalid base32 token string",
+        # then "Soft token string is invalid", exit code 1 before any network contact.
         state, message = tn.classify_line("Soft token string is invalid")
         self.assertEqual(state, "auth_failed")
         self.assertIn("uni-vpn totp", message)
 
     def test_rejected_soft_token_names_the_second_factor(self):
-        # Falls ein Server das OTP-Formular erneut zeigt, probiert openconnect zwei Codes und
-        # meldet dann "switching to manual entry"; danach folgen "User input required" und
-        # "Failed to complete authentication". Der erste Treffer zaehlt.
+        # If a server shows the OTP form again, openconnect tries two codes and then
+        # reports "switching to manual entry"; "User input required" and
+        # "Failed to complete authentication" follow. The first match counts.
         state, message = tn.classify_line("Server is rejecting the soft token; switching to manual entry")
         self.assertEqual(state, "auth_failed")
-        self.assertIn("Einmalcode", message)
+        self.assertIn("One-time code", message)
         self.assertIn("uni-vpn totp", message)
-        self.assertIn("Uhrzeit", message)
+        self.assertIn("clock", message)
 
     def test_login_failed_before_otp_means_password(self):
-        # Gemessen am 2026-09-08: der ASA lehnt ein falsches Passwort ab, bevor er nach dem OTP fragt.
+        # Measured on 2026-09-08: the ASA rejects a wrong password before it asks for the OTP.
         seq = tn.Classifier()
         self.assertIsNone(seq.feed("Bitte geben Sie ihren Benutzernamen und ihr Passwort ein."))
         state, message = seq.feed("Login failed.")
         self.assertEqual(state, "auth_failed")
-        self.assertIn("Passwort", message)
+        self.assertIn("password", message)
         self.assertIn("uni-vpn password", message)
-        self.assertNotIn("Einmalcode", message)
+        self.assertNotIn("One-time code", message)
 
     def test_login_failed_after_otp_means_second_factor(self):
-        # Gemessen am 2026-09-08: bei falschem Schluessel kommt erst die OTP-Abfrage, openconnect
-        # erzeugt den Code, dann "Login failed." und das Formular von vorn.
+        # Measured on 2026-09-08: with a wrong secret the OTP prompt comes first, openconnect
+        # generates the code, then "Login failed." and the form starts over.
         seq = tn.Classifier()
         seq.feed("Bitte zweiten Faktor eingeben (OTP) / Please enter second factor (OTP).")
         self.assertIsNone(seq.feed("Generating OATH TOTP token code"))
         state, message = seq.feed("Login failed.")
         self.assertEqual(state, "auth_failed")
-        self.assertIn("Einmalcode", message)
+        self.assertIn("One-time code", message)
         self.assertIn("uni-vpn totp", message)
         self.assertNotIn("uni-vpn password", message)
 
@@ -88,6 +90,7 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(seq.verdict, first)
 
 
+@posix_only
 class TunnelTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.cfg = Config(user="u", host="vpn.example")
@@ -118,8 +121,8 @@ class TunnelTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("--passwd-on-stdin", cmd)
         self.assertIn("--non-inter", cmd)
         self.assertIn("--no-dtls", cmd)
-        # "exec" davor: openconnect startet den Wert per /bin/sh -c, und dash liesse sonst
-        # ein sh neben ocproxy stehen (in der Prozessliste am 2026-09-08 gesehen).
+        # "exec" in front: openconnect runs the value via /bin/sh -c, and dash would otherwise
+        # leave an sh running next to ocproxy (seen in the process list on 2026-09-08).
         self.assertIn(f"--script=exec {WRAPPER} 4321", cmd)
         self.assertEqual(cmd[-1], "vpn.example")
         self.assertNotIn("--dump-http-traffic", cmd)
@@ -131,18 +134,18 @@ class TunnelTests(unittest.IsolatedAsyncioTestCase):
         cmd = t.command(4321)
         self.assertIn("--token-mode=totp", cmd)
         self.assertIn(f"--token-secret=@{self.token_dir / 'totp-1'}", cmd)
-        # Der Schluessel selbst steht nie in der Kommandozeile.
+        # The secret itself never appears on the command line.
         self.assertFalse([a for a in cmd if "base32" in a])
 
     async def test_totp_secret_reaches_openconnect_by_file_and_is_removed_when_ready(self):
         t = self.make()
-        await t.start(b"geheim", totp="base32:GEZDGNBVGY3TQOJQ")
+        await t.start(b"secret", totp="base32:GEZDGNBVGY3TQOJQ")
         self.assertEqual(len(self.token_files()), 1)
         self.assertTrue(self.token_files()[0].startswith("totp-"))
         self.assertEqual(stat.S_IMODE((self.token_dir / self.token_files()[0]).stat().st_mode), 0o600)
         self.assertTrue(await t.wait_ready(3))
         self.assertEqual(self.tokenfile.read_text(), "base32:GEZDGNBVGY3TQOJQ\n")
-        self.assertEqual(self.token_files(), [], "Schluesseldatei muss nach dem Aufbau weg sein")
+        self.assertEqual(self.token_files(), [], "secret file must be gone once connected")
         await t.stop(2)
 
     async def test_token_file_removed_when_openconnect_exits_early(self):
@@ -163,7 +166,7 @@ class TunnelTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_without_totp_no_token_file(self):
         t = self.make()
-        await t.start(b"geheim")
+        await t.start(b"secret")
         self.assertTrue(await t.wait_ready(3))
         self.assertEqual(self.token_files(), [])
         self.assertFalse(self.tokenfile.exists())
@@ -176,33 +179,33 @@ class TunnelTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(await t.wait_ready(3))
         self.assertEqual(t.returncode, 1)
         self.assertEqual(t.classification[0], "auth_failed")
-        self.assertIn("Einmalcode", t.classification[1])
+        self.assertIn("One-time code", t.classification[1])
         self.assertNotIn("uni-vpn password", t.classification[1])
         self.assertIsNotNone(t.otp_generated_at)
         self.assertLess(abs(t.otp_generated_at - time.time()), 10)
 
     async def test_otp_generated_at_is_none_without_token(self):
         t = self.make()
-        await t.start(b"geheim")
+        await t.start(b"secret")
         self.assertTrue(await t.wait_ready(3))
         await t.stop(2)
         self.assertIsNone(t.otp_generated_at)
 
     def test_remove_stale_token_files(self):
-        (self.token_dir / "totp-123").write_text("alt")
-        (self.token_dir / "totp-456").write_text("alt")
-        (self.token_dir / "daemon.log").write_text("bleibt")
+        (self.token_dir / "totp-123").write_text("old")
+        (self.token_dir / "totp-456").write_text("old")
+        (self.token_dir / "daemon.log").write_text("stays")
         removed = tn.remove_stale_token_files(self.token_dir)
         self.assertEqual(removed, 2)
         self.assertEqual(self.token_files(), ["daemon.log"])
-        self.assertEqual(tn.remove_stale_token_files(self.token_dir / "gibt-es-nicht"), 0)
+        self.assertEqual(tn.remove_stale_token_files(self.token_dir / "does-not-exist"), 0)
 
     async def test_start_ready_stop(self):
         t = self.make()
-        await t.start(b"geheim")
+        await t.start(b"secret")
         self.assertTrue(await t.wait_ready(3))
         self.assertTrue(tn.port_open(t.port))
-        self.assertEqual(self.pwfile.read_text(), "geheim\n")
+        self.assertEqual(self.pwfile.read_text(), "secret\n")
         await t.stop(2)
         self.assertTrue(t.exited.is_set())
         self.assertEqual(t.returncode, 0)
@@ -218,7 +221,7 @@ class TunnelTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(t.returncode, 1)
         self.assertEqual(t.classification[0], "auth_failed")
         self.assertIn("uni-vpn password", t.classification[1])
-        self.assertNotIn("Einmalcode", t.classification[1])
+        self.assertNotIn("One-time code", t.classification[1])
         self.assertTrue(any("Failed to complete" in line for line in t.stderr_tail))
 
     async def test_input_required_message(self):
@@ -228,12 +231,12 @@ class TunnelTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(await t.wait_ready(3))
         self.assertEqual(t.classification[0], "auth_failed")
         self.assertIn("uni-vpn log", t.classification[1])
-        # Feststellung 6: dieselbe Zeilenfolge entsteht bei falschem Passwort.
-        self.assertIn("Passwort", t.classification[1])
+        # Finding 6: a wrong password produces the same sequence of lines.
+        self.assertIn("password", t.classification[1])
 
     def test_script_value_survives_sh_with_spaces_and_quote(self):
-        # Feststellung 5: openconnect fuehrt --script per /bin/sh -c aus.
-        base = Path(tempfile.mkdtemp()) / "mit leerzeichen"
+        # Finding 5: openconnect runs --script via /bin/sh -c.
+        base = Path(tempfile.mkdtemp()) / "with spaces"
         base.mkdir()
         wrapper = base / "o'proxy wrapper"
         argfile = base / "args"
@@ -247,8 +250,8 @@ class TunnelTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(argfile.read_text(), "4321\n")
 
     def test_kill_wrapper_argv(self):
-        # Feststellung 4: Muster ohne fuehrenden Bindestrich, "--" vor dem Muster,
-        # nur eigene Prozesse, Rueckgabewert im Log.
+        # Finding 4: pattern without a leading hyphen, "--" before the pattern,
+        # only our own processes, return code in the log.
         t = self.make()
         t.port = 4321
         with mock.patch.object(tn.subprocess, "run") as run:
@@ -262,8 +265,8 @@ class TunnelTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("1" in line and "pkill" in line for line in logs.output), logs.output)
 
     def test_kill_wrapper_kills_port_holder(self):
-        # Feststellung 4: ein Prozess, dessen Kommandozeile wie der Wrapper-exec aussieht
-        # und der den Port haelt, muss nach _kill_wrapper() verschwunden sein.
+        # Finding 4: a process whose command line looks like the wrapper exec and that
+        # holds the port must be gone after _kill_wrapper().
         port = tn.free_port()
         code = (
             "import socket, sys, time\n"
@@ -283,14 +286,14 @@ class TunnelTests(unittest.IsolatedAsyncioTestCase):
             deadline = time.monotonic() + 3
             while not tn.port_open(port) and time.monotonic() < deadline:
                 time.sleep(0.05)
-            self.assertTrue(tn.port_open(port), "Dummy haelt den Port nicht")
+            self.assertTrue(tn.port_open(port), "dummy does not hold the port")
             t = self.make()
             t.port = port
             t._kill_wrapper()
             deadline = time.monotonic() + 2
             while tn.port_open(port) and time.monotonic() < deadline:
                 time.sleep(0.05)
-            self.assertFalse(tn.port_open(port), "Port nach _kill_wrapper() noch offen")
+            self.assertFalse(tn.port_open(port), "port still open after _kill_wrapper()")
             self.assertEqual(dummy.wait(timeout=2), -9)
         finally:
             if dummy.poll() is None:

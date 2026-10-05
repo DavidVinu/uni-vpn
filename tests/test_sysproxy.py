@@ -10,7 +10,7 @@ from uni_vpn import sysproxy
 
 
 class Runner:
-    """Faengt Kommandos ab und liefert vorbereitete Antworten."""
+    """Captures commands and returns prepared answers."""
 
     def __init__(self, answers=None):
         self.calls = []
@@ -33,11 +33,19 @@ class PacUrlTests(unittest.TestCase):
         self.assertFalse(sysproxy.is_ours("", 1081))
 
 
+def as_platform(test, macos=False, windows=False):
+    for name, value in (("IS_MACOS", macos), ("IS_WINDOWS", windows)):
+        patcher = mock.patch.object(pf, name, value)
+        patcher.start()
+        test.addCleanup(patcher.stop)
+
+
 class LinuxTests(unittest.TestCase):
     def setUp(self):
-        self.macos = mock.patch.object(pf, "IS_MACOS", False)
-        self.macos.start()
-        self.addCleanup(self.macos.stop)
+        as_platform(self)
+        env = mock.patch.dict("os.environ", {"XDG_CURRENT_DESKTOP": "ubuntu:GNOME"})
+        env.start()
+        self.addCleanup(env.stop)
 
     def test_current_reads_gsettings(self):
         run = Runner({"gsettings get org.gnome.system.proxy mode": (0, "'auto'\n"),
@@ -63,10 +71,46 @@ class LinuxTests(unittest.TestCase):
         self.assertIn(["gsettings", "set", "org.gnome.system.proxy", "autoconfig-url", ""], run.calls)
 
     def test_refresh_bumps_url_version_so_browsers_refetch(self):
-        run = Runner()
+        run = Runner({"gsettings get org.gnome.system.proxy mode": (0, "'auto'\n"),
+                      "gsettings get org.gnome.system.proxy autoconfig-url": (0, "'http://127.0.0.1:1081/proxy.pac?v=1'\n")})
         with mock.patch.object(sysproxy.time, "time", return_value=1700000000.9):
             sysproxy.refresh(1081, run=run)
         self.assertIn(["gsettings", "set", "org.gnome.system.proxy", "autoconfig-url", "http://127.0.0.1:1081/proxy.pac?v=1700000000"], run.calls)
+
+    def test_refresh_leaves_a_foreign_setting_alone(self):
+        for mode, url in (("auto", "http://corp/wpad.dat"), ("manual", "http://127.0.0.1:1081/proxy.pac"), ("none", "")):
+            run = Runner({"gsettings get org.gnome.system.proxy mode": (0, f"'{mode}'\n"),
+                          "gsettings get org.gnome.system.proxy autoconfig-url": (0, f"'{url}'\n")})
+            sysproxy.refresh(1081, run=run)
+            self.assertFalse([c for c in run.calls if c[:2] == ["gsettings", "set"]], mode)
+
+    def test_failed_gsettings_set_is_reported(self):
+        backup = Path(tempfile.mkdtemp()) / "proxy-backup.json"
+        run = Runner({"gsettings get org.gnome.system.proxy mode": (0, "'none'\n"),
+                      "gsettings get org.gnome.system.proxy autoconfig-url": (0, "''\n"),
+                      "gsettings set": (1, "")})
+        self.assertEqual(sysproxy.install(1081, backup=backup, run=run), "failed")
+        self.assertEqual(sysproxy.uninstall(backup=backup, run=run), "failed")
+        self.assertTrue(backup.exists(), "backup must stay for another try")
+
+    def test_kde_backup_is_restored_outside_the_kde_session(self):
+        # Uninstall over SSH: XDG_CURRENT_DESKTOP is not KDE, kwriteconfig must still run.
+        backup = Path(tempfile.mkdtemp()) / "proxy-backup.json"
+        backup.write_text(json.dumps({"kde": {"type": "0", "url": ""}}))
+        run = Runner()
+        with mock.patch.dict("os.environ", {"XDG_CURRENT_DESKTOP": ""}), \
+                mock.patch.object(pf, "find_binary", lambda name, override=None: f"/usr/bin/{name}"):
+            self.assertEqual(sysproxy.uninstall(backup=backup, run=run), "restored")
+        self.assertIn(["/usr/bin/kwriteconfig6", "--file", "kioslaverc", "--group", "Proxy Settings", "--key", "ProxyType", "0"],
+                      run.calls)
+        self.assertFalse(backup.exists())
+
+    def test_kde_backup_without_kwriteconfig_is_kept(self):
+        backup = Path(tempfile.mkdtemp()) / "proxy-backup.json"
+        backup.write_text(json.dumps({"kde": {"type": "0", "url": ""}}))
+        with mock.patch.object(pf, "find_binary", lambda name, override=None: None):
+            self.assertEqual(sysproxy.uninstall(backup=backup, run=Runner()), "failed")
+        self.assertTrue(backup.exists())
 
     def test_install_backs_up_then_applies_and_uninstall_restores(self):
         backup = Path(tempfile.mkdtemp()) / "proxy-backup.json"
@@ -77,12 +121,12 @@ class LinuxTests(unittest.TestCase):
         self.assertEqual(json.loads(backup.read_text()), {"mode": "none", "url": ""})
         self.assertIn(["gsettings", "set", "org.gnome.system.proxy", "mode", "auto"], run.calls)
         run2 = Runner()
-        self.assertTrue(sysproxy.uninstall(backup=backup, run=run2))
+        self.assertEqual(sysproxy.uninstall(backup=backup, run=run2), "restored")
         self.assertIn(["gsettings", "set", "org.gnome.system.proxy", "mode", "none"], run2.calls)
         self.assertFalse(backup.exists())
 
     def test_install_keeps_existing_backup_when_rerun(self):
-        # Beim zweiten install.sh ist unser eigener Eintrag aktiv; der urspruengliche Zustand bleibt gesichert.
+        # On the second install.sh our own entry is active; the original state stays backed up.
         backup = Path(tempfile.mkdtemp()) / "proxy-backup.json"
         backup.write_text(json.dumps({"mode": "none", "url": ""}))
         run = Runner({"gsettings get org.gnome.system.proxy mode": (0, "'auto'\n"),
@@ -105,7 +149,7 @@ class LinuxTests(unittest.TestCase):
 
     def test_uninstall_without_backup_is_noop(self):
         run = Runner()
-        self.assertFalse(sysproxy.uninstall(backup=Path(tempfile.mkdtemp()) / "fehlt.json", run=run))
+        self.assertEqual(sysproxy.uninstall(backup=Path(tempfile.mkdtemp()) / "missing.json", run=run), "unset")
         self.assertEqual(run.calls, [])
 
     def test_state_for_doctor(self):
@@ -120,9 +164,7 @@ class LinuxTests(unittest.TestCase):
 
 class MacTests(unittest.TestCase):
     def setUp(self):
-        self.macos = mock.patch.object(pf, "IS_MACOS", True)
-        self.macos.start()
-        self.addCleanup(self.macos.stop)
+        as_platform(self, macos=True)
         self.answers = {
             "networksetup -listallnetworkservices": (0, "An asterisk (*) denotes that a network service is disabled.\nWi-Fi\n*Thunderbolt Bridge\n"),
             "networksetup -getautoproxyurl Wi-Fi": (0, "URL: (null)\nEnabled: No\n"),
@@ -138,6 +180,11 @@ class MacTests(unittest.TestCase):
         self.assertIn(["networksetup", "-setautoproxyurl", "Wi-Fi", "http://127.0.0.1:1081/proxy.pac"], run.calls)
         self.assertNotIn(["networksetup", "-setautoproxyurl", "Thunderbolt Bridge", "http://127.0.0.1:1081/proxy.pac"], run.calls)
 
+    def test_failed_networksetup_is_reported(self):
+        answers = dict(self.answers)
+        answers["networksetup -setautoproxyurl"] = (1, "")
+        self.assertEqual(sysproxy.install(1081, backup=Path(tempfile.mkdtemp()) / "b.json", run=Runner(answers)), "failed")
+
     def test_restore_disables_when_previously_off(self):
         run = Runner(self.answers)
         sysproxy.restore({"services": {"Wi-Fi": {"url": "", "enabled": False}}}, run=run)
@@ -145,8 +192,8 @@ class MacTests(unittest.TestCase):
 
     def test_restore_puts_old_url_back(self):
         run = Runner(self.answers)
-        sysproxy.restore({"services": {"Wi-Fi": {"url": "http://alt/p.pac", "enabled": True}}}, run=run)
-        self.assertIn(["networksetup", "-setautoproxyurl", "Wi-Fi", "http://alt/p.pac"], run.calls)
+        sysproxy.restore({"services": {"Wi-Fi": {"url": "http://old/p.pac", "enabled": True}}}, run=run)
+        self.assertIn(["networksetup", "-setautoproxyurl", "Wi-Fi", "http://old/p.pac"], run.calls)
 
     def test_state_ok_when_our_url_is_enabled(self):
         answers = dict(self.answers)
@@ -158,3 +205,85 @@ class MacTests(unittest.TestCase):
         run = Runner(self.answers)
         sysproxy.refresh(1081, run=run)
         self.assertEqual(run.calls, [])
+
+
+class KdeTests(unittest.TestCase):
+    def setUp(self):
+        as_platform(self)
+        env = mock.patch.dict("os.environ", {"XDG_CURRENT_DESKTOP": "KDE"})
+        env.start()
+        self.addCleanup(env.stop)
+        tools = mock.patch.object(pf, "find_binary", lambda name, override=None: f"/usr/bin/{name}")
+        tools.start()
+        self.addCleanup(tools.stop)
+        self.answers = {
+            "gsettings get": (1, ""),
+            "/usr/bin/kreadconfig6 --file kioslaverc --group Proxy Settings --key ProxyType": (0, "0\n"),
+            "/usr/bin/kreadconfig6 --file kioslaverc --group Proxy Settings --key Proxy Config Script": (0, "\n"),
+        }
+
+    def test_install_writes_kioslaverc_and_uninstall_restores(self):
+        backup = Path(tempfile.mkdtemp()) / "backup.json"
+        run = Runner(self.answers)
+        self.assertEqual(sysproxy.install(1081, backup=backup, run=run), "ok")
+        self.assertEqual(json.loads(backup.read_text()), {"kde": {"type": "0", "url": ""}})
+        write = ["/usr/bin/kwriteconfig6", "--file", "kioslaverc", "--group", "Proxy Settings", "--key"]
+        self.assertIn(write + ["ProxyType", "2"], run.calls)
+        self.assertIn(write + ["Proxy Config Script", "http://127.0.0.1:1081/proxy.pac"], run.calls)
+        run2 = Runner(self.answers)
+        self.assertEqual(sysproxy.uninstall(backup=backup, run=run2), "restored")
+        self.assertIn(write + ["ProxyType", "0"], run2.calls)
+
+    def test_state_follows_kde(self):
+        answers = dict(self.answers)
+        answers["/usr/bin/kreadconfig6 --file kioslaverc --group Proxy Settings --key ProxyType"] = (0, "2\n")
+        answers["/usr/bin/kreadconfig6 --file kioslaverc --group Proxy Settings --key Proxy Config Script"] = (
+            0, "http://127.0.0.1:1081/proxy.pac?v=3\n")
+        self.assertEqual(sysproxy.state(1081, run=Runner(answers)), "ok")
+        self.assertEqual(sysproxy.state(1081, run=Runner(self.answers)), "unset")
+
+    def test_without_kde_tools_and_gsettings_is_unavailable(self):
+        with mock.patch.object(pf, "find_binary", lambda name, override=None: None):
+            self.assertIsNone(sysproxy.current(run=Runner({"gsettings get": (1, "")})))
+
+
+class WindowsTests(unittest.TestCase):
+    def setUp(self):
+        as_platform(self, windows=True)
+        self.registry = {"url": ""}
+        self.notified = []
+        from uni_vpn import windows
+
+        def proxy_set(url):
+            self.registry["url"] = url
+            self.notified.append(url)
+
+        for name, value in (("proxy_get", lambda: dict(self.registry)), ("proxy_set", proxy_set)):
+            patcher = mock.patch.object(windows, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_install_sets_autoconfig_url_and_uninstall_removes_it(self):
+        backup = Path(tempfile.mkdtemp()) / "backup.json"
+        self.assertEqual(sysproxy.install(1081, backup=backup), "ok")
+        self.assertEqual(self.registry["url"], "http://127.0.0.1:1081/proxy.pac")
+        self.assertEqual(sysproxy.state(1081), "ok")
+        self.assertEqual(sysproxy.uninstall(backup=backup), "restored")
+        self.assertEqual(self.registry["url"], "")
+        self.assertEqual(sysproxy.state(1081), "unset")
+
+    def test_foreign_pac_is_replaced_and_restored(self):
+        self.registry["url"] = "http://corp/wpad.dat"
+        backup = Path(tempfile.mkdtemp()) / "backup.json"
+        self.assertEqual(sysproxy.state(1081), "foreign")
+        self.assertEqual(sysproxy.install(1081, backup=backup), "replaced")
+        self.assertEqual(sysproxy.uninstall(backup=backup), "restored")
+        self.assertEqual(self.registry["url"], "http://corp/wpad.dat")
+
+    def test_refresh_bumps_version_only_when_ours(self):
+        sysproxy.refresh(1081)
+        self.assertEqual(self.notified, [])
+        self.registry["url"] = "http://127.0.0.1:1081/proxy.pac"
+        sysproxy.refresh(1081)
+        self.assertTrue(self.registry["url"].startswith("http://127.0.0.1:1081/proxy.pac?v="))
+

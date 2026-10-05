@@ -5,12 +5,17 @@ from unittest import mock
 
 from uni_vpn import credentials, platform as pf
 
+from tests import posix_only, simulate_posix
+
+setUpModule, tearDownModule = simulate_posix()
+
 
 class GetPasswordTests(unittest.IsolatedAsyncioTestCase):
     async def test_returns_bytes_without_newline(self):
-        cmd = [sys.executable, "-c", "import sys; sys.stdout.write('geheim')"]
-        self.assertEqual(await credentials.get_password("u", 2, command=cmd), b"geheim")
+        cmd = [sys.executable, "-c", "import sys; sys.stdout.write('secret')"]
+        self.assertEqual(await credentials.get_password("u", 2, command=cmd), b"secret")
 
+    @posix_only
     async def test_macos_strips_exactly_one_newline(self):
         cmd = [sys.executable, "-c", "import sys; sys.stdout.write('pw \\n')"]
         with mock.patch.object(pf, "IS_MACOS", True):
@@ -33,7 +38,7 @@ class GetPasswordTests(unittest.IsolatedAsyncioTestCase):
 
 
 class TotpEntryTests(unittest.IsolatedAsyncioTestCase):
-    """Der TOTP-Schluessel liegt unter eigenem Dienstnamen, damit secret-tool ihn nie mit dem Passwort verwechselt."""
+    """The TOTP secret lives under its own service name so secret-tool never confuses it with the password."""
 
     def test_lookup_commands_use_separate_service_names(self):
         with mock.patch.object(pf, "IS_MACOS", False), mock.patch.object(pf, "find_binary", return_value="/usr/bin/secret-tool"):
@@ -67,7 +72,7 @@ class TotpEntryTests(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(pf, "IS_MACOS", False), mock.patch.object(pf, "find_binary", return_value="/usr/bin/secret-tool"):
             credentials.store_totp("ab1", "base32:GEZDGNBVGY3TQOJQ", run=run)
         cmd, kwargs = calls[0]
-        self.assertEqual(cmd, ["/usr/bin/secret-tool", "store", "--label", "Uni VPN (zweiter Faktor)",
+        self.assertEqual(cmd, ["/usr/bin/secret-tool", "store", "--label", "Uni VPN (second factor)",
                                "service", "uni-vpn-totp", "user", "ab1"])
         self.assertEqual(kwargs["input"], b"base32:GEZDGNBVGY3TQOJQ")
 
@@ -146,7 +151,7 @@ class StoreTests(unittest.TestCase):
 
     def test_store_failure_raises(self):
         def run(cmd, **kwargs):
-            return subprocess.CompletedProcess(cmd, 1, b"", b"kaputt")
+            return subprocess.CompletedProcess(cmd, 1, b"", b"broken")
 
         with mock.patch.object(pf, "IS_MACOS", False), mock.patch.object(pf, "find_binary", return_value="/usr/bin/secret-tool"):
             with self.assertRaises(credentials.KeyringError):
@@ -158,12 +163,12 @@ class StoreTests(unittest.TestCase):
                 credentials.lookup_command("ab1")
 
 
-@unittest.skipUnless(sys.platform == "darwin", "nur auf macOS")
+@unittest.skipUnless(sys.platform == "darwin", "macOS only")
 class MacKeychainRoundtrip(unittest.IsolatedAsyncioTestCase):
-    """Echter security-Roundtrip in einem Wegwerf-Keychain (auch auf CI-Runnern ohne GUI-Session).
+    """Real security roundtrip in a throwaway keychain (also on CI runners without a GUI session).
 
-    Jeder Schritt meldet sich auf stderr und hat ein Timeout, damit ein haengender
-    Keychain-Dialog den Lauf nicht stumm blockiert.
+    Every step reports on stderr and has a timeout, so a hanging keychain dialog does not
+    silently block the run.
     """
 
     def sec(self, *args, check=True):
@@ -177,7 +182,7 @@ class MacKeychainRoundtrip(unittest.IsolatedAsyncioTestCase):
         self.old_list = [line.strip().strip('"') for line in self.sec("list-keychains", "-d", "user", check=False).stdout.splitlines()]
         self.sec("create-keychain", "-p", "ci", self.keychain)
         self.sec("unlock-keychain", "-p", "ci", self.keychain)
-        self.sec("set-keychain-settings", self.keychain)  # kein Auto-Lock
+        self.sec("set-keychain-settings", self.keychain)  # no auto-lock
         self.sec("list-keychains", "-d", "user", "-s", self.keychain, *self.old_list)
         self.sec("default-keychain", "-d", "user", "-s", self.keychain)
 
@@ -188,33 +193,33 @@ class MacKeychainRoundtrip(unittest.IsolatedAsyncioTestCase):
         self.sec("delete-keychain", self.keychain, check=False)
 
     def store(self, user, password):
-        print(f"store_password ({len(password)} Zeichen)", file=sys.stderr, flush=True)
+        print(f"store_password ({len(password)} characters)", file=sys.stderr, flush=True)
         credentials.store_password(user, password)
 
     async def test_roundtrip_simple(self):
         user = "uni-vpn-citest-simple"
-        self.store(user, "einfach123")
-        self.assertEqual(await credentials.get_password(user, 10), b"einfach123")
+        self.store(user, "simple123")
+        self.assertEqual(await credentials.get_password(user, 10), b"simple123")
         self.assertTrue(credentials.delete_password(user))
 
     async def test_roundtrip_totp_is_separate_entry(self):
         user = "uni-vpn-citest-totp"
-        self.store(user, "passwort")
+        self.store(user, "password")
         credentials.store_totp(user, "base32:GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")
-        self.assertEqual(await credentials.get_password(user, 10), b"passwort")
+        self.assertEqual(await credentials.get_password(user, 10), b"password")
         self.assertEqual(await credentials.get_totp(user, 10), b"base32:GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")
         self.assertTrue(credentials.delete_totp(user))
         with self.assertRaises(credentials.TotpMissing):
             await credentials.get_totp(user, 10)
-        self.assertEqual(await credentials.get_password(user, 10), b"passwort")
+        self.assertEqual(await credentials.get_password(user, 10), b"password")
         self.assertTrue(credentials.delete_password(user))
 
     async def test_roundtrip_special_characters(self):
         user = "uni-vpn-citest"
         self.store(user, "ci pass \"quoted\" \\ back")
         self.assertEqual(await credentials.get_password(user, 10), b'ci pass "quoted" \\ back')
-        self.store(user, "zweites")  # Ueberschreiben = loeschen und neu anlegen
-        self.assertEqual(await credentials.get_password(user, 10), b"zweites")
+        self.store(user, "second")  # overwrite = delete and create anew
+        self.assertEqual(await credentials.get_password(user, 10), b"second")
         self.assertTrue(credentials.delete_password(user))
         with self.assertRaises(credentials.PasswordMissing):
             await credentials.get_password(user, 10)
