@@ -16,7 +16,7 @@
         "Click \"Tokendetails einblenden\" and copy the line starting with otpauth://.",
         "Paste it below, then type the code shown here into the portal's \"Testen\" field."
       ],
-      "default_domains": ["sogo.uni-heidelberg.de", "elearning-med.uni-heidelberg.de", "cip.dmed.uni-heidelberg.de"],
+      "default_domains": ["sogo.uni-heidelberg.de", "elearning-med.uni-heidelberg.de", "cip.dmed.uni-heidelberg.de", "heico.uni-heidelberg.de"],
       "aliases": ["Universitaet Heidelberg", "Ruprecht-Karls-Universitaet", "URZ"],
       "verified": true,
       "notes": "Tested end to end, see docs/e2e.md. The OTP form comes after the password form."

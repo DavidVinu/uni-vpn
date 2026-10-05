@@ -97,7 +97,7 @@ in the terminal.
 
 At Heidelberg, `https://sogo.uni-heidelberg.de` and `https://elearning-med.uni-heidelberg.de`
 now go through the university, along with `cip.dmed.uni-heidelberg.de`, which elearning-med
-embeds for its statistics. Everything else does not. For other universities the list starts
+embeds for its statistics, and the heiCO login at `heico.uni-heidelberg.de`. Everything else does not. For other universities the list starts
 empty. Domains go under Settings, Websites.
 
 Without a desktop, `--university ID` (`-University ID` on Windows) picks the university, for

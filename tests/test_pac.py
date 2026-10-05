@@ -11,7 +11,8 @@ from uni_vpn import pac
 class DomainListTests(unittest.TestCase):
     def test_defaults(self):
         self.assertEqual(pac.DEFAULT_DOMAINS,
-                         ["sogo.uni-heidelberg.de", "elearning-med.uni-heidelberg.de", "cip.dmed.uni-heidelberg.de"])
+                         ["sogo.uni-heidelberg.de", "elearning-med.uni-heidelberg.de", "cip.dmed.uni-heidelberg.de",
+                          "heico.uni-heidelberg.de"])
 
     def test_parse_normalizes_and_reports_errors_with_line_numbers(self):
         text = "Sogo.Uni-Heidelberg.DE\n# comment\n\n*.example.org  # wildcard\nsogo.uni-heidelberg.de\nnot valid\nhttp://x.y\n"
