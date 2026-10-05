@@ -8,17 +8,19 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.parse
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from . import config, credentials, doctor, service, sysproxy, totp
+from . import config, credentials, detect, doctor, service, sysproxy, totp
 from . import platform as pf
+from . import universities as unis
 from .tunnel import port_open as _port_open
 
 INSTALLED_FILES = "installed-files.txt"
-TOTP_HINT = """   Second factor: in the MFA portal https://mfa.uni-heidelberg.de (reachable only on the university network
-   or via VPN), set up another token under "Soft-Token (zeitbasiert)", click "Tokendetails einblenden" and copy
-   the text between secret= and &issuer=. The app on your phone stays as a second token."""
+UNIVERSITY_PROMPT = "Your university (name or part of it, Enter for Heidelberg, other if not listed): "
+MFA_CHOICES = {"none": "none", "totp_field": "one-time code in its own field",
+               "totp_append": "one-time code after the password", "duo_push": "Duo push"}
 FINAL_HINT = """
 Status page (state, connect/disconnect, domain list): http://127.0.0.1:{port}/
 Restart any open browser once so that it reads the proxy rule.
@@ -198,10 +200,70 @@ def install_launcher(port: int, dry: bool, created, run=subprocess.run) -> None:
     _say(f"App entry created: {path}")
 
 
+def totp_hint(cfg: config.Config) -> str:
+    portal = f" ({cfg.mfa_portal_url})" if cfg.mfa_portal_url else ""
+    return (f"   Second factor: in your university's MFA portal{portal}, add another time-based token (TOTP) for\n"
+            "   this computer and copy its secret, the otpauth:// line or the letters after secret=.\n"
+            "   The app on your phone stays as a second token.")
+
+
+def ask_other(input_fn, probe=detect.probe) -> tuple[str, dict] | None:
+    """"Not listed": the VPN address, then what the gateway's login form shows."""
+    try:
+        host, usergroup = detect.split_address(input_fn("VPN address (for example vpn.example.edu): "))
+    except unis.FieldError as exc:
+        print(f"   {exc}")
+        return None
+    result = probe(host, usergroup)
+    overrides = {"host": host, **({"usergroup": usergroup} if usergroup else {})}
+    if result.error:
+        print(f"   {result.error}")
+    if len(result.groups) > 1:
+        print("   Groups: " + ", ".join(result.groups))
+        group = input_fn(f"Group [{result.group}]: ").strip() or result.group
+        if group != result.group:
+            result = probe(host, usergroup, group)
+        overrides["authgroup"] = group
+    if result.saml:
+        print("   This university signs in through a browser (SAML), uni-vpn does not support that yet")
+        return None
+    guess = result.suggestion()["mfa"]
+    print("   Second factor: " + ", ".join(f"{key} ({text})" for key, text in MFA_CHOICES.items()))
+    mfa = input_fn(f"Second factor [{guess}]: ").strip() or guess
+    if mfa not in MFA_CHOICES:
+        print(f"   Unknown second factor {mfa!r}")
+        return None
+    overrides["mfa"] = mfa
+    return unis.OTHER_ID, overrides
+
+
+def choose_university(input_fn, probe=detect.probe) -> tuple[str, dict] | None:
+    """The assistant's university step for the terminal. (id, overrides), None if nothing fits."""
+    for _attempt in range(3):
+        text = input_fn(UNIVERSITY_PROMPT).strip()
+        if not text:
+            return unis.DEFAULT_ID, {}
+        if text.lower() in (unis.OTHER_ID, "not listed"):
+            return ask_other(input_fn, probe)
+        found = unis.search(text)
+        if len(found) == 1:
+            if found[0].mfa == "saml":
+                print(f"   {found[0].name} signs in through a browser (SAML), uni-vpn does not support that yet")
+                return None
+            _say(found[0].name)
+            return found[0].id, {}
+        if found:
+            print("   Which one? " + ", ".join(f"{p.name} ({p.id})" for p in found[:8]))
+        else:
+            print("   Not in the list. Type other to enter the VPN address")
+    print("No university chosen")
+    return None
+
+
 def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=service.install,
           store=credentials.store_password, store_totp=credentials.store_totp,
           keyring_probe=doctor.keyring_state, proxy_install=sysproxy.install, run_doctor=True,
-          port_open=_port_open, open_url=None, has_desktop=None) -> int:
+          port_open=_port_open, open_url=None, has_desktop=None, probe=detect.probe) -> int:
     dry = bool(getattr(args, "dry_run", False))
     open_url = open_url or pf.open_url
     has_desktop = has_desktop or pf.has_desktop
@@ -228,6 +290,15 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
 
     cfg_path = config.default_path()
     user = (getattr(args, "user", None) or "").strip()
+    university = (getattr(args, "university", None) or "").strip()
+    if university:
+        profile = unis.get(university)
+        if profile is None or university == unis.OTHER_ID:
+            print(f"Unknown university {university!r}, see uni_vpn/universities.json")
+            return 1
+        if profile.mfa == "saml":
+            print(f"{profile.name} signs in through a browser (SAML), uni-vpn does not support that yet")
+            return 1
     broken = None
     configured = cfg_path.exists()
     if configured:
@@ -239,7 +310,9 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
             cfg = config.Config(**config.ports_from_broken(cfg_path))  # the ports the daemon uses
             print(f"Config {cfg_path} is invalid ({exc}), please fix it; continuing with defaults")
         else:
-            _say(f"Config found: {cfg_path} (university ID {cfg.user})")
+            _say(f"Config found: {cfg_path} ({cfg.university_name}, university ID {cfg.user})")
+            if university and university != cfg.university:
+                print(f"   Keeping {cfg.university_name}. To switch, set university = \"{university}\" in {cfg_path}")
         if user and broken is None and user != cfg.user:
             if not config.valid_user(user):
                 print(f"Not a university ID: {user!r}")
@@ -257,6 +330,14 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
             return 1
         cfg = config.Config()
     else:
+        overrides: dict = {}
+        if not university and dry:
+            university = unis.DEFAULT_ID
+        elif not university:
+            chosen = choose_university(input_fn, probe)
+            if chosen is None:
+                return 1
+            university, overrides = chosen
         if not user:
             if dry and not sys.stdin.isatty():
                 user = "example"
@@ -269,10 +350,11 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
             print(f"Not a university ID: {user!r}")
             return 1
         if dry:
-            _say(f"would create {cfg_path} with university ID {user}")
-            cfg = config.Config(user=user)
+            _say(f"would create {cfg_path} for {unis.get(university).name} with university ID {user}")
+            cfg = config.profile_config(university)
+            cfg.user = user
         else:
-            config.write_initial(cfg_path, user=user)
+            config.write_initial(cfg_path, user=user, university=university, overrides=overrides)
             created(cfg_path)
             cfg = config.load(cfg_path)
             _say(f"Config created: {cfg_path}")
@@ -328,8 +410,10 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
 
     url = f"http://127.0.0.1:{cfg.http_port}/"
     if gui:
-        if user and not configured:
-            url += f"?user={user}"
+        given = {"user": user, "university": university} if not configured else {}
+        query = urllib.parse.urlencode({key: value for key, value in given.items() if value})
+        if query:
+            url += f"?{query}"
         # The service has started, but the daemon needs a moment until bind().
         if not wait_for_port(cfg.http_port, port_open=port_open, timeout=15):
             print(f"\nThe service did not open {url} within 15 seconds. See: uni-vpn log, uni-vpn doctor")
@@ -351,7 +435,8 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
             return 0
 
     if dry:
-        _say("would ask for the university password and the TOTP secret and store both in the keyring")
+        _say("would ask for the university password" + (" and the TOTP secret" if cfg.needs_totp else "")
+             + " and store it in the keyring")
     else:
         state = keyring_probe(cfg.user)
         if state == "present":
@@ -363,11 +448,13 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
                 _say("Password stored in the keyring")
             else:
                 print("   No password entered, set it later with: uni-vpn password")
-        state = keyring_probe(cfg.user, kind="totp")
-        if state == "present":
+        state = keyring_probe(cfg.user, kind="totp") if cfg.needs_totp else "not used"
+        if state == "not used":
+            pass
+        elif state == "present":
             _say("TOTP secret is already in the keyring")
         else:
-            print(TOTP_HINT)
+            print(totp_hint(cfg))
             text = getpass_fn(f"TOTP secret for {cfg.user} (otpauth URL or Base32, input stays hidden): ")
             if not text.strip():
                 print("   No secret entered, set it later with: uni-vpn totp")

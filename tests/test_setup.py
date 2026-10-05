@@ -11,9 +11,11 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from uni_vpn import doctor, service, sysproxy
+from uni_vpn import config, detect, doctor, service, sysproxy
 from uni_vpn import platform as pf
 from uni_vpn import setup
+
+from tests.test_detect import fixture
 
 
 class SetupHarness(unittest.TestCase):
@@ -59,12 +61,16 @@ class SetupHarness(unittest.TestCase):
         return [target]
 
     def args(self, **kwargs):
-        base = {"dry_run": False, "user": None, "yes": False}
+        base = {"dry_run": False, "user": None, "university": None, "yes": False}
         base.update(kwargs)
         return argparse.Namespace(**base)
 
     def answer(self, prompt):
         return "pw" if "password" in prompt else "gezd gnbv gy3t qojq gezd gnbv gy3t qojq"
+
+    def ask(self, prompt):
+        # Enter at the university question keeps Heidelberg, as before profiles existed.
+        return "" if prompt == setup.UNIVERSITY_PROMPT else "ab123"
 
     def fake_proxy_install(self, http_port):
         self.proxy_calls.append(http_port)
@@ -73,7 +79,7 @@ class SetupHarness(unittest.TestCase):
     def run_setup(self, service_install=None, run_doctor=False, port_open=lambda port: True, getpass_fn=None, **kwargs):
         out = StringIO()
         with redirect_stdout(out):
-            rc = setup.setup(self.args(**kwargs), input_fn=lambda prompt: "ab123", getpass_fn=getpass_fn or self.answer,
+            rc = setup.setup(self.args(**kwargs), input_fn=self.ask, getpass_fn=getpass_fn or self.answer,
                              service_install=service_install or self.fake_service_install,
                              store=lambda user, pw: self.stored.append((user, pw)),
                              store_totp=lambda user, token: self.stored_totp.append((user, token)),
@@ -309,7 +315,7 @@ class SetupTests(SetupHarness):
     def test_existing_secrets_not_asked_again(self):
         out = StringIO()
         with redirect_stdout(out):
-            rc = setup.setup(self.args(user="ab123"), input_fn=lambda p: "x", getpass_fn=lambda p: (_ for _ in ()).throw(AssertionError("must not ask")),
+            rc = setup.setup(self.args(user="ab123"), input_fn=self.ask, getpass_fn=lambda p: (_ for _ in ()).throw(AssertionError("must not ask")),
                              service_install=self.fake_service_install, store=self.stored.append,
                              store_totp=self.stored_totp.append, proxy_install=self.fake_proxy_install,
                              keyring_probe=lambda user, kind="password": "present", run_doctor=False)
@@ -354,6 +360,11 @@ class GuiSetupTests(SetupHarness):
         self.assertEqual(self.urls, ["http://127.0.0.1:1081/?user=ab123"])
         self.assertFalse((self.home / ".config" / "uni-vpn" / "config.toml").exists())
 
+    def test_given_university_is_passed_to_the_assistant(self):
+        rc, out = self.run_gui(user="ab123", university="ethz")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.urls, ["http://127.0.0.1:1081/?user=ab123&university=ethz"])
+
     def test_without_a_browser_it_says_where_to_go(self):
         rc, out = self.run_gui(opened=False)
         self.assertEqual(rc, 0)
@@ -362,7 +373,7 @@ class GuiSetupTests(SetupHarness):
     def test_no_gui_flag_asks_in_the_terminal(self):
         out = StringIO()
         with redirect_stdout(out):
-            rc = setup.setup(self.args(no_gui=True), input_fn=lambda p: "ab123", getpass_fn=self.answer,
+            rc = setup.setup(self.args(no_gui=True), input_fn=self.ask, getpass_fn=self.answer,
                              service_install=self.fake_service_install,
                              store=lambda user, pw: self.stored.append((user, pw)),
                              store_totp=lambda user, token: self.stored_totp.append((user, token)),
@@ -386,6 +397,131 @@ class GuiSetupTests(SetupHarness):
         rc, out = self.run_setup(user='ab"1')
         self.assertEqual(rc, 1)
         self.assertIn("Not a university ID", out)
+
+
+class UniversityChoiceTests(SetupHarness):
+    def run_terminal(self, answers, probe=None, **kwargs):
+        """answers: prompt start -> list of answers, used in order."""
+        self.prompts = []
+        queue = {start: list(values) for start, values in answers.items()}
+
+        def ask(prompt):
+            self.prompts.append(prompt)
+            for start, values in queue.items():
+                if prompt.startswith(start) and values:
+                    return values.pop(0)
+            return "ab123" if prompt.startswith("University ID") else ""
+
+        def no_probe(*args):
+            raise AssertionError("no probe expected")
+
+        out = StringIO()
+        with redirect_stdout(out):
+            rc = setup.setup(self.args(**kwargs), input_fn=ask, getpass_fn=self.answer,
+                             service_install=self.fake_service_install,
+                             store=lambda user, pw: self.stored.append((user, pw)),
+                             store_totp=lambda user, token: self.stored_totp.append((user, token)),
+                             keyring_probe=lambda user, kind="password": self.keyring[kind],
+                             proxy_install=self.fake_proxy_install, run_doctor=False, port_open=lambda port: True,
+                             probe=probe or no_probe)
+        return rc, out.getvalue()
+
+    def config_path(self):
+        return self.home / ".config" / "uni-vpn" / "config.toml"
+
+    def test_enter_keeps_heidelberg(self):
+        rc, out = self.run_terminal({})
+        self.assertEqual(rc, 0, out)
+        self.assertIn('university = "heidelberg"', self.config_path().read_text())
+        self.assertEqual(len(self.stored_totp), 1)
+        self.assertIn("mfa.uni-heidelberg.de", out)
+
+    def test_a_name_picks_the_profile_and_skips_the_totp_question(self):
+        rc, out = self.run_terminal({"Your university": ["bonn"]})
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(config.load(self.config_path()).university, "bonn")
+        self.assertIn("University of Bonn", out)
+        self.assertEqual(self.stored, [("ab123", "pw")])
+        self.assertEqual(self.stored_totp, [])
+        self.assertNotIn("TOTP", out)
+
+    def test_an_ambiguous_name_asks_again(self):
+        rc, out = self.run_terminal({"Your university": ["universit", "mannheim"]})
+        self.assertEqual(rc, 0, out)
+        self.assertIn("Which one?", out)
+        self.assertEqual(config.load(self.config_path()).university, "mannheim")
+
+    def test_three_misses_stop_without_a_config(self):
+        rc, out = self.run_terminal({"Your university": ["atlantis", "atlantis", "atlantis"]})
+        self.assertEqual(rc, 1)
+        self.assertIn("Type other", out)
+        self.assertFalse(self.config_path().exists())
+
+    def test_saml_university_is_refused(self):
+        rc, out = self.run_terminal({"Your university": ["oxford"]})
+        self.assertEqual(rc, 1)
+        self.assertIn("browser", out)
+        self.assertFalse(self.config_path().exists())
+
+    def test_other_probes_the_gateway_and_writes_the_profile(self):
+        calls = []
+
+        def probe(host, usergroup="", group=""):
+            calls.append((host, usergroup, group))
+            return detect.parse_reply(fixture("bremen.xml"), host, usergroup)
+
+        rc, out = self.run_terminal({"Your university": ["other"], "VPN address": ["https://vpn.example.edu/staff"]},
+                                    probe=probe)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(calls, [("vpn.example.edu", "staff", "")])
+        cfg = config.load(self.config_path())
+        self.assertEqual((cfg.university, cfg.host, cfg.usergroup, cfg.authgroup, cfg.mfa),
+                         ("other", "vpn.example.edu", "staff", "Tunnel-All-Traffic", "totp_field"))
+        self.assertEqual(len(self.stored_totp), 1)
+
+    def test_other_with_another_group_probes_again(self):
+        def probe(host, usergroup="", group=""):
+            return detect.parse_reply(fixture("stanford-group-stanford.xml" if group else "stanford.xml"), host)
+
+        rc, out = self.run_terminal({"Your university": ["other"], "VPN address": ["su-vpn.stanford.edu"],
+                                     "Group": ["Stanford"], "Second factor": ["duo_push"]}, probe=probe)
+        self.assertEqual(rc, 0, out)
+        cfg = config.load(self.config_path())
+        self.assertEqual((cfg.authgroup, cfg.mfa), ("Stanford", "duo_push"))
+        self.assertEqual(self.stored_totp, [])
+
+    def test_other_with_saml_stops(self):
+        rc, out = self.run_terminal({"Your university": ["other"], "VPN address": ["vpn.fu-berlin.de"]},
+                                    probe=lambda host, usergroup="", group="": detect.parse_reply(fixture("fu-berlin.xml"), host))
+        self.assertEqual(rc, 1)
+        self.assertIn("browser", out)
+        self.assertFalse(self.config_path().exists())
+
+    def test_university_option_skips_the_question(self):
+        rc, out = self.run_terminal({}, university="stanford")
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn(setup.UNIVERSITY_PROMPT, self.prompts)
+        self.assertEqual(config.load(self.config_path()).university, "stanford")
+        self.assertEqual(self.stored_totp, [])
+
+    def test_unknown_or_saml_university_option_is_refused(self):
+        for university in ("atlantis", "other", "fu-berlin"):
+            rc, out = self.run_terminal({}, university=university)
+            self.assertEqual(rc, 1, university)
+        self.assertFalse(self.config_path().exists())
+
+    def test_existing_config_keeps_its_university(self):
+        rc, _ = self.run_terminal({})
+        rc, out = self.run_terminal({}, university="bonn")
+        self.assertEqual(rc, 0, out)
+        self.assertIn('set university = "bonn"', out)
+        self.assertEqual(config.load(self.config_path()).university, "heidelberg")
+
+    def test_dry_run_asks_no_university(self):
+        rc, out = self.run_terminal({}, dry_run=True, user="ab123")
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn(setup.UNIVERSITY_PROMPT, self.prompts)
+        self.assertIn("Heidelberg University", out)
 
 
 class UninstallTests(SetupHarness):

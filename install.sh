@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Install uni-vpn on Linux or macOS: fetch packages, then run "uni-vpn setup".
-# Usage: ./install.sh [--uninstall | --update] [--dry-run] [--no-gui] [--user UNIVERSITY-ID]
+# Usage: ./install.sh [--uninstall | --update] [--dry-run] [--no-gui] [--user UNIVERSITY-ID] [--university ID]
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
@@ -16,12 +16,15 @@ while [ $# -gt 0 ]; do
     --user)
       [ $# -ge 2 ] || { echo "--user needs a university ID"; exit 2; }
       extra+=(--user "$2"); shift ;;
+    --university)
+      [ $# -ge 2 ] || { echo "--university needs an id from uni_vpn/universities.json"; exit 2; }
+      extra+=(--university "$2"); shift ;;
     -h|--help) sed -n '2,3p' "$0"; exit 0 ;;
     *) echo "Unknown option: $1"; exit 2 ;;
   esac
   shift
 done
-# --no-gui and --user only mean something to "setup".
+# --no-gui, --user and --university only mean something to "setup".
 if [ "$mode" != setup ]; then
   filtered=()
   for a in "${extra[@]:-}"; do [ "$a" = "--dry-run" ] && filtered+=("$a"); done
