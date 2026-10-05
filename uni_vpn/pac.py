@@ -16,6 +16,9 @@ DEFAULT_DOMAINS = [
     # elearning-med bindet von dort matomo.js ein; der Host ist nur im Uni-Netz erreichbar
     # und der Browser wartet sonst bis zum Verbindungs-Timeout (Chrome: 136 s).
     "cip.dmed.uni-heidelberg.de",
+    # heiCO login uses the UHDLOGINTERNAL realm, which answers 403 "Nur intern zugaenglich"
+    # outside the university network.
+    "heico.uni-heidelberg.de",
 ]
 _LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
 HOST_RE = re.compile(rf"^(?=.{{1,253}}$){_LABEL}(?:\.{_LABEL})+$")
