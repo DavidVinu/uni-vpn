@@ -111,7 +111,7 @@ def run_checks(cfg_path: Path | None = None, *,
     programs = [("openconnect", cfg.openconnect)] + [(name, cfg.ocproxy) for name in pf.tunnel_helpers()]
     for name, override in programs:
         found = find_binary(name, override)
-        detail = found or "not found, run install.sh"
+        detail = found or "not found, click Repair in the app"
         status = "ok" if found else "fail"
         if found and name == "openconnect":
             version = openconnect_version(found, run)
@@ -126,10 +126,10 @@ def run_checks(cfg_path: Path | None = None, *,
         found = find_binary("openconnect", cfg.openconnect)
         wintun = bool(found) and os.path.isfile(os.path.join(os.path.dirname(found), "wintun.dll"))
         checks.append(Check("Wintun", "ok" if wintun else "fail",
-                            "wintun.dll next to openconnect" if wintun else "wintun.dll missing, run install.ps1 again"))
+                            "wintun.dll next to openconnect" if wintun else "wintun.dll missing, click Repair in the app"))
     elif not pf.IS_MACOS:
         found = find_binary("secret-tool")
-        checks.append(Check("secret-tool", "ok" if found else "fail", found or "not found, run install.sh (libsecret-tools)"))
+        checks.append(Check("secret-tool", "ok" if found else "fail", found or "not found (libsecret-tools), click Repair in the app"))
 
     # Ask the daemon first: if it answers, the ports are ours, whether or not systemd/launchd started it.
     daemon_status: dict | None = None
@@ -145,18 +145,18 @@ def run_checks(cfg_path: Path | None = None, *,
     elif daemon_up:
         checks.append(Check("Service", "warn", "Daemon running, but not as a service (started by hand?)"))
     else:
-        checks.append(Check("Service", "fail", "not running: uni-vpn service start, log: uni-vpn log"))
+        checks.append(Check("Service", "fail", "not running, restart the computer"))
 
     for label, port in (("Port %d" % cfg.socks_port, cfg.socks_port), ("Port %d" % cfg.http_port, cfg.http_port)):
         in_use = port_in_use(port)
         if daemon_up and in_use:
             checks.append(Check(label, "ok", "bound (uni-vpn)"))
         elif daemon_up:
-            checks.append(Check(label, "fail", "daemon answers, but the port is not bound, see uni-vpn log"))
+            checks.append(Check(label, "fail", "daemon answers, but the port is not bound, see the log (app: Settings, Log)"))
         elif active and in_use:
             checks.append(Check(label, "ok", "bound"))
         elif active:
-            checks.append(Check(label, "fail", "service running, but the port is not bound, see uni-vpn log"))
+            checks.append(Check(label, "fail", "service running, but the port is not bound, see the log (app: Settings, Log)"))
         elif in_use:
             owner = port_owner(port, run)
             checks.append(Check(label, "fail", "in use by another process" + (f": {owner}" if owner else "")
@@ -167,7 +167,7 @@ def run_checks(cfg_path: Path | None = None, *,
     if cfg.user:
         state = keyring_probe(cfg.user)
         mapping = {"present": ("ok", "password stored"),
-                   "missing": ("fail", "no password stored: uni-vpn password"),
+                   "missing": ("fail", "no password stored, enter it in the app: Settings, Password"),
                    "locked": ("warn", "keyring locked or not responding")}
         status, detail = mapping.get(state, ("fail", state.replace("error:", "error: ")))
         checks.append(Check("Keyring", status, detail))
@@ -176,7 +176,7 @@ def run_checks(cfg_path: Path | None = None, *,
         elif cfg.needs_totp:
             state = keyring_probe(cfg.user, kind="totp")
             mapping = {"present": ("ok", "TOTP secret stored"),
-                       "missing": ("fail", "no TOTP secret stored: uni-vpn totp"),
+                       "missing": ("fail", "no TOTP secret stored, enter it in the app: Settings, Second factor"),
                        "locked": ("warn", "keyring locked or not responding")}
             status, detail = mapping.get(state, ("fail", state.replace("error:", "error: ")))
             checks.append(Check("Second factor", status, detail))
@@ -187,8 +187,8 @@ def run_checks(cfg_path: Path | None = None, *,
     url = sysproxy.pac_url(cfg.http_port)
     proxy = proxy_state(cfg.http_port)
     proxy_map = {"ok": ("ok", f"system reads {url}"),
-                 "unset": ("fail", "not registered with the system: run install.sh again"),
-                 "foreign": ("warn", "another proxy setting is active, running install.sh again replaces it"),
+                 "unset": ("fail", "not registered with the system, click Repair in the app"),
+                 "foreign": ("warn", "another proxy setting is active, Repair in the app replaces it"),
                  "unavailable": ("warn", f"no GNOME, KDE, macOS or Windows proxy settings; enter it by hand in the browser: {url}")}
     checks.append(Check("Proxy rule", *proxy_map.get(proxy, ("warn", proxy))))
 
@@ -203,7 +203,7 @@ def run_checks(cfg_path: Path | None = None, *,
         elevated = daemon_status["elevated"]
         checks.append(Check("Administrator rights", "ok" if elevated else "fail",
                             "service runs elevated" if elevated
-                            else "service is not elevated, Wintun needs it: run install.ps1 from an administrator account"))
+                            else "service is not elevated, Wintun needs it: click Repair in the app"))
 
     if daemon_status:
         bad = daemon_status["state"] in ("auth_failed", "keyring", "error", "blocked")

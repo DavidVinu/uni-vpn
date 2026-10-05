@@ -240,13 +240,13 @@ class SetupTests(SetupHarness):
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.stored_totp, [])
         self.assertIn("That is not the secret", out)
-        self.assertIn("uni-vpn totp", out)
+        self.assertIn("in the app, under Settings", out)
 
-    def test_empty_totp_input_hints_at_later_command(self):
+    def test_empty_totp_input_points_to_the_app(self):
         rc, out = self.run_setup(user="ab123", getpass_fn=lambda p: "pw" if "password" in p else "")
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.stored_totp, [])
-        self.assertIn("uni-vpn totp", out)
+        self.assertIn("in the app, under Settings", out)
 
     def test_dry_run_tolerates_missing_binaries(self):
         with mock.patch.object(pf, "find_binary", lambda name, override=None: None):
@@ -390,7 +390,7 @@ class GuiSetupTests(SetupHarness):
                              run_doctor=True, port_open=lambda port: False,
                              open_url=mock.Mock(side_effect=AssertionError("browser opened")), has_desktop=lambda: True)
         self.assertEqual(rc, 1)
-        self.assertIn("uni-vpn log", out.getvalue())
+        self.assertIn("Restart the computer", out.getvalue())
         self.assertIn("[!!] Service: not running", out.getvalue())
 
     def test_invalid_university_id_is_refused(self):
@@ -460,7 +460,7 @@ class UniversityChoiceTests(SetupHarness):
     def test_saml_university_is_refused(self):
         rc, out = self.run_terminal({"Your university": ["oxford"]})
         self.assertEqual(rc, 1)
-        self.assertIn("browser", out)
+        self.assertIn("web page", out)
         self.assertFalse(self.config_path().exists())
 
     def test_other_probes_the_gateway_and_writes_the_profile(self):
@@ -494,7 +494,7 @@ class UniversityChoiceTests(SetupHarness):
         rc, out = self.run_terminal({"Your university": ["other"], "VPN address": ["vpn.fu-berlin.de"]},
                                     probe=lambda host, usergroup="", group="": detect.parse_reply(fixture("fu-berlin.xml"), host))
         self.assertEqual(rc, 1)
-        self.assertIn("browser", out)
+        self.assertIn("web page", out)
         self.assertFalse(self.config_path().exists())
 
     def test_university_option_skips_the_question(self):

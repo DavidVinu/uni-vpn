@@ -24,6 +24,10 @@ class Forwarder:
         self._writers: set[asyncio.StreamWriter] = set()
         self._waiting: set[asyncio.Task] = set()
 
+    @property
+    def listening(self) -> bool:
+        return self._server is not None
+
     async def start(self) -> None:
         self._server = await asyncio.start_server(self._handle, self.host, self.port)
 

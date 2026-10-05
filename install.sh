@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Install uni-vpn on Linux or macOS: fetch packages, then run "uni-vpn setup".
-# Usage: ./install.sh [--uninstall | --update] [--dry-run] [--no-gui] [--user UNIVERSITY-ID] [--university ID]
+# Usage: ./install.sh [--uninstall | --update | --repair] [--dry-run] [--no-gui] [--user UNIVERSITY-ID] [--university ID]
+# --repair: what the app's Repair button runs, without a terminal: installs what is missing,
+# asks for the password in a dialog (pkexec) and opens no browser.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
@@ -11,6 +13,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --uninstall) mode=uninstall ;;
     --update) mode=update ;;
+    --repair) extra+=(--no-browser) ;;
     --dry-run) extra+=(--dry-run); dry=1 ;;
     --no-gui) extra+=(--no-gui) ;;
     --user)
@@ -35,7 +38,12 @@ say() { echo "-> $*"; }
 
 run_root() {
   if [ "$dry" = 1 ]; then say "would run: $*"; return 0; fi
-  if [ "$(id -u)" = 0 ]; then "$@"; else
+  if [ "$(id -u)" = 0 ]; then "$@"
+  elif [ ! -t 0 ] && command -v pkexec >/dev/null; then
+    # No terminal (the app's Repair button): the desktop asks for the password in a dialog.
+    say "$* (a dialog asks for your password)"
+    pkexec "$@"
+  else
     say "$* (sudo asks for your password)"
     sudo "$@"
   fi
@@ -64,8 +72,8 @@ linux_packages() {
     done
     find_python >/dev/null || missing+=(python3)
     if [ ${#missing[@]} -gt 0 ]; then
-      run_root apt-get update -qq || true
-      run_root apt-get install -y "${missing[@]}"
+      # One call, so a password dialog comes up once.
+      run_root sh -c 'apt-get update -qq || true; exec apt-get install -y "$@"' sh "${missing[@]}"
     fi
     # Ubuntu 22.04 and Debian 11 ship Python 3.10; 3.11 is a separate package there.
     if [ "$dry" = 0 ] && ! find_python >/dev/null; then
