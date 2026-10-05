@@ -1,9 +1,43 @@
 # uni-vpn
 
-Heidelberg University's VPN (Cisco AnyConnect) only for selected websites in the browser.
-The tunnel comes up on the first request to a listed domain, password and TOTP secret live
-in the operating system's keyring, and after 15 minutes without traffic the tunnel is torn
-down again. Everything else on the machine keeps its normal connection.
+Your university's Cisco AnyConnect VPN only for selected websites in the browser. Built at
+Heidelberg University, with profiles for other universities. The tunnel comes up on the first
+request to a listed domain, password and second factor live in the operating system's
+keyring, and after 15 minutes without traffic the tunnel is torn down again. Everything else
+on the machine keeps its normal connection.
+
+## Universities
+
+| University | Gateway | Second factor | State |
+|---|---|---|---|
+| Heidelberg University | vpn-ac.uni-heidelberg.de | TOTP | tested end to end |
+| ETH Zurich | sslvpn.ethz.ch | TOTP | profile only |
+| University of Bremen | vpn.uni-bremen.de | TOTP | profile only |
+| University of Muenster | vpn.uni-muenster.de | TOTP | profile only |
+| Harvard FAS Research Computing | vpn.rc.fas.harvard.edu | TOTP | profile only |
+| University of Marburg | vpn.uni-marburg.de | TOTP after the password | profile only |
+| Stanford University | su-vpn.stanford.edu | Duo push | profile only |
+| University of Stuttgart | vpn.tik.uni-stuttgart.de | none | profile only |
+| University of Bonn | unibn-vpn.uni-bonn.de | none | profile only |
+| University of Mannheim | vpn.uni-mannheim.de | none | profile only |
+| University of Kassel | univpn.uni-kassel.de | none | profile only |
+| TU Dresden | vpn2.zih.tu-dresden.de | none | profile only |
+| Freie Universitaet Berlin | vpn.fu-berlin.de | browser sign-in (SAML) | not supported yet |
+| University of Oxford | vpn.ox.ac.uk | browser sign-in (SAML) | not supported yet |
+
+"Profile only" means the values come from the university's documentation and a look at its
+login form, but nobody has logged in with uni-vpn yet. If it works for you, or if your
+university is missing, open an issue or a pull request against `uni_vpn/universities.json`.
+Not listed: choose "Not listed" in the setup assistant and enter the VPN address; uni-vpn reads
+the gateway's login form and fills in what it can. Every value can be changed in
+`config.toml`, for example:
+
+```toml
+university = "ethz"
+user = "jdoe"
+authgroup = "student-net"
+username_suffix = "@student-net.ethz.ch"
+```
 
 ## Platforms
 
@@ -56,20 +90,28 @@ What the installer adds when missing:
 - Windows: Python 3.12 (winget, or the signed python.org installer) and OpenConnect with
   Wintun (the OpenConnect-GUI 1.6.2 installer, checked against its SHA-256).
 
-The assistant then asks for three things, one per step: university ID and password, the TOTP
-secret (see below, with a live check code), done. Restart open browsers once afterwards.
+The assistant then asks one thing per step: your university, user name and password, the TOTP
+secret if your university uses one (see below, with a live check code), done. Restart open browsers once afterwards.
 Without a desktop (SSH), or with `--no-gui` (`-NoGui` on Windows), the same questions come
 in the terminal.
 
-`https://sogo.uni-heidelberg.de` and `https://elearning-med.uni-heidelberg.de` now go
-through the university, along with `cip.dmed.uni-heidelberg.de`, which elearning-med embeds
-for its statistics. Everything else does not. Further domains go under Settings, Websites.
+At Heidelberg, `https://sogo.uni-heidelberg.de` and `https://elearning-med.uni-heidelberg.de`
+now go through the university, along with `cip.dmed.uni-heidelberg.de`, which elearning-med
+embeds for its statistics. Everything else does not. For other universities the list starts
+empty. Domains go under Settings, Websites.
+
+Without a desktop, `--university ID` (`-University ID` on Windows) picks the university, for
+example `./install.sh --university ethz`.
 
 ### Second factor
 
-The URZ requires a time-based one-time password (TOTP) for VPN login. So that uni-vpn can
-connect without asking, the machine gets a token of its own, exactly as the URZ describes
-for KeePassXC. The app on your phone stays as it is.
+Universities with a time-based one-time password (TOTP): so that uni-vpn can connect without
+asking, the machine gets a token of its own, like a second phone. Add one in your
+university's MFA portal and paste its secret (the `otpauth://` line) into the assistant. With
+Duo push, confirm the request on the phone; without a second factor there is nothing to do.
+
+At Heidelberg the URZ requires TOTP for VPN login and describes the same for KeePassXC. The
+app on your phone stays as it is.
 
 1. On the university network, or with the Cisco client connected, open
    https://mfa.uni-heidelberg.de
@@ -111,6 +153,8 @@ The app is `http://127.0.0.1:1081/`, also in the start menu, Launchpad or app gr
 | App: login rejected | password wrong or expired | `uni-vpn password`; if it persists, check `uni-vpn log` and open an issue |
 | App: one-time code rejected | the machine's clock is off, or the TOTP secret is wrong | turn on automatic time; otherwise create a new token in the MFA portal and run `uni-vpn totp` |
 | App: no TOTP secret stored | second factor not set up yet | `uni-vpn totp`, see "Second factor" |
+| App: this university signs in through a browser (SAML) | the university uses single sign-on in a browser | not supported yet, use the Cisco client |
+| App: login rejected with Duo | the push was denied or not answered in time | connect again and confirm the push |
 | App: waiting for the next one-time code | within 30 s of the last login the same code cannot be reused | nothing to do, it continues by itself |
 | App: Cisco Secure Client is connected | the Cisco client is active | disconnect Cisco, uni-vpn then connects on its own |
 | App: keyring locked | the keyring was not unlocked after autologin | log out and log in with your password |
@@ -139,7 +183,8 @@ The app is `http://127.0.0.1:1081/`, also in the start menu, Launchpad or app gr
   `%ProgramFiles%\uni-vpn` and runs only Python and openconnect from Program Files, so nothing
   the user account can change runs elevated. `uni-vpn update` asks for administrator rights.
 - Password and TOTP secret live in the GNOME keyring, the macOS keychain or the Windows
-  Credential Manager, nowhere else. While connecting, openconnect reads the secret from a
+  Credential Manager, nowhere else. Setting up a university that is not listed asks its
+  gateway for the login form once, without any user data. While connecting, openconnect reads the secret from a
   file readable only by the user, which is deleted immediately afterwards. The machine is
   therefore the second factor, the same way the KeePassXC token documented by the URZ is.
 - macOS lists the service under System Settings, General, Login Items.
@@ -156,7 +201,8 @@ The app is `http://127.0.0.1:1081/`, also in the start menu, Launchpad or app gr
 ## Development
 
 `python3 -m unittest discover -s tests -t . -v` runs without a real VPN, against a fake
-openconnect, on Linux, macOS and Windows. Design: `docs/superpowers/specs/2026-09-07-uni-vpn-design.md`. End-to-end tests:
+openconnect, on Linux, macOS and Windows. Design: `docs/superpowers/specs/2026-09-07-uni-vpn-design.md`,
+other universities: `docs/superpowers/specs/2026-10-05-multi-university-design.md`. End-to-end tests:
 `docs/e2e.md` (Linux), `docs/macos-test.md`, `docs/windows-test.md`.
 
 ## License

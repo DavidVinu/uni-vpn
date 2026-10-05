@@ -1,6 +1,7 @@
 import copy
 import json
 import unittest
+from pathlib import Path
 
 from uni_vpn import universities as unis
 
@@ -68,6 +69,13 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual([p.id for p in unis.search("fasrc")], ["harvard-fasrc"])
         self.assertEqual([p.id for p in unis.search("bonn")], ["bonn"])
         self.assertEqual(unis.search("   "), [])
+
+
+class ReadmeTests(unittest.TestCase):
+    def test_readme_lists_every_university(self):
+        readme = (Path(__file__).parent.parent / "README.md").read_text(encoding="utf-8")
+        for profile in unis.registry().values():
+            self.assertIn(f"| {profile.name} | {profile.host} |", readme, profile.id)
 
 
 class ParseTests(unittest.TestCase):
