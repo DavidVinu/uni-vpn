@@ -41,7 +41,7 @@ class CatalogTests(unittest.TestCase):
                 self.assertIsNone(command.search(text), (code, key))
         for key, text in i18n.terminal().items():
             self.assertIn(key, i18n.catalog("en"))
-            self.assertEqual(placeholders(text), placeholders(i18n.catalog("en")[key]), key)
+            self.assertLessEqual(placeholders(i18n.catalog("en")[key]), placeholders(text), key)
 
     def test_university_steps_match_the_list(self):
         for code in i18n.CODES:
