@@ -168,7 +168,7 @@ The app is `http://127.0.0.1:1081/`, also in the start menu, Launchpad or app gr
 | Change university ID, password or TOTP secret | the app, gear icon, or `uni-vpn password`, `uni-vpn totp` |
 | Change websites | the app, gear icon, Websites (Chrome picks it up at once, Firefox after about 10 s; on macOS and Windows restart the browser) |
 | Something is wrong | `uni-vpn doctor`, paste the output into an issue |
-| Update | automatic, see below; `uni-vpn update` updates right away |
+| Update | nothing to do, uni-vpn updates itself (see below) |
 | Remove | `uni-vpn uninstall` (Linux, macOS) or, on Windows, `install.ps1 -Uninstall` from `%ProgramFiles%\uni-vpn` (it asks for administrator rights); both also reset the proxy setting |
 
 ## Troubleshooting
