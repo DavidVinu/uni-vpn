@@ -192,7 +192,18 @@ class TotpEndpointTests(DaemonHarness):
         await self.start_daemon()
         _, _, payload = await http(self.cfg.http_port, "GET", "/")
         self.assertIn(b"/api/totp", payload)
-        self.assertIn(b"mfa.uni-heidelberg.de", payload)
+        # The portal link comes from the profile now, not from the page.
+        self.assertNotIn(b"mfa.uni-heidelberg.de", payload)
+        _, _, payload = await http(self.cfg.http_port, "GET", "/status.json")
+        self.assertEqual(json.loads(payload)["mfa_portal_url"], "https://mfa.uni-heidelberg.de/")
+
+    async def test_status_page_has_the_university_picker(self):
+        await self.start_daemon()
+        _, _, payload = await http(self.cfg.http_port, "GET", "/")
+        for needle in (b'id="s-uni"', b'role="combobox"', b"/universities.json", b"/api/detect", b'id="s-mfa"',
+                       b"{portal}", b"university: uni.id"):
+            self.assertIn(needle, payload)
+        self.assertNotIn("\u2014".encode(), payload, "no em-dashes")
 
     async def test_totp_endpoint_normalizes_stores_and_answers_with_check_code(self):
         d = await self.start_daemon()

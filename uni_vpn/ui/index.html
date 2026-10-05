@@ -38,9 +38,9 @@ h2{font-size:24px;font-weight:500;margin:0 0 6px;outline:none}
 .field>.row-title{display:flex;margin-bottom:6px}
 .field>.row-title label{margin:0}
 .input{position:relative}
-input,textarea{width:100%;font:inherit;color:var(--text);background:var(--field);border:1px solid var(--line);border-radius:10px;padding:11px 12px;outline:none}
+input,textarea,select{width:100%;font:inherit;color:var(--text);background:var(--field);border:1px solid var(--line);border-radius:10px;padding:11px 12px;outline:none}
 input::placeholder,textarea::placeholder{color:var(--muted);opacity:.7}
-input:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+input:focus,textarea:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
 .input input{padding-right:44px}
 .input .icon-btn{position:absolute;right:2px;top:2px}
 .error{color:var(--bad);font-size:13px;margin:-8px 0 14px}
@@ -91,6 +91,11 @@ pre{font-size:12px;background:var(--bg);border-radius:10px;padding:10px;max-heig
 .steps{margin:0 0 20px;padding-left:20px;display:grid;gap:6px}
 .steps a{color:var(--accent);font-weight:500}
 .code .hint{font-size:13px;color:var(--muted);margin-left:auto;text-align:right}
+.options{list-style:none;margin:6px 0 0;padding:4px;border:1px solid var(--line);border-radius:10px;max-height:264px;overflow:auto}
+.options li{display:flex;justify-content:space-between;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer}
+.options li[aria-selected=true]{background:var(--bg)}
+.options li:last-child{color:var(--accent)}
+#s-detect{margin:-8px 0 12px -8px}
 .offline{background:var(--bad);color:var(--on-color);border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:14px}
 </style>
 </head>
@@ -102,29 +107,45 @@ pre{font-size:12px;background:var(--bg);border-radius:10px;padding:10px;max-heig
   <section id="setup" hidden>
     <div class="bar"><h1>Uni VPN</h1></div>
     <div class="card">
-      <form id="step1" autocomplete="on">
-        <p class="step">Step 1 of 3</p>
+      <form id="step0" autocomplete="off">
+        <p class="step"></p>
+        <h2>University</h2>
+        <div class="field"><span class="row-title"><label for="s-uni">Find your university</label>
+          <span class="info"><button type="button" aria-label="More help"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></button>
+            <span class="pop" hidden>Not in the list? Choose "Not listed" and enter the address your university gives for Cisco AnyConnect or Cisco Secure Client.</span></span></span>
+          <input id="s-uni" role="combobox" aria-expanded="false" aria-controls="s-uni-list" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="Name or city">
+          <ul class="options" id="s-uni-list" role="listbox" aria-label="Universities" hidden></ul></div>
+        <div id="s-other" hidden>
+          <label class="field"><span>VPN address</span>
+            <input id="s-host" autocapitalize="none" spellcheck="false" placeholder="vpn.example.edu"></label>
+          <button class="btn text" type="button" id="s-detect">Detect</button>
+          <label class="field" id="s-group-row" hidden><span>Group</span><select id="s-group"></select></label>
+          <label class="field" id="s-mfa-row" hidden><span>Second factor</span><select id="s-mfa">
+            <option value="none">None</option><option value="totp_field">One-time code, own field</option>
+            <option value="totp_append">One-time code after the password</option><option value="duo_push">Duo push</option></select></label>
+        </div>
+        <p class="error" id="s0-err" role="alert" hidden></p>
+        <div class="actions"><span></span><button class="btn primary" type="submit">Next</button></div>
+      </form>
+
+      <form id="step1" autocomplete="on" hidden>
+        <p class="step"></p>
         <h2>Sign in</h2>
         <p class="sub">Your university account, the same as for email.</p>
-        <label class="field"><span>Uni-ID</span>
+        <label class="field"><span>Username</span>
           <input id="s-user" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="ab123"></label>
         <label class="field"><span>Password</span>
           <div class="input"><input id="s-pw" type="password" name="password" autocomplete="current-password">
             <button type="button" class="icon-btn reveal" data-for="s-pw" aria-label="Show password"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button></div></label>
         <p class="error" id="s1-err" role="alert" hidden></p>
-        <div class="actions"><span></span><button class="btn primary" type="submit">Next</button></div>
+        <div class="actions"><button class="btn text" type="button" data-back="step0">Back</button><button class="btn primary" type="submit">Next</button></div>
       </form>
 
       <form id="step2" hidden>
-        <p class="step">Step 2 of 3</p>
+        <p class="step"></p>
         <h2>Second factor</h2>
         <p class="sub">Add this computer as a token, like a second phone.</p>
-        <ol class="steps">
-          <li>Open the <a href="https://mfa.uni-heidelberg.de/" target="_blank" rel="noopener">MFA portal</a>. It only opens on campus or with Cisco VPN.</li>
-          <li>Choose "Soft-Token (zeitbasiert)", then "Einrichten".</li>
-          <li>Click "Tokendetails einblenden" and copy the line starting with otpauth://.</li>
-          <li>Paste it below, then type the code shown here into the portal's "Testen" field.</li>
-        </ol>
+        <ol class="steps" id="s-steps"></ol>
         <div class="field"><span class="row-title"><label for="s-totp">Token secret</label>
           <span class="info"><button type="button" aria-label="More help"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></button>
             <span class="pop" hidden>No otpauth:// line? Copy the letters after "secret=" instead. Already have a token on your phone? Add a second one for this computer; both keep working.</span></span></span>
@@ -133,23 +154,23 @@ pre{font-size:12px;background:var(--bg);border-radius:10px;padding:10px;max-heig
         <p class="error" id="s2-err" role="alert" hidden></p>
         <div class="code" id="s-code" hidden>
           <svg class="ring" viewBox="0 0 24 24"><circle class="bg" cx="12" cy="12" r="10"/><circle class="fg" cx="12" cy="12" r="10"/></svg>
-          <b></b><span class="hint">Code for "Testen"</span>
+          <b></b><span class="hint">Check code</span>
         </div>
         <div class="actions"><button class="btn text" type="button" data-back="step1">Back</button><button class="btn primary" type="submit" disabled>Next</button></div>
       </form>
 
       <div id="step3" hidden class="center">
         <div class="spinner"></div>
-        <p class="step">Step 3 of 3</p>
+        <p class="step"></p>
         <h2 tabindex="-1">Connecting</h2>
         <p class="sub" id="s3-msg" aria-live="polite">&nbsp;</p>
-        <div class="actions"><button class="btn text" type="button" data-back="step2">Back</button><button class="btn text" type="button" id="s3-skip" hidden>Finish</button></div>
+        <div class="actions"><button class="btn text" type="button" id="s3-back">Back</button><button class="btn text" type="button" id="s3-skip" hidden>Finish</button></div>
       </div>
 
       <div id="step4" hidden class="center">
         <div class="badge ok"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
         <h2 tabindex="-1">All set</h2>
-        <p class="sub">University websites now open through the VPN by themselves. Close and reopen your browser once.</p>
+        <p class="sub" id="s4-msg">University websites now open through the VPN by themselves. Close and reopen your browser once.</p>
         <div class="actions" style="justify-content:center"><button class="btn primary" type="button" id="s4-done">Done</button></div>
       </div>
     </div>
@@ -173,7 +194,8 @@ pre{font-size:12px;background:var(--bg);border-radius:10px;padding:10px;max-heig
     <div class="bar"><button class="icon-btn" id="close-settings" aria-label="Back"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button><h1>Settings</h1><span style="width:40px"></span></div>
     <p class="group">Account</p>
     <div class="list">
-      <div class="item"><span>Uni-ID</span><span class="small" id="v-user"></span></div>
+      <div class="item"><span>University</span><span class="small" id="v-uni"></span></div>
+      <div class="item"><span>Username</span><span class="small" id="v-user"></span></div>
       <details id="d-pw"><summary><span>Password</span></summary><div class="body">
         <form id="pwform"><div class="input"><input type="password" id="pw" autocomplete="current-password" aria-label="Password">
           <button type="button" class="icon-btn reveal" data-for="pw" aria-label="Show password"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
@@ -219,7 +241,8 @@ function show(id) {
 }
 
 function step(id, focusId) {
-  for (const s of ["step1", "step2", "step3", "step4"]) $(s).hidden = s !== id;
+  for (const s of ["step0", "step1", "step2", "step3", "step4"]) $(s).hidden = s !== id;
+  if (id === "step2") renderMfaSteps();
   const focus = focusId ? $(focusId) : $(id).querySelector("input") || $(id).querySelector("h2");
   if (focus) focus.focus();
 }
@@ -256,7 +279,9 @@ function render() {
   $("toggle").className = fix ? "btn text" : "btn primary big";
   $("toggle").textContent = isOn() ? "Disconnect" : fix ? "Try again" : "Connect";
   $("toggle").disabled = S.state === "disconnecting";
+  $("v-uni").textContent = S.university_name;
   $("v-user").textContent = S.user;
+  $("d-totp").hidden = !TOTP_MODES.includes(S.mfa);
   $("v-ver").textContent = S.version;
   $("v-dom").textContent = (S.domains || []).length + " domains";
   // Only on change, so a selection in the log survives the next poll.
@@ -281,7 +306,7 @@ async function refresh() {
     refreshing = false;
   }
   if (S.setup_needed && !setupDone) {
-    if (view !== "setup") { show("setup"); step("step1", $("s-user").value ? "s-pw" : null); }
+    if (view !== "setup") { show("setup"); await loadUniversities(); step(uni ? "step1" : "step0", uni && $("s-user").value ? "s-pw" : null); }
     return;
   }
   if (view === "setup" && !setupSent) {
@@ -293,16 +318,158 @@ async function refresh() {
 }
 
 // --- setup assistant ---------------------------------------------------------
-// The installer passes the ID it was given (setup --user) in the address.
-const givenUser = new URLSearchParams(location.search).get("user");
-if (givenUser && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(givenUser)) $("s-user").value = givenUser;
+// Role models: eduroam CAT (find your institution), Thunderbird account setup (list, detect, manual).
+const USER_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(@[A-Za-z0-9][A-Za-z0-9.-]{0,252})?$/;
+const TOTP_MODES = ["totp_field", "totp_append"];
+const OTHER = {id: "other", name: "Not listed", country: "", mfa: "none", mfa_portal_url: "", mfa_steps: []};
+const SAML = "This university signs in through a browser, uni-vpn does not support that yet.";
+const GENERIC_STEPS = ["Open your university's {portal} and add a time-based token (TOTP) for this computer.",
+  "Copy the line starting with otpauth://, or the letters after secret=.", "Paste it below."];
+let UNIS = null, uni = null, active = -1, detectSeq = 0;
+
+// The installer passes what it was given (setup --user, --university) in the address.
+const params = new URLSearchParams(location.search);
+const givenUser = params.get("user");
+if (givenUser && USER_RE.test(givenUser)) $("s-user").value = givenUser;
+
+async function loadUniversities() {
+  if (UNIS) return;
+  try { UNIS = (await (await fetch("/universities.json", {cache: "no-store"})).json()).universities; } catch (e) { UNIS = []; }
+  const given = UNIS.find((u) => u.id === params.get("university"));
+  if (given && given.mfa !== "saml") pick(given);
+  numberSteps();
+}
+
+// Lower case without accents and umlaut spellings, like the registry's own search.
+const fold = (s) => String(s || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+  .replace(/ue/g, "u").replace(/oe/g, "o").replace(/ae/g, "a");
+
+function matches(query) {
+  const q = fold(query.trim());
+  return (UNIS || []).filter((u) => !q || [u.id, u.name, u.host, ...(u.aliases || [])].some((t) => fold(t).includes(q)));
+}
+
+function mfa() { return uni && uni.id === "other" ? $("s-mfa").value : uni ? uni.mfa : "totp_field"; }
+function needsTotp() { return TOTP_MODES.includes(mfa()); }
+
+function numberSteps() {
+  const ids = ["step0", "step1", ...(needsTotp() ? ["step2"] : []), "step3"];
+  ids.forEach((id, i) => { $(id).querySelector(".step").textContent = `Step ${i + 1} of ${ids.length}`; });
+}
+
+function closeList() { $("s-uni-list").hidden = true; $("s-uni").setAttribute("aria-expanded", "false"); active = -1; }
+
+function renderList() {
+  const list = $("s-uni-list"), found = [...matches($("s-uni").value).slice(0, 7), OTHER];
+  active = Math.min(active, found.length - 1);
+  list.replaceChildren(...found.map((u, i) => {
+    const li = document.createElement("li");
+    li.id = "s-uni-" + u.id;
+    li.setAttribute("role", "option");
+    li.setAttribute("aria-selected", String(i === active));
+    li.textContent = u.name;
+    if (u.country) { const c = document.createElement("span"); c.className = "small"; c.textContent = u.country; li.append(c); }
+    li.onmousedown = (e) => { e.preventDefault(); pick(u); };
+    return li;
+  }));
+  list.hidden = false;
+  $("s-uni").setAttribute("aria-expanded", "true");
+  $("s-uni").setAttribute("aria-activedescendant", active >= 0 ? "s-uni-" + found[active].id : "");
+  return found;
+}
+
+function pick(u) {
+  uni = u;
+  $("s-uni").value = u.name;
+  closeList();
+  $("s-other").hidden = u.id !== "other";
+  err("s0-err", u.mfa === "saml" ? SAML : "");
+  numberSteps();
+  if (u.id === "other") $("s-host").focus();
+}
+
+$("s-uni").oninput = () => { uni = null; $("s-other").hidden = true; err("s0-err", ""); active = -1; renderList(); };
+$("s-uni").onfocus = () => { if (!uni) renderList(); };
+$("s-uni").onblur = closeList;
+$("s-uni").onkeydown = (e) => {
+  if (e.key === "Escape") { closeList(); return; }
+  if (!["ArrowDown", "ArrowUp", "Enter"].includes(e.key) || (e.key === "Enter" && uni)) return;
+  e.preventDefault();
+  if (e.key === "Enter") { const found = renderList(); pick(found[Math.max(active, 0)]); return; }
+  active += e.key === "ArrowDown" ? 1 : -1;
+  if (active < 0) active = 0;
+  renderList();
+};
+
+async function detect(group) {
+  const host = $("s-host").value.trim(), seq = ++detectSeq;
+  if (!host) { err("s0-err", "Enter the VPN address"); return; }
+  err("s0-err", "");
+  $("s-detect").disabled = true;
+  const r = await send("/api/detect", {host, group});
+  if (seq !== detectSeq) return;
+  $("s-detect").disabled = false;
+  const d = r.data;
+  $("s-mfa-row").hidden = false;
+  if (!d || !d.ok) { err("s0-err", (d && d.error) || r.text); return; }
+  if (d.error) { err("s0-err", d.error); return; }
+  $("s-group").replaceChildren(...d.groups.map((g) => new Option(g, g, false, g === d.group)));
+  $("s-group-row").hidden = d.groups.length < 2;
+  if (d.saml) { err("s0-err", SAML); return; }
+  $("s-mfa").value = d.suggestion.mfa;
+  numberSteps();
+}
+$("s-detect").onclick = () => detect("");
+$("s-group").onchange = () => detect($("s-group").value);
+$("s-mfa").onchange = numberSteps;
+
+// For "Not listed": what goes into config.toml besides the university.
+function profileOverrides() {
+  if (!uni || uni.id !== "other") return {};
+  const [host, ...path] = $("s-host").value.trim().replace(/^https?:\/\//i, "").split("/");
+  const p = {host, mfa: $("s-mfa").value};
+  if (path.join("/")) p.usergroup = path.join("/");
+  if (!$("s-group-row").hidden && $("s-group").value) p.authgroup = $("s-group").value;
+  return p;
+}
+
+$("step0").onsubmit = (e) => {
+  e.preventDefault();
+  if (!uni) { err("s0-err", "Choose your university, or Not listed"); return; }
+  if (uni.mfa === "saml") { err("s0-err", SAML); return; }
+  if (uni.id === "other" && !$("s-host").value.trim()) { err("s0-err", "Enter the VPN address"); return; }
+  if (uni.id === "other" && $("s-mfa-row").hidden) { detect(""); return; }
+  err("s0-err", "");
+  step("step1");
+};
+
+function renderMfaSteps() {
+  const steps = uni && uni.mfa_steps && uni.mfa_steps.length ? uni.mfa_steps : GENERIC_STEPS;
+  $("s-steps").replaceChildren(...steps.map((text) => {
+    const li = document.createElement("li"), [before, after] = text.split("{portal}");
+    li.append(before);
+    if (after !== undefined) {
+      const url = uni && uni.mfa_portal_url;
+      if (url) {
+        const a = document.createElement("a");
+        Object.assign(a, {href: url, target: "_blank", rel: "noopener", textContent: "MFA portal"});
+        li.append(a);
+      } else {
+        li.append("MFA portal");
+      }
+      li.append(after);
+    }
+    return li;
+  }));
+}
+
 $("step1").onsubmit = (e) => {
   e.preventDefault();
   const user = $("s-user").value.trim();
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(user)) { err("s1-err", "Enter your Uni-ID, for example ab123"); return; }
+  if (!USER_RE.test(user)) { err("s1-err", "Enter your username, for example ab123"); return; }
   if (!$("s-pw").value) { err("s1-err", "Enter your password"); return; }
   err("s1-err", "");
-  step("step2");
+  if (needsTotp()) step("step2"); else submitSetup();
 };
 
 let checkSeq = 0;
@@ -334,8 +501,10 @@ function showCode(code, remaining, secret) {
   codeTimer = setInterval(tick, 1000);
 }
 
-$("step2").onsubmit = async (e) => {
-  e.preventDefault();
+$("step2").onsubmit = (e) => { e.preventDefault(); submitSetup(); };
+
+const PROFILE_FIELDS = ["university", "host", "usergroup", "authgroup", "mfa"];
+async function submitSetup() {
   if (submitting) return;
   submitting = setupSent = true;
   clearInterval(codeTimer);
@@ -344,7 +513,9 @@ $("step2").onsubmit = async (e) => {
   $("s3-skip").hidden = true;
   let r;
   try {
-    r = await post("/api/setup", {user: $("s-user").value.trim(), password: $("s-pw").value, secret: $("s-totp").value.trim()});
+    r = await post("/api/setup", {user: $("s-user").value.trim(), password: $("s-pw").value,
+                                  secret: needsTotp() ? $("s-totp").value.trim() : "", university: uni.id,
+                                  profile: profileOverrides()});
   } catch (e) {
     r = {ok: false, data: null, text: "uni-vpn is not running. Run: uni-vpn service start"};
   } finally {
@@ -352,22 +523,25 @@ $("step2").onsubmit = async (e) => {
   }
   if (!r.ok) {
     const field = r.data && r.data.field, text = (r.data && r.data.error) || r.text;
-    if (field === "user" || field === "password") {
-      step("step1", field === "user" ? "s-user" : "s-pw");
-      err("s1-err", text);
-    } else {
+    if (PROFILE_FIELDS.includes(field)) {
+      step("step0");
+      err("s0-err", text);
+    } else if (field === "totp" && needsTotp()) {
       step("step2");
       err("s2-err", text);
+    } else {
+      step("step1", field === "password" ? "s-pw" : "s-user");
+      err("s1-err", text);
     }
     return;
   }
   setupDone = true;
   connectRequested = Date.now();
-};
+}
 
 function setupProgress() {
   if (!setupDone || $("step3").hidden) return;
-  if (S.state === "connected") { step("step4"); return; }
+  if (S.state === "connected") { finish(); return; }
   const settled = Date.now() - connectRequested > 1500;
   if (["auth_failed", "keyring"].includes(S.state) && settled) {
     const totp = S.error_kind === "totp";
@@ -388,7 +562,15 @@ function setupProgress() {
 }
 
 for (const b of document.querySelectorAll("[data-back]")) b.onclick = () => { if (!submitting) { setupDone = false; step(b.dataset.back); } };
-$("s3-skip").onclick = () => { if (setupDone) step("step4"); };
+$("s3-back").onclick = () => { if (!submitting) { setupDone = false; step(needsTotp() ? "step2" : "step1"); } };
+// Without default domains nothing goes through the university yet: say where to add them.
+function finish() {
+  $("s4-msg").textContent = (S.domains || []).length
+    ? "University websites now open through the VPN by themselves. Close and reopen your browser once."
+    : "Add the websites that should go through the university under Settings, Websites.";
+  step("step4");
+}
+$("s3-skip").onclick = () => { if (setupDone) finish(); };
 $("s4-done").onclick = () => { show("main"); render(); refresh(); };
 
 // --- main and settings -----------------------------------------------------
