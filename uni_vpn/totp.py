@@ -42,11 +42,11 @@ def normalize(text: str) -> str:
         secret = text
     cleaned = re.sub(r"[\s\-]", "", secret).upper().rstrip("=")
     if not cleaned:
-        raise ValueError("No secret given")
+        raise ValueError("Paste the secret first")
     if not BASE32.fullmatch(cleaned):
-        raise ValueError("Secret must consist of Base32 characters (A-Z, 2-7)")
+        raise ValueError("That is not the secret. Copy the line starting with otpauth://, or the letters after secret=")
     if len(cleaned) < MIN_CHARS:
-        raise ValueError("Secret is too short")
+        raise ValueError("The secret is incomplete. Copy the whole line")
     _decode(cleaned)
     token = f"base32:{cleaned}"
     return token if algorithm == "SHA1" else f"{algorithm.lower()}:{token}"

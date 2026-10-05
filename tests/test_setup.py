@@ -233,7 +233,7 @@ class SetupTests(SetupHarness):
         rc, out = self.run_setup(user="ab123", getpass_fn=lambda p: "pw" if "password" in p else "0189")
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.stored_totp, [])
-        self.assertIn("Base32", out)
+        self.assertIn("That is not the secret", out)
         self.assertIn("uni-vpn totp", out)
 
     def test_empty_totp_input_hints_at_later_command(self):
