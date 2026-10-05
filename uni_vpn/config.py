@@ -8,6 +8,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import i18n
 from . import universities as unis
 
 DEFAULT_HOST = "vpn-ac.uni-heidelberg.de"
@@ -51,6 +52,7 @@ class Config:
     openconnect: str | None = None
     ocproxy: str | None = None
     auto_update: bool = True
+    language: str = ""  # "" follows the system, otherwise a code from i18n.LANGUAGES
     # [timing], all in seconds
     ready_timeout: float = 45.0
     client_wait: float = 25.0
@@ -125,6 +127,7 @@ TOP_KEYS: dict[str, tuple[type, ...]] = {
     "openconnect": (str,),
     "ocproxy": (str,),
     "auto_update": (bool,),
+    "language": (str,),
     "university": (str,),
     **{key: (kind,) for key, kind in unis.PROFILE_FIELDS.items()},
 }
@@ -211,6 +214,9 @@ def load(path: Path | None = None) -> Config:
                 raise ConfigError(str(exc), line=_line_of_key(text, key)) from None
         setattr(cfg, key, value)
 
+    if not i18n.valid(cfg.language):
+        raise ConfigError(f"'language' must be empty or one of {', '.join(i18n.CODES)}",
+                          line=_line_of_key(text, "language"))
     if not cfg.user:
         raise ConfigError("'user' (university ID) is missing")
     if not cfg.host:

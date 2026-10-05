@@ -17,6 +17,7 @@ from pathlib import Path
 from . import platform as pf
 from . import totp as totp_mod
 from .config import Config
+from .i18n import t
 
 # Measured on 2026-09-08 against Heidelberg's ASA: it rejects a wrong password with "Login failed."
 # before it asks for the OTP. With a wrong one-time code the OTP prompt comes first
@@ -24,21 +25,15 @@ from .config import Config
 # again, stdin is closed, "User input required", then "Failed to complete authentication".
 # So the order decides which factor was wrong; without a separate OTP step the profile's
 # second factor decides how to word it.
-PASSWORD_REJECTED = "Login rejected: check your password (uni-vpn password)"
-TOTP_REJECTED = (
-    "One-time code rejected: check the computer's clock, otherwise re-enter the TOTP secret (uni-vpn totp)"
-)
-APPEND_REJECTED = "Login rejected: check your password, then the computer's clock (uni-vpn password)"
-DUO_REJECTED = ("Login rejected: check your password, or the Duo request was denied or not answered in time "
-                "(uni-vpn password)")
+PASSWORD_REJECTED = t("tunnel.password_rejected")
+TOTP_REJECTED = t("tunnel.totp_rejected")
+APPEND_REJECTED = t("tunnel.append_rejected")
+DUO_REJECTED = t("tunnel.duo_rejected")
 LOGIN_REJECTED = {"totp_append": APPEND_REJECTED, "duo_push": DUO_REJECTED}
 # Without a preceding "Login failed." the server asked for something uni-vpn cannot fill in.
-AUTH_REJECTED = (
-    "Login rejected: check your password (uni-vpn password). "
-    "If it is correct, the server asked for something uni-vpn does not know, see uni-vpn log"
-)
-SAML_REQUIRED = "This university signs in through a browser (SAML), uni-vpn does not support that yet"
-HOSTSCAN_REQUIRED = "The server requires HostScan (CSD), uni-vpn does not support that"
+AUTH_REJECTED = t("tunnel.auth_rejected")
+SAML_REQUIRED = t("tunnel.saml")
+HOSTSCAN_REQUIRED = t("tunnel.hostscan")
 OTP_GENERATED = "Generating OATH TOTP token code"
 LOGIN_FAILED = "Login failed"
 TOKEN_PREFIX = "totp-"
@@ -46,14 +41,14 @@ TOKEN_PREFIX = "totp-"
 # (substring of the openconnect output, state, message). The first match wins.
 MARKERS: list[tuple[str, str, str]] = [
     ("Server is rejecting the soft token", "auth_failed", TOTP_REJECTED),
-    ("Soft token string is invalid", "auth_failed", "TOTP secret unusable, enter it again (uni-vpn totp)"),
+    ("Soft token string is invalid", "auth_failed", t("tunnel.totp_invalid")),
     ("User input required in non-interactive mode", "auth_failed", AUTH_REJECTED),
     ("Server asked us to run CSD", "auth_failed", HOSTSCAN_REQUIRED),
     ("Cisco Secure Desktop", "auth_failed", HOSTSCAN_REQUIRED),
     ("SAML", "auth_failed", SAML_REQUIRED),
     ("external browser", "auth_failed", SAML_REQUIRED),
     ("Failed to complete authentication", "auth_failed", AUTH_REJECTED),
-    ("certificate", "error", "Certificate problem on the server"),
+    ("certificate", "error", t("tunnel.certificate")),
 ]
 
 

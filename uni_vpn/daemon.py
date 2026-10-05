@@ -17,6 +17,8 @@ from . import config as config_mod
 from . import universities as unis
 from .config import Config
 from .forwarder import Forwarder
+from . import i18n
+from .i18n import t
 from .tunnel import SAML_REQUIRED, PasswordEncodingError, Tunnel, remove_stale_token_files
 from .updater import UpdateError, Updater
 
@@ -36,7 +38,7 @@ class State(str, Enum):
 FINAL_STATES = {State.auth_failed, State.keyring}
 RETRY_STATES = {State.offline, State.blocked, State.error}
 OTP_STEP = 30  # seconds per one-time code (RFC 6238, same as openconnect)
-BLOCKED_MESSAGE = "Cisco Secure Client is connected, uni-vpn is paused"
+BLOCKED_MESSAGE = t("state.blocked")
 
 
 async def wait_event(event: asyncio.Event, timeout: float) -> bool:
@@ -113,7 +115,7 @@ class Daemon:
         self.restart_requested = False
 
         self.state = State.idle
-        self.message = "Not connected"
+        self.message = t("state.not_connected")
         self.since = time.time()
         self.last_error: dict | None = None
         self.failures = 0
@@ -140,9 +142,9 @@ class Daemon:
         self.forwarder = Forwarder("127.0.0.1", cfg.socks_port, self.acquire, self.note_activity,
                                    cfg.halfclose_grace, self.log)
         if needs_setup:
-            self.message = "Setup needed"
+            self.message = t("state.setup_needed")
         elif config_error:
-            self._set(State.error, f"Configuration error: {config_error}")
+            self._set(State.error, t("state.config_error", error=config_error))
 
     # --- Helpers ----------------------------------------------------------
 
@@ -190,9 +192,12 @@ class Daemon:
             "version": __version__,
             "commit": self.commit,
             "auto_update": self.cfg.auto_update,
+            "language": self.cfg.language,
             "update_pending": self.updater.pending,
             "state": self.state.value,
             "message": self.message,
+            # Key and arguments of the message, so the app can show it in the user's language.
+            "message_t": i18n.as_json(self.message),
             "since": self.since,
             "host": self.cfg.host,
             "user": self.cfg.user,
@@ -245,15 +250,15 @@ class Daemon:
         Raises unis.FieldError naming the step to change, ValueError otherwise."""
         user = user.strip()
         if not config_mod.valid_user(user):
-            raise unis.FieldError("user", "Invalid university ID")
+            raise unis.FieldError("user", t("setup.invalid_user"))
         if self.config_error and not self.needs_setup:
-            raise ValueError(f"Fix config.toml first: {self.config_error}")
+            raise ValueError(t("setup.fix_config", error=self.config_error))
         overrides = config_mod.check_overrides(overrides or {})
         profile = config_mod.profile_config(university, overrides)
         if profile.mfa == "saml":
             raise unis.FieldError("university", SAML_REQUIRED)
         if profile.needs_totp and not token:
-            raise unis.FieldError("totp", "Paste the secret first")
+            raise unis.FieldError("totp", t("totp.empty"))
         path = self.config_path or config_mod.default_path()
         loop = asyncio.get_running_loop()
         # Secrets first: if the keyring refuses, no config.toml exists yet and the assistant
@@ -304,7 +309,7 @@ class Daemon:
     async def set_domains(self, text: str) -> list[str]:
         domains, errors = pac.parse_domain_list(text)
         if errors:
-            raise ValueError("\n".join(errors))
+            raise ValueError(t("app.lines", lines=errors))
         pac.write_domains(self.domains_path, domains)
         self.log.info("Domain list saved: %s", ", ".join(domains) or "(empty)")
         await asyncio.get_running_loop().run_in_executor(None, self.proxy_refresh, self.cfg.http_port)
@@ -332,7 +337,7 @@ class Daemon:
             await self.forwarder.start()
         except OSError as exc:
             self.log.error("SOCKS port %s not available: %s", self.cfg.socks_port, exc)
-            self._set(State.error, f"Port {self.cfg.socks_port} is in use, run uni-vpn doctor")
+            self._set(State.error, t("state.port_in_use", port=self.cfg.socks_port))
         ticker = asyncio.create_task(self._ticker())
         updates = asyncio.create_task(self._auto_update())
         self.started.set()
@@ -391,7 +396,7 @@ class Daemon:
         self.explicit = True
         self.failures = 0
         if self.state in FINAL_STATES or self.state in RETRY_STATES:
-            self._set(State.idle, "Not connected")
+            self._set(State.idle, t("state.not_connected"))
         self.note_activity()
         self._ensure_loop()
         self._wake.set()
@@ -403,7 +408,7 @@ class Daemon:
         self._wake.set()
         tunnel = self.tunnel
         if tunnel:
-            self._set(State.disconnecting, "Disconnecting")
+            self._set(State.disconnecting, t("state.disconnecting"))
             await self.forwarder.close_all()
             await tunnel.stop(self.cfg.stop_grace)  # the loop may have dropped self.tunnel meanwhile
             return
@@ -414,7 +419,7 @@ class Daemon:
             except asyncio.CancelledError:
                 pass
         if self.state not in FINAL_STATES:
-            self._set(State.idle, "Not connected")
+            self._set(State.idle, t("state.not_connected"))
 
     async def set_password(self, password: str) -> None:
         await asyncio.get_running_loop().run_in_executor(None, self.password_setter, password)
@@ -433,7 +438,7 @@ class Daemon:
         cfg = self.cfg
         while self.has_demand():
             if self._elevated() is False:
-                self._final(State.error, "Needs administrator rights (Wintun): run the installer again")
+                self._final(State.error, t("state.wintun_admin"))
                 return
             if cfg.mfa == "saml":
                 self._final(State.auth_failed, SAML_REQUIRED)
@@ -443,22 +448,22 @@ class Daemon:
                 await self._sleep(cfg.retry_interval)
                 continue
             if not await self.probe():
-                self._set(State.offline, "No network or captive portal")
+                self._set(State.offline, t("state.offline"))
                 await self._sleep(cfg.retry_interval)
                 continue
             wait = self._otp_wait()
             if wait:
-                self._set(State.connecting, "Waiting for the next one-time code (up to 30 s)")
+                self._set(State.connecting, t("state.otp_wait"))
                 await self._sleep(wait)
                 continue  # checks Cisco, network and demand again, then fetches the secrets
             generation = self._secrets_gen
             try:
                 password = await self.password_getter()
             except credentials.PasswordMissing:
-                self._final(State.keyring, "No password stored: uni-vpn password")
+                self._final(State.keyring, t("state.no_password"))
                 return
             except credentials.KeyringLocked:
-                self._final(State.keyring, "Keyring locked, please unlock it and connect again")
+                self._final(State.keyring, t("state.keyring_locked"))
                 return
             except credentials.KeyringError as exc:
                 self._final(State.keyring, str(exc))
@@ -468,27 +473,27 @@ class Daemon:
                 try:
                     totp = (await self.totp_getter()).decode("ascii").strip()
                 except credentials.TotpMissing:
-                    self._final(State.keyring, "No TOTP secret stored: uni-vpn totp")
+                    self._final(State.keyring, t("state.no_totp"))
                     return
                 except credentials.KeyringLocked:
-                    self._final(State.keyring, "Keyring locked, please unlock it and connect again")
+                    self._final(State.keyring, t("state.keyring_locked"))
                     return
                 except (credentials.KeyringError, UnicodeDecodeError) as exc:
-                    self._final(State.keyring, f"TOTP secret unreadable: {exc}")
+                    self._final(State.keyring, t("state.totp_unreadable", error=exc))
                     return
 
-            self._set(State.connecting, "Connecting")
+            self._set(State.connecting, t("state.connecting"))
             try:
                 tunnel = self.tunnel_factory()
                 self.tunnel = tunnel
                 await tunnel.start(password, totp)
             except PasswordEncodingError as exc:
                 self.tunnel = None
-                self._final(State.keyring, f"{exc}. Change the password (uni-vpn password)")
+                self._final(State.keyring, t("state.password_encoding", error=exc))
                 return
             except OSError as exc:
                 self.tunnel = None
-                self._final(State.error, f"Could not start openconnect: {exc}")
+                self._final(State.error, t("state.openconnect_start", error=exc))
                 return
             finally:
                 del password, totp
@@ -515,13 +520,13 @@ class Daemon:
                     continue  # a request_connect in the meantime takes effect via has_demand()
                 if not tunnel.exited.is_set():
                     await tunnel.stop(cfg.stop_grace)
-                    state, message = State.error, "Connecting took too long"
+                    state, message = State.error, t("state.timeout")
                 elif tunnel.classification:
                     state, message = State(tunnel.classification[0]), tunnel.classification[1]
                 elif tunnel.returncode == 1:
-                    state, message = State.auth_failed, "Login failed (openconnect exit code 1), see uni-vpn log"
+                    state, message = State.auth_failed, t("state.login_failed_exit")
                 else:
-                    state, message = State.error, f"openconnect exited with code {tunnel.returncode}"
+                    state, message = State.error, t("state.openconnect_exit", code=tunnel.returncode)
                 self.tunnel = None
                 if state == State.auth_failed:
                     self._final(state, message)
@@ -533,7 +538,7 @@ class Daemon:
 
             self.failures = 0
             self.log.info("Tunnel ready after %.1f s", (tunnel.ready_at or 0) - (tunnel.started_at or 0))
-            self._set(State.connected, "Connected")
+            self._set(State.connected, t("state.connected"))
             # The "connect now" request is fulfilled. From here on only real use counts,
             # the idle timer handles the rest.
             self.explicit = False
@@ -544,10 +549,10 @@ class Daemon:
             if tunnel.stopped_by_us:
                 self._after_stop()
                 continue  # a request_connect in the meantime takes effect via has_demand()
-            message = tunnel.classification[1] if tunnel.classification else f"Tunnel dropped (exit code {tunnel.returncode})"
+            message = tunnel.classification[1] if tunnel.classification else t("state.dropped", code=tunnel.returncode)
             self.last_error = {"message": message, "at": time.time()}
             if not self.has_demand():
-                self._set(State.idle, f"Not connected ({message})")
+                self._set(State.idle, t("state.not_connected_because", reason=message))
                 return
             self._set(State.error, message)
             if not await self._backoff():
@@ -555,14 +560,14 @@ class Daemon:
         # `blocked` stays until the ticker sees Cisco disconnected, so the popup keeps
         # explaining why nothing works.
         if self.state in (State.offline, State.error, State.connecting, State.disconnecting):
-            self._set(State.idle, "Not connected")
+            self._set(State.idle, t("state.not_connected"))
 
     def _after_stop(self) -> None:
         if self.paused_by_cisco:
             self.paused_by_cisco = False
             self._set(State.blocked, BLOCKED_MESSAGE)
         else:
-            self._set(State.idle, "Disconnected")
+            self._set(State.idle, t("state.disconnected"))
 
     def _otp_wait(self, now: float | None = None) -> float:
         """Seconds until the next one-time code window, 0 if the current code is still unused."""
@@ -589,9 +594,20 @@ class Daemon:
                 and (self._loop_task is None or self._loop_task.done())
                 and self.state not in (State.connecting, State.connected, State.disconnecting))
 
+    async def set_language(self, code: str) -> None:
+        """The app's language; "" follows the system."""
+        if not i18n.valid(code):
+            raise ValueError(f"unknown language {code!r}")
+        if self.needs_setup or not self.config_path or not self.config_path.exists():
+            raise ValueError(t("setup.finish_first"))
+        await asyncio.get_running_loop().run_in_executor(
+            None, lambda: config_mod.set_values(self.config_path, {"language": code}))
+        self.cfg.language = code
+        self.log.info("Language %s", code or "from the system")
+
     async def set_auto_update(self, enabled: bool) -> None:
         if self.needs_setup or not self.config_path or not self.config_path.exists():
-            raise ValueError("Finish the setup first")
+            raise ValueError(t("setup.finish_first"))
         await asyncio.get_running_loop().run_in_executor(
             None, lambda: config_mod.set_values(self.config_path, {"auto_update": enabled}))
         self.cfg.auto_update = enabled
@@ -665,7 +681,7 @@ class Daemon:
                     await self.forwarder.close_all()
                     await tunnel.stop(self.cfg.stop_grace)
                 elif not cisco and self.state == State.blocked and (self._loop_task is None or self._loop_task.done()):
-                    self._set(State.idle, "Not connected")
+                    self._set(State.idle, t("state.not_connected"))
             if jump > 30:
                 self.log.info("Resume detected (clock jumped by %.0f s)", jump)
                 tunnel = self.tunnel
@@ -673,7 +689,7 @@ class Daemon:
                     # Stop cleanly instead of SIGUSR2: the state machine then goes through
                     # disconnecting -> idle and reconnects if there is demand.
                     self.log.info("Resume detected, reconnecting the tunnel")
-                    self._set(State.disconnecting, "Resume, reconnecting the tunnel")
+                    self._set(State.disconnecting, t("state.resume"))
                     await self.forwarder.close_all()
                     await tunnel.stop(self.cfg.stop_grace)
             if self.state == State.connected and self.tunnel and mono - self.last_activity > self.cfg.idle_minutes * 60:
@@ -681,6 +697,6 @@ class Daemon:
                 self.explicit = False
                 self.demand_until = 0.0
                 tunnel = self.tunnel
-                self._set(State.disconnecting, "Idle, disconnecting")
+                self._set(State.disconnecting, t("state.idle_disconnect"))
                 await self.forwarder.close_all()
                 await tunnel.stop(self.cfg.stop_grace)

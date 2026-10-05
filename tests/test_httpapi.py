@@ -180,7 +180,9 @@ class ApiTests(DaemonHarness):
             status, _, payload = await http(self.cfg.http_port, "POST", "/api/password",
                                             {"X-Uni-VPN": "1", "Content-Type": "application/json"}, body)
             self.assertEqual(status, 400, repr(password))
-            self.assertEqual(payload.decode(), "Password must not contain a line break")
+            answer = json.loads(payload)
+            self.assertEqual(answer["error"], "Password must not contain a line break")
+            self.assertEqual(answer["error_t"], {"key": "password.line_break", "args": {}})
         self.assertEqual(self.stored, [])
         self.assertEqual(d.state, dm.State.idle)
 

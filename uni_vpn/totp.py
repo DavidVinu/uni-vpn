@@ -15,6 +15,8 @@ import struct
 import time
 from urllib.parse import parse_qs, unquote, urlsplit
 
+from .i18n import t
+
 ALGORITHMS = {"SHA1": "sha1", "SHA256": "sha256", "SHA512": "sha512"}
 BASE32 = re.compile(r"^[A-Z2-7]+$")
 STEP = 30  # seconds per code
@@ -25,28 +27,28 @@ def normalize(text: str) -> str:
     """otpauth URL or Base32 text -> openconnect token ("base32:..." or "sha256:base32:...")."""
     text = text.strip()
     if "\n" in text or "\r" in text:
-        raise ValueError("Secret must not contain a line break")
+        raise ValueError(t("totp.line_break"))
     algorithm = "SHA1"
     if text.lower().startswith("otpauth:"):
         parts = urlsplit(text)
         if parts.netloc.lower() != "totp":
-            raise ValueError("Only time-based tokens (otpauth://totp/...) are supported")
+            raise ValueError(t("totp.only_totp"))
         query = {k: v[-1] for k, v in parse_qs(parts.query, keep_blank_values=True).items()}
         secret = unquote(query.get("secret", ""))
         algorithm = query.get("algorithm", "SHA1").upper()
         if algorithm not in ALGORITHMS:
-            raise ValueError(f"Algorithm {algorithm} is not supported")
+            raise ValueError(t("totp.algorithm", algorithm=algorithm))
         if query.get("digits", "6") != "6" or query.get("period", "30") != "30":
-            raise ValueError("Only 6 digits and 30 seconds are supported")
+            raise ValueError(t("totp.digits"))
     else:
         secret = text
     cleaned = re.sub(r"[\s\-]", "", secret).upper().rstrip("=")
     if not cleaned:
-        raise ValueError("Paste the secret first")
+        raise ValueError(t("totp.empty"))
     if not BASE32.fullmatch(cleaned):
-        raise ValueError("That is not the secret. Copy the line starting with otpauth://, or the letters after secret=")
+        raise ValueError(t("totp.not_secret"))
     if len(cleaned) < MIN_CHARS:
-        raise ValueError("The secret is incomplete. Copy the whole line")
+        raise ValueError(t("totp.incomplete"))
     _decode(cleaned)
     token = f"base32:{cleaned}"
     return token if algorithm == "SHA1" else f"{algorithm.lower()}:{token}"
@@ -57,7 +59,7 @@ def _decode(cleaned: str) -> bytes:
     try:
         return base64.b32decode(padded)
     except ValueError:
-        raise ValueError("Secret is not valid Base32") from None
+        raise ValueError(t("totp.base32")) from None
 
 
 def code(token: str, now: float | None = None) -> str:
@@ -69,7 +71,7 @@ def code(token: str, now: float | None = None) -> str:
             token = token[len(name) + 1:]
             break
     if not token.startswith("base32:"):
-        raise ValueError("Unknown token format")
+        raise ValueError(t("totp.unknown"))
     key = _decode(token[len("base32:"):])
     counter = int((time.time() if now is None else now) // STEP)
     mac = hmac.new(key, struct.pack(">Q", counter), getattr(hashlib, digest)).digest()
