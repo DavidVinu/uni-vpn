@@ -404,7 +404,8 @@ func reason(err error) string {
 	switch {
 	case errors.As(err, &ne) && ne.Timeout():
 		return "timed out"
-	case errors.Is(err, syscall.ECONNREFUSED):
+	// 10061 is WSAECONNREFUSED: Go's syscall.ECONNREFUSED is not what Windows returns.
+	case errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.Errno(10061)):
 		return "Connection refused"
 	case errors.As(err, &dns) && dns.IsNotFound:
 		return "Name or service not known"

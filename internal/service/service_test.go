@@ -651,7 +651,7 @@ func TestWindowsInstallWritesUTF16TaskAndRuns(t *testing.T) {
 		units[i] = uint16(data[2+2*i]) | uint16(data[3+2*i])<<8
 	}
 	text := strings.ReplaceAll(string(utf16.Decode(units)), "\r\n", "\n")
-	if text != winsys.RenderTaskBinary("/opt/uni-vpn/uni-vpn", `UNI\ab123`, "/opt/uni-vpn") {
+	if text != winsys.RenderTaskBinary("/opt/uni-vpn/uni-vpn", `UNI\ab123`, filepath.Dir("/opt/uni-vpn/uni-vpn")) {
 		t.Fatal(text)
 	}
 	if !r.called("schtasks", "/Create", "/TN", "uni-vpn", "/XML", files[0], "/F") ||

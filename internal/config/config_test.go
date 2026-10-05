@@ -443,7 +443,8 @@ func TestRemoveKeysKeepsTablesAndComments(t *testing.T) {
 	if err := RemoveKeys(path, []string{"host", "no_external_auth", "authgroup"}); err != nil {
 		t.Fatal(err)
 	}
-	if data, _ := os.ReadFile(path); string(data) != "# mine\nuser = \"ab1\"\n[timing]\nhost = \"x\"\n" {
+	// Written in text mode, like Python: CRLF on Windows.
+	if data, _ := os.ReadFile(path); strings.ReplaceAll(string(data), "\r\n", "\n") != "# mine\nuser = \"ab1\"\n[timing]\nhost = \"x\"\n" {
 		t.Fatalf("%q", data)
 	}
 }
