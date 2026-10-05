@@ -12,7 +12,7 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from . import config, credentials, desktop, detect, doctor, service, sysproxy, totp, updater
+from . import config, credentials, desktop, detect, doctor, messages, service, sysproxy, totp, updater
 from . import platform as pf
 from . import universities as unis
 from .tunnel import port_open as _port_open
@@ -99,11 +99,7 @@ def wait_for_port(port: int, *, port_open=_port_open, timeout: float = 5.0, step
 
 
 def _install_hint() -> str:
-    if pf.IS_WINDOWS:
-        return "run install.ps1 again"
-    if pf.IS_MACOS:
-        return "brew install openconnect ocproxy, or run install.sh again"
-    return "run install.sh again (Debian/Ubuntu: sudo apt install openconnect ocproxy libsecret-tools)"
+    return "start the installer again"
 
 
 def needed_programs() -> list[str]:
@@ -192,7 +188,7 @@ def ask_other(input_fn, probe=detect.probe) -> tuple[str, dict] | None:
             result = probe(host, usergroup, group)
         overrides["authgroup"] = group
     if result.saml:
-        print("   This university signs in through a browser (SAML), uni-vpn does not support that yet")
+        print(f"   {messages.SAML_REQUIRED}")
         return None
     guess = result.suggestion()["mfa"]
     print("   Second factor: " + ", ".join(f"{key} ({text})" for key, text in MFA_CHOICES.items()))
@@ -215,7 +211,7 @@ def choose_university(input_fn, probe=detect.probe) -> tuple[str, dict] | None:
         found = unis.search(text)
         if len(found) == 1:
             if found[0].mfa == "saml":
-                print(f"   {found[0].name} signs in through a browser (SAML), uni-vpn does not support that yet")
+                print(f"   {found[0].name}: {messages.SAML_REQUIRED}")
                 return None
             _say(found[0].name)
             return found[0].id, {}
@@ -253,7 +249,7 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
         if dry:
             _say(f"would require: {', '.join(missing)} ({_install_hint()})")
         else:
-            print(f"Missing: {', '.join(missing)}. To install: {_install_hint()}")
+            print(f"Missing: {', '.join(missing)}. To install it, {_install_hint()}.")
             return 1
     else:
         _say(f"{' and '.join(needed_programs()[:2])} found")
@@ -267,7 +263,7 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
             print(f"Unknown university {university!r}, see uni_vpn/universities.json")
             return 1
         if profile.mfa == "saml":
-            print(f"{profile.name} signs in through a browser (SAML), uni-vpn does not support that yet")
+            print(f"{profile.name}: {messages.SAML_REQUIRED}")
             return 1
     broken = None
     configured = cfg_path.exists()
@@ -278,7 +274,7 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
             # An update must still go through; the file stays as it is and the daemon reports the error.
             broken = exc
             cfg = config.Config(**config.ports_from_broken(cfg_path))  # the ports the daemon uses
-            print(f"Config {cfg_path} is invalid ({exc}), please fix it; continuing with defaults")
+            print(f"Config {cfg_path} is invalid ({exc}); the setup assistant asks again, the file is kept")
         else:
             _say(f"Config found: {cfg_path} ({cfg.university_name}, university ID {cfg.user})")
             if university and university != cfg.university:
@@ -370,12 +366,12 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
     install_app(cfg.http_port, dry, created)
 
     if pf.cisco_installed():
-        print("   Note: Cisco Secure Client is installed. Do not connect both at once; uni-vpn pauses while Cisco is connected.")
-        print("   Recommendation: in the Cisco client, turn off automatic connect on start ('Beim Start automatisch verbinden').")
+        print("   Note: Cisco Secure Client is installed. Uni VPN pauses while Cisco is connected.")
+        print("   Tip: in Cisco Secure Client, turn off connecting automatically at start.")
 
-    if broken is not None:
+    if broken is not None and not gui:
         # Nothing to ask for without a valid university ID; the service is in place again.
-        print(f"\nFix {cfg_path} (or delete it and run setup again), then: uni-vpn service restart")
+        print(f"\n{messages.SETTINGS_BROKEN} Open http://127.0.0.1:{cfg.http_port}/ in a browser.")
         return 0
 
     url = f"http://127.0.0.1:{cfg.http_port}/"
@@ -386,7 +382,7 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
             url += f"?{query}"
         # The service has started, but the daemon needs a moment until bind().
         if not wait_for_port(cfg.http_port, port_open=port_open, timeout=15):
-            print(f"\nThe service did not open {url} within 15 seconds. See: uni-vpn log, uni-vpn doctor")
+            print("\nUni VPN did not start. Restart the computer, then open Uni VPN.")
             if run_doctor:
                 print()
                 print(doctor.format_checks(doctor.run_checks(cfg_path)))
@@ -404,8 +400,8 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
             print("Restart any other open browser once so that it reads the proxy rule.")
             return 0
         gui = False
-        if not cfg_path.exists():
-            print(f"\nOpen {url} in a browser to finish the setup (or here: uni-vpn setup --no-gui).")
+        if not cfg_path.exists() or broken is not None:
+            print(f"\nOpen {url} in a browser to finish the setup.")
             return 0
 
     if dry:
@@ -421,7 +417,7 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
                 store(cfg.user, password)
                 _say("Password stored in the keyring")
             else:
-                print("   No password entered, set it later with: uni-vpn password")
+                print("   No password entered. Add it later in the app, under Settings.")
         state = keyring_probe(cfg.user, kind="totp") if cfg.needs_totp else "not used"
         if state == "not used":
             pass
@@ -431,12 +427,12 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
             print(totp_hint(cfg))
             text = getpass_fn(f"TOTP secret for {cfg.user} (otpauth URL or Base32, input stays hidden): ")
             if not text.strip():
-                print("   No secret entered, set it later with: uni-vpn totp")
+                print("   No secret entered. Add it later in the app, under Settings.")
             else:
                 try:
                     token = totp.normalize(text)
                 except ValueError as exc:
-                    print(f"   {exc}. Try again later with: uni-vpn totp")
+                    print(f"   {exc}. Add it later in the app, under Settings.")
                 else:
                     store_totp(cfg.user, token)
                     _say(f"TOTP secret stored in the keyring. Check code now: {totp.code(token)} (must match the app)")

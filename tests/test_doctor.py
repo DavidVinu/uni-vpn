@@ -63,7 +63,7 @@ class DoctorTests(unittest.TestCase):
     def test_missing_binary_fails(self):
         checks = doctor.run_checks(write_config(), **self.probes(find_binary=lambda n, override=None: None))
         self.assertEqual(self.by_name(checks, "openconnect").status, "fail")
-        self.assertIn("install.sh", self.by_name(checks, "openconnect").detail)
+        self.assertIn("Repair", self.by_name(checks, "openconnect").detail)
 
     def test_config_error_fails_and_uses_defaults(self):
         checks = doctor.run_checks(write_config("user = 1\n"), **self.probes())
@@ -168,14 +168,14 @@ class DoctorTests(unittest.TestCase):
             self.assertEqual(self.by_name(checks, "Keyring").status, expected, state)
             self.assertEqual(self.by_name(checks, "Second factor").status, expected, state)
 
-    def test_second_factor_missing_names_command(self):
+    def test_second_factor_missing_points_to_the_app(self):
         def probe(user, kind="password"):
             return "missing" if kind == "totp" else "present"
 
         checks = doctor.run_checks(write_config(), **self.probes(keyring_probe=probe))
         self.assertEqual(self.by_name(checks, "Keyring").status, "ok")
         self.assertEqual(self.by_name(checks, "Second factor").status, "fail")
-        self.assertIn("uni-vpn totp", self.by_name(checks, "Second factor").detail)
+        self.assertIn("Settings, Second factor", self.by_name(checks, "Second factor").detail)
 
     def test_second_factor_follows_the_university(self):
         kinds = []
@@ -227,7 +227,7 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(seen, [("ab1", "password"), ("ab1", "totp")])
 
     def test_proxy_states(self):
-        for state, expected, needle in (("ok", "ok", "proxy.pac"), ("unset", "fail", "install.sh"),
+        for state, expected, needle in (("ok", "ok", "proxy.pac"), ("unset", "fail", "Repair"),
                                         ("foreign", "warn", "another"), ("unavailable", "warn", "KDE, macOS or Windows")):
             checks = doctor.run_checks(write_config(), **self.probes(proxy_state=lambda port, s=state: s))
             check = self.by_name(checks, "Proxy rule")

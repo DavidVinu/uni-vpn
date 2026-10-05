@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from uni_vpn import tunnel as tn
+from uni_vpn import messages, tunnel as tn
 from uni_vpn.config import Config
 
 from tests import posix_only
@@ -23,9 +23,9 @@ WRAPPER = "/nonexistent/uni-vpn-ocproxy"
 class ClassifyTests(unittest.TestCase):
     def test_markers(self):
         self.assertEqual(tn.classify_line("User input required in non-interactive mode")[0], "auth_failed")
-        self.assertIn("uni-vpn log", tn.classify_line("User input required in non-interactive mode")[1])
-        self.assertIn("password", tn.classify_line("Failed to complete authentication")[1])
-        self.assertIn("HostScan", tn.classify_line("Error: Server asked us to run CSD hostscan.")[1])
+        self.assertIs(tn.classify_line("User input required in non-interactive mode")[1], messages.AUTH_REJECTED)
+        self.assertEqual(tn.classify_line("Failed to complete authentication")[1].action, "password")
+        self.assertIs(tn.classify_line("Error: Server asked us to run CSD hostscan.")[1], messages.HOSTSCAN_REQUIRED)
         self.assertEqual(tn.classify_line("SAML authentication required")[0], "auth_failed")
         self.assertEqual(tn.classify_line("Server certificate verify failed")[0], "error")
         self.assertIsNone(tn.classify_line("Connected as 10.0.0.2"))
@@ -40,15 +40,14 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(auth_failed[0], "auth_failed")
         self.assertEqual(input_required[1], auth_failed[1])
         self.assertIn("password", input_required[1])
-        self.assertIn("uni-vpn password", input_required[1])
-        self.assertIn("uni-vpn log", input_required[1])
+        self.assertEqual(input_required[1].action, "password")
 
-    def test_invalid_soft_token_string_names_the_command(self):
+    def test_invalid_soft_token_string_offers_the_second_factor(self):
         # Real openconnect 9.12 with a broken secret file: "Invalid base32 token string",
         # then "Soft token string is invalid", exit code 1 before any network contact.
         state, message = tn.classify_line("Soft token string is invalid")
         self.assertEqual(state, "auth_failed")
-        self.assertIn("uni-vpn totp", message)
+        self.assertEqual(message.action, "totp")
 
     def test_rejected_soft_token_names_the_second_factor(self):
         # If a server shows the OTP form again, openconnect tries two codes and then
@@ -56,8 +55,8 @@ class ClassifyTests(unittest.TestCase):
         # "Failed to complete authentication" follow. The first match counts.
         state, message = tn.classify_line("Server is rejecting the soft token; switching to manual entry")
         self.assertEqual(state, "auth_failed")
-        self.assertIn("One-time code", message)
-        self.assertIn("uni-vpn totp", message)
+        self.assertIn("one-time code", message)
+        self.assertEqual(message.action, "totp")
         self.assertIn("clock", message)
 
     def test_login_failed_before_otp_means_password(self):
@@ -67,8 +66,8 @@ class ClassifyTests(unittest.TestCase):
         state, message = seq.feed("Login failed.")
         self.assertEqual(state, "auth_failed")
         self.assertIn("password", message)
-        self.assertIn("uni-vpn password", message)
-        self.assertNotIn("One-time code", message)
+        self.assertEqual(message.action, "password")
+        self.assertNotIn("one-time code", message)
 
     def test_login_failed_after_otp_means_second_factor(self):
         # Measured on 2026-09-08: with a wrong secret the OTP prompt comes first, openconnect
@@ -78,9 +77,8 @@ class ClassifyTests(unittest.TestCase):
         self.assertIsNone(seq.feed("Generating OATH TOTP token code"))
         state, message = seq.feed("Login failed.")
         self.assertEqual(state, "auth_failed")
-        self.assertIn("One-time code", message)
-        self.assertIn("uni-vpn totp", message)
-        self.assertNotIn("uni-vpn password", message)
+        self.assertIn("one-time code", message)
+        self.assertEqual(message.action, "totp")
 
     def test_login_failed_is_worded_by_the_second_factor(self):
         for mfa, expected in (("none", tn.PASSWORD_REJECTED), ("totp_field", tn.PASSWORD_REJECTED),
@@ -90,16 +88,14 @@ class ClassifyTests(unittest.TestCase):
         self.assertIn("clock", tn.APPEND_REJECTED)
         self.assertIn("Duo", tn.DUO_REJECTED)
         for message in (tn.APPEND_REJECTED, tn.DUO_REJECTED):
-            self.assertIn("uni-vpn password", message)
-            self.assertNotIn("totp", message.lower(), "the page would offer the TOTP fix")
+            self.assertEqual(message.action, "password")
 
     def test_unsupported_login_methods_say_so_without_naming_a_university(self):
         for line in ("SAML authentication required", "Opening external browser for authentication"):
             state, message = tn.classify_line(line)
             self.assertEqual(state, "auth_failed")
-            self.assertIn("browser", message)
-            self.assertIn("not support", message)
-        self.assertIn("not support", tn.classify_line("Error: Server asked us to run CSD hostscan.")[1])
+            self.assertIs(message, messages.SAML_REQUIRED)
+        self.assertIn("cannot do that yet", tn.classify_line("Error: Server asked us to run CSD hostscan.")[1])
         for _needle, _state, message in tn.MARKERS:
             self.assertNotIn("Heidelberg", message)
             self.assertNotIn("needs an update", message)
@@ -267,8 +263,7 @@ class TunnelTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(await t.wait_ready(3))
         self.assertEqual(t.returncode, 1)
         self.assertEqual(t.classification[0], "auth_failed")
-        self.assertIn("One-time code", t.classification[1])
-        self.assertNotIn("uni-vpn password", t.classification[1])
+        self.assertIs(t.classification[1], messages.TOTP_REJECTED)
         self.assertIsNotNone(t.otp_generated_at)
         self.assertLess(abs(t.otp_generated_at - time.time()), 10)
 
@@ -326,7 +321,7 @@ class TunnelTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(t.exited.is_set())
         self.assertEqual(t.returncode, 1)
         self.assertEqual(t.classification[0], "auth_failed")
-        self.assertIn("uni-vpn password", t.classification[1])
+        self.assertIs(t.classification[1], messages.PASSWORD_REJECTED)
         self.assertNotIn("One-time code", t.classification[1])
         self.assertTrue(any("Failed to complete" in line for line in t.stderr_tail))
 
@@ -336,7 +331,7 @@ class TunnelTests(unittest.IsolatedAsyncioTestCase):
         await t.start(b"x")
         self.assertFalse(await t.wait_ready(3))
         self.assertEqual(t.classification[0], "auth_failed")
-        self.assertIn("uni-vpn log", t.classification[1])
+        self.assertIs(t.classification[1], messages.AUTH_REJECTED)
         # Finding 6: a wrong password produces the same sequence of lines.
         self.assertIn("password", t.classification[1])
 
