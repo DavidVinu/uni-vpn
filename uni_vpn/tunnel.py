@@ -15,22 +15,30 @@ import time
 from pathlib import Path
 
 from . import platform as pf
+from . import totp as totp_mod
 from .config import Config
 
-# Measured on 2026-09-08 against vpn-ac: the ASA rejects a wrong password with "Login failed."
+# Measured on 2026-09-08 against Heidelberg's ASA: it rejects a wrong password with "Login failed."
 # before it asks for the OTP. With a wrong one-time code the OTP prompt comes first
 # ("Generating OATH TOTP token code"), then "Login failed.". In both cases it shows the form
 # again, stdin is closed, "User input required", then "Failed to complete authentication".
-# So the order decides which factor was wrong.
+# So the order decides which factor was wrong; without a separate OTP step the profile's
+# second factor decides how to word it.
 PASSWORD_REJECTED = "Login rejected: check your password (uni-vpn password)"
 TOTP_REJECTED = (
     "One-time code rejected: check the computer's clock, otherwise re-enter the TOTP secret (uni-vpn totp)"
 )
+APPEND_REJECTED = "Login rejected: check your password, then the computer's clock (uni-vpn password)"
+DUO_REJECTED = ("Login rejected: check your password, or the Duo request was denied or not answered in time "
+                "(uni-vpn password)")
+LOGIN_REJECTED = {"totp_append": APPEND_REJECTED, "duo_push": DUO_REJECTED}
 # Without a preceding "Login failed." the server asked for something uni-vpn cannot fill in.
 AUTH_REJECTED = (
     "Login rejected: check your password (uni-vpn password). "
     "If it is correct, the server asked for something uni-vpn does not know, see uni-vpn log"
 )
+SAML_REQUIRED = "This university signs in through a browser (SAML), uni-vpn does not support that yet"
+HOSTSCAN_REQUIRED = "The server requires HostScan (CSD), uni-vpn does not support that"
 OTP_GENERATED = "Generating OATH TOTP token code"
 LOGIN_FAILED = "Login failed"
 TOKEN_PREFIX = "totp-"
@@ -40,10 +48,10 @@ MARKERS: list[tuple[str, str, str]] = [
     ("Server is rejecting the soft token", "auth_failed", TOTP_REJECTED),
     ("Soft token string is invalid", "auth_failed", "TOTP secret unusable, enter it again (uni-vpn totp)"),
     ("User input required in non-interactive mode", "auth_failed", AUTH_REJECTED),
-    ("Server asked us to run CSD", "auth_failed", "Server requires HostScan, uni-vpn needs an update"),
-    ("Cisco Secure Desktop", "auth_failed", "Server requires HostScan, uni-vpn needs an update"),
-    ("SAML", "auth_failed", "Login method changed (SAML), uni-vpn needs an update"),
-    ("external browser", "auth_failed", "Login method changed, uni-vpn needs an update"),
+    ("Server asked us to run CSD", "auth_failed", HOSTSCAN_REQUIRED),
+    ("Cisco Secure Desktop", "auth_failed", HOSTSCAN_REQUIRED),
+    ("SAML", "auth_failed", SAML_REQUIRED),
+    ("external browser", "auth_failed", SAML_REQUIRED),
     ("Failed to complete authentication", "auth_failed", AUTH_REJECTED),
     ("certificate", "error", "Certificate problem on the server"),
 ]
@@ -60,7 +68,8 @@ def classify_line(line: str) -> tuple[str, str] | None:
 class Classifier:
     """Classifies the openconnect output line by line; the first verdict sticks."""
 
-    def __init__(self) -> None:
+    def __init__(self, mfa: str = "totp_field") -> None:
+        self.mfa = mfa
         self.otp_generated = False
         self.verdict: tuple[str, str] | None = None
 
@@ -71,7 +80,8 @@ class Classifier:
             self.otp_generated = True
             return None
         if LOGIN_FAILED.lower() in line.lower():
-            self.verdict = ("auth_failed", TOTP_REJECTED if self.otp_generated else PASSWORD_REJECTED)
+            message = TOTP_REJECTED if self.otp_generated else LOGIN_REJECTED.get(self.mfa, PASSWORD_REJECTED)
+            self.verdict = ("auth_failed", message)
         else:
             self.verdict = classify_line(line)
         return self.verdict
@@ -128,7 +138,7 @@ class Tunnel:
         self.proc: asyncio.subprocess.Process | None = None
         self.exited = asyncio.Event()
         self.stderr_tail: collections.deque[str] = collections.deque(maxlen=20)
-        self.classifier = Classifier()
+        self.classifier = Classifier(cfg.mfa)
         self.classification: tuple[str, str] | None = None
         self.otp_generated_at: float | None = None  # wall clock time when openconnect generated a code
         self.stopped_by_us = False
@@ -136,14 +146,35 @@ class Tunnel:
         self.ready_at: float | None = None
         self._reader: asyncio.Task | None = None
 
+    def auth_args(self) -> list[str]:
+        """Login options from the university profile; the Windows tunnel uses the same."""
+        cfg = self.cfg
+        args = ["--protocol=anyconnect", f"--useragent={cfg.useragent}", f"--user={cfg.login_name}", "--passwd-on-stdin"]
+        # With Duo the second password ("push") comes through openconnect's prompt, which
+        # --non-inter refuses. stdin is closed after it, so a further prompt ends at EOF.
+        if cfg.mfa != "duo_push":
+            args.append("--non-inter")
+        if cfg.authgroup:
+            args.append(f"--authgroup={cfg.authgroup}")
+        if cfg.usergroup:
+            args.append(f"--usergroup={cfg.usergroup}")
+        if cfg.os:
+            args.append(f"--os={cfg.os}")
+        if cfg.no_external_auth:
+            args.append("--no-external-auth")
+        return args
+
+    def token_args(self) -> list[str]:
+        # The secret is passed via a 0600 file, never via the process list. openconnect
+        # rereads it for every code it generates, so it stays until the tunnel is up.
+        if self.token_file:
+            return ["--token-mode=totp", f"--token-secret=@{self.token_file}"]
+        return []
+
     def command(self, port: int) -> list[str]:
         cmd = [
             self.openconnect,
-            "--protocol=anyconnect",
-            f"--useragent={self.cfg.useragent}",
-            f"--user={self.cfg.user}",
-            "--passwd-on-stdin",
-            "--non-inter",
+            *self.auth_args(),
             "--no-dtls",
             "--force-dpd=30",
             "--reconnect-timeout=60",
@@ -152,11 +183,7 @@ class Tunnel:
             # "exec" so that dash does not leave an sh running next to ocproxy.
             f"--script=exec {shlex.quote(self.wrapper)} {port}",
         ]
-        if self.token_file:
-            # The secret is passed via a 0600 file, never via the process list. openconnect
-            # rereads it for every code it generates, so it stays until the tunnel is up.
-            cmd += ["--token-mode=totp", f"--token-secret=@{self.token_file}"]
-        return cmd + [self.cfg.host]
+        return cmd + self.token_args() + [self.cfg.host]
 
     def _write_token_file(self, totp: str) -> None:
         self.token_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -193,12 +220,26 @@ class Tunnel:
         """The password as openconnect reads it from stdin."""
         return password
 
-    async def start(self, password: bytes, totp: str | None = None) -> None:
+    def stdin_bytes(self, password: bytes, totp: str | None) -> bytes:
+        """What openconnect reads on stdin, by the profile's second factor."""
+        mfa = self.cfg.mfa
+        if mfa == "totp_append":
+            if not totp:
+                raise ValueError("totp_append needs a TOTP secret")
+            code = totp_mod.code(totp)
+            self.otp_generated_at = time.time()
+            return self._password_bytes(password + self.cfg.totp_separator.encode() + code.encode()) + b"\n"
         data = self._password_bytes(password) + b"\n"
+        if mfa == "duo_push":
+            data += b"push\n"
+        return data
+
+    async def start(self, password: bytes, totp: str | None = None) -> None:
+        data = self.stdin_bytes(password, totp)
         self.port = free_port()
         self.started_at = time.monotonic()
         env = self._env()
-        if totp:
+        if totp and self.cfg.mfa == "totp_field":
             self._write_token_file(totp)
         try:
             self.proc = await asyncio.create_subprocess_exec(

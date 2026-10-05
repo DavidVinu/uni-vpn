@@ -5,10 +5,12 @@ Environment variables:
   FAKE_MODE           ok (default) | auth_fail | input_required | totp_rejected | never_ready | ignore_sigterm | exit_after_ready
   FAKE_DELAY          seconds until the port listens (default 0.2)
   FAKE_EXIT_AFTER     with exit_after_ready: seconds after becoming ready (default 0.5)
-  FAKE_PASSWORD_FILE  file the password read from stdin is appended to
+  FAKE_PASSWORD_FILE  file every line read from stdin is appended to (password, "push" for Duo)
+  FAKE_ARGS_FILE      file the command line is appended to, one JSON list per start
   FAKE_TOKEN_FILE     file the contents of --token-secret=@file are appended to
                       (read shortly before becoming ready, like openconnect when generating the code)
 """
+import json
 import os
 import signal
 import socket
@@ -43,10 +45,14 @@ def main():
             port = int(arg.split()[-1])
         if arg.startswith("--token-secret=@"):
             token_path = arg[len("--token-secret=@"):]
-    password = sys.stdin.readline()
+    if os.environ.get("FAKE_ARGS_FILE"):
+        with open(os.environ["FAKE_ARGS_FILE"], "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(sys.argv[1:]) + "\n")
+    # uni-vpn closes stdin after writing, so this ends; Duo sends a second line.
+    lines = sys.stdin.read().splitlines()
     if os.environ.get("FAKE_PASSWORD_FILE"):
         with open(os.environ["FAKE_PASSWORD_FILE"], "a", encoding="utf-8") as handle:
-            handle.write(password)
+            handle.write("".join(line + "\n" for line in lines))
     log("POST https://fake.example/")
     mode = os.environ.get("FAKE_MODE", "ok")
     delay = float(os.environ.get("FAKE_DELAY", "0.2"))
