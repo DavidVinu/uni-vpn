@@ -5,7 +5,15 @@
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-$ref = if ($env:UNI_VPN_REF) { $env:UNI_VPN_REF } else { "main" }
+# The commit "stable" points to (CI moves it to every green commit on main), main as a fallback.
+$ref = $env:UNI_VPN_REF
+if (-not $ref) {
+    try {
+        $ref = ([string](Invoke-RestMethod -Uri "https://api.github.com/repos/DavidVinu/uni-vpn/commits/stable" `
+            -Headers @{ Accept = "application/vnd.github.sha" } -UseBasicParsing)).Trim()
+    } catch { $ref = "" }
+    if ($ref -notmatch '^[0-9a-f]{40}$') { $ref = "main" }
+}
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ("uni-vpn-" + [Guid]::NewGuid())
 New-Item -ItemType Directory -Path $tmp | Out-Null
 try {
@@ -16,6 +24,8 @@ try {
     $src = Get-ChildItem -Path $tmp -Directory | Select-Object -First 1
     if (-not (Test-Path (Join-Path $src.FullName "uni_vpn\__init__.py"))) { throw "Download is incomplete" }
     Get-ChildItem -Path $src.FullName -Recurse -File | Unblock-File
+    # The installed commit, for the automatic updates (uni_vpn/updater.py); install.ps1 copies it along.
+    if ($ref -match '^[0-9a-f]{40}$') { Set-Content -Path (Join-Path $src.FullName ".commit") -Value $ref -Encoding Ascii }
     $arguments = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $src.FullName "install.ps1"))
     if ($env:UNI_VPN_UPDATE -eq "1") { $arguments += "-Update" }
     & powershell.exe @arguments

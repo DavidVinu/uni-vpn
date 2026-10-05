@@ -35,7 +35,13 @@ Note: Windows version and build, CPU, Python version, Chrome, Edge and Firefox v
 11. Reboot, sign in, open a university page: connects by itself, no UAC prompt.
 12. `uni-vpn update` in a normal terminal: downloads, restarts the task (note whether it
     needs elevation).
-13. `install.ps1 -Uninstall` (one UAC prompt): task gone, proxy setting reset,
+13. Automatic update: in an administrator PowerShell, `Set-Content "$env:ProgramFiles\uni-vpn\.commit" ("0" * 40)`.
+    In the app, gear icon, switch "Automatic updates" off and on again (that checks at once).
+    Within a minute `uni-vpn log` shows "Updated to ..., restarting" and the app's Version row
+    the new commit. `Get-ScheduledTask uni-vpn` stays "Running", Task Manager shows two
+    `pythonw.exe` (the old one waits for the new one). No UAC prompt.
+14. `uni-vpn service stop`: both `pythonw.exe` are gone.
+15. `install.ps1 -Uninstall` (one UAC prompt): task gone, proxy setting reset,
     `uni-vpn` no longer on the PATH in new terminals, Start menu entry gone. Answer "y" to the
     keyring question: Control Panel, Credential Manager, Windows Credentials then shows no
     `uni-vpn` entries.

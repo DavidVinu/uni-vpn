@@ -50,6 +50,7 @@ class Config:
     default_domains: list[str] = field(default_factory=lambda: list(_DEFAULT.default_domains))
     openconnect: str | None = None
     ocproxy: str | None = None
+    auto_update: bool = True
     # [timing], all in seconds
     ready_timeout: float = 45.0
     client_wait: float = 25.0
@@ -123,6 +124,7 @@ TOP_KEYS: dict[str, tuple[type, ...]] = {
     "useragent": (str,),
     "openconnect": (str,),
     "ocproxy": (str,),
+    "auto_update": (bool,),
     "university": (str,),
     **{key: (kind,) for key, kind in unis.PROFILE_FIELDS.items()},
 }

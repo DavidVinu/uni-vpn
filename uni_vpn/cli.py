@@ -7,8 +7,10 @@ import asyncio
 import ctypes
 import getpass
 import json
+import logging
 import os
 import signal
+import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -219,15 +221,40 @@ def cmd_daemon(args) -> int:
         if not windows.is_admin():
             log.warning("Not running elevated: openconnect cannot create the Wintun adapter")
 
-    async def run() -> None:
+    async def run() -> bool:
         daemon = Daemon(cfg, log, config_error=config_error, log_tail=tail, config_path=cfg_path,
                         needs_setup=not cfg_path.exists())
         install_signal_handlers(asyncio.get_running_loop(), daemon)
         await daemon.run()
+        return daemon.restart_requested
 
-    asyncio.run(run())
+    restart = asyncio.run(run())
     log.info("uni-vpn stopped")
+    if restart:
+        lock.close()
+        logging.shutdown()
+        return restart_daemon()
     return 0
+
+
+def restart_daemon(execv=os.execv, call=subprocess.call, environ=os.environ) -> int:
+    """Start the updated code in place of this process. The service manager must not notice."""
+    from .updater import RESTART_EXIT, SUPERVISED_ENV
+
+    command = [sys.executable, *sys.orig_argv[1:]]
+    if not pf.IS_WINDOWS:
+        # Same process id: systemd and launchd keep watching the same service.
+        execv(sys.executable, command)
+        return 1  # only reached with a replaced execv
+    if environ.get(SUPERVISED_ENV):
+        return RESTART_EXIT  # the supervisor below starts the new code
+    # Task Scheduler restarts nothing that ends normally, and the job object ends the children
+    # with this process. So this process stays as a small supervisor until the task ends.
+    env = dict(environ, **{SUPERVISED_ENV: "1"})
+    while True:
+        code = call(command, env=env)
+        if code != RESTART_EXIT:
+            return code
 
 
 def cmd_service(args) -> int:

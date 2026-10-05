@@ -12,7 +12,7 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from . import config, credentials, detect, doctor, service, sysproxy, totp
+from . import config, credentials, detect, doctor, service, sysproxy, totp, updater
 from . import platform as pf
 from . import universities as unis
 from .tunnel import port_open as _port_open
@@ -562,88 +562,16 @@ def uninstall(args, *, input_fn=input, service_uninstall=service.uninstall, dele
     return 1 if failed else 0
 
 
-ARCHIVE_URL = "https://codeload.github.com/DavidVinu/uni-vpn/zip/refs/heads/main"
-
-
-def _archive_files(archive, root: Path) -> dict[str, tuple[str, Path]]:
-    """Relative path -> (name in the archive, destination). Refuses foreign archives and paths outside root."""
-    names = archive.namelist()
-    if not names:
-        raise ValueError("the download is empty")
-    prefix = names[0].split("/", 1)[0] + "/"
-    if prefix + "uni_vpn/__init__.py" not in names:
-        raise ValueError("the download does not look like uni-vpn")
-    files = {}
-    for name in names:
-        if not name.startswith(prefix):
-            raise ValueError(f"unexpected path in the download: {name}")
-        relative = name[len(prefix):]
-        if not relative or name.endswith("/"):
-            continue
-        destination = (root / relative).resolve()
-        if root not in destination.parents:
-            raise ValueError(f"unexpected path in the download: {name}")
-        files[relative] = (name, destination)
-    return files
-
-
-def _remove_stale(root: Path, keep: set[str]) -> None:
-    """Delete files under uni_vpn/ and bin/ that the new version no longer has. Never follows symlinks."""
-    fold = str.lower if (pf.IS_MACOS or pf.IS_WINDOWS) else str  # case-insensitive file systems
-    keep = {fold(k) for k in keep}
-    for top in ("uni_vpn", "bin"):
-        base = root / top
-        if base.is_symlink() or not base.is_dir():
-            continue
-        for dirpath, _dirs, filenames in os.walk(base, topdown=False):
-            here = Path(dirpath)
-            if "__pycache__" in here.relative_to(root).parts:
-                continue
-            for filename in filenames:
-                path = here / filename
-                if not path.is_symlink() and fold(path.relative_to(root).as_posix()) not in keep:
-                    path.unlink()
-            if here != base and not any(here.iterdir()):
-                here.rmdir()
-
-
-def download_release(target: Path, url: str = ARCHIVE_URL, opener=None) -> None:
-    """Replace the program files in target with the current main branch (installs without git).
+def download_release(target: Path, url: str | None = None, opener=None) -> None:
+    """Replace the program files in target with the current stable version (installs without git).
     ValueError for a broken or unexpected download, OSError when files cannot be written."""
-    import io
-    import tempfile
-    import urllib.request
-    import zipfile
-    import zlib
-
-    opener = opener or urllib.request.urlopen
-    with opener(url, timeout=60) as response:
-        data = response.read()
-    root = target.resolve()
+    if url:
+        updater.stage(target, url, opener=opener).install()
+        return
     try:
-        with zipfile.ZipFile(io.BytesIO(data)) as archive:
-            files = _archive_files(archive, root)
-            if archive.testzip() is not None:
-                raise ValueError("the download is damaged, try again")
-            # Unpack everything first, next to target (same file system), so that a broken download
-            # changes nothing. Then overwrite file by file: on Windows the running service has this
-            # folder as its working directory, so the folder itself cannot be swapped.
-            staging = Path(tempfile.mkdtemp(prefix=".uni-vpn-update-", dir=root.parent))
-            try:
-                for relative, (name, _destination) in files.items():
-                    staged = staging / relative
-                    staged.parent.mkdir(parents=True, exist_ok=True)
-                    staged.write_bytes(archive.read(name))
-                    if relative.startswith("bin/") or relative.endswith(".sh"):
-                        staged.chmod(0o755)
-                for relative, (_name, destination) in files.items():
-                    destination.parent.mkdir(parents=True, exist_ok=True)
-                    os.replace(staging / relative, destination)
-            finally:
-                shutil.rmtree(staging, ignore_errors=True)
-    except (zipfile.BadZipFile, zlib.error, EOFError) as exc:
-        raise ValueError(f"the download is damaged, try again ({exc})") from None
-    _remove_stale(root, set(files))
+        updater.update_now(target, opener=opener)
+    except updater.UpdateError as exc:
+        raise ValueError(str(exc)) from None
 
 
 GET_PS1_URL = "https://raw.githubusercontent.com/DavidVinu/uni-vpn/main/get.ps1"
