@@ -70,8 +70,9 @@ class MacTests(Harness):
         self.assertNotIn("LSUIElement", info)  # a Dock icon while the window is open
 
     def test_login_item_starts_the_menu_bar_item_without_a_window(self):
-        plist = desktop.login_plist(Path("/x/Uni VPN.app/Contents/MacOS/Uni VPN"))
-        self.assertEqual(plist["ProgramArguments"], ["/x/Uni VPN.app/Contents/MacOS/Uni VPN", "--hidden"])
+        binary = Path("/x/Uni VPN.app/Contents/MacOS/Uni VPN")
+        plist = desktop.login_plist(binary)
+        self.assertEqual(plist["ProgramArguments"], [str(binary), "--hidden"])
         self.assertTrue(plist["RunAtLoad"])
 
     def test_build_puts_the_bundle_in_applications_and_registers_login(self):
@@ -135,9 +136,11 @@ class WindowsTests(Harness):
         self.assertEqual(sorted(p.name for p in target.iterdir()), sorted(desktop.WEBVIEW2_FILES.values()))
 
     def test_shortcut_script_quotes_paths(self):
-        script = desktop.shortcut_script(Path("C:/Users/O'Brien/Uni VPN.lnk"), Path("C:/Program Files/uni-vpn/x.exe"),
-                                         "--port 1081 --hidden", Path("C:/x.exe"))
-        self.assertIn("'C:/Users/O''Brien/Uni VPN.lnk'", script)
+        link = Path("C:/Users/O'Brien/Uni VPN.lnk")
+        script = desktop.shortcut_script(link, Path("C:/Program Files/uni-vpn/x.exe"), "--port 1081 --hidden",
+                                         Path("C:/x.exe"))
+        self.assertIn("'" + str(link).replace("'", "''") + "'", script)
+        self.assertIn("O''Brien", script)
         self.assertIn("$s.Arguments = '--port 1081 --hidden'", script)
 
     def test_app_command_passes_port_and_page(self):
