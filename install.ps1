@@ -1,5 +1,5 @@
 # Install uni-vpn on Windows: Python and OpenConnect (with Wintun) if missing, then "uni-vpn setup".
-# Usage: powershell -ExecutionPolicy Bypass -File install.ps1 [-Uninstall | -Update] [-DryRun] [-NoGui] [-User UNIVERSITY-ID]
+# Usage: powershell -ExecutionPolicy Bypass -File install.ps1 [-Uninstall | -Update] [-DryRun] [-NoGui] [-User UNIVERSITY-ID] [-University ID]
 # Needs an administrator account: Wintun, the virtual network adapter openconnect uses on
 # Windows, can only be created with administrator rights. The program goes to
 # %ProgramFiles%\uni-vpn: the service runs it elevated, so only administrators may change it.
@@ -11,6 +11,7 @@ param(
     [switch]$NoGui,
     [switch]$NoBrowser,
     [string]$User = "",
+    [string]$University = "",
     [string]$ForUser = ""
 )
 $ErrorActionPreference = "Stop"
@@ -126,6 +127,7 @@ if (-not $DryRun -and -not (Test-Admin)) {
     # The browser must not run elevated: this window opens it once the elevated part is done.
     $arguments += "-NoBrowser"
     if ($User) { $arguments += @("-User", "`"$User`"") }
+    if ($University) { $arguments += @("-University", "`"$University`"") }
     Say "asking for administrator rights"
     try {
         $process = Start-Process -FilePath "powershell.exe" -ArgumentList $arguments -Verb RunAs -Wait -PassThru
@@ -141,8 +143,11 @@ if (-not $DryRun -and -not (Test-Admin)) {
             if ($match) { $port = [int]$match.Matches[0].Groups[1].Value }
         }
         $url = "http://127.0.0.1:$port/"
-        # A given ID is prefilled in the assistant, which writes the config.
-        if ($User -and -not (Test-Path $config)) { $url += "?user=$([uri]::EscapeDataString($User))" }
+        # A given ID and university are prefilled in the assistant, which writes the config.
+        $query = @()
+        if ($User) { $query += "user=$([uri]::EscapeDataString($User))" }
+        if ($University) { $query += "university=$([uri]::EscapeDataString($University))" }
+        if ($query.Count -gt 0 -and -not (Test-Path $config)) { $url += "?" + ($query -join "&") }
         Start-Process $url
     }
     exit $process.ExitCode
@@ -197,6 +202,7 @@ try {
         if ($NoGui) { $cliArgs += "--no-gui" }
         if ($NoBrowser) { $cliArgs += "--no-browser" }
         if ($User) { $cliArgs += @("--user", $User) }
+        if ($University) { $cliArgs += @("--university", $University) }
     }
     & $python @cliArgs
     $code = $LASTEXITCODE

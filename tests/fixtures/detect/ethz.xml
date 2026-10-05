@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<config-auth client="vpn" type="auth-request" aggregate-auth-version="2">
+<opaque is-for="sg">
+<tunnel-group>staff-net</tunnel-group>
+<aggauth-handle>7533735957464142058</aggauth-handle>
+<auth-method>single-sign-on-v2</auth-method>
+<group-alias>staff-net</group-alias>
+<config-hash>1791175769768</config-hash>
+</opaque>
+<auth id="main">
+<title>Login</title>
+<message>Bitte geben Sie Benutzernamen und Passwort ein.</message>
+<banner>Server: =&#x3E; sslvpn.ethz.ch/VPZ_NAME&#x0A;Username: ETH user name@REALM.ethz.ch&#x0A;Password: ETH network password&#x0A;Second Password: One Time Password (OTP)&#x0A;Example:&#x0A;=&#x3E; Aktuell ist staff-net selektiert:&#x0A;sslvpn.ethz.ch/staff-net &#x0A;ETH user name@staff-net.ethz.ch</banner>
+<form>
+<input type="text" name="username" label="Username:"></input>
+<input type="password" name="password" label="Password:"></input>
+<input type="password" name="secondary_password" label="Password:"></input>
+<select name="group_list" label="GROUP:">
+<option selected="true">staff-net</option>
+<option>student-net</option>
+</select>
+</form>
+</auth>
+</config-auth>

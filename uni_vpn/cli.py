@@ -127,6 +127,9 @@ def cmd_password(args) -> int:
 
 def cmd_totp(args) -> int:
     cfg = _load(args)
+    if not cfg.needs_totp:
+        print(f"{cfg.university_name} uses no TOTP secret (mfa = \"{cfg.mfa}\" in config.toml)")
+        return 2
     text = getpass.getpass(f"TOTP secret for {cfg.user} (otpauth URL or Base32, input stays hidden): ")
     if not text.strip():
         print("No secret entered")
@@ -283,6 +286,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("setup", help="Set up (called by the installer)")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--user", help="University ID")
+    p.add_argument("--university", help="University from uni_vpn/universities.json, for example heidelberg")
     p.add_argument("--no-gui", action="store_true", help="Ask in the terminal instead of opening the setup assistant")
     p.add_argument("--no-browser", action="store_true", help=argparse.SUPPRESS)
     p.set_defaults(func=cmd_setup)

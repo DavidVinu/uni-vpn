@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<config-auth client="vpn" type="auth-request" aggregate-auth-version="2">
+<opaque is-for="sg">
+<tunnel-group>DefaultWEBVPNGroup</tunnel-group>
+<aggauth-handle>13570670443410999886</aggauth-handle>
+<auth-method>single-sign-on-v2</auth-method>
+<config-hash>1789723525702</config-hash>
+</opaque>
+<auth id="main">
+<title>Login</title>
+<message>Please complete the authentication process in the AnyConnect Login window.</message>
+<banner></banner>
+<sso-v2-login>https://vpn.fu-berlin.de/+CSCOE+/saml/sp/login?ctx=1343066654&#x26;acsamlcap=v2</sso-v2-login>
+<sso-v2-login-final>https://vpn.fu-berlin.de/+CSCOE+/saml_ac_login.html</sso-v2-login-final>
+<sso-v2-logout>https://vpn.fu-berlin.de/+CSCOE+/saml/sp/logout</sso-v2-logout>
+<sso-v2-logout-final>https://vpn.fu-berlin.de/+CSCOE+/saml_ac_login.html</sso-v2-logout-final>
+<sso-v2-token-cookie-name>acSamlv2Token</sso-v2-token-cookie-name>
+<sso-v2-error-cookie-name>acSamlv2Error</sso-v2-error-cookie-name>
+<form>
+<input type="sso" name="sso-token"></input>
+</form>
+</auth>
+</config-auth>

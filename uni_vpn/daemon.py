@@ -14,9 +14,10 @@ from typing import Awaitable, Callable
 from . import PROTOCOL, __version__, credentials, pac, sysproxy
 from . import platform as pf
 from . import config as config_mod
+from . import universities as unis
 from .config import Config
 from .forwarder import Forwarder
-from .tunnel import PasswordEncodingError, Tunnel, remove_stale_token_files
+from .tunnel import SAML_REQUIRED, PasswordEncodingError, Tunnel, remove_stale_token_files
 
 
 class State(str, Enum):
@@ -178,6 +179,11 @@ class Daemon:
             "since": self.since,
             "host": self.cfg.host,
             "user": self.cfg.user,
+            "university": self.cfg.university,
+            "university_name": self.cfg.university_name,
+            "mfa": self.cfg.mfa,
+            "mfa_portal_url": self.cfg.mfa_portal_url,
+            "mfa_steps": list(self.cfg.mfa_steps),
             "socks_port": self.cfg.socks_port,
             "http_port": self.cfg.http_port,
             "idle_minutes": self.cfg.idle_minutes,
@@ -186,7 +192,7 @@ class Daemon:
             "bytes_out": self.forwarder.bytes_out,
             "connects": self.connect_count,
             "last_error": self.last_error,
-            "domains": pac.read_domains(self.domains_path),
+            "domains": pac.read_domains(self.domains_path, self.cfg.default_domains),
             "pac_url": sysproxy.pac_url(self.cfg.http_port),
             "pac_refresh": "manual" if pf.IS_MACOS else "auto",
             "log_tail": list(self.log_tail)[-30:],
@@ -216,13 +222,21 @@ class Daemon:
             return "password"
         return None
 
-    async def complete_setup(self, user: str, password: str, token: str) -> None:
-        """First run from the setup assistant: config.toml, both secrets, then a test connection."""
+    async def complete_setup(self, user: str, password: str, token: str | None,
+                             university: str = unis.DEFAULT_ID, overrides: dict | None = None) -> None:
+        """First run from the setup assistant: config.toml, the secrets, then a test connection.
+        Raises unis.FieldError naming the step to change, ValueError otherwise."""
         user = user.strip()
         if not config_mod.valid_user(user):
-            raise ValueError("Invalid university ID")
+            raise unis.FieldError("user", "Invalid university ID")
         if self.config_error and not self.needs_setup:
             raise ValueError(f"Fix config.toml first: {self.config_error}")
+        overrides = config_mod.check_overrides(overrides or {})
+        profile = config_mod.profile_config(university, overrides)
+        if profile.mfa == "saml":
+            raise unis.FieldError("university", SAML_REQUIRED)
+        if profile.needs_totp and not token:
+            raise unis.FieldError("totp", "Paste the secret first")
         path = self.config_path or config_mod.default_path()
         loop = asyncio.get_running_loop()
         # Secrets first: if the keyring refuses, no config.toml exists yet and the assistant
@@ -231,19 +245,22 @@ class Daemon:
         self.cfg.user = user
         try:
             await loop.run_in_executor(None, self.password_setter, password)
-            await loop.run_in_executor(None, self.totp_setter, token)
+            if profile.needs_totp:
+                await loop.run_in_executor(None, self.totp_setter, token)
             if path.exists():
-                await loop.run_in_executor(None, config_mod.set_user, path, user)
+                values = {"user": user, "university": university, **overrides}
+                await loop.run_in_executor(None, config_mod.set_values, path, values)
             else:
-                await loop.run_in_executor(None, config_mod.write_initial, path, user)
+                await loop.run_in_executor(None, config_mod.write_initial, path, user, university, overrides)
         except config_mod.ConfigError as exc:
             self.cfg.user = previous_user
             raise ValueError(str(exc)) from exc
         except BaseException:
             self.cfg.user = previous_user
             raise
+        config_mod.copy_profile(self.cfg, profile)
         self.config_path = path
-        self.log.info("Setup completed for %s", user)
+        self.log.info("Setup completed for %s (%s)", user, profile.university_name)
         self.needs_setup = False
         self.config_error = None
         await self._secrets_changed()
@@ -265,7 +282,7 @@ class Daemon:
         await self.request_connect()
 
     def pac(self) -> str:
-        return pac.build_pac(pac.read_domains(self.domains_path), self.cfg.socks_port)
+        return pac.build_pac(pac.read_domains(self.domains_path, self.cfg.default_domains), self.cfg.socks_port)
 
     async def set_domains(self, text: str) -> list[str]:
         domains, errors = pac.parse_domain_list(text)
@@ -399,6 +416,9 @@ class Daemon:
             if self._elevated() is False:
                 self._final(State.error, "Needs administrator rights (Wintun): run the installer again")
                 return
+            if cfg.mfa == "saml":
+                self._final(State.auth_failed, SAML_REQUIRED)
+                return
             if await asyncio.get_running_loop().run_in_executor(None, self.cisco_check):
                 self._set(State.blocked, BLOCKED_MESSAGE)
                 await self._sleep(cfg.retry_interval)
@@ -424,17 +444,19 @@ class Daemon:
             except credentials.KeyringError as exc:
                 self._final(State.keyring, str(exc))
                 return
-            try:
-                totp = (await self.totp_getter()).decode("ascii").strip()
-            except credentials.TotpMissing:
-                self._final(State.keyring, "No TOTP secret stored: uni-vpn totp")
-                return
-            except credentials.KeyringLocked:
-                self._final(State.keyring, "Keyring locked, please unlock it and connect again")
-                return
-            except (credentials.KeyringError, UnicodeDecodeError) as exc:
-                self._final(State.keyring, f"TOTP secret unreadable: {exc}")
-                return
+            totp = None
+            if cfg.needs_totp:
+                try:
+                    totp = (await self.totp_getter()).decode("ascii").strip()
+                except credentials.TotpMissing:
+                    self._final(State.keyring, "No TOTP secret stored: uni-vpn totp")
+                    return
+                except credentials.KeyringLocked:
+                    self._final(State.keyring, "Keyring locked, please unlock it and connect again")
+                    return
+                except (credentials.KeyringError, UnicodeDecodeError) as exc:
+                    self._final(State.keyring, f"TOTP secret unreadable: {exc}")
+                    return
 
             self._set(State.connecting, "Connecting")
             try:
@@ -526,6 +548,8 @@ class Daemon:
     def _otp_wait(self, now: float | None = None) -> float:
         """Seconds until the next one-time code window, 0 if the current code is still unused."""
         now = time.time() if now is None else now
+        if not self.cfg.needs_totp:
+            return 0
         if self.last_otp_step is None or int(now // OTP_STEP) != self.last_otp_step:
             return 0
         return OTP_STEP - now % OTP_STEP + 0.5

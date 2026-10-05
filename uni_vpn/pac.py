@@ -80,12 +80,13 @@ def domains_path() -> Path:
     return config_dir() / "domains.txt"
 
 
-def read_domains(path: Path) -> list[str]:
-    """If the file is missing, the defaults apply; invalid lines are skipped."""
+def read_domains(path: Path, defaults: list[str] | None = None) -> list[str]:
+    """If the file is missing, the university's defaults apply (without them Heidelberg's);
+    invalid lines are skipped."""
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
-        return list(DEFAULT_DOMAINS)
+        return list(DEFAULT_DOMAINS if defaults is None else defaults)
     domains, _errors = parse_domain_list(text)
     return domains
 

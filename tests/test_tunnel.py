@@ -82,12 +82,84 @@ class ClassifyTests(unittest.TestCase):
         self.assertIn("uni-vpn totp", message)
         self.assertNotIn("uni-vpn password", message)
 
+    def test_login_failed_is_worded_by_the_second_factor(self):
+        for mfa, expected in (("none", tn.PASSWORD_REJECTED), ("totp_field", tn.PASSWORD_REJECTED),
+                              ("totp_append", tn.APPEND_REJECTED), ("duo_push", tn.DUO_REJECTED)):
+            seq = tn.Classifier(mfa)
+            self.assertEqual(seq.feed("Login failed."), ("auth_failed", expected), mfa)
+        self.assertIn("clock", tn.APPEND_REJECTED)
+        self.assertIn("Duo", tn.DUO_REJECTED)
+        for message in (tn.APPEND_REJECTED, tn.DUO_REJECTED):
+            self.assertIn("uni-vpn password", message)
+            self.assertNotIn("totp", message.lower(), "the page would offer the TOTP fix")
+
+    def test_unsupported_login_methods_say_so_without_naming_a_university(self):
+        for line in ("SAML authentication required", "Opening external browser for authentication"):
+            state, message = tn.classify_line(line)
+            self.assertEqual(state, "auth_failed")
+            self.assertIn("browser", message)
+            self.assertIn("not support", message)
+        self.assertIn("not support", tn.classify_line("Error: Server asked us to run CSD hostscan.")[1])
+        for _needle, _state, message in tn.MARKERS:
+            self.assertNotIn("Heidelberg", message)
+            self.assertNotIn("needs an update", message)
+
+    def test_tunnel_classifier_follows_the_profile(self):
+        t = tn.Tunnel(Config(user="u", mfa="duo_push"), FAKE, WRAPPER, logging.getLogger("t"), token_dir=Path(tempfile.mkdtemp()))
+        self.assertEqual(t.classifier.mfa, "duo_push")
+
     def test_classifier_keeps_first_verdict(self):
         seq = tn.Classifier()
         seq.feed("Generating OATH TOTP token code")
         first = seq.feed("Login failed.")
         self.assertEqual(seq.feed("User input required in non-interactive mode"), first)
         self.assertEqual(seq.verdict, first)
+
+
+TOKEN = "base32:GEZDGNBVGY3TQOJQ"
+
+
+class ProfileCommandTests(unittest.TestCase):
+    def make(self, **fields):
+        cfg = Config(user="ab123", **fields)
+        return tn.Tunnel(cfg, "/usr/bin/openconnect", WRAPPER, logging.getLogger("t"), token_dir=Path(tempfile.mkdtemp()))
+
+    def test_heidelberg_command_is_unchanged(self):
+        # The command line from before profiles existed, argument for argument.
+        self.assertEqual(self.make().command(4321), [
+            "/usr/bin/openconnect", "--protocol=anyconnect", "--useragent=AnyConnect Linux_64 5.1.18.314",
+            "--user=ab123", "--passwd-on-stdin", "--non-inter", "--no-dtls", "--force-dpd=30",
+            "--reconnect-timeout=60", "--script-tun", f"--script=exec {WRAPPER} 4321", "vpn-ac.uni-heidelberg.de"])
+
+    def test_profile_flags(self):
+        cmd = self.make(host="sslvpn.ethz.ch", authgroup="staff-net", usergroup="exchange", os="win",
+                        useragent="AnyConnect", username_suffix="@staff-net.ethz.ch", no_external_auth=True).command(1)
+        for arg in ("--authgroup=staff-net", "--usergroup=exchange", "--os=win", "--useragent=AnyConnect",
+                    "--user=ab123@staff-net.ethz.ch", "--no-external-auth", "--non-inter"):
+            self.assertIn(arg, cmd)
+        self.assertEqual(cmd[-1], "sslvpn.ethz.ch")
+
+    def test_group_names_with_spaces_stay_one_argument(self):
+        cmd = self.make(authgroup="RWTH-VPN (Split Tunnel)").command(1)
+        self.assertIn("--authgroup=RWTH-VPN (Split Tunnel)", cmd)
+
+    def test_duo_push_drops_non_inter(self):
+        self.assertNotIn("--non-inter", self.make(mfa="duo_push").command(1))
+
+    def test_stdin_per_mode(self):
+        with mock.patch.object(tn.totp_mod, "code", return_value="123456"):
+            self.assertEqual(self.make(mfa="none").stdin_bytes(b"pw", None), b"pw\n")
+            self.assertEqual(self.make(mfa="totp_field").stdin_bytes(b"pw", TOKEN), b"pw\n")
+            self.assertEqual(self.make(mfa="duo_push").stdin_bytes(b"pw", None), b"pw\npush\n")
+            self.assertEqual(self.make(mfa="totp_append").stdin_bytes(b"pw", TOKEN), b"pw123456\n")
+            self.assertEqual(self.make(mfa="totp_append", totp_separator=",").stdin_bytes(b"pw", TOKEN), b"pw,123456\n")
+
+    def test_totp_append_records_when_the_code_was_made(self):
+        t = self.make(mfa="totp_append")
+        t.stdin_bytes(b"pw", TOKEN)
+        self.assertLess(abs(t.otp_generated_at - time.time()), 5)
+        with self.assertRaises(ValueError):
+            self.make(mfa="totp_append").stdin_bytes(b"pw", None)
 
 
 @posix_only
@@ -183,6 +255,24 @@ class TunnelTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("uni-vpn password", t.classification[1])
         self.assertIsNotNone(t.otp_generated_at)
         self.assertLess(abs(t.otp_generated_at - time.time()), 10)
+
+    async def test_only_totp_field_writes_a_token_file(self):
+        for mfa in ("none", "duo_push", "totp_append"):
+            self.cfg.mfa = mfa
+            t = self.make()
+            await t.start(b"secret", totp=TOKEN)
+            self.assertEqual(self.token_files(), [], mfa)
+            self.assertFalse([a for a in t.command(1) if a.startswith("--token")], mfa)
+            self.assertTrue(await t.wait_ready(3))
+            await t.stop(2)
+
+    async def test_duo_push_sends_push_as_the_second_line(self):
+        self.cfg.mfa = "duo_push"
+        t = self.make()
+        await t.start(b"secret")
+        self.assertTrue(await t.wait_ready(3))
+        await t.stop(2)
+        self.assertEqual(self.pwfile.read_text().splitlines(), ["secret", "push"])
 
     async def test_otp_generated_at_is_none_without_token(self):
         t = self.make()

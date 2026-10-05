@@ -10,7 +10,8 @@ import re
 from pathlib import Path
 
 from . import config as config_mod
-from . import totp
+from . import detect, totp
+from . import universities as unis
 
 MAX_HEADER = 16 * 1024
 MAX_BODY = 64 * 1024
@@ -43,6 +44,7 @@ class HttpApi:
         self.host = host
         self.port = port
         self.log = log
+        self.detector = detect.probe  # tests replace it, there is no gateway in CI
         self._server: asyncio.AbstractServer | None = None
 
     async def start(self) -> None:
@@ -131,6 +133,9 @@ class HttpApi:
                 return 200, "application/json", json.dumps(self.daemon.status()).encode()
             if path == "/proxy.pac":
                 return 200, "application/x-ns-proxy-autoconfig", self.daemon.pac().encode()
+            if path == "/universities.json":
+                payload = {"default": unis.DEFAULT_ID, "universities": unis.public_list()}
+                return 200, "application/json", json.dumps(payload).encode()
             return 404, "text/plain", b"not found"
         if method != "POST":
             return 405, "text/plain", b"method not allowed"
@@ -201,6 +206,23 @@ class HttpApi:
             self.daemon.note_code_shown()
             return 200, "application/json", json.dumps({"ok": True, "code": totp.code(token),
                                                          "remaining": remaining}).encode()
+        elif path == "/api/detect":
+            # "Not listed" in the setup assistant: what the gateway's login form looks like.
+            try:
+                data = json.loads(body.decode("utf-8"))
+                address, group = data["host"], data.get("group", "")
+            except (ValueError, KeyError, TypeError, AttributeError, UnicodeDecodeError):
+                return 400, "text/plain", b"expected JSON with 'host'"
+            if not isinstance(address, str) or not isinstance(group, str):
+                return 400, "text/plain", b"host and group must be text"
+            try:
+                host, usergroup = detect.split_address(address)
+                result = await asyncio.get_running_loop().run_in_executor(
+                    None, lambda: self.detector(host, usergroup, group))
+            except unis.FieldError as exc:
+                payload = {"ok": False, "field": exc.field, "error": str(exc)}
+                return 400, "application/json", json.dumps(payload).encode()
+            return 200, "application/json", json.dumps({"ok": True, **result.as_dict()}).encode()
         elif path == "/api/setup":
             # Errors name the step that has to change, so the assistant can go back to it.
             def fail(status: int, field: str | None, message: str):
@@ -208,26 +230,33 @@ class HttpApi:
 
             try:
                 data = json.loads(body.decode("utf-8"))
-                user, password, secret = data["user"], data["password"], data["secret"]
-            except (ValueError, KeyError, TypeError, UnicodeDecodeError):
-                return fail(400, None, "expected JSON with 'user', 'password' and 'secret'")
-            if not all(isinstance(v, str) for v in (user, password, secret)):
-                return fail(400, None, "user, password and secret must be text")
+                user, password = data["user"], data["password"]
+                secret = data.get("secret", "")
+                university = data.get("university", unis.DEFAULT_ID)
+                overrides = data.get("profile") or {}
+            except (ValueError, KeyError, TypeError, AttributeError, UnicodeDecodeError):
+                return fail(400, None, "expected JSON with 'user' and 'password'")
+            if not all(isinstance(v, str) for v in (user, password, secret, university)) or not isinstance(overrides, dict):
+                return fail(400, None, "user, password, secret and university must be text, profile an object")
             if not config_mod.valid_user(user.strip()):
                 return fail(400, "user", "Invalid university ID")
             if not password or "\n" in password or "\r" in password:
                 return fail(400, "password", "Enter your password")
+            token = None
+            if secret.strip():
+                try:
+                    token = totp.normalize(secret)
+                except ValueError as exc:
+                    return fail(400, "totp", str(exc))
             try:
-                token = totp.normalize(secret)
-            except ValueError as exc:
-                return fail(400, "totp", str(exc))
-            try:
-                await self.daemon.complete_setup(user, password, token)
+                await self.daemon.complete_setup(user, password, token, university, overrides)
+            except unis.FieldError as exc:
+                return fail(400, exc.field, str(exc))
             except ValueError as exc:
                 return fail(400, "user", str(exc))
             except Exception as exc:  # noqa: BLE001 - the error text goes to the page
                 return fail(500, None, str(exc))
-            payload = {"ok": True, "state": self.daemon.state.value, "code": totp.code(token)}
+            payload = {"ok": True, "state": self.daemon.state.value, "code": totp.code(token) if token else None}
             return 200, "application/json", json.dumps(payload).encode()
         else:
             return 404, "text/plain", b"not found"

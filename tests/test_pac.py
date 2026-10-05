@@ -66,6 +66,15 @@ class DomainFileTests(unittest.TestCase):
     def test_missing_file_gives_defaults(self):
         self.assertEqual(pac.read_domains(self.path), pac.DEFAULT_DOMAINS)
 
+    def test_missing_file_gives_the_university_defaults(self):
+        self.assertEqual(pac.read_domains(self.path, ["intranet.example.edu"]), ["intranet.example.edu"])
+        self.assertEqual(pac.read_domains(self.path, []), [])
+
+    def test_heidelberg_profile_has_the_same_defaults(self):
+        from uni_vpn import universities
+
+        self.assertEqual(list(universities.get("heidelberg").default_domains), pac.DEFAULT_DOMAINS)
+
     def test_roundtrip_keeps_order_and_comment_header(self):
         pac.write_domains(self.path, ["example.org", "sogo.uni-heidelberg.de"])
         text = self.path.read_text(encoding="utf-8")

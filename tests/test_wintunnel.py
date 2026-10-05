@@ -35,6 +35,17 @@ class ParseTests(unittest.TestCase):
         self.assertIn("--disable-ipv6", cmd)
         self.assertEqual(cmd[-1], "vpn.example")
 
+    def test_command_uses_the_profile_like_the_posix_tunnel(self):
+        cfg = Config(user="jdoe", host="sslvpn.ethz.ch", authgroup="staff-net", username_suffix="@staff-net.ethz.ch",
+                     no_external_auth=True, mfa="duo_push")
+        tunnel = wintunnel.WindowsTunnel(cfg, "openconnect.exe", "x.js", logging.getLogger("t"))
+        cmd = tunnel.command(4000)
+        self.assertEqual(cmd[1:1 + len(tunnel.auth_args())], tunnel.auth_args())
+        self.assertIn("--authgroup=staff-net", cmd)
+        self.assertIn("--user=jdoe@staff-net.ethz.ch", cmd)
+        self.assertNotIn("--non-inter", cmd)
+        self.assertEqual(cmd[-1], "sslvpn.ethz.ch")
+
     def test_password_is_passed_in_the_ansi_code_page(self):
         tunnel = wintunnel.WindowsTunnel(Config(user="ab1", host="vpn.example"), "openconnect.exe", "x.js",
                                          logging.getLogger("t"))

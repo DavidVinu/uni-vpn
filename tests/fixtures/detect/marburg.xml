@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<config-auth client="vpn" type="auth-request" aggregate-auth-version="2">
+<opaque is-for="sg">
+<tunnel-group>vpn-staff</tunnel-group>
+<aggauth-handle>8192463503180710810</aggauth-handle>
+<auth-method>single-sign-on-v2</auth-method>
+<group-alias>unimr-vpn-staff-Passwort+2FA</group-alias>
+<config-hash>1786538397690</config-hash>
+</opaque>
+<auth id="main">
+<title>Login</title>
+<message>Please enter your username and password.</message>
+<banner></banner>
+<form>
+<input type="text" name="username" label="Username:"></input>
+<input type="password" name="password" label="Password:"></input>
+<select name="group_list" label="GROUP:">
+<option selected="true">unimr-vpn-staff-Passwort+2FA</option>
+<option>unimr-vpn-staff-ft-Passwort+2FA</option>
+<option>unimr-vpn-students-Passwort+2FA</option>
+<option>unimr-vpn-uv-staff-TS-PW+2FA</option>
+</select>
+</form>
+</auth>
+</config-auth>

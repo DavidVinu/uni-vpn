@@ -59,11 +59,7 @@ class WindowsTunnel(Tunnel):
     def command(self, port: int) -> list[str]:
         cmd = [
             self.openconnect,
-            "--protocol=anyconnect",
-            f"--useragent={self.cfg.useragent}",
-            f"--user={self.cfg.user}",
-            "--passwd-on-stdin",
-            "--non-inter",
+            *self.auth_args(),
             "--no-dtls",
             "--force-dpd=30",
             "--reconnect-timeout=60",
@@ -73,9 +69,7 @@ class WindowsTunnel(Tunnel):
             # openconnect 9.12 runs it as: cscript.exe "<script>" (the .js association picks JScript)
             f"--script={self.script}",
         ]
-        if self.token_file:
-            cmd += ["--token-mode=totp", f"--token-secret=@{self.token_file}"]
-        return cmd + [self.cfg.host]
+        return cmd + self.token_args() + [self.cfg.host]
 
     def _env(self) -> dict[str, str]:
         env = super()._env()

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<config-auth client="vpn" type="auth-request" aggregate-auth-version="2">
+<opaque is-for="sg">
+<tunnel-group>unitunnelall</tunnel-group>
+<aggauth-handle>2379893026361719118</aggauth-handle>
+<auth-method>single-sign-on-v2</auth-method>
+<group-alias>Tunnel-All-Traffic</group-alias>
+<config-hash>1788194782005</config-hash>
+</opaque>
+<auth id="main">
+<title>Cisco Secure Client Installation</title>
+<message></message>
+<banner></banner>
+<form>
+<input type="text" name="username" label="Username:"></input>
+<input type="password" name="password" label="Password:"></input>
+<input type="password" name="secondary_password" label="Password:"></input>
+<select name="group_list" label="GROUP:">
+<option selected="true">Tunnel-All-Traffic</option>
+<option>Tunnel-Uni-Bremen</option>
+</select>
+</form>
+</auth>
+</config-auth>

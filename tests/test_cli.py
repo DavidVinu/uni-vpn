@@ -97,6 +97,20 @@ class ApiTests(DaemonHarness):
             store.assert_not_called()
             self.assertTrue(out.getvalue().strip(), repr(text))
 
+    async def test_totp_command_refuses_when_the_university_uses_none(self):
+        path = Path(tempfile.mkdtemp()) / "config.toml"
+        path.write_text('university = "bonn"\nuser = "u"\n')
+        out = io.StringIO()
+        with mock.patch.object(cli.getpass, "getpass", side_effect=AssertionError("must not ask")), \
+             mock.patch.object(credentials, "store_totp") as store, redirect_stdout(out):
+            self.assertEqual(cli.main(["--config", str(path), "totp"]), 2)
+        store.assert_not_called()
+        self.assertIn("University of Bonn uses no TOTP secret", out.getvalue())
+
+    def test_setup_takes_a_university(self):
+        args = cli.build_parser().parse_args(["setup", "--university", "ethz", "--user", "jdoe"])
+        self.assertEqual((args.university, args.user), ("ethz", "jdoe"))
+
     async def test_password_empty_rejected(self):
         with mock.patch.object(cli.getpass, "getpass", return_value=""), redirect_stdout(io.StringIO()):
             self.assertEqual(cli.main(["--config", self.config_path(), "password"]), 2)

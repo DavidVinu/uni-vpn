@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -52,6 +53,15 @@ def openconnect_version(path: str, run=subprocess.run) -> str:
     return _first_line(result.stdout or "") or _first_line(result.stderr or "")
 
 
+NO_EXTERNAL_AUTH_SINCE = (9, 10)  # openconnect release that added --no-external-auth
+
+
+def version_tuple(text: str) -> tuple[int, int] | None:
+    """(9, 12) from "OpenConnect version v9.12-1"; None if there is no version in it."""
+    match = re.search(r"v?(\d+)\.(\d+)", text)
+    return (int(match.group(1)), int(match.group(2))) if match else None
+
+
 def port_owner(port: int, run=subprocess.run) -> str:
     """Process line from ss (Linux) or lsof (macOS) for a port in use, shortened. Empty if unknown."""
     if pf.IS_WINDOWS:
@@ -94,7 +104,7 @@ def run_checks(cfg_path: Path | None = None, *,
     cfg = config.Config()
     try:
         cfg = config.load(cfg_path)
-        checks.append(Check("Config", "ok", f"{cfg.path}, university ID {cfg.user}, host {cfg.host}"))
+        checks.append(Check("Config", "ok", f"{cfg.path}, {cfg.university_name}, university ID {cfg.user}, host {cfg.host}"))
     except config.ConfigError as exc:
         checks.append(Check("Config", "fail", str(exc)))
 
@@ -102,10 +112,16 @@ def run_checks(cfg_path: Path | None = None, *,
     for name, override in programs:
         found = find_binary(name, override)
         detail = found or "not found, run install.sh"
+        status = "ok" if found else "fail"
         if found and name == "openconnect":
             version = openconnect_version(found, run)
             detail = f"{found}, {version}" if version else found
-        checks.append(Check(name, "ok" if found else "fail", detail))
+            parsed = version_tuple(version)
+            if cfg.no_external_auth and parsed and parsed < NO_EXTERNAL_AUTH_SINCE:
+                status = "warn"
+                detail += (", too old for --no-external-auth (needs 9.10): update openconnect,"
+                           " or set no_external_auth = false in config.toml")
+        checks.append(Check(name, status, detail))
     if pf.IS_WINDOWS:
         found = find_binary("openconnect", cfg.openconnect)
         wintun = bool(found) and os.path.isfile(os.path.join(os.path.dirname(found), "wintun.dll"))
@@ -155,12 +171,18 @@ def run_checks(cfg_path: Path | None = None, *,
                    "locked": ("warn", "keyring locked or not responding")}
         status, detail = mapping.get(state, ("fail", state.replace("error:", "error: ")))
         checks.append(Check("Keyring", status, detail))
-        state = keyring_probe(cfg.user, kind="totp")
-        mapping = {"present": ("ok", "TOTP secret stored"),
-                   "missing": ("fail", "no TOTP secret stored: uni-vpn totp"),
-                   "locked": ("warn", "keyring locked or not responding")}
-        status, detail = mapping.get(state, ("fail", state.replace("error:", "error: ")))
-        checks.append(Check("Second factor", status, detail))
+        if cfg.mfa == "saml":
+            checks.append(Check("Second factor", "fail", "browser sign-in (SAML) is not supported yet"))
+        elif cfg.needs_totp:
+            state = keyring_probe(cfg.user, kind="totp")
+            mapping = {"present": ("ok", "TOTP secret stored"),
+                       "missing": ("fail", "no TOTP secret stored: uni-vpn totp"),
+                       "locked": ("warn", "keyring locked or not responding")}
+            status, detail = mapping.get(state, ("fail", state.replace("error:", "error: ")))
+            checks.append(Check("Second factor", status, detail))
+        else:
+            detail = {"none": "none", "duo_push": "Duo push, confirm it on the phone"}[cfg.mfa]
+            checks.append(Check("Second factor", "ok", detail))
 
     url = sysproxy.pac_url(cfg.http_port)
     proxy = proxy_state(cfg.http_port)
