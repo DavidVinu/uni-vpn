@@ -296,6 +296,106 @@
       "mfa": "none",
       "aliases": ["Universidad de Granada", "UGR"],
       "notes": "Profile from the university's documentation, not tested. User name is the full address cuenta@ugr.es."
+    },
+    {
+      "id": "uni-halle",
+      "name": "Martin Luther University Halle-Wittenberg",
+      "country": "DE",
+      "host": "vpn.uni-halle.de",
+      "mfa": "none",
+      "aliases": ["Universitaet Halle", "MLU"],
+      "notes": "Profile from the university's documentation, not tested. No second factor is mentioned in its documentation. "
+    },
+    {
+      "id": "hs-flensburg",
+      "name": "Flensburg University of Applied Sciences",
+      "country": "DE",
+      "host": "vpn.hs-flensburg.de",
+      "authgroup": "HSFL-Studierende",
+      "mfa": "none",
+      "aliases": ["Hochschule Flensburg"],
+      "notes": "Profile from the university's documentation, not tested. No second factor is mentioned in its documentation. User name without the e-mail domain."
+    },
+    {
+      "id": "w-hs",
+      "name": "Westphalian University of Applied Sciences",
+      "country": "DE",
+      "host": "vpn-gateway.w-hs.de",
+      "mfa": "totp_field",
+      "aliases": ["Westfaelische Hochschule", "Gelsenkirchen"],
+      "notes": "Profile from the university's documentation, not tested. User name without @w-hs.de."
+    },
+    {
+      "id": "hs-offenburg",
+      "name": "Offenburg University of Applied Sciences",
+      "country": "DE",
+      "host": "vpn.hs-offenburg.de",
+      "mfa": "none",
+      "aliases": ["Hochschule Offenburg"],
+      "notes": "Profile from the university's documentation, not tested. No second factor is mentioned in its documentation. "
+    },
+    {
+      "id": "uni-hamburg",
+      "name": "University of Hamburg",
+      "country": "DE",
+      "host": "vpn.rrz.uni-hamburg.de",
+      "mfa": "none",
+      "aliases": ["Universitaet Hamburg", "UHH", "RRZ"],
+      "notes": "Profile from the university's documentation, not tested. No second factor is mentioned in its documentation. "
+    },
+    {
+      "id": "fau",
+      "name": "Friedrich-Alexander University Erlangen-Nuremberg",
+      "country": "DE",
+      "host": "vpn.fau.de",
+      "mfa": "none",
+      "aliases": ["FAU", "Universitaet Erlangen-Nuernberg", "RRZE"],
+      "notes": "Profile from the university's documentation, not tested. No second factor is mentioned in its documentation. "
+    },
+    {
+      "id": "uni-jena",
+      "name": "Friedrich Schiller University Jena",
+      "country": "DE",
+      "host": "vpn.uni-jena.de",
+      "mfa": "none",
+      "aliases": ["Universitaet Jena"],
+      "notes": "Profile from the university's documentation, not tested. No second factor is mentioned in its documentation. "
+    },
+    {
+      "id": "uni-weimar",
+      "name": "Bauhaus-Universitaet Weimar",
+      "country": "DE",
+      "host": "vpngate.uni-weimar.de",
+      "mfa": "none",
+      "aliases": ["Bauhaus University Weimar"],
+      "notes": "Profile from the university's documentation, not tested. No second factor is mentioned in its documentation. "
+    },
+    {
+      "id": "th-koeln",
+      "name": "TH Koeln",
+      "country": "DE",
+      "host": "vpn.th-koeln.de",
+      "mfa": "none",
+      "aliases": ["Technische Hochschule Koeln", "Cologne University of Applied Sciences"],
+      "notes": "Profile from the university's documentation, not tested. No second factor is mentioned in its documentation. Gummersbach campus: vpn-gm.th-koeln.de."
+    },
+    {
+      "id": "thu",
+      "name": "Technische Hochschule Ulm",
+      "country": "DE",
+      "host": "vpn.thu.de",
+      "mfa": "none",
+      "aliases": ["THU", "Ulm University of Applied Sciences"],
+      "notes": "Profile from the university's documentation, not tested. No second factor is mentioned in its documentation. "
+    },
+    {
+      "id": "tu-braunschweig",
+      "name": "TU Braunschweig",
+      "country": "DE",
+      "host": "vpngate.tu-bs.de",
+      "mfa": "none",
+      "aliases": ["Technische Universitaet Braunschweig"],
+      "notes": "Profile from the university's documentation, not tested. No second factor is mentioned in its documentation. "
     }
   ]
 }

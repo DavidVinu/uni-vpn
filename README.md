@@ -38,6 +38,17 @@ on the machine keeps its normal connection.
 | Carleton University | cuvpn.carleton.ca | Microsoft push | profile only |
 | University of Hong Kong | vpn2fa.hku.hk | Microsoft push | profile only |
 | University of Granada | vpn.ugr.es | none | profile only |
+| Martin Luther University Halle-Wittenberg | vpn.uni-halle.de | none | profile only |
+| Flensburg University of Applied Sciences | vpn.hs-flensburg.de | none | profile only |
+| Westphalian University of Applied Sciences | vpn-gateway.w-hs.de | TOTP | profile only |
+| Offenburg University of Applied Sciences | vpn.hs-offenburg.de | none | profile only |
+| University of Hamburg | vpn.rrz.uni-hamburg.de | none | profile only |
+| Friedrich-Alexander University Erlangen-Nuremberg | vpn.fau.de | none | profile only |
+| Friedrich Schiller University Jena | vpn.uni-jena.de | none | profile only |
+| Bauhaus-Universitaet Weimar | vpngate.uni-weimar.de | none | profile only |
+| TH Koeln | vpn.th-koeln.de | none | profile only |
+| Technische Hochschule Ulm | vpn.thu.de | none | profile only |
+| TU Braunschweig | vpngate.tu-bs.de | none | profile only |
 | Freie Universitaet Berlin | vpn.fu-berlin.de | browser sign-in (SAML) | not supported yet |
 | University of Oxford | vpn.ox.ac.uk | browser sign-in (SAML) | not supported yet |
 

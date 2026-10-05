@@ -19,7 +19,9 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(set(profiles), {
             "heidelberg", "ethz", "bremen", "muenster", "marburg", "stanford", "harvard-fasrc", "stuttgart",
             "bonn", "mannheim", "kassel", "tu-dresden", "fu-berlin", "oxford", "tamu", "ucf", "osu", "utexas",
-            "asu", "ufl", "umn", "uiuc", "uga", "unc", "ncsu", "uwaterloo", "uottawa", "carleton", "hku", "ugr"})
+            "asu", "ufl", "umn", "uiuc", "uga", "unc", "ncsu", "uwaterloo", "uottawa", "carleton", "hku", "ugr", "uni-halle",
+            "hs-flensburg", "w-hs", "hs-offenburg", "uni-hamburg", "fau", "uni-jena", "uni-weimar", "th-koeln", "thu",
+            "tu-braunschweig"})
 
     def test_heidelberg_keeps_todays_values(self):
         hd = unis.get("heidelberg")
