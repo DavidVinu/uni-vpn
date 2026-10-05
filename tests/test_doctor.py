@@ -177,6 +177,43 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(self.by_name(checks, "Second factor").status, "fail")
         self.assertIn("uni-vpn totp", self.by_name(checks, "Second factor").detail)
 
+    def test_second_factor_follows_the_university(self):
+        kinds = []
+
+        def probe(user, kind="password"):
+            kinds.append(kind)
+            return "missing" if kind == "totp" else "present"
+
+        checks = doctor.run_checks(write_config('university = "bonn"\nuser = "ab1"\n'), **self.probes(keyring_probe=probe))
+        self.assertEqual(self.by_name(checks, "Second factor").status, "ok")
+        self.assertNotIn("totp", kinds)
+        checks = doctor.run_checks(write_config('university = "stanford"\nuser = "ab1"\n'), **self.probes(keyring_probe=probe))
+        self.assertIn("Duo", self.by_name(checks, "Second factor").detail)
+        checks = doctor.run_checks(write_config('university = "oxford"\nuser = "ab1"\n'), **self.probes())
+        self.assertEqual(self.by_name(checks, "Second factor").status, "fail")
+        self.assertIn("SAML", self.by_name(checks, "Second factor").detail)
+
+    def test_config_names_the_university(self):
+        checks = doctor.run_checks(write_config('university = "ethz"\nuser = "ab1"\n'), **self.probes())
+        self.assertIn("ETH Zurich", self.by_name(checks, "Config").detail)
+
+    def test_old_openconnect_warns_only_when_the_profile_needs_no_external_auth(self):
+        def run(cmd, **kwargs):
+            if cmd == ["/usr/bin/openconnect", "--version"]:
+                return subprocess.CompletedProcess(cmd, 0, "OpenConnect version v9.01-3\n", "")
+            return subprocess.CompletedProcess(cmd, 1, "", "")
+
+        checks = doctor.run_checks(write_config('university = "bonn"\nuser = "ab1"\n'), **self.probes(run=run))
+        self.assertEqual(self.by_name(checks, "openconnect").status, "warn")
+        self.assertIn("9.10", self.by_name(checks, "openconnect").detail)
+        checks = doctor.run_checks(write_config(), **self.probes(run=run))
+        self.assertEqual(self.by_name(checks, "openconnect").status, "ok", "Heidelberg runs without the flag")
+
+    def test_version_tuple(self):
+        self.assertEqual(doctor.version_tuple("OpenConnect version v9.12-1"), (9, 12))
+        self.assertEqual(doctor.version_tuple("OpenConnect version v10.0"), (10, 0))
+        self.assertIsNone(doctor.version_tuple(""))
+
     def test_keyring_state_probes_requested_kind(self):
         seen = []
 
