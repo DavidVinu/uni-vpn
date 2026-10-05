@@ -35,6 +35,15 @@ class SetupHarness(unittest.TestCase):
             patch = mock.patch.object(pf, name, value)
             patch.start()
             self.addCleanup(patch.stop)
+        # The native app: never built or started by a test, the browser entry stands in for it.
+        from uni_vpn import desktop
+        for name, value in (("install", lambda port, dry, created, run=None: desktop._browser_entry(
+                                 port, dry, created, run or mock.Mock(return_value=subprocess.CompletedProcess([], 0)))),
+                            ("open_app", lambda port, page="", run=None: False),
+                            ("uninstall", lambda run=None: None)):
+            patch = mock.patch.object(desktop, name, value)
+            patch.start()
+            self.addCleanup(patch.stop)
         self.stored = []
         self.stored_totp = []
         self.installed = []
@@ -691,7 +700,7 @@ class UpdateTests(unittest.TestCase):
         (target / "uni_vpn" / "__init__.py").write_text("old")
         (target / "keep.txt").write_text("mine")
         opener = self.archive({"uni_vpn/__init__.py": "new", "bin/uni-vpn": "#!/bin/sh\n"})
-        setup.download_release(target, opener=opener)
+        setup.download_release(target, "https://example.invalid/a.zip", opener=opener)
         self.assertEqual((target / "uni_vpn" / "__init__.py").read_text(), "new")
         self.assertEqual((target / "keep.txt").read_text(), "mine")
         if os.name == "posix":
@@ -701,9 +710,9 @@ class UpdateTests(unittest.TestCase):
         target = Path(tempfile.mkdtemp()) / "app"
         target.mkdir()
         with self.assertRaises(ValueError):
-            setup.download_release(target, opener=self.archive({"README.md": "x"}))
+            setup.download_release(target, "https://example.invalid/a.zip", opener=self.archive({"README.md": "x"}))
         with self.assertRaises(ValueError):
-            setup.download_release(target, opener=self.archive({"uni_vpn/__init__.py": "x", "../evil": "x"}))
+            setup.download_release(target, "https://example.invalid/a.zip", opener=self.archive({"uni_vpn/__init__.py": "x", "../evil": "x"}))
         self.assertFalse((target.parent / "evil").exists())
 
     def files(self, root):
@@ -723,7 +732,7 @@ class UpdateTests(unittest.TestCase):
         self.assertNotEqual(good, damaged)
         for payload in (b"not a zip", empty.getvalue(), damaged):
             with self.assertRaises(ValueError):
-                setup.download_release(target, opener=self.opener(payload))
+                setup.download_release(target, "https://example.invalid/a.zip", opener=self.opener(payload))
             self.assertEqual(self.files(target), {"uni_vpn/__init__.py": "old", "uni_vpn/b.py": "old"})
         self.assertEqual(sorted(p.name for p in target.parent.iterdir()), ["app"])
 
@@ -738,7 +747,7 @@ class UpdateTests(unittest.TestCase):
         outside.write_text("mine")
         if os.name == "posix":
             (target / "uni_vpn" / "link.py").symlink_to(outside)
-        setup.download_release(target, opener=self.archive({"uni_vpn/__init__.py": "new", "bin/uni-vpn": "#!/bin/sh\n"}))
+        setup.download_release(target, "https://example.invalid/a.zip", opener=self.archive({"uni_vpn/__init__.py": "new", "bin/uni-vpn": "#!/bin/sh\n"}))
         self.assertEqual(self.files(target), {"uni_vpn/__init__.py": "new", "uni_vpn/__pycache__/x.pyc": "old",
                                               "bin/uni-vpn": "#!/bin/sh\n", "docs/notes.md": "old", "config.local": "old"})
         self.assertFalse((target / "uni_vpn" / "sub").exists())
@@ -752,7 +761,7 @@ class UpdateTests(unittest.TestCase):
         with mock.patch.object(pf, "repo_root", return_value=root), redirect_stdout(out), \
                 mock.patch.object(setup.service, "control", side_effect=AssertionError("restarted")):
             rc = setup.update(argparse.Namespace(dry_run=False),
-                              download=lambda target: setup.download_release(target, opener=self.opener(b"junk")))
+                              download=lambda target: setup.download_release(target, "https://example.invalid/a.zip", opener=self.opener(b"junk")))
         self.assertEqual(rc, 1)
         self.assertIn("Update failed", out.getvalue())
 

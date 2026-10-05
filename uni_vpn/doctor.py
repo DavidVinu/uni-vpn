@@ -215,7 +215,11 @@ def run_checks(cfg_path: Path | None = None, *,
     browsers = [name for name in ("google-chrome", "google-chrome-stable", "chromium", "firefox", "brave-browser")
                 if find_binary(name)]
     checks.append(Check("Browser", "ok", ", ".join(browsers) if browsers else "none found in PATH (normal on macOS and Windows)"))
-    checks.append(Check("uni-vpn", "ok", f"version {__version__}, repo {pf.repo_root()}"))
+    commit = daemon_status.get("commit") if isinstance(daemon_status, dict) else None
+    commit = commit if isinstance(commit, str) else None
+    updates = "automatic updates " + ("on" if cfg.auto_update else "off")
+    checks.append(Check("uni-vpn", "ok", f"version {__version__}" + (f" ({commit[:7]})" if commit else "")
+                        + f", {updates}, repo {pf.repo_root()}"))
     return checks
 
 

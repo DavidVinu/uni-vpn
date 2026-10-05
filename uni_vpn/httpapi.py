@@ -176,6 +176,20 @@ class HttpApi:
             except Exception as exc:  # noqa: BLE001 - the error text goes to the page
                 return 500, "text/plain", str(exc).encode()
             return 200, "application/json", json.dumps({"ok": True, "domains": domains}).encode()
+        elif path == "/api/auto-update":
+            try:
+                enabled = json.loads(body.decode("utf-8"))["enabled"]
+            except (ValueError, KeyError, TypeError, UnicodeDecodeError):
+                return 400, "text/plain", b"expected JSON with 'enabled'"
+            if not isinstance(enabled, bool):
+                return 400, "text/plain", b"enabled must be true or false"
+            try:
+                await self.daemon.set_auto_update(enabled)
+            except ValueError as exc:
+                return 409, "text/plain", str(exc).encode()
+            except Exception as exc:  # noqa: BLE001 - the error text goes to the page
+                return 500, "text/plain", str(exc).encode()
+            return 200, "application/json", json.dumps({"ok": True, "enabled": enabled}).encode()
         elif path == "/api/totp":
             try:
                 data = json.loads(body.decode("utf-8"))

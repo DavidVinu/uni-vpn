@@ -7,8 +7,10 @@ import asyncio
 import ctypes
 import getpass
 import json
+import logging
 import os
 import signal
+import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -219,21 +221,57 @@ def cmd_daemon(args) -> int:
         if not windows.is_admin():
             log.warning("Not running elevated: openconnect cannot create the Wintun adapter")
 
-    async def run() -> None:
+    async def run() -> bool:
         daemon = Daemon(cfg, log, config_error=config_error, log_tail=tail, config_path=cfg_path,
                         needs_setup=not cfg_path.exists())
         install_signal_handlers(asyncio.get_running_loop(), daemon)
         await daemon.run()
+        return daemon.restart_requested
 
-    asyncio.run(run())
+    restart = asyncio.run(run())
     log.info("uni-vpn stopped")
+    if restart:
+        lock.close()
+        logging.shutdown()
+        return restart_daemon()
     return 0
+
+
+def restart_daemon(execv=os.execv, call=subprocess.call, environ=os.environ) -> int:
+    """Start the updated code in place of this process. The service manager must not notice."""
+    from .updater import RESTART_EXIT, SUPERVISED_ENV
+
+    command = [sys.executable, *sys.orig_argv[1:]]
+    if not pf.IS_WINDOWS:
+        # Same process id: systemd and launchd keep watching the same service.
+        execv(sys.executable, command)
+        return 1  # only reached with a replaced execv
+    if environ.get(SUPERVISED_ENV):
+        return RESTART_EXIT  # the supervisor below starts the new code
+    # Task Scheduler restarts nothing that ends normally, and the job object ends the children
+    # with this process. So this process stays as a small supervisor until the task ends.
+    env = dict(environ, **{SUPERVISED_ENV: "1"})
+    while True:
+        code = call(command, env=env)
+        if code != RESTART_EXIT:
+            return code
 
 
 def cmd_service(args) -> int:
     from . import service
 
     return service.control(args.action)
+
+
+def cmd_app(args) -> int:
+    from . import desktop
+
+    cfg = _load(args)
+    page = "#settings" if args.settings else ""
+    if desktop.open_app(cfg.http_port, page) or pf.open_url(f"http://127.0.0.1:{cfg.http_port}/"):
+        return 0
+    print(f"No desktop to show the app on; the page is http://127.0.0.1:{cfg.http_port}/")
+    return 1
 
 
 def cmd_doctor(args) -> int:
@@ -278,6 +316,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("log", help="Show the last log lines")
     p.add_argument("-n", "--lines", type=int, default=200)
     p.set_defaults(func=cmd_log)
+    p = sub.add_parser("app", help="Open the Uni VPN window")
+    p.add_argument("--settings", action="store_true", help="open it at Settings")
+    p.set_defaults(func=cmd_app)
     sub.add_parser("doctor", help="Self-diagnosis").set_defaults(func=cmd_doctor)
     sub.add_parser("daemon", help="Run the service in the foreground (used by the background service)").set_defaults(func=cmd_daemon)
     p = sub.add_parser("service", help="Control the service")

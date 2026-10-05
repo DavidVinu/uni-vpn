@@ -50,6 +50,7 @@ class Config:
     default_domains: list[str] = field(default_factory=lambda: list(_DEFAULT.default_domains))
     openconnect: str | None = None
     ocproxy: str | None = None
+    auto_update: bool = True
     # [timing], all in seconds
     ready_timeout: float = 45.0
     client_wait: float = 25.0
@@ -123,6 +124,7 @@ TOP_KEYS: dict[str, tuple[type, ...]] = {
     "useragent": (str,),
     "openconnect": (str,),
     "ocproxy": (str,),
+    "auto_update": (bool,),
     "university": (str,),
     **{key: (kind,) for key, kind in unis.PROFILE_FIELDS.items()},
 }
@@ -296,6 +298,25 @@ def set_values(path: Path, values: dict) -> None:
         written = {}
     if any(written.get(key) != value for key, value in values.items()):
         raise ConfigError(f"could not change {', '.join(values)} in {path}, please edit it by hand")
+    if new != text:
+        path.write_text(new, encoding="utf-8")
+
+
+def remove_keys(path: Path, keys) -> None:
+    """Delete top-level keys from an existing config.toml, keeping everything else. Used when
+    the university changes: overrides that belonged to the old profile must not stay behind."""
+    text = path.read_text(encoding="utf-8")
+    table = re.search(r"(?m)^[ \t]*\[", text)
+    head, rest = (text[:table.start()], text[table.start():]) if table else (text, "")
+    for key in keys:
+        head = re.sub(rf"(?m)^[ \t]*{re.escape(key)}[ \t]*=[ \t]*{_VALUE}[ \t]*(?:#[^\n]*)?(?:\n|$)", "", head)
+    new = head + rest
+    try:
+        written = tomllib.loads(new)
+    except tomllib.TOMLDecodeError:
+        written = {"": None}
+    if any(key in written for key in keys) or "" in written:
+        raise ConfigError(f"could not remove {', '.join(keys)} from {path}, please edit it by hand")
     if new != text:
         path.write_text(new, encoding="utf-8")
 

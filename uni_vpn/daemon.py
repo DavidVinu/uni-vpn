@@ -20,6 +20,7 @@ from . import universities as unis
 from .config import Config
 from .forwarder import Forwarder
 from .tunnel import SAML_REQUIRED, PasswordEncodingError, Tunnel, remove_stale_token_files
+from .updater import UpdateError, Updater
 
 
 class State(str, Enum):
@@ -80,7 +81,11 @@ class Daemon:
                  wrapper: str | None = None,
                  token_dir: Path | None = None,
                  domains_path: Path | None = None,
-                 proxy_refresh: Callable[[int], None] | None = None):
+                 proxy_refresh: Callable[[int], None] | None = None,
+                 updater: Updater | None = None,
+                 update_first_check: float = 600.0,
+                 update_interval: float = 5 * 3600.0,
+                 update_jitter: float = 1800.0):
         self.cfg = cfg
         self.log = log or logging.getLogger("uni-vpn")
         self.password_getter = password_getter or (lambda: credentials.get_password(cfg.user, cfg.keyring_timeout))
@@ -100,6 +105,14 @@ class Daemon:
         self._disconnects = 0
         self.log_tail = log_tail if log_tail is not None else []
         self.wrapper = wrapper or str(pf.bin_dir() / "uni-vpn-ocproxy")
+        # Like Chrome: check a while after the start, then every few hours.
+        self.updater = updater or Updater()
+        self.update_first_check = update_first_check
+        self.update_interval = update_interval
+        self.update_jitter = update_jitter
+        self.commit: str | None = None
+        # Set when the program files were replaced: the caller starts the new code.
+        self.restart_requested = False
 
         self.state = State.idle
         self.message: str = M.NOT_CONNECTED
@@ -124,6 +137,7 @@ class Daemon:
         self._changed = asyncio.Event()
         self._wake = asyncio.Event()
         self._stop = asyncio.Event()
+        self._update_now = asyncio.Event()
         self.started = asyncio.Event()
         self.forwarder = Forwarder("127.0.0.1", cfg.socks_port, self.acquire, self.note_activity,
                                    cfg.halfclose_grace, self.log)
@@ -181,6 +195,9 @@ class Daemon:
         return {
             "protocol": PROTOCOL,
             "version": __version__,
+            "commit": self.commit,
+            "auto_update": self.cfg.auto_update,
+            "update_pending": self.updater.pending,
             "state": self.state.value,
             "message": self.message,
             # For translations and the app's fix button, see messages.py.
@@ -267,7 +284,7 @@ class Daemon:
 
     async def complete_setup(self, user: str, password: str, token: str | None,
                              university: str = unis.DEFAULT_ID, overrides: dict | None = None) -> None:
-        """First run from the setup assistant: config.toml, the secrets, then a test connection.
+        """The setup assistant, on first run or from Settings: config.toml, the secrets, then a test connection.
         Raises unis.FieldError naming the step to change, ValueError otherwise."""
         user = user.strip()
         if not config_mod.valid_user(user):
@@ -282,7 +299,10 @@ class Daemon:
         loop = asyncio.get_running_loop()
         # Secrets first: if the keyring refuses, no config.toml exists yet and the assistant
         # stays the way in after a restart.
-        previous_user = self.cfg.user
+        previous_user, previous_university = self.cfg.user, self.cfg.university
+        # Settings, Account runs the assistant again: the tunnel of the old account goes.
+        if not self.needs_setup and self.tunnel:
+            await self.request_disconnect()
         self.cfg.user = user
         try:
             await loop.run_in_executor(None, self.password_setter, password)
@@ -295,6 +315,9 @@ class Daemon:
                 await loop.run_in_executor(None, os.replace, path, backup)
                 self.log.warning("Unreadable %s moved to %s", path, backup)
             if path.exists():
+                if university != previous_university:
+                    stale = [key for key in unis.PROFILE_FIELDS if key not in overrides]
+                    await loop.run_in_executor(None, config_mod.remove_keys, path, stale)
                 values = {"user": user, "university": university, **overrides}
                 await loop.run_in_executor(None, config_mod.set_values, path, values)
             else:
@@ -365,11 +388,13 @@ class Daemon:
             self.http = None
         await self._bind_forwarder()
         ticker = asyncio.create_task(self._ticker())
+        updates = asyncio.create_task(self._auto_update())
         self.started.set()
         try:
             await self._stop.wait()
         finally:
             ticker.cancel()
+            updates.cancel()
             if self._loop_task and not self._loop_task.done():
                 self._loop_task.cancel()
             if self.tunnel:
@@ -631,6 +656,63 @@ class Daemon:
         self.log.info("Retrying in %.1f s", delay)
         await self._sleep(delay)
         return self.has_demand()
+
+    # --- Updates --------------------------------------------------------
+
+    def _idle_for_update(self) -> bool:
+        """Nothing uses or wants the tunnel: replacing the program and restarting goes unnoticed."""
+        return (self.tunnel is None and not self.has_demand()
+                and (self._loop_task is None or self._loop_task.done())
+                and self.state not in (State.connecting, State.connected, State.disconnecting))
+
+    async def set_auto_update(self, enabled: bool) -> None:
+        if self.needs_setup or not self.config_path or not self.config_path.exists():
+            raise ValueError("Finish the setup first")
+        await asyncio.get_running_loop().run_in_executor(
+            None, lambda: config_mod.set_values(self.config_path, {"auto_update": enabled}))
+        self.cfg.auto_update = enabled
+        self.log.info("Automatic updates %s", "on" if enabled else "off")
+        if enabled:
+            self._update_now.set()
+
+    async def _auto_update(self) -> None:
+        loop = asyncio.get_running_loop()
+        try:
+            self.commit = await loop.run_in_executor(None, self.updater.installed)
+        except UpdateError as exc:
+            self.log.warning("Update: %s", exc)
+        delay = self.update_first_check
+        while True:
+            await wait_event(self._update_now, delay)
+            self._update_now.clear()
+            delay = self.update_interval + random.uniform(0, self.update_jitter)
+            if not self.cfg.auto_update:
+                continue
+            try:
+                commit = await loop.run_in_executor(None, self.updater.check)
+            except UpdateError as exc:
+                self.log.warning("Update: %s", exc)
+                continue
+            except Exception:  # noqa: BLE001 - an update problem must never stop the service
+                self.log.exception("Update check failed")
+                continue
+            if not commit:
+                continue
+            self.log.info("Update %s ready, installing once the tunnel is idle", commit[:7])
+            while self.cfg.auto_update and not self._idle_for_update():
+                await asyncio.sleep(self.cfg.tick)
+            if not self.cfg.auto_update:
+                self.updater.discard()
+                continue
+            try:
+                self.updater.apply()
+            except UpdateError as exc:
+                self.log.warning("Update: %s", exc)
+                continue
+            self.log.info("Updated to %s, restarting", commit[:7])
+            self.restart_requested = True
+            self.stop()
+            return
 
     # --- Idle and resume ------------------------------------------------
 

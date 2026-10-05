@@ -30,6 +30,15 @@ jobs:
           open("/tmp/uni-vpn.plist", "w").write(service.render_unit("/opt/homebrew/bin/python3", "/tmp/uni-vpn", "/tmp/logs", "/opt/homebrew"))
           EOF
           plutil -lint /tmp/uni-vpn.plist
+      - name: Build the macOS app
+        if: runner.os == 'macOS'
+        run: |
+          swiftc -O -o /tmp/uni-vpn-app app/macos/main.swift
+          python3 -c "import plistlib; from uni_vpn import desktop; plistlib.dump(desktop.info_plist(1081), open('/tmp/Info.plist', 'wb'))"
+          plutil -lint /tmp/Info.plist
+      - name: Linux app syntax
+        if: runner.os == 'Linux'
+        run: python3 -m py_compile app/linux/uni-vpn-app.py
 
   windows:
     runs-on: windows-latest
@@ -54,3 +63,31 @@ jobs:
       - name: Installer dry run
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -DryRun -User citest
+      - name: Build the Windows app
+        shell: powershell
+        run: |
+          python -c "import pathlib, urllib.request; from uni_vpn import desktop; desktop.extract_webview2(urllib.request.urlopen(desktop.WEBVIEW2_URL).read(), pathlib.Path('build'))"
+          $csc = python -c "from uni_vpn import desktop; print(desktop.csc_path())"
+          & $csc /nologo /target:winexe /optimize+ /win32icon:app\windows\uni-vpn.ico "/out:build\Uni VPN.exe" /lib:build /r:Microsoft.Web.WebView2.Core.dll /r:Microsoft.Web.WebView2.WinForms.dll /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll app\windows\UniVpn.cs
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+  # Clients update themselves from "stable" (uni_vpn/updater.py): every green commit on main
+  # moves it forward. Fast-forward only, so a slower older run never moves it back.
+  promote:
+    needs: [tests, windows]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency: promote-stable
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Move stable to this commit
+        run: |
+          if git fetch --quiet origin stable 2>/dev/null && git merge-base --is-ancestor HEAD FETCH_HEAD; then
+            echo "stable is already at or past $GITHUB_SHA"
+          else
+            git push origin "HEAD:refs/heads/stable"
+          fi

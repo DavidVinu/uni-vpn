@@ -12,7 +12,7 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from . import config, credentials, detect, doctor, messages, service, sysproxy, totp
+from . import config, credentials, desktop, detect, doctor, messages, service, sysproxy, totp, updater
 from . import platform as pf
 from . import universities as unis
 from .tunnel import port_open as _port_open
@@ -22,7 +22,7 @@ UNIVERSITY_PROMPT = "Your university (name or part of it, Enter for Heidelberg, 
 MFA_CHOICES = {"none": "none", "totp_field": "one-time code in its own field",
                "totp_append": "one-time code after the password", "duo_push": "Duo push"}
 FINAL_HINT = """
-Status page (state, connect/disconnect, domain list): http://127.0.0.1:{port}/
+Uni VPN is in your apps (state, connect, settings), also at http://127.0.0.1:{port}/
 Restart any open browser once so that it reads the proxy rule.
 """
 MANUAL_PROXY_HINT = """   The proxy rule could not be registered automatically (no GNOME, KDE, macOS or Windows proxy settings found).
@@ -163,39 +163,6 @@ def install_command(dry: bool, created) -> None:
             print(f"   Note: {link.parent} is not in PATH yet, the uni-vpn command works after logging out and in")
 
 
-def launcher_path() -> Path:
-    if pf.IS_WINDOWS:
-        from .windows import start_menu_dir
-
-        return Path(start_menu_dir()) / "Uni VPN.url"
-    if pf.IS_MACOS:
-        return Path.home() / "Applications" / "Uni VPN.app"
-    base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
-    return Path(base) / "applications" / "uni-vpn.desktop"
-
-
-def install_launcher(port: int, dry: bool, created, run=subprocess.run) -> None:
-    """An app entry in the start menu, Launchpad or app grid that opens the status page."""
-    url = f"http://127.0.0.1:{int(port)}/"
-    path = launcher_path()
-    if dry:
-        _say(f"would add {path} to open {url}")
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if pf.IS_WINDOWS:
-        path.write_text(f"[InternetShortcut]\r\nURL={url}\r\n", encoding="utf-8", newline="")
-    elif pf.IS_MACOS:
-        result = run(["osacompile", "-o", str(path), "-e", f'open location "{url}"'], capture_output=True, text=True)
-        if result.returncode != 0:
-            print(f"   App entry could not be created: {(result.stderr or '').strip()}")
-            return
-    else:
-        path.write_text("[Desktop Entry]\nType=Application\nName=Uni VPN\nComment=University VPN for selected websites\n"
-                        f"Exec=xdg-open {url}\nIcon=network-vpn\nCategories=Network;\nTerminal=false\n", encoding="utf-8")
-    created(path)
-    _say(f"App entry created: {path}")
-
-
 def totp_hint(cfg: config.Config) -> str:
     portal = f" ({cfg.mfa_portal_url})" if cfg.mfa_portal_url else ""
     return (f"   Second factor: in your university's MFA portal{portal}, add another time-based token (TOTP) for\n"
@@ -259,9 +226,12 @@ def choose_university(input_fn, probe=detect.probe) -> tuple[str, dict] | None:
 def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=service.install,
           store=credentials.store_password, store_totp=credentials.store_totp,
           keyring_probe=doctor.keyring_state, proxy_install=sysproxy.install, run_doctor=True,
-          port_open=_port_open, open_url=None, has_desktop=None, probe=detect.probe) -> int:
+          port_open=_port_open, open_url=None, has_desktop=None, probe=detect.probe,
+          install_app=None, open_app=None) -> int:
     dry = bool(getattr(args, "dry_run", False))
     open_url = open_url or pf.open_url
+    install_app = install_app or desktop.install
+    open_app = open_app or desktop.open_app
     has_desktop = has_desktop or pf.has_desktop
     # With a desktop the browser does the rest (setup assistant); otherwise ask here.
     gui = not dry and not getattr(args, "no_gui", False) and has_desktop()
@@ -393,7 +363,7 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
         else:
             _say("Proxy rule registered with the system (Chrome, Edge and Firefox read it on their own)")
 
-    install_launcher(cfg.http_port, dry, created)
+    install_app(cfg.http_port, dry, created)
 
     if pf.cisco_installed():
         print("   Note: Cisco Secure Client is installed. Uni VPN pauses while Cisco is connected.")
@@ -420,6 +390,10 @@ def setup(args, *, input_fn=input, getpass_fn=getpass.getpass, service_install=s
         if getattr(args, "no_browser", False):
             # install.ps1 runs this elevated and opens the browser itself, unelevated (not on update).
             print(f"\nStatus page: {url}" if configured else f"\nFinish in the browser ({url}).")
+            return 0
+        if open_app(cfg.http_port, desktop.page_for(given)):
+            print("\nFinish in the Uni VPN window that just opened.")
+            print("Restart any open browser once so that it reads the proxy rule.")
             return 0
         if open_url(url):
             print(f"\nFinish in the browser window that just opened ({url}).")
@@ -505,6 +479,7 @@ def uninstall(args, *, input_fn=input, service_uninstall=service.uninstall, dele
         print("Service could not be removed")
     else:
         _say("Service removed")
+    desktop.uninstall()
     for path in recorded():
         try:
             if path.is_dir() and not path.is_symlink():
@@ -558,88 +533,16 @@ def uninstall(args, *, input_fn=input, service_uninstall=service.uninstall, dele
     return 1 if failed else 0
 
 
-ARCHIVE_URL = "https://codeload.github.com/DavidVinu/uni-vpn/zip/refs/heads/main"
-
-
-def _archive_files(archive, root: Path) -> dict[str, tuple[str, Path]]:
-    """Relative path -> (name in the archive, destination). Refuses foreign archives and paths outside root."""
-    names = archive.namelist()
-    if not names:
-        raise ValueError("the download is empty")
-    prefix = names[0].split("/", 1)[0] + "/"
-    if prefix + "uni_vpn/__init__.py" not in names:
-        raise ValueError("the download does not look like uni-vpn")
-    files = {}
-    for name in names:
-        if not name.startswith(prefix):
-            raise ValueError(f"unexpected path in the download: {name}")
-        relative = name[len(prefix):]
-        if not relative or name.endswith("/"):
-            continue
-        destination = (root / relative).resolve()
-        if root not in destination.parents:
-            raise ValueError(f"unexpected path in the download: {name}")
-        files[relative] = (name, destination)
-    return files
-
-
-def _remove_stale(root: Path, keep: set[str]) -> None:
-    """Delete files under uni_vpn/ and bin/ that the new version no longer has. Never follows symlinks."""
-    fold = str.lower if (pf.IS_MACOS or pf.IS_WINDOWS) else str  # case-insensitive file systems
-    keep = {fold(k) for k in keep}
-    for top in ("uni_vpn", "bin"):
-        base = root / top
-        if base.is_symlink() or not base.is_dir():
-            continue
-        for dirpath, _dirs, filenames in os.walk(base, topdown=False):
-            here = Path(dirpath)
-            if "__pycache__" in here.relative_to(root).parts:
-                continue
-            for filename in filenames:
-                path = here / filename
-                if not path.is_symlink() and fold(path.relative_to(root).as_posix()) not in keep:
-                    path.unlink()
-            if here != base and not any(here.iterdir()):
-                here.rmdir()
-
-
-def download_release(target: Path, url: str = ARCHIVE_URL, opener=None) -> None:
-    """Replace the program files in target with the current main branch (installs without git).
+def download_release(target: Path, url: str | None = None, opener=None) -> None:
+    """Replace the program files in target with the current stable version (installs without git).
     ValueError for a broken or unexpected download, OSError when files cannot be written."""
-    import io
-    import tempfile
-    import urllib.request
-    import zipfile
-    import zlib
-
-    opener = opener or urllib.request.urlopen
-    with opener(url, timeout=60) as response:
-        data = response.read()
-    root = target.resolve()
+    if url:
+        updater.stage(target, url, opener=opener).install()
+        return
     try:
-        with zipfile.ZipFile(io.BytesIO(data)) as archive:
-            files = _archive_files(archive, root)
-            if archive.testzip() is not None:
-                raise ValueError("the download is damaged, try again")
-            # Unpack everything first, next to target (same file system), so that a broken download
-            # changes nothing. Then overwrite file by file: on Windows the running service has this
-            # folder as its working directory, so the folder itself cannot be swapped.
-            staging = Path(tempfile.mkdtemp(prefix=".uni-vpn-update-", dir=root.parent))
-            try:
-                for relative, (name, _destination) in files.items():
-                    staged = staging / relative
-                    staged.parent.mkdir(parents=True, exist_ok=True)
-                    staged.write_bytes(archive.read(name))
-                    if relative.startswith("bin/") or relative.endswith(".sh"):
-                        staged.chmod(0o755)
-                for relative, (_name, destination) in files.items():
-                    destination.parent.mkdir(parents=True, exist_ok=True)
-                    os.replace(staging / relative, destination)
-            finally:
-                shutil.rmtree(staging, ignore_errors=True)
-    except (zipfile.BadZipFile, zlib.error, EOFError) as exc:
-        raise ValueError(f"the download is damaged, try again ({exc})") from None
-    _remove_stale(root, set(files))
+        updater.update_now(target, opener=opener)
+    except updater.UpdateError as exc:
+        raise ValueError(str(exc)) from None
 
 
 GET_PS1_URL = "https://raw.githubusercontent.com/DavidVinu/uni-vpn/main/get.ps1"

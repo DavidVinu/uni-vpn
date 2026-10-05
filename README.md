@@ -25,9 +25,12 @@ A window opens and asks for your university, your user name and your password. W
 There is nothing to click: open a university website and Uni VPN connects by itself. After 15
 minutes without use it disconnects again.
 
-To see whether it is connected, or to connect and disconnect by hand, open **Uni VPN** from the
-Start menu, Launchpad or app list. The gear icon holds the settings: password, second factor and
-the websites that go through the university.
+The shield icon in the menu bar (Mac), next to the clock (Windows) or in the panel (Linux) shows
+whether it is connected. Click it to connect, disconnect or open Settings. You can also open
+**Uni VPN** from the Start menu, Launchpad or app list. Settings holds your university, user
+name, password, second factor and the websites that go through the university.
+
+Uni VPN keeps itself up to date. There is nothing to do.
 
 If something goes wrong, the app says what happened in one sentence and shows a button that fixes
 it, for example **Update password** or **Repair**.
@@ -79,10 +82,10 @@ terminals only).
 
 | What | Command |
 |---|---|
-| Status, connect, disconnect | `uni-vpn status`, `uni-vpn connect`, `uni-vpn disconnect` |
+| Status, connect, disconnect, open the window | `uni-vpn status`, `uni-vpn connect`, `uni-vpn disconnect`, `uni-vpn app` |
 | Change password or TOTP secret | `uni-vpn password`, `uni-vpn totp` |
 | Diagnosis, log | `uni-vpn doctor` (paste the output into an issue), `uni-vpn log` |
-| Update | `uni-vpn update` |
+| Update now (it updates itself anyway) | `uni-vpn update` |
 | Repair (what the app's Repair button runs) | `./install.sh --repair`, on Windows `install.ps1 -Repair` |
 | Remove | `uni-vpn uninstall` (Linux, macOS) or, on Windows, `install.ps1 -Uninstall` from `%ProgramFiles%\uni-vpn` (it asks for administrator rights); both also reset the proxy setting |
 
@@ -206,8 +209,12 @@ username_suffix = "@student-net.ethz.ch"
 
 A small Python daemon (standard library only) runs as a background service and offers the
 VPN as a SOCKS5 proxy on `127.0.0.1:1080`. A PAC rule in the system proxy settings sends the
-listed domains there and everything else directly. The app at `http://127.0.0.1:1081/`
-shows the state, connects or disconnects by hand and holds the settings.
+listed domains there and everything else directly. The Uni VPN app shows the state, connects
+or disconnects by hand and holds the settings: a small window of its own around the page on
+`http://127.0.0.1:1081/` (WKWebView on macOS, WebView2 on Windows, WebKitGTK on Linux), plus an
+icon in the menu bar, notification area or panel that starts at login. The installer builds
+it on the machine (`app/`, `uni_vpn/desktop.py`). Without the app (no Swift compiler on macOS,
+no WebKitGTK on Linux) the entry opens `http://127.0.0.1:1081/` in the browser instead.
 
 - Linux and macOS: `openconnect --script-tun` with `ocproxy`, so the VPN never becomes a
   network interface. No root, no routes, no DNS changes.
@@ -232,7 +239,11 @@ shows the state, connects or disconnects by hand and holds the settings.
   gateway and no DNS. The service runs elevated as the signed-in user (Task Scheduler,
   "uni-vpn"), because Wintun needs administrator rights. For the same reason the program sits in
   `%ProgramFiles%\uni-vpn` and runs only Python and openconnect from Program Files, so nothing
-  the user account can change runs elevated. `uni-vpn update` asks for administrator rights.
+  the user account can change runs elevated. Updates install without asking for a password.
+- Updates: uni-vpn keeps itself up to date. A few times a day it asks GitHub whether there
+  is a new version. If there is, it installs it while you are not on a university website.
+  You notice nothing. To turn this off: open the app, click the gear, switch off "Automatic
+  updates".
 - Password and TOTP secret live in the GNOME keyring, the macOS keychain or the Windows
   Credential Manager, nowhere else. Setting up a university that is not listed asks its
   gateway for the login form once, without any user data. While connecting, openconnect reads the secret from a
@@ -245,6 +256,10 @@ shows the state, connects or disconnects by hand and holds the settings.
 | Role model | Pattern taken |
 |---|---|
 | Mullvad VPN, Tailscale | main screen with one state, one button, settings behind a gear |
+| Tailscale, macOS and Windows VPN settings | a problem in one sentence, its fix on a button below it (Update password, Repair), never a command |
+| Tailscale (macOS) | menu bar icon that shows the state, menu with state, Connect/Disconnect, Settings…, Quit; Dock icon only while the window is open |
+| Cisco Secure Client, Mullvad VPN (Windows) | notification area icon: left click opens the small fixed window, right click the menu; closing the window keeps the icon; Exit at the bottom |
+| macOS System Settings | Account rows open their page, the back arrow returns; Cmd+, opens Settings |
 | Google sign-in | one question per card, Next bottom right, Back bottom left, inline errors |
 | Google Authenticator | the check code with a countdown ring |
 | iOS and macOS Settings | grouped settings list, hints behind info icons |
