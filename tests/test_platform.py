@@ -180,6 +180,7 @@ class PackagedTests(unittest.TestCase):
         (self.package / "app" / "uni_vpn" / "__init__.py").write_text("")
         self.assertTrue(pf.packaged(str(self.package)))
 
+    @posix_only
     def test_bundled_programs_only_on_macos_for_this_processor(self):
         directory = self.package / os.uname().machine / "bin"
         directory.mkdir(parents=True)

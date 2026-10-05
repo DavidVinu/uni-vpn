@@ -131,6 +131,7 @@ class ProfileCommandTests(unittest.TestCase):
             "--user=ab123", "--passwd-on-stdin", "--non-inter", "--no-dtls", "--force-dpd=30",
             "--reconnect-timeout=60", "--script-tun", f"--script=exec {WRAPPER} 4321", "vpn-ac.uni-heidelberg.de"])
 
+    @posix_only
     def test_bundled_openconnect_on_macos_gets_the_system_certificates(self):
         package = tempfile.mkdtemp()
         ca = Path(package) / "cert.pem"
