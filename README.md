@@ -194,7 +194,7 @@ entry opens `http://127.0.0.1:1081/` in the browser instead.
 | Change websites | the app, gear icon, Websites (Chrome picks it up at once, Firefox after about 10 s; on macOS and Windows restart the browser) |
 | Something is wrong | `uni-vpn doctor`, paste the output into an issue |
 | Update | nothing to do, uni-vpn updates itself (see below) |
-| Remove | `uni-vpn uninstall` (Linux, macOS) or, on Windows, `install.ps1 -Uninstall` from `%ProgramFiles%\uni-vpn` (it asks for administrator rights); both also reset the proxy setting |
+| Remove | Mac: drag "Uni VPN" from Applications to the Trash. Windows: Settings, Apps, "Uni VPN", Uninstall. Linux: remove "Uni VPN" in the App Center. uni-vpn then also resets the proxy setting and removes its background service. Installed from a terminal: `uni-vpn uninstall` |
 
 ## Troubleshooting
 

@@ -68,6 +68,8 @@ if [ "$force" = 1 ] || [ ! -f "$unit" ] || [ ! -f "$app/uni_vpn/__init__.py" ]; 
     if ! cp -R "$here/app" "$app.new" 2>"$log"; then fail; fi
     rm -rf "$app"
     mv "$app.new" "$app"
+    # Removing the app or package later removes this copy and the service (uni_vpn/removal.py).
+    printf '%s\n' "$here" >"$app/.package"
   fi
   if ! "$python" -I "$app/bin/uni-vpn" setup >"$log" 2>&1; then fail; fi
   exit 0

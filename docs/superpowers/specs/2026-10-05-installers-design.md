@@ -35,7 +35,8 @@ of the GitHub release `latest`, so these links always give the newest version:
 All three keep the layout the architecture review asked for, "core + openconnect + app
 window", so the Go core replaces the Python files without touching the pipeline.
 
-- **macOS** `Uni VPN.app` in `/Applications`, with `Contents/Resources/<arm64|x86_64>/`
+- **macOS** `Uni VPN.app` in `/Applications` is the app window and menu bar item (app/macos,
+  built in CI for both processors), with `Contents/Resources/<arm64|x86_64>/`
   holding openconnect, ocproxy and their libraries (built by Homebrew on a CI runner of that
   processor, then made independent of Homebrew) and, as a stopgap until the Go core, a
   standalone Python. The `postinstall` script runs `uni-vpn-open --setup` as the signed-in
@@ -49,10 +50,24 @@ window", so the Go core replaces the Python files without touching the pipeline.
   `ocproxy`, `secret-tool` and Python 3.11. The service runs per user (systemd user service),
   which a package cannot set up for each user, so the "Uni VPN" app entry does it the first
   time it is opened, the same way as on macOS.
-- **Windows** installs the program to `C:\Program Files\uni-vpn`, where `install.ps1` expects
-  it, then runs `install.ps1 -Unattended` for the signed-in user, which adds Python and
-  OpenConnect if missing and runs the setup. Removing it in Settings, Apps runs
-  `install.ps1 -Uninstall`.
+- **Windows** installs the program and the app window (built in CI, marked `.prebuilt`) to
+  `C:\Program Files\uni-vpn`, where `install.ps1` expects it, then runs `install.ps1
+  -Unattended` for the signed-in user, which adds OpenConnect if missing, python.org's
+  embeddable Python inside the same folder (a regular Python installer does nothing when the
+  user already has that version), and runs the setup.
+
+## Removing it
+
+Each system's own way, nothing else to do:
+
+- **macOS:** drag "Uni VPN" to the Trash (Zoom, Signal). **Linux:** remove it in the App
+  Center. Neither runs anything of ours, so the service watches the installer's folder
+  (`uni_vpn/removal.py`, the folder is recorded in `.package` of the user's copy): gone on
+  two checks five minutes apart (a new version being installed is back by then), it restores
+  the proxy setting, stops the menu bar or panel icon, deletes its files and ends itself. The
+  keyring entries stay, like the data of any app moved to the Trash.
+- **Windows:** Settings, Apps, "Uni VPN", Uninstall (Signal, Zoom) runs `install.ps1
+  -Uninstall`, then removes the folder.
 
 ## Updates
 
@@ -83,5 +98,3 @@ The CI steps are in place and switch on by themselves once the secrets exist.
 - With the Go core: drop the bundled Python, Windows `.msi` (the payload is then plain files,
   no per-user step), signed update manifest instead of `stable` source archives.
 - The native app windows (settings thread) go into the same bundle and entries.
-- Removing the `.deb`/`.rpm` leaves each user's own copy and service running; the Go core's
-  uninstall will cover it.
