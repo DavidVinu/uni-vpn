@@ -12,6 +12,7 @@ answer the POST with a 302 to a cluster member, which must get the same POST aga
 
 from __future__ import annotations
 
+import http.client
 import ssl
 import urllib.error
 import urllib.request
@@ -159,7 +160,8 @@ def probe(host: str, usergroup: str = "", group: str = "", *, useragent: str = u
         data = opener(request, timeout)
     except urllib.error.HTTPError as exc:
         return Detection(host=host, usergroup=usergroup, reachable=True, error=f"{NOT_CISCO} (HTTP {exc.code})")
-    except (urllib.error.URLError, OSError) as exc:
+    # A garbled HTTP reply or a port above 65535 fails outside OSError; the page must still get an answer.
+    except (urllib.error.URLError, OSError, http.client.HTTPException, OverflowError, ValueError) as exc:
         reason = getattr(exc, "reason", None) or exc
         return Detection(host=host, usergroup=usergroup, error=f"Could not reach {host}: {reason}")
     return parse_reply(data, host, usergroup)
