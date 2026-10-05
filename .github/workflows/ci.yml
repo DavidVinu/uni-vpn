@@ -343,8 +343,7 @@ jobs:
           $process = Start-Process -FilePath "$env:ProgramFiles\uni-vpn\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES" -Wait -PassThru
           Start-Sleep 5
           if (Test-Path "$env:ProgramFiles\uni-vpn\uni_vpn") { throw "files are left in Program Files" }
-          schtasks.exe /Query /TN uni-vpn 2>$null
-          if ($LASTEXITCODE -eq 0) { throw "the task is still registered" }
+          if (Get-ScheduledTask -TaskName uni-vpn -ErrorAction SilentlyContinue) { throw "the task is still registered" }
       - uses: actions/upload-artifact@v4
         with:
           name: installer-windows
