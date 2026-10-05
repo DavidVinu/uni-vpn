@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<config-auth client="vpn" type="auth-request" aggregate-auth-version="2">
+<opaque is-for="sg">
+<tunnel-group>CardinalKey-TG</tunnel-group>
+<aggauth-handle>7636031216619106254</aggauth-handle>
+<auth-method>single-sign-on-v2</auth-method>
+<group-alias>CardinalKey</group-alias>
+<config-hash>1789830105098</config-hash>
+</opaque>
+<auth id="main">
+<title>Login</title>
+<message>Please complete the authentication process in the AnyConnect Login window.</message>
+<banner></banner>
+<sso-v2-login>https://su-vpn-wech.stanford.edu/+CSCOE+/saml/sp/login?ctx=1168323638&#x26;acsamlcap=v2</sso-v2-login>
+<sso-v2-login-final>https://su-vpn-wech.stanford.edu/+CSCOE+/saml_ac_login.html</sso-v2-login-final>
+<sso-v2-token-cookie-name>acSamlv2Token</sso-v2-token-cookie-name>
+<sso-v2-error-cookie-name>acSamlv2Error</sso-v2-error-cookie-name>
+<form>
+<input type="sso" name="sso-token"></input>
+<select name="group_list" label="GROUP:">
+<option selected="true">CardinalKey</option>
+<option>CardinalKey-Full</option>
+<option>SU-VPN Full Tunnel</option>
+<option>Stanford</option>
+<option>Stanford-Full</option>
+<option>Test-CardinalKey</option>
+<option>Test-CardinalKey-Full</option>
+</select>
+</form>
+</auth>
+</config-auth>

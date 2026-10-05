@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<config-auth client="vpn" type="auth-request" aggregate-auth-version="2">
+<opaque is-for="sg">
+<tunnel-group>DefaultWEBVPNGroup</tunnel-group>
+<aggauth-handle>4984830146295384610</aggauth-handle>
+<auth-method>single-sign-on-v2</auth-method>
+<config-hash>1790282985956</config-hash>
+</opaque>
+<auth id="main">
+<title>Login</title>
+<message>Bitte geben Sie ihren Benutzernamen und Passwort ein.</message>
+<banner></banner>
+<form>
+<input type="text" name="username" label="Username:"></input>
+<input type="password" name="password" label="Password:"></input>
+</form>
+</auth>
+</config-auth>
