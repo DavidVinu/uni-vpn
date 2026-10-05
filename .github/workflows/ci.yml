@@ -175,7 +175,17 @@ jobs:
         run: packaging/macos/build-pkg.sh runtime "0.1.${{ github.run_number }}" uni-vpn.pkg
       - name: Install it like a user would
         run: |
-          sudo installer -pkg uni-vpn.pkg -target /
+          sudo installer -pkg uni-vpn.pkg -target / </dev/null &
+          pid=$!
+          for i in $(seq 240); do kill -0 $pid 2>/dev/null || break; sleep 1; done
+          if kill -0 $pid 2>/dev/null; then
+            echo "The installer did not finish within 4 minutes"
+            ps -axo pid,ppid,etime,command | grep -iE "uni|python|installer|launchctl|sudo|osascript|lsregister|open" | grep -v grep
+            cat "$HOME/Library/Logs/uni-vpn/setup.log" || true
+            sudo tail -n 40 /var/log/install.log
+            exit 1
+          fi
+          wait $pid
           cat "$HOME/Library/Logs/uni-vpn/setup.log" || true
           for i in $(seq 30); do curl -fsS http://127.0.0.1:1081/status.json && break; sleep 1; done
           curl -fsS http://127.0.0.1:1081/status.json >/dev/null

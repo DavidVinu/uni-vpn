@@ -71,7 +71,8 @@ if [ "$force" = 1 ] || [ ! -f "$unit" ] || [ ! -f "$app/uni_vpn/__init__.py" ]; 
     # Removing the app or package later removes this copy and the service (uni_vpn/removal.py).
     printf '%s\n' "$here" >"$app/.package"
   fi
-  if ! "$python" -I "$app/bin/uni-vpn" setup >"$log" 2>&1; then fail; fi
+  # Nobody can answer a question here; the assistant opens in the app window instead.
+  if ! "$python" -I "$app/bin/uni-vpn" setup </dev/null >"$log" 2>&1; then fail; fi
   exit 0
 fi
 
