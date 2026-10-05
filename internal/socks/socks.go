@@ -42,10 +42,12 @@ const (
 )
 
 const (
-	handshakeTimeout = 30 * time.Second
-	dnsTimeout       = 3 * time.Second
-	stopWait         = 2 * time.Second
+	dnsTimeout = 3 * time.Second
+	stopWait   = 2 * time.Second
 )
+
+// handshakeTimeout applies to each read of the handshake (a variable for the tests).
+var handshakeTimeout = 30 * time.Second
 
 // Server is the SOCKS5 server. Set the exported fields before Start.
 type Server struct {
@@ -188,12 +190,7 @@ func (s *Server) handle(client net.Conn) {
 	defer s.untrack(client)
 	upstream, err := s.negotiate(client)
 	if err != nil {
-		// Read/write errors and timeouts end the client quietly; one bad client must not
-		// stop the server.
-		var ve *valueError
-		if errors.As(err, &ve) {
-			s.Log.Warn(fmt.Sprintf("SOCKS: %s", err))
-		}
+		// Read/write errors and timeouts end the client quietly.
 		return
 	}
 	if upstream == nil {
@@ -210,7 +207,7 @@ func (s *Server) handle(client net.Conn) {
 	wg.Wait()
 }
 
-func readTimeout(c net.Conn, buf []byte) error {
+func read(c net.Conn, buf []byte) error {
 	c.SetReadDeadline(time.Now().Add(handshakeTimeout))
 	_, err := io.ReadFull(c, buf)
 	c.SetReadDeadline(time.Time{})
@@ -220,15 +217,15 @@ func readTimeout(c net.Conn, buf []byte) error {
 // negotiate returns the upstream connection, or nil after a refusal reply.
 func (s *Server) negotiate(c net.Conn) (net.Conn, error) {
 	head := make([]byte, 2)
-	if err := readTimeout(c, head); err != nil {
-		return nil, err
-	}
-	methods := make([]byte, head[1])
-	if _, err := io.ReadFull(c, methods); err != nil {
+	if err := read(c, head); err != nil {
 		return nil, err
 	}
 	if head[0] != Version {
 		return nil, nil
+	}
+	methods := make([]byte, head[1])
+	if err := read(c, methods); err != nil {
+		return nil, err
 	}
 	noAuth := false
 	for _, m := range methods {
@@ -242,8 +239,11 @@ func (s *Server) negotiate(c net.Conn) (net.Conn, error) {
 		return nil, err
 	}
 	req := make([]byte, 4)
-	if err := readTimeout(c, req); err != nil {
+	if err := read(c, req); err != nil {
 		return nil, err
+	}
+	if req[0] != Version {
+		return nil, reply(c, RepFailure, nil, 0)
 	}
 	cmd, atyp := req[1], req[3]
 	var host string
@@ -251,22 +251,22 @@ func (s *Server) negotiate(c net.Conn) (net.Conn, error) {
 	switch atyp {
 	case AtypIPv4:
 		b := make([]byte, 4)
-		if _, err := io.ReadFull(c, b); err != nil {
+		if err := read(c, b); err != nil {
 			return nil, err
 		}
 		host = netip.AddrFrom4([4]byte(b)).String()
 	case AtypDomain:
 		n := make([]byte, 1)
-		if _, err := io.ReadFull(c, n); err != nil {
+		if err := read(c, n); err != nil {
 			return nil, err
 		}
 		b := make([]byte, n[0])
-		if _, err := io.ReadFull(c, b); err != nil {
+		if err := read(c, b); err != nil {
 			return nil, err
 		}
 		host = decodeASCIIReplace(b)
 	case AtypIPv6:
-		if _, err := io.ReadFull(c, make([]byte, 16)); err != nil {
+		if err := read(c, make([]byte, 16)); err != nil {
 			return nil, err
 		}
 		known = false
@@ -274,7 +274,7 @@ func (s *Server) negotiate(c net.Conn) (net.Conn, error) {
 		known = false
 	}
 	pb := make([]byte, 2)
-	if _, err := io.ReadFull(c, pb); err != nil {
+	if err := read(c, pb); err != nil {
 		return nil, err
 	}
 	port := int(pb[0])<<8 | int(pb[1])
@@ -287,8 +287,7 @@ func (s *Server) negotiate(c net.Conn) (net.Conn, error) {
 	source, dns := s.Route()
 	address, err := Resolve(s.ctx, host, dns, source, dnsTimeout, s.DNSPort)
 	if err != nil {
-		var ve *valueError
-		if s.ctx.Err() != nil || errors.As(err, &ve) {
+		if s.ctx.Err() != nil {
 			return nil, err
 		}
 		s.Log.Info(fmt.Sprintf("SOCKS: %s", err))
@@ -302,12 +301,10 @@ func (s *Server) negotiate(c net.Conn) (net.Conn, error) {
 		if isRefused(err) {
 			return nil, reply(c, RepRefused, nil, 0)
 		}
-		text := ""
+		text := "timed out"
 		if !isTimeout(err) {
 			text = connectErrorString(err, source, address, port)
 		}
-		// Python prints `exc or "timeout"`, and an exception is always true: a timeout shows
-		// as an empty text.
 		s.Log.Info(fmt.Sprintf("SOCKS: %s:%d not reachable: %s", host, port, text))
 		return nil, reply(c, RepHostUnreachable, nil, 0)
 	}

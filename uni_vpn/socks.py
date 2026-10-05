@@ -22,10 +22,21 @@ CMD_CONNECT = 1
 ATYP_IPV4, ATYP_DOMAIN, ATYP_IPV6 = 1, 3, 4
 REP_OK, REP_FAILURE, REP_NET_UNREACHABLE, REP_HOST_UNREACHABLE, REP_REFUSED = 0, 1, 3, 4, 5
 REP_CMD_UNSUPPORTED, REP_ATYP_UNSUPPORTED = 7, 8
+HANDSHAKE_TIMEOUT = 30.0  # seconds for each read of the handshake
 
 
 class DnsError(Exception):
     pass
+
+
+def reason(exc: BaseException) -> str:
+    """Text of an exception for the log; a timeout has none of its own."""
+    text = str(exc)
+    if text:
+        return text
+    if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
+        return "timed out"
+    return type(exc).__name__
 
 
 def build_query(name: str, qid: int) -> bytes:
@@ -76,6 +87,8 @@ def parse_response(data: bytes, qid: int) -> list[str]:
             raise DnsError("truncated answer")
         rtype, rclass, _ttl, rdlength = struct.unpack(">HHIH", data[offset:offset + 10])
         offset += 10
+        if offset + rdlength > len(data):
+            raise DnsError("truncated answer")
         if rtype == 1 and rclass == 1 and rdlength == 4:
             addresses.append(str(ipaddress.IPv4Address(data[offset:offset + 4])))
         offset += rdlength
@@ -127,7 +140,7 @@ async def resolve(name: str, servers: list[str], source: str, timeout: float = 3
                 break
         finally:
             transport.close()
-    raise DnsError(f"{name}: {last or 'no answer'}")
+    raise DnsError(f"{name}: {reason(last)}")
 
 
 class SocksServer:
@@ -175,27 +188,30 @@ class SocksServer:
                     w.close()
 
     async def _negotiate(self, reader, writer):
-        version, count = await asyncio.wait_for(reader.readexactly(2), 30)
-        methods = await reader.readexactly(count)
+        version, count = await _read(reader, 2)
         if version != VERSION:
             return None, None
+        methods = await _read(reader, count)
         if NO_AUTH not in methods:
             writer.write(bytes([VERSION, NO_ACCEPTABLE]))
             await writer.drain()
             return None, None
         writer.write(bytes([VERSION, NO_AUTH]))
-        version, cmd, _rsv, atyp = await asyncio.wait_for(reader.readexactly(4), 30)
+        version, cmd, _rsv, atyp = await _read(reader, 4)
+        if version != VERSION:
+            await self._reply(writer, REP_FAILURE)
+            return None, None
         if atyp == ATYP_IPV4:
-            host = str(ipaddress.IPv4Address(await reader.readexactly(4)))
+            host = str(ipaddress.IPv4Address(await _read(reader, 4)))
         elif atyp == ATYP_DOMAIN:
-            length = (await reader.readexactly(1))[0]
-            host = (await reader.readexactly(length)).decode("ascii", errors="replace")
+            length = (await _read(reader, 1))[0]
+            host = (await _read(reader, length)).decode("ascii", errors="replace")
         elif atyp == ATYP_IPV6:
-            await reader.readexactly(16)
+            await _read(reader, 16)
             host = None
         else:
             host = None
-        port = struct.unpack(">H", await reader.readexactly(2))[0]
+        port = struct.unpack(">H", await _read(reader, 2))[0]
         if cmd != CMD_CONNECT:
             await self._reply(writer, REP_CMD_UNSUPPORTED)
             return None, None
@@ -215,7 +231,7 @@ class SocksServer:
             await self._reply(writer, REP_REFUSED)
             return None, None
         except (OSError, asyncio.TimeoutError) as exc:
-            self.log.info("SOCKS: %s:%s not reachable: %s", host, port, exc or "timeout")
+            self.log.info("SOCKS: %s:%s not reachable: %s", host, port, reason(exc))
             await self._reply(writer, REP_HOST_UNREACHABLE)
             return None, None
         bound = upstream.get_extra_info("sockname") or ("0.0.0.0", 0)
@@ -229,6 +245,10 @@ class SocksServer:
             packed = b"\x00\x00\x00\x00"
         writer.write(bytes([VERSION, code, 0, ATYP_IPV4]) + packed + struct.pack(">H", port))
         await writer.drain()
+
+
+async def _read(reader: asyncio.StreamReader, count: int) -> bytes:
+    return await asyncio.wait_for(reader.readexactly(count), HANDSHAKE_TIMEOUT)
 
 
 async def _pipe(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:

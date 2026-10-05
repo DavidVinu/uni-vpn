@@ -8,7 +8,6 @@ import (
 	"math/rand/v2"
 	"net"
 	"net/netip"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -20,12 +19,6 @@ type DNSError struct{ msg string }
 func (e *DNSError) Error() string { return e.msg }
 
 func dnsErr(format string, args ...any) *DNSError { return &DNSError{fmt.Sprintf(format, args...)} }
-
-// valueError stands for a Python ValueError that escapes resolve(); the SOCKS handler logs
-// it as a warning and drops the client without a reply, like the Python server.
-type valueError struct{ msg string }
-
-func (e *valueError) Error() string { return e.msg }
 
 // BuildQuery builds a DNS query for the A record of name (recursion desired).
 // Non-ASCII labels are rejected: Python's IDNA codec would convert them, but SOCKS clients
@@ -110,12 +103,10 @@ func ParseResponse(data []byte, qid uint16) ([]string, error) {
 		rclass := binary.BigEndian.Uint16(data[offset+2:])
 		rdlength := int(binary.BigEndian.Uint16(data[offset+8:]))
 		offset += 10
+		if offset+rdlength > len(data) {
+			return nil, dnsErr("truncated answer")
+		}
 		if rtype == 1 && rclass == 1 && rdlength == 4 {
-			if offset+4 > len(data) {
-				part := data[min(offset, len(data)):]
-				return nil, &valueError{fmt.Sprintf("%s (len %d != 4) is not permitted as an IPv4 address",
-					pyBytesRepr(part), len(part))}
-			}
 			addresses = append(addresses, netip.AddrFrom4([4]byte(data[offset:offset+4])).String())
 		}
 		offset += rdlength
@@ -173,8 +164,7 @@ func Resolve(ctx context.Context, name string, servers []string, source string, 
 		if err == nil {
 			return address, nil
 		}
-		var ve *valueError
-		if ctx.Err() != nil || errors.As(err, &ve) {
+		if ctx.Err() != nil {
 			return "", err
 		}
 		last = err
@@ -183,19 +173,22 @@ func Resolve(ctx context.Context, name string, servers []string, source string, 
 			break
 		}
 	}
-	return "", dnsErr("%s: %s", name, resolveErrText(last))
+	return "", dnsErr("%s: %s", name, reason(last))
 }
 
-// resolveErrText is str(exc) as Python prints it; a timeout has an empty message there.
-func resolveErrText(err error) string {
+// reason is the text of err for the log; a timeout has none of its own.
+func reason(err error) string {
 	var de *DNSError
 	if errors.As(err, &de) {
 		return de.msg
 	}
-	if errors.Is(err, os.ErrDeadlineExceeded) {
-		return ""
+	if isTimeout(err) {
+		return "timed out"
 	}
-	return osErrorString(err)
+	if text := osErrorString(err); text != "" {
+		return text
+	}
+	return fmt.Sprintf("%T", err)
 }
 
 func dialUDP(ctx context.Context, source, server string, port int) (*net.UDPConn, error) {
@@ -249,34 +242,4 @@ func exchange(ctx context.Context, conn *net.UDPConn, name string, qid uint16, t
 		return "", dnsErr("no IPv4 address")
 	}
 	return addresses[0], nil
-}
-
-// pyBytesRepr is repr() of a Python bytes object.
-func pyBytesRepr(b []byte) string {
-	quote := byte('\'')
-	if strings.IndexByte(string(b), '\'') >= 0 && strings.IndexByte(string(b), '"') < 0 {
-		quote = '"'
-	}
-	var s strings.Builder
-	s.WriteString("b")
-	s.WriteByte(quote)
-	for _, c := range b {
-		switch {
-		case c == quote || c == '\\':
-			s.WriteByte('\\')
-			s.WriteByte(c)
-		case c == '\t':
-			s.WriteString(`\t`)
-		case c == '\n':
-			s.WriteString(`\n`)
-		case c == '\r':
-			s.WriteString(`\r`)
-		case c < ' ' || c >= 0x7f:
-			fmt.Fprintf(&s, `\x%02x`, c)
-		default:
-			s.WriteByte(c)
-		}
-	}
-	s.WriteByte(quote)
-	return s.String()
 }

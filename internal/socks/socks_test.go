@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -141,11 +142,23 @@ func TestTruncated(t *testing.T) {
 	if _, err := ParseResponse(full[:len(full)-5], 7); err == nil || err.Error() != "truncated answer" {
 		t.Fatal(err)
 	}
-	// Python raises a ValueError from ipaddress here, not a DnsError.
-	_, err := ParseResponse(full[:len(full)-2], 7)
-	var ve *valueError
-	if !errors.As(err, &ve) || err.Error() != `b'\x01\x02' (len 2 != 4) is not permitted as an IPv4 address` {
+}
+
+func TestTruncatedAddressRecord(t *testing.T) {
+	query, _ := BuildQuery("x.example", 7)
+	full := answer(query, []string{"1.2.3.4"}, 0, false)
+	var de *DNSError
+	if _, err := ParseResponse(full[:len(full)-2], 7); !errors.As(err, &de) || err.Error() != "truncated answer" {
 		t.Fatal(err)
+	}
+}
+
+func TestReasonNeverEmpty(t *testing.T) {
+	if got := reason(os.ErrDeadlineExceeded); got != "timed out" {
+		t.Fatal(got)
+	}
+	if got := reason(dnsErr("host not found")); got != "host not found" {
+		t.Fatal(got)
 	}
 }
 
@@ -173,12 +186,12 @@ func TestResolveErrors(t *testing.T) {
 	if err == nil || err.Error() != "x.example: unusable DNS server ::1" {
 		t.Fatal(err)
 	}
-	// A server that never answers: Python prints the empty TimeoutError text.
+	// A server that never answers.
 	silent, _ := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	defer silent.Close()
 	_, err = Resolve(ctx, "x.example", []string{"127.0.0.1"}, "127.0.0.1", 100*time.Millisecond,
 		silent.LocalAddr().(*net.UDPAddr).Port)
-	if err == nil || err.Error() != "x.example: " {
+	if err == nil || err.Error() != "x.example: timed out" {
 		t.Fatalf("%q", err)
 	}
 	if got, err := Resolve(ctx, "10.0.0.1", nil, "127.0.0.1", time.Second, 53); got != "10.0.0.1" || err != nil {
@@ -346,12 +359,52 @@ func TestBindCommandUnsupported(t *testing.T) {
 	}
 }
 
-func TestWrongVersionIsDropped(t *testing.T) {
+func expectClosed(t *testing.T, c net.Conn) {
+	t.Helper()
+	c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	n, err := c.Read(make([]byte, 10))
+	var ne net.Error
+	if n != 0 || err == nil || (errors.As(err, &ne) && ne.Timeout()) {
+		t.Fatal(n, err)
+	}
+}
+
+func TestWrongVersionIsDroppedBeforeReadingMethods(t *testing.T) {
 	e := setup(t)
 	c := e.dial(t)
-	c.Write([]byte{4, 1, 0})
-	if n, err := c.Read(make([]byte, 1)); n != 0 || err == nil {
-		t.Fatal(n, err)
+	c.Write([]byte{4, 0xff}) // announces 255 methods that never come
+	expectClosed(t, c)
+}
+
+func TestWrongRequestVersionFails(t *testing.T) {
+	e := setup(t)
+	c := e.dial(t)
+	c.Write([]byte{5, 1, 0, 4, 1, 0, 1, 127, 0, 0, 1, 0, 0x50})
+	if got := readN(t, c, 2); !bytes.Equal(got, []byte{5, 0}) {
+		t.Fatal(got)
+	}
+	if got := readN(t, c, 10); got[1] != RepFailure {
+		t.Fatal(got)
+	}
+	expectClosed(t, c)
+}
+
+func TestEveryHandshakeReadTimesOut(t *testing.T) {
+	old := handshakeTimeout
+	handshakeTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { handshakeTimeout = old }) // after the server's Stop
+	e := setup(t)
+	for _, data := range [][]byte{
+		{5, 2, 0}, // one of two methods
+		[]byte("\x05\x01\x00\x05\x01\x00\x03\x10abc"), // short host name
+		{5, 1, 0, 5, 1, 0, 1, 127, 0, 0, 1, 0},        // half a port
+	} {
+		c := e.dial(t)
+		c.Write(data)
+		if len(data) > 3 {
+			readN(t, c, 2)
+		}
+		expectClosed(t, c)
 	}
 }
 
