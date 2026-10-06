@@ -13,8 +13,8 @@ Download the file for your computer and open it:
 |---|---|
 | Mac | [uni-vpn.pkg](https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn.pkg) |
 | Windows | [uni-vpn-setup.exe](https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn-setup.exe) |
-| Ubuntu, Debian, Mint | [uni-vpn.deb](https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn.deb) |
-| Fedora | [uni-vpn.rpm](https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn.rpm) |
+| Ubuntu, Debian, Mint | [uni-vpn.deb](https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn.deb), with an ARM processor [uni-vpn-arm64.deb](https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn-arm64.deb) |
+| Fedora | [uni-vpn.rpm](https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn.rpm), with an ARM processor [uni-vpn-arm64.rpm](https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn-arm64.rpm) |
 
 On a Mac, if it says the file "cannot be opened": open System Settings, Privacy & Security, and
 click "Open Anyway". On Windows, if a blue box appears: click "More info", then "Run anyway".
@@ -111,10 +111,12 @@ terminals only).
 ### Installation details
 
 The downloads are built by CI (`packaging/`, design in
-`docs/superpowers/specs/2026-10-05-installers-design.md`). The Mac package brings openconnect,
-ocproxy and Python inside `/Applications/Uni VPN.app`; the Linux packages use the system's.
+`docs/superpowers/specs/2026-10-05-installers-design.md`). They bring the Go core
+(`bin/uni-vpn-core`) and need no Python. The Mac package also brings openconnect and ocproxy
+inside `/Applications/Uni VPN.app`, the Windows setup `openconnect.exe` with Wintun; the Linux
+packages use the system's, and Python with GTK only for the app window.
 
-The same installer in a terminal: `irm https://raw.githubusercontent.com/DavidVinu/uni-vpn/main/get.ps1 | iex`
+The installer scripts (with Python) in a terminal: `irm https://raw.githubusercontent.com/DavidVinu/uni-vpn/main/get.ps1 | iex`
 on Windows (PowerShell), or `./install.sh` from a downloaded copy on Linux and macOS.
 
 What the installer adds when missing:

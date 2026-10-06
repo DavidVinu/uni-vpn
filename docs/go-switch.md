@@ -88,4 +88,11 @@ starts the new binary until it exits with something other than 75.
 2. CI tests the switch end to end on Linux, macOS and Windows runners: a Python install, the
    Python updater against the new manifest, then the status page answered by the Go core.
 3. Add `packaging/handover`. Users move to Go with their next automatic update.
-4. Installers ship the Go core without Python.
+4. Installers ship the Go core without Python (`packaging/stage-app.sh --go`): the .pkg,
+   uni-vpn-setup.exe and the .deb/.rpm (amd64, and uni-vpn-arm64.deb/.rpm) hold
+   `bin/uni-vpn-core`, its helpers and the app windows, no `uni_vpn/` and no install scripts.
+   `uni-vpn-open` (macOS, Linux) and the Windows setup run `uni-vpn-core setup`; uninstalling
+   on Windows runs `uni-vpn-core uninstall --yes`. `uni-vpn-open` replaces a user's copy of the
+   Python program with the Go core, the Windows setup deletes Python and the Python program
+   from its folder, and the removal watchers of both cores count a package with either the
+   Python program or the Go core as still installed.

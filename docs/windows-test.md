@@ -60,11 +60,16 @@ D1. Download [uni-vpn-setup.exe](https://github.com/DavidVinu/uni-vpn/releases/l
     and double-click it. Until it is signed, SmartScreen shows a blue box: "More info", "Run
     anyway". Note every dialog.
     Expected: one UAC prompt, a progress bar, then the assistant opens. No terminal window stays.
+    `C:\Program Files\uni-vpn` has no `python` folder; the task `uni-vpn` starts
+    `conhost.exe --headless "C:\Program Files\uni-vpn\bin\uni-vpn-core.exe" daemon`.
+    With a standard account and an administrator's password at the UAC prompt, the setup says
+    it has to be installed from an account with administrator rights.
 D2. Finish the assistant and open a university page in Edge: it loads through the VPN.
 D3. Sign out and in: the shield is back in the notification area.
 D4. Settings, Apps, "Uni VPN", Uninstall. Expected: the shield is gone, the proxy setting is
-    off (Settings, Network, Proxy), the task "uni-vpn" is gone from Task Scheduler and
-    `C:\Program Files\uni-vpn` no longer exists.
+    off (Settings, Network, Proxy), the task "uni-vpn" is gone from Task Scheduler,
+    `C:\Program Files\uni-vpn` no longer exists and Credential Manager has no `uni-vpn`
+    entries.
 
 Report the result as an issue or pull request with this table filled in:
 

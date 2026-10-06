@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Builds uni-vpn.pkg from the per-processor folders of build-runtime.sh.
+# Builds uni-vpn.pkg from the per-processor folders of build-runtime.sh and the Go core.
+# Needs Go and Python 3 (only here, for the Info.plist; the Macs it installs on need neither).
 # Usage: packaging/macos/build-pkg.sh RUNTIME-DIR VERSION OUT.pkg
 # Signs and notarizes when MACOS_APP_IDENTITY, MACOS_INSTALLER_IDENTITY and
 # MACOS_NOTARY_PROFILE are set (see .github/workflows/ci.yml); unsigned otherwise.
@@ -18,7 +19,7 @@ for arch in arm64 x86_64; do
   [ -d "$runtime/$arch" ] || { echo "missing $runtime/$arch"; exit 1; }
   cp -R "$runtime/$arch" "$resources/"
 done
-"$repo/packaging/stage-app.sh" "$resources/app"
+"$repo/packaging/stage-app.sh" --go darwin/universal "$resources/app"
 cp "$repo/packaging/uni-vpn-open" "$resources/"
 chmod 755 "$resources/uni-vpn-open"
 
