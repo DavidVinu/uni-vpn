@@ -1,0 +1,82 @@
+#!/bin/sh
+# Opens uni-vpn from the app entry the .pkg (macOS) or the .deb/.rpm (Linux) installed.
+# The first time for each user it copies the program into the user's own folder, where it
+# keeps itself up to date (uni_vpn/updater.py), and runs the setup, which opens the assistant.
+# --setup: copy and set up again (the macOS installer, after installing a new version).
+set -u
+here=$(cd "$(dirname "$0")" && pwd -P)
+force=0
+[ "${1:-}" = --setup ] && force=1
+
+case "$(uname -s)" in
+  Darwin)
+    python="$here/$(uname -m)/python/bin/python3"
+    app="$HOME/Library/Application Support/uni-vpn/app"
+    unit="$HOME/Library/LaunchAgents/de.davidvinu.uni-vpn.plist"
+    config="${XDG_CONFIG_HOME:-$HOME/.config}/uni-vpn/config.toml"
+    log="$HOME/Library/Logs/uni-vpn/setup.log"
+    # The bundled Python finds no certificates of its own.
+    export SSL_CERT_FILE=/etc/ssl/cert.pem
+    ;;
+  *)
+    python=""
+    for candidate in python3.13 python3.12 python3.11 python3; do
+      if command -v "$candidate" >/dev/null 2>&1 &&
+         "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' 2>/dev/null; then
+        python=$(command -v "$candidate")
+        break
+      fi
+    done
+    app="${XDG_DATA_HOME:-$HOME/.local/share}/uni-vpn/app"
+    unit="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/uni-vpn.service"
+    config="${XDG_CONFIG_HOME:-$HOME/.config}/uni-vpn/config.toml"
+    log="${XDG_STATE_HOME:-$HOME/.local/state}/uni-vpn/setup.log"
+    ;;
+esac
+
+fail() {
+  title="Uni VPN could not be set up."
+  detail=$(tail -n 1 "$log" 2>/dev/null)
+  if [ "$(uname -s)" = Darwin ]; then
+    osascript - "$title" "$detail" >/dev/null 2>&1 <<'APPLESCRIPT'
+on run argv
+  display alert (item 1 of argv) message (item 2 of argv) as critical giving up after 300
+end run
+APPLESCRIPT
+  elif command -v zenity >/dev/null 2>&1; then
+    zenity --error --title="Uni VPN" --text="$title" --secondary-text="$detail" 2>/dev/null ||
+      zenity --error --title="Uni VPN" --text="$title\n\n$detail" 2>/dev/null
+  elif command -v kdialog >/dev/null 2>&1; then
+    kdialog --title "Uni VPN" --detailedsorry "$title" "$detail"
+  elif command -v notify-send >/dev/null 2>&1; then
+    notify-send "$title" "$detail"
+  fi
+  exit 1
+}
+
+mkdir -p "$(dirname "$log")"
+if [ -z "$python" ] || [ ! -x "$python" ]; then
+  echo "Python 3.11 or newer was not found" >"$log"
+  fail
+fi
+
+if [ "$force" = 1 ] || [ ! -f "$unit" ] || [ ! -f "$app/uni_vpn/__init__.py" ]; then
+  # A git checkout is a developer's own and stays as it is.
+  if [ ! -e "$app/.git" ]; then
+    rm -rf "$app.new"
+    mkdir -p "$(dirname "$app")"
+    if ! cp -R "$here/app" "$app.new" 2>"$log"; then fail; fi
+    rm -rf "$app"
+    mv "$app.new" "$app"
+    # Removing the app or package later removes this copy and the service (uni_vpn/removal.py).
+    printf '%s\n' "$here" >"$app/.package"
+  fi
+  # Nobody can answer a question here; the assistant opens in the app window instead.
+  if ! "$python" -I "$app/bin/uni-vpn" setup </dev/null >"$log" 2>&1; then fail; fi
+  exit 0
+fi
+
+port=$(sed -n 's/^[[:space:]]*http_port[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$config" 2>/dev/null | head -n 1)
+url="http://127.0.0.1:${port:-1081}/"
+if [ "$(uname -s)" = Darwin ]; then exec open "$url"; fi
+exec xdg-open "$url"

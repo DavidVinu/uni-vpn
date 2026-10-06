@@ -12,7 +12,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Awaitable, Callable
 
-from . import PROTOCOL, __version__, credentials, pac, repair, sysproxy
+from . import PROTOCOL, __version__, credentials, pac, removal, repair, sysproxy
 from . import messages as M
 from . import platform as pf
 from . import config as config_mod
@@ -85,7 +85,10 @@ class Daemon:
                  updater: Updater | None = None,
                  update_first_check: float = 600.0,
                  update_interval: float = 5 * 3600.0,
-                 update_jitter: float = 1800.0):
+                 update_jitter: float = 1800.0,
+                 package_root: Path | None = None,
+                 package_check: float = 300.0,
+                 remove_self: Callable[[], object] | None = None):
         self.cfg = cfg
         self.log = log or logging.getLogger("uni-vpn")
         self.password_getter = password_getter or (lambda: credentials.get_password(cfg.user, cfg.keyring_timeout))
@@ -111,6 +114,9 @@ class Daemon:
         self.update_interval = update_interval
         self.update_jitter = update_jitter
         self.commit: str | None = None
+        self.package_root = package_root or pf.repo_root()
+        self.package_check = package_check
+        self.remove_self = remove_self or removal.remove
         # Set when the program files were replaced: the caller starts the new code.
         self.restart_requested = False
 
@@ -389,12 +395,14 @@ class Daemon:
         await self._bind_forwarder()
         ticker = asyncio.create_task(self._ticker())
         updates = asyncio.create_task(self._auto_update())
+        watch = asyncio.create_task(self._watch_package())
         self.started.set()
         try:
             await self._stop.wait()
         finally:
             ticker.cancel()
             updates.cancel()
+            watch.cancel()
             if self._loop_task and not self._loop_task.done():
                 self._loop_task.cancel()
             if self.tunnel:
@@ -722,6 +730,24 @@ class Daemon:
             self.restart_requested = True
             self.stop()
             return
+
+    async def _watch_package(self) -> None:
+        """The app was moved to the Trash or its package removed: uninstall (uni_vpn/removal.py).
+        Gone on two checks in a row, so that installing a new version over it does not count."""
+        if pf.IS_WINDOWS or removal.package_dir(self.package_root) is None:
+            return
+        loop = asyncio.get_running_loop()
+        missing = 0
+        while True:
+            await asyncio.sleep(self.package_check)
+            gone = await loop.run_in_executor(None, removal.package_gone, self.package_root)
+            missing = missing + 1 if gone else 0
+            if missing >= 2:
+                self.log.info("The app was removed, uninstalling")
+                await self.request_disconnect()
+                await loop.run_in_executor(None, self.remove_self)
+                self.stop()
+                return
 
     # --- Idle and resume ------------------------------------------------
 

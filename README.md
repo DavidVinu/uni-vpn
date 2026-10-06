@@ -7,15 +7,18 @@ university website.
 
 ## Install
 
-**Windows:** [download Uni VPN](https://github.com/DavidVinu/uni-vpn/archive/refs/heads/main.zip).
-Right-click the downloaded file and choose "Extract All". In the folder that opens, double-click
-`install.cmd`, and click Yes when Windows asks.
+Download the file for your computer and open it:
 
-**Mac and Linux:** open the Terminal app, paste this line and press Enter:
+| Computer | Download |
+|---|---|
+| Mac | [uni-vpn.pkg](https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn.pkg) |
+| Windows | [uni-vpn-setup.exe](https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn-setup.exe) |
+| Ubuntu, Debian, Mint | [uni-vpn.deb](https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn.deb) |
+| Fedora | [uni-vpn.rpm](https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn.rpm) |
 
-```
-curl -fsSL https://raw.githubusercontent.com/DavidVinu/uni-vpn/main/get.sh | bash
-```
+On a Mac, if it says the file "cannot be opened": open System Settings, Privacy & Security, and
+click "Open Anyway". On Windows, if a blue box appears: click "More info", then "Run anyway".
+On Linux, open **Uni VPN** from your apps when the installation is done.
 
 A window opens and asks for your university, your user name and your password. When it says
 "All set", close and reopen your browser once. That's it.
@@ -31,6 +34,10 @@ whether it is connected. Click it to connect, disconnect or open Settings. You c
 name, password, second factor and the websites that go through the university.
 
 Uni VPN keeps itself up to date. There is nothing to do.
+
+To remove it: on a Mac, drag **Uni VPN** from Applications to the Trash. On Windows, open
+Settings, Apps, click **Uni VPN** and Uninstall. On Linux, remove **Uni VPN** in your app store.
+Your browser settings go back to how they were.
 
 If something goes wrong, the app says what happened in one sentence and shows a button that fixes
 it, for example **Update password** or **Repair**.
@@ -103,6 +110,10 @@ terminals only).
 
 ### Installation details
 
+The downloads are built by CI (`packaging/`, design in
+`docs/superpowers/specs/2026-10-05-installers-design.md`). The Mac package brings openconnect,
+ocproxy and Python inside `/Applications/Uni VPN.app`; the Linux packages use the system's.
+
 The same installer in a terminal: `irm https://raw.githubusercontent.com/DavidVinu/uni-vpn/main/get.ps1 | iex`
 on Windows (PowerShell), or `./install.sh` from a downloaded copy on Linux and macOS.
 
@@ -111,8 +122,8 @@ What the installer adds when missing:
 - Linux: `openconnect`, `ocproxy`, `secret-tool` and Python 3.11+ through apt, dnf, zypper
   or pacman (sudo asks for your password). On Arch, `ocproxy` comes from the AUR.
 - macOS: Homebrew (it asks first), then `openconnect`, `ocproxy` and Python.
-- Windows: Python 3.12 (winget, or the signed python.org installer) and OpenConnect with
-  Wintun (the OpenConnect-GUI 1.6.2 installer, checked against its SHA-256).
+- Windows: Python 3.12 (python.org's embeddable package) and `openconnect.exe` with Wintun (built
+  by uni-vpn's CI from OpenConnect's signed release), both inside uni-vpn's folder.
 
 The assistant then asks one thing per step: your university, user name and password, the TOTP
 secret if your university uses one (see "Second factor" above, with a live check code), done. Restart open browsers once afterwards.
@@ -212,8 +223,9 @@ VPN as a SOCKS5 proxy on `127.0.0.1:1080`. A PAC rule in the system proxy settin
 listed domains there and everything else directly. The Uni VPN app shows the state, connects
 or disconnects by hand and holds the settings: a small window of its own around the page on
 `http://127.0.0.1:1081/` (WKWebView on macOS, WebView2 on Windows, WebKitGTK on Linux), plus an
-icon in the menu bar, notification area or panel that starts at login. The installer builds
-it on the machine (`app/`, `uni_vpn/desktop.py`). Without the app (no Swift compiler on macOS,
+icon in the menu bar, notification area or panel that starts at login. The Mac and Windows
+downloads bring it ready-built; the terminal installer builds it on the machine (`app/`,
+`uni_vpn/desktop.py`). Without the app (no Swift compiler on macOS,
 no WebKitGTK on Linux) the entry opens `http://127.0.0.1:1081/` in the browser instead.
 
 - Linux and macOS: `openconnect --script-tun` with `ocproxy`, so the VPN never becomes a

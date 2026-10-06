@@ -127,6 +127,22 @@ class ProfileCommandTests(unittest.TestCase):
             "--user=ab123", "--passwd-on-stdin", "--non-inter", "--no-dtls", "--force-dpd=30",
             "--reconnect-timeout=60", "--script-tun", f"--script=exec {WRAPPER} 4321", "vpn-ac.uni-heidelberg.de"])
 
+    @posix_only
+    def test_bundled_openconnect_on_macos_gets_the_system_certificates(self):
+        package = tempfile.mkdtemp()
+        ca = Path(package) / "cert.pem"
+        ca.write_text("")
+        bundled = os.path.join(package, "arm64", "bin", "openconnect")
+        cfg = Config(user="ab123")
+        with mock.patch.object(tn.pf, "IS_MACOS", True), mock.patch.object(tn.pf, "PACKAGE_DIR", package), \
+                mock.patch.object(tn.pf, "MACOS_CA_FILE", str(ca)):
+            cmd = tn.Tunnel(cfg, bundled, WRAPPER, logging.getLogger("t")).command(1)
+            self.assertIn(f"--cafile={ca}", cmd)
+            self.assertEqual(cmd[-1], cfg.host)
+            # Homebrew's openconnect finds its own certificate file.
+            cmd = tn.Tunnel(cfg, "/opt/homebrew/bin/openconnect", WRAPPER, logging.getLogger("t")).command(1)
+            self.assertFalse(any(arg.startswith("--cafile") for arg in cmd))
+
     def test_profile_flags(self):
         cmd = self.make(host="sslvpn.ethz.ch", authgroup="staff-net", usergroup="exchange", os="win",
                         useragent="AnyConnect", username_suffix="@staff-net.ethz.ch", no_external_auth=True).command(1)

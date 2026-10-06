@@ -39,6 +39,21 @@ Record the environment: macOS version, chip, Homebrew version, Chrome and Firefo
     `~/Library/Application Support/uni-vpn/app`): service gone (`launchctl print` reports an
     error), files gone.
 
+## The download (uni-vpn.pkg)
+
+On a second fresh user account, or after step 12:
+
+D1. Download [uni-vpn.pkg](https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn.pkg)
+    and double-click it. Until it is signed, macOS says it "cannot be opened": System Settings,
+    Privacy & Security, "Open Anyway". Note every dialog.
+    Expected: the usual installer pages, one password prompt, then the "Uni VPN" window with the
+    assistant. Homebrew is not needed and not installed.
+D2. Finish the assistant and open a university page in Chrome: it loads through the VPN.
+D3. Log out and in: the shield is back in the menu bar.
+D4. Drag "Uni VPN" from Applications to the Trash. Within about 10 minutes the shield is gone,
+    the proxy setting is off (System Settings, Network, Details, Proxies) and
+    `~/Library/LaunchAgents/de.davidvinu.uni-vpn.plist` no longer exists.
+
 Report the result as an issue or pull request with the table filled in:
 
 | Step | Result | Dialogs |

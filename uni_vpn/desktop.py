@@ -78,8 +78,17 @@ def app_path() -> Path:
 
         return Path(start_menu_dir()) / f"{APP_NAME}.lnk"
     if pf.IS_MACOS:
-        return Path.home() / "Applications" / f"{APP_NAME}.app"
+        packaged = packaged_app()
+        return packaged or Path.home() / "Applications" / f"{APP_NAME}.app"
     return _data_home() / "applications" / f"{APP_ID}.desktop"
+
+
+def packaged_app() -> Path | None:
+    """macOS: the app the .pkg put in /Applications, ready built (packaging/macos)."""
+    if not (pf.IS_MACOS and pf.PACKAGE_DIR and pf.packaged()):
+        return None
+    app = Path(pf.PACKAGE_DIR).parent.parent
+    return app if (app / "Contents" / "MacOS" / APP_NAME).is_file() else None
 
 
 def legacy_paths() -> list[Path]:
@@ -89,7 +98,8 @@ def legacy_paths() -> list[Path]:
 
         return [Path(start_menu_dir()) / f"{APP_NAME}.url"]
     if pf.IS_MACOS:
-        return []
+        # The one setup built before the .pkg brought its own.
+        return [Path.home() / "Applications" / f"{APP_NAME}.app"] if packaged_app() else []
     return [_data_home() / "applications" / "uni-vpn.desktop"]
 
 
@@ -109,6 +119,10 @@ def windows_build_dir() -> Path:
     # Next to the program in Program Files: what runs as the user must not be changeable by
     # other programs of the user either.
     return pf.repo_root() / "desktop"
+
+
+# Written next to the app by the Windows installer, which ships it ready built.
+PREBUILT_MARKER = ".prebuilt"
 
 
 def windows_exe() -> Path:
@@ -216,6 +230,14 @@ def _icns(png: Path, target: Path, run) -> bool:
 
 def _install_macos(port: int, dry: bool, created, run) -> bool:
     app = app_path()
+    if packaged_app():
+        if dry:
+            _say(f"would start {app} at login ({login_path()})")
+            return True
+        _stop_running(run)
+        for legacy in legacy_paths():
+            shutil.rmtree(legacy, ignore_errors=True)
+        return _register_macos(app, created, run)
     swiftc = _swiftc(run) if not dry else shutil.which("swiftc") or "swiftc"
     if not swiftc:
         print("   Swift is missing (Xcode Command Line Tools), the app opens in the browser for now")
@@ -249,10 +271,15 @@ def _install_macos(port: int, dry: bool, created, run) -> bool:
         app.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(bundle), str(app))
     created(app)
+    return _register_macos(app, created, run)
+
+
+def _register_macos(app: Path, created, run) -> bool:
+    login = login_path()
     lsregister = ("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/"
                   "Support/lsregister")
     _quiet(run, [lsregister, "-f", str(app)])
-    _say(f"App built: {app}")
+    _say(f"App ready: {app}")
     login.parent.mkdir(parents=True, exist_ok=True)
     with open(login, "wb") as handle:
         plistlib.dump(login_plist(app / "Contents" / "MacOS" / APP_NAME), handle)
@@ -319,16 +346,31 @@ def _install_windows(port: int, dry: bool, created, run, download=_download) -> 
         _say(f"would build {exe} with {csc or 'csc.exe'} and the WebView2 SDK {WEBVIEW2_VERSION}, "
              f"add {app_path()} and start it at login ({login_path()})")
         return True
-    if csc is None:
-        print("   The .NET Framework compiler is missing, the app opens in the browser for now")
+    if (windows_build_dir() / PREBUILT_MARKER).is_file() and exe.is_file():
+        # Built by the Windows installer (packaging/windows); restart the running copy.
+        _stop_running(run)
+        return _windows_entries(port, created, run)
+    problem = build_windows_app(run, download)
+    if problem:
+        print(f"   {problem}, the app opens in the browser for now")
         return _browser_entry(port, dry, created, run)
+    _say(f"App built: {exe}")
+    return _windows_entries(port, created, run)
+
+
+def build_windows_app(run=subprocess.run, download=_download) -> str | None:
+    """Builds windows_exe() with its WebView2 files; also used by the Windows installer's build.
+    None on success, otherwise what went wrong."""
+    csc = csc_path()
+    if csc is None:
+        return "The .NET Framework compiler is missing"
     build = windows_build_dir()
+    exe = windows_exe()
     try:
         sdk = Path(tempfile.mkdtemp(prefix="uni-vpn-sdk-"))
         extract_webview2(download(WEBVIEW2_URL), sdk)
     except (OSError, ValueError, zipfile.BadZipFile) as exc:
-        print(f"   WebView2 SDK not available ({exc}), the app opens in the browser for now")
-        return _browser_entry(port, dry, created, run)
+        return f"WebView2 SDK not available ({exc})"
     _stop_running(run)
     shutil.rmtree(build, ignore_errors=True)
     build.mkdir(parents=True, exist_ok=True)
@@ -345,9 +387,12 @@ def _install_windows(port: int, dry: bool, created, run, download=_download) -> 
     except (OSError, subprocess.SubprocessError) as exc:
         result = subprocess.CompletedProcess(command, 1, stdout=str(exc), stderr="")
     if result.returncode != 0:
-        print(f"   Building the app failed, it opens in the browser for now: {(result.stdout or '').strip()[-400:]}")
-        return _browser_entry(port, dry, created, run)
-    _say(f"App built: {exe}")
+        return f"Building the app failed: {(result.stdout or '').strip()[-400:]}"
+    return None
+
+
+def _windows_entries(port: int, created, run) -> bool:
+    exe = windows_exe()
     for legacy in legacy_paths():
         legacy.unlink(missing_ok=True)
     for path, arguments in ((app_path(), f"--port {port}"), (login_path(), f"--port {port} --hidden")):

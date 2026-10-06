@@ -799,3 +799,4 @@ class UpdateTests(unittest.TestCase):
             rc = setup.update(argparse.Namespace(dry_run=False), download=lambda target: calls.append(target))
         self.assertEqual(rc, 0)
         self.assertEqual(calls, [root, "restart"])
+
