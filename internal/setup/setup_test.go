@@ -16,6 +16,7 @@ import (
 	"github.com/DavidVinu/uni-vpn/internal/credentials"
 	"github.com/DavidVinu/uni-vpn/internal/desktop"
 	"github.com/DavidVinu/uni-vpn/internal/detect"
+	"github.com/DavidVinu/uni-vpn/internal/platform"
 	"github.com/DavidVinu/uni-vpn/internal/service"
 )
 
@@ -818,7 +819,7 @@ func TestUninstallFailuresAreReportedNotHidden(t *testing.T) {
 }
 
 func getShCopy(t *testing.T, h *harness, git bool) string {
-	app := filepath.Join(h.home, ".local", "share", "uni-vpn", "app")
+	app := platform.AppInstallDir() // under h.home
 	os.MkdirAll(filepath.Join(app, "bin"), 0o755)
 	os.WriteFile(filepath.Join(app, "bin", "uni-vpn-core"), []byte(""), 0o755)
 	if git {
