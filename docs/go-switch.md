@@ -38,8 +38,10 @@ Next to them, `core-manifest.json`:
     {"commit": "<40 hex>", "handover": false,
      "files": {"uni-vpn-core-linux-amd64.zip": {"sha256": "<64 hex>", "size": 123}, ...}}
 
-The binary carries its commit (`-ldflags -X`); `uni-vpn-core --version` prints
-`uni-vpn <version> <commit>`. From main they are uploaded to the release "latest" next to the
+The binary carries its commit:
+`go build -ldflags "-X github.com/DavidVinu/uni-vpn/internal/daemon.Commit=<sha>" ./cmd/uni-vpn`.
+`uni-vpn-core --version` then prints `uni-vpn <version> <commit>` (just `uni-vpn <version>`
+without one), and the status reports it as `commit`. From main they are uploaded to the release "latest" next to the
 installers, after the commit was promoted to "stable":
 `https://github.com/DavidVinu/uni-vpn/releases/latest/download/core-manifest.json`.
 
@@ -55,13 +57,25 @@ the hand-over.
 
 ## The Go updater
 
-Same schedule and the same rules as the Python one (first check after 10 minutes, then every 5
-hours plus jitter, applied only when idle, `auto_update` in config.toml, `update_pending` in
-status). It reads the manifest, compares the commit with its own, downloads and checks the zip
-for its platform, smoke-tests the new binary and replaces the files one by one (on Windows a
-running .exe is renamed to `.old` first and removed on the next start). It never removes files it
-did not install, so the Python tree stays for the hand-over chain. A build without a commit
-(a developer's `go build`) never updates itself.
+`internal/updater`, run by the daemon (`internal/daemon/update.go`). Same schedule and the same
+rules as the Python one (first check after 10 minutes, then every 5 hours plus up to 30 minutes,
+switching `auto_update` on checks right away, applied only when idle, `auto_update` in
+config.toml, `update_pending` in status). It reads the manifest, compares the commit with its
+own, downloads the zip for its platform (size limit, then size and SHA-256 from the manifest),
+unpacks it into `.uni-vpn-core-update-*` next to the install root (paths outside the root,
+absolute paths, `..` and symlinks are refused), runs `<staged>/bin/uni-vpn-core --version`
+(must print the manifest's commit) and replaces the files one by one. On Windows a file that is
+in use (the running .exe) is renamed to `<name>.old` first (`<name>.1.old` and so on while an
+older `.old` is still running) and removed on the next start.
+
+The install root is the folder above `bin/` holding the running `uni-vpn-core`. The updater
+records the files it installed in `<root>/.core-files` and the commit in `<root>/.commit`. It
+only ever deletes files listed there, so the Python tree stays for the hand-over chain. A build
+without a commit (a developer's `go build`), a binary outside `bin/` of an installation and a
+root with `.git` never update themselves.
+
+`uni-vpn-core update` checks right away, installs what it finds and restarts the service
+(`--dry-run` only says what it would do).
 
 Restart after an update: `syscall.Exec` of the new binary with the same arguments on Linux and
 macOS; on Windows exit 75 when `UNI_VPN_SUPERVISED` is set, otherwise stay as a supervisor that

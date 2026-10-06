@@ -2,7 +2,6 @@ package main
 
 import (
 	"os"
-	"os/exec"
 
 	"golang.org/x/sys/windows"
 )
@@ -26,22 +25,4 @@ func acquireLock(path string) (*os.File, error) {
 		return nil, nil
 	}
 	return f, nil
-}
-
-// restart: Task Scheduler restarts nothing that ends normally, and the job object ends the
-// children with this process, so this process waits for the new one.
-func restart() int {
-	exe, err := os.Executable()
-	if err != nil {
-		return 1
-	}
-	cmd := exec.Command(exe, os.Args[1:]...)
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	if err := cmd.Run(); err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			return ee.ExitCode()
-		}
-		return 1
-	}
-	return 0
 }

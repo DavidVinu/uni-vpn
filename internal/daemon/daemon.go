@@ -38,6 +38,7 @@ import (
 	"github.com/DavidVinu/uni-vpn/internal/totp"
 	"github.com/DavidVinu/uni-vpn/internal/tunnel"
 	unis "github.com/DavidVinu/uni-vpn/internal/universities"
+	"github.com/DavidVinu/uni-vpn/internal/updater"
 	"github.com/DavidVinu/uni-vpn/internal/winsys"
 	"github.com/DavidVinu/uni-vpn/internal/wintunnel"
 )
@@ -47,6 +48,11 @@ const (
 	Version  = "0.1.0"
 	Protocol = 1
 )
+
+// Commit is the commit the binary was built from, set by the release build with
+// -ldflags "-X github.com/DavidVinu/uni-vpn/internal/daemon.Commit=<sha>". Empty for a
+// developer build, which never updates itself.
+var Commit string
 
 // State is the daemon state; the names are the status.json values.
 type State string
@@ -114,6 +120,8 @@ type Options struct {
 	RepairStart  func() (Process, error)
 	// Elevated is is_admin() on Windows, nil elsewhere (status "elevated": null).
 	Elevated func() *bool
+	// Updater is the self-updater; nil means updater.New(Commit).
+	Updater Updater
 }
 
 type lastError struct {
@@ -161,8 +169,16 @@ type Daemon struct {
 	http          *httpapi.Server
 
 	// RestartRequested is set when the program files were replaced and the caller should
-	// start the new code. The Go core does not update itself, so it stays false.
+	// start the new code. Read it after Run returned.
 	RestartRequested bool
+
+	// Like Chrome: check a while after the start, then every few hours. Tests change these
+	// and the clock (after) before Run.
+	updateFirstCheck time.Duration
+	updateInterval   time.Duration
+	updateJitter     time.Duration
+	after            func(time.Duration) <-chan time.Time
+	updateNow        chan struct{}
 
 	forwarder *forwarder.Forwarder
 	closeAll  func() // forwarder.CloseAll; tests replace it before Run
@@ -179,6 +195,8 @@ func New(cfg *config.Config, log *slog.Logger, opts Options) *Daemon {
 	d := &Daemon{log: log, cfg: cfg, base: time.Now(), changed: make(chan struct{}), wake: make(chan struct{}),
 		stop: make(chan struct{}), started: make(chan struct{})}
 	d.wall = func() float64 { return float64(time.Now().UnixNano()) / 1e9 }
+	d.updateFirstCheck, d.updateInterval, d.updateJitter = 600*time.Second, 5*time.Hour, 30*time.Minute
+	d.after, d.updateNow = time.After, make(chan struct{}, 1)
 	if opts.PasswordGetter == nil {
 		opts.PasswordGetter = func(ctx context.Context) ([]byte, error) {
 			user, timeout := d.keyringArgs()
@@ -227,6 +245,9 @@ func New(cfg *config.Config, log *slog.Logger, opts Options) *Daemon {
 	}
 	if opts.RepairStart == nil {
 		opts.RepairStart = StartRepairProcess
+	}
+	if opts.Updater == nil {
+		opts.Updater = updater.New(Commit)
 	}
 	if opts.Elevated == nil {
 		opts.Elevated = func() *bool {
@@ -455,10 +476,9 @@ func (d *Daemon) Status() (pyjson.Object, error) {
 	return pyjson.O(
 		"protocol", Protocol,
 		"version", Version,
-		// No self-update in the Go core: no commit, nothing pending.
-		"commit", nil,
+		"commit", nullable(d.opts.Updater.Installed()),
 		"auto_update", cfg.AutoUpdate,
-		"update_pending", nil,
+		"update_pending", nullable(d.opts.Updater.Pending()),
 		"state", string(d.state),
 		"message", d.message.Text,
 		// For translations and the app's fix button, see messages.
@@ -739,7 +759,7 @@ func (d *Daemon) SetDomains(text string) ([]string, error) {
 	return domains, nil
 }
 
-// SetAutoUpdate stores the setting. The Go core has no updater, so nothing else happens.
+// SetAutoUpdate stores the setting. Switching it on checks right away, like Tailscale.
 func (d *Daemon) SetAutoUpdate(enabled bool) error {
 	d.mu.Lock()
 	path, needsSetup := d.configPath, d.needsSetup
@@ -762,6 +782,12 @@ func (d *Daemon) SetAutoUpdate(enabled bool) error {
 		word = "on"
 	}
 	d.logf(slog.LevelInfo, "Automatic updates %s", word)
+	if enabled {
+		select {
+		case d.updateNow <- struct{}{}:
+		default:
+		}
+	}
 	return nil
 }
 
@@ -799,9 +825,12 @@ func (d *Daemon) Run() {
 	d.bindForwarder()
 	tickerDone := make(chan struct{})
 	go func() { d.ticker(); close(tickerDone) }()
+	updatesDone := make(chan struct{})
+	go func() { d.autoUpdate(); close(updatesDone) }()
 	close(d.started)
 	<-d.stop
 	<-tickerDone
+	<-updatesDone
 	d.mu.Lock()
 	if d.loopRunning {
 		d.loopCancel()

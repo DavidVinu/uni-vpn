@@ -30,14 +30,3 @@ func acquireLock(path string) (*os.File, error) {
 	}
 	return f, nil
 }
-
-// restart starts the updated program in place of this process: same process id, so systemd
-// and launchd keep watching the same service.
-func restart() int {
-	exe, err := os.Executable()
-	if err != nil {
-		return 1
-	}
-	_ = syscall.Exec(exe, os.Args, os.Environ())
-	return 1
-}
