@@ -27,9 +27,11 @@ def package_dir(root: Path) -> Path | None:
 
 
 def package_gone(root: Path) -> bool:
-    """True when this copy came from an installer whose files are no longer there."""
+    """True when this copy came from an installer whose files are no longer there: neither the
+    Python program nor the Go core (a package of the Go core alone replaces this one)."""
     package = package_dir(root)
-    return package is not None and not (package / "app" / "uni_vpn" / "__init__.py").is_file()
+    return (package is not None and not (package / "app" / "uni_vpn" / "__init__.py").is_file()
+            and not (package / "app" / "bin" / "uni-vpn-core").is_file())
 
 
 def _forget_service(run=subprocess.run) -> bool:

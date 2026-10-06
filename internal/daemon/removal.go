@@ -47,19 +47,16 @@ func isFile(path string) bool {
 	return err == nil && st.Mode().IsRegular()
 }
 
-// PackageGone is true when root came from an installer whose files are no longer there. A
-// copy of the Python program looks for the package's Python program; a Go-native copy (no
-// uni_vpn/__init__.py of its own) for the package's Go core.
+// PackageGone is true when root came from an installer whose files are no longer there: neither
+// the package's Python program nor its Go core. Either counts for any copy, because a package
+// of the Go core alone replaces one with the Python program (packaging/stage-app.sh --go).
 func PackageGone(root string) bool {
 	pkg := PackageDir(root)
 	if pkg == "" {
 		return false
 	}
-	marker := filepath.Join(pkg, "app", "uni_vpn", "__init__.py")
-	if !isFile(filepath.Join(root, "uni_vpn", "__init__.py")) {
-		marker = filepath.Join(pkg, "app", "bin", "uni-vpn-core")
-	}
-	return !isFile(marker)
+	return !isFile(filepath.Join(pkg, "app", "uni_vpn", "__init__.py")) &&
+		!isFile(filepath.Join(pkg, "app", "bin", "uni-vpn-core"))
 }
 
 // watchPackage uninstalls once the package is gone on two checks in a row, so that installing

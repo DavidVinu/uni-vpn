@@ -31,6 +31,14 @@ class PackageTests(unittest.TestCase):
         (root / "installer" / "app" / "uni_vpn" / "__init__.py").unlink()
         self.assertTrue(removal.package_gone(copy))
 
+    def test_a_package_of_the_go_core_is_not_a_removal(self):
+        root = Path(tempfile.mkdtemp())
+        copy = package(root)
+        (root / "installer" / "app" / "uni_vpn" / "__init__.py").unlink()
+        (root / "installer" / "app" / "bin").mkdir()
+        (root / "installer" / "app" / "bin" / "uni-vpn-core").write_text("")
+        self.assertFalse(removal.package_gone(copy))
+
     def test_remove_keeps_the_keyring_and_ends_the_service_last(self):
         calls = []
 
