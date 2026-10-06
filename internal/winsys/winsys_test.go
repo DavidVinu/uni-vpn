@@ -41,12 +41,20 @@ func TestRenderTask(t *testing.T) {
 
 func TestRenderTaskBinaryDiffersOnlyInTheProgram(t *testing.T) {
 	py := RenderTask(`C:\Py\pythonw.exe`, `C:\x\uni-vpn`, "u", `C:\w`)
-	gobin := RenderTaskBinary(`C:\Program Files\uni-vpn\uni-vpn.exe`, "u", `C:\w`)
+	gobin := RenderTaskBinary("", `C:\Program Files\uni-vpn\uni-vpn.exe`, "u", `C:\w`)
 	want := strings.Replace(strings.Replace(py, `<Command>C:\Py\pythonw.exe</Command>`,
 		`<Command>C:\Program Files\uni-vpn\uni-vpn.exe</Command>`, 1),
 		`<Arguments>-I C:\x\uni-vpn daemon</Arguments>`, `<Arguments>daemon</Arguments>`, 1)
 	if gobin != want || py == want {
 		t.Fatal(gobin)
+	}
+	headless := RenderTaskBinary(`C:\Windows\System32\conhost.exe`, `C:\Program Files\R&D\uni-vpn-core.exe`, "u", `C:\w`)
+	want = strings.Replace(strings.Replace(py, `<Command>C:\Py\pythonw.exe</Command>`,
+		`<Command>C:\Windows\System32\conhost.exe</Command>`, 1),
+		`<Arguments>-I C:\x\uni-vpn daemon</Arguments>`,
+		`<Arguments>--headless "C:\Program Files\R&amp;D\uni-vpn-core.exe" daemon</Arguments>`, 1)
+	if headless != want {
+		t.Fatal(headless)
 	}
 }
 

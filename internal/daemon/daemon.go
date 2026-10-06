@@ -122,6 +122,8 @@ type Options struct {
 	Elevated func() *bool
 	// Updater is the self-updater; nil means updater.New(Commit).
 	Updater Updater
+	// PackageWatch: uninstall once the installer's folder is gone (removal.go).
+	PackageWatch PackageWatch
 }
 
 type lastError struct {
@@ -827,6 +829,7 @@ func (d *Daemon) Run() {
 	go func() { d.ticker(); close(tickerDone) }()
 	updatesDone := make(chan struct{})
 	go func() { d.autoUpdate(); close(updatesDone) }()
+	go d.watchPackage(d.opts.PackageWatch)
 	close(d.started)
 	<-d.stop
 	<-tickerDone

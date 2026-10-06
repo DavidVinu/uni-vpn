@@ -135,7 +135,7 @@ func TestTaskXMLIsAcceptedByTaskScheduler(t *testing.T) {
 	name := fmt.Sprintf("uni-vpn-test-%08x", time.Now().UnixNano()&0xffffffff)
 	exe, _ := os.Executable()
 	xmlFile := filepath.Join(t.TempDir(), "task.xml")
-	text := strings.ReplaceAll(RenderTaskBinary(exe, CurrentUser(), filepath.Dir(exe)), "\n", "\r\n")
+	text := strings.ReplaceAll(RenderTaskBinary(Conhost(), exe, CurrentUser(), filepath.Dir(exe)), "\n", "\r\n")
 	data := []byte{0xFF, 0xFE}
 	for _, r := range text {
 		data = append(data, byte(r), byte(r>>8)) // ASCII and BMP paths only

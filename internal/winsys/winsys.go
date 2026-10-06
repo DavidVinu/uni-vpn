@@ -91,8 +91,16 @@ func RenderTask(python, script, user, workdir string) string {
 }
 
 // RenderTaskBinary is RenderTask for the Go core: the single binary runs "<binary> daemon".
-func RenderTaskBinary(binary, user, workdir string) string {
-	return taskXML(binary, "daemon", user, workdir)
+// The binary is a console program, so started by itself it would open a console window at
+// every logon (the Python core avoids that with pythonw.exe). With conhost set (System32's
+// conhost.exe, see Conhost) the task runs "conhost.exe --headless <binary> daemon": the
+// daemon gets a console that is never shown, so Ctrl+C handling for openconnect keeps
+// working. conhost "" runs the binary directly.
+func RenderTaskBinary(conhost, binary, user, workdir string) string {
+	if conhost == "" {
+		return taskXML(binary, "daemon", user, workdir)
+	}
+	return taskXML(conhost, "--headless "+XMLEscape(QuoteArg(binary))+" daemon", user, workdir)
 }
 
 // taskXML takes arguments already escaped.
