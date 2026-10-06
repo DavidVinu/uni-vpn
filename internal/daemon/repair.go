@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sync"
@@ -22,20 +23,41 @@ import (
 // RepoRoot is the installation the installer scripts live in: the parent of BinDir.
 func RepoRoot() string { return filepath.Dir(BinDir()) }
 
-// RepairCommand is the installer's command line.
+// RepairCommand is the installer's command line. An installation without the installer
+// scripts (the Go core on its own) runs this program's "setup --no-browser" instead, which
+// registers the service and the app again and restarts the service.
 func RepairCommand() []string {
 	root := RepoRoot()
+	self := func() []string {
+		exe, err := os.Executable()
+		if err != nil {
+			exe = filepath.Join(BinDir(), "uni-vpn-core")
+		}
+		return []string{exe, "setup", "--no-browser"}
+	}
 	if platform.IsWindows {
-		return []string{"powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-			filepath.Join(root, "install.ps1"), "-Repair"}
+		script := filepath.Join(root, "install.ps1")
+		if !fileExists(script) {
+			// Already elevated: the service runs with administrator rights.
+			return self()
+		}
+		return []string{"powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-Repair"}
 	}
 	installer := []string{"/bin/bash", filepath.Join(root, "install.sh"), "--repair"}
+	if !fileExists(installer[1]) {
+		installer = self()
+	}
 	if !platform.IsMacOS {
 		if systemdRun, err := exec.LookPath("systemd-run"); err == nil {
 			return append([]string{systemdRun, "--user", "--collect", "--quiet", "--wait", "--"}, installer...)
 		}
 	}
 	return installer
+}
+
+func fileExists(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && st.Mode().IsRegular()
 }
 
 type cmdProcess struct {

@@ -114,6 +114,8 @@ type Options struct {
 	RepairStart  func() (Process, error)
 	// Elevated is is_admin() on Windows, nil elsewhere (status "elevated": null).
 	Elevated func() *bool
+	// PackageWatch: uninstall once the installer's folder is gone (removal.go).
+	PackageWatch PackageWatch
 }
 
 type lastError struct {
@@ -799,6 +801,7 @@ func (d *Daemon) Run() {
 	d.bindForwarder()
 	tickerDone := make(chan struct{})
 	go func() { d.ticker(); close(tickerDone) }()
+	go d.watchPackage(d.opts.PackageWatch)
 	close(d.started)
 	<-d.stop
 	<-tickerDone

@@ -60,6 +60,9 @@ func run(argv []string) int {
 			configPath = strings.TrimPrefix(a, "--config=")
 		case command == "":
 			command = a
+			if run, ok := installCommands[command]; ok { // setup.go
+				return run(configPath, args[i+1:])
+			}
 		default:
 			fmt.Fprintf(os.Stderr, "%s\nuni-vpn: error: unrecognized arguments: %s\n", usage, a)
 			return 2
