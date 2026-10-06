@@ -318,21 +318,36 @@ func TestKillWrapperKillsPortHolder(t *testing.T) {
 	if _, err := exec.LookPath("pkill"); err != nil {
 		t.Skip("pkill not installed")
 	}
-	port, err := FreePort()
-	if err != nil {
-		t.Fatal(err)
-	}
+	// Another package's test may take the free port before the dummy does: then the dummy
+	// exits with 3 and the test tries another port.
 	exe, _ := os.Executable()
-	dummy := exec.Command(exe, "ocproxy", "-D", "127.0.0.1:"+itoa(port), "-k", "30")
-	dummy.Env = append(os.Environ(), fakeoc.EnvVar+"=portholder")
-	if err := dummy.Start(); err != nil {
-		t.Fatal(err)
+	var port int
+	var dummy *exec.Cmd
+	var exited chan error
+	for attempt := 0; attempt < 5 && exited == nil; attempt++ {
+		p, err := FreePort()
+		if err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command(exe, "ocproxy", "-D", "127.0.0.1:"+itoa(p), "-k", "30")
+		cmd.Env = append(os.Environ(), fakeoc.EnvVar+"=portholder")
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan error, 1)
+		go func() { done <- cmd.Wait() }()
+		waitFor(3*time.Second, func() bool { return PortOpen(p) || len(done) > 0 })
+		time.Sleep(200 * time.Millisecond) // a failed Listen exits at once
+		if len(done) > 0 {
+			<-done
+			continue
+		}
+		port, dummy, exited = p, cmd, done
 	}
-	defer dummy.Process.Kill()
-	waitFor(3*time.Second, func() bool { return PortOpen(port) })
-	if !PortOpen(port) {
+	if dummy == nil {
 		t.Fatal("dummy does not hold the port")
 	}
+	defer dummy.Process.Kill()
 	tn := New(heidelberg(), "openconnect", wrapper, nil, "", t.TempDir())
 	tn.port = port
 	tn.killWrapper()
@@ -340,7 +355,7 @@ func TestKillWrapperKillsPortHolder(t *testing.T) {
 	if PortOpen(port) {
 		t.Fatal("port still open after killWrapper()")
 	}
-	_ = dummy.Wait()
+	<-exited
 	if code := exitCode(dummy.ProcessState); code != -9 {
 		t.Fatal(code)
 	}
