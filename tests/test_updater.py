@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import io
 import json
 import logging
@@ -8,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import urllib.error
 import zipfile
 from pathlib import Path
 from unittest import mock
@@ -40,13 +42,20 @@ def make_zip(files, comment=b""):
     return buf.getvalue()
 
 
-def github(stable=B, files=None, comment=None):
-    """Opener for api.github.com and codeload.github.com. Records the URLs it was asked for."""
+def github(stable=B, files=None, comment=None, release=None):
+    """Opener for api.github.com, codeload.github.com and the release files ({name: bytes}).
+    Records the URLs it was asked for."""
     asked = []
+    release = release or {}
 
     def opener(request, timeout=None):
         url = getattr(request, "full_url", request)
         asked.append(url)
+        for name, data in release.items():
+            if url == updater.CORE_FILE_URL.format(name=name):
+                return Response(data)
+        if url.startswith(updater.CORE_FILE_URL.format(name="")):
+            raise urllib.error.HTTPError(url, 404, "Not Found", None, None)
         if url == updater.LATEST_URL:
             if isinstance(stable, Exception):
                 raise stable
@@ -110,7 +119,8 @@ class ArchiveUpdaterTests(unittest.TestCase):
     def test_current_version_downloads_nothing(self):
         opener = github(stable=A)
         self.assertIsNone(updater.Updater(app(A), opener=opener).check())
-        self.assertEqual(opener.asked, [updater.LATEST_URL])
+        # Besides the commit only the Go core's manifest, which says whether to move over.
+        self.assertEqual(opener.asked, [updater.LATEST_URL, updater.CORE_MANIFEST_URL])
 
     def test_unknown_installed_commit_updates_once(self):
         root = app(None)
@@ -314,6 +324,126 @@ class ConfigTests(unittest.TestCase):
         path.write_text(path.read_text().replace("auto_update = false", 'auto_update = "no"'))
         with self.assertRaises(config.ConfigError):
             config.load(path)
+
+
+CORE = "uni-vpn-core-linux-amd64.zip"
+
+
+def core_zip(content=b"\x7fELF go core"):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("bin/uni-vpn-core", content)
+    return buf.getvalue()
+
+
+def release(commit=B, handover=True, data=None, sha=None, size=None):
+    data = data if data is not None else core_zip()
+    manifest = {"commit": commit, "handover": handover,
+                "files": {CORE: {"sha256": sha or hashlib.sha256(data).hexdigest(),
+                                 "size": size if size is not None else len(data)}}}
+    return {"core-manifest.json": json.dumps(manifest).encode(), CORE: data}
+
+
+def runner(version_output):
+    """subprocess.run for the updater: the Go core's --version answers version_output, the
+    Python smoke test runs for real."""
+    calls = []
+
+    def run(command, **kwargs):
+        if command[-1] == "--version":
+            calls.append(command)
+            return subprocess.CompletedProcess(command, 0, version_output, "")
+        return subprocess.run(command, **kwargs)
+
+    run.calls = calls
+    return run
+
+
+@mock.patch.object(updater, "core_name", lambda: CORE)
+@mock.patch.object(updater.pf, "IS_WINDOWS", False)
+class CoreHandoverTests(unittest.TestCase):
+    def updater_for(self, root, rel, version=f"uni-vpn 0.1.0 {B}\n", stable=B):
+        self.run_ = runner(version)
+        return updater.Updater(root, opener=github(stable=stable, release=rel), run=self.run_)
+
+    def test_without_handover_python_updates_as_before(self):
+        root = app(A)
+        u = self.updater_for(root, release(handover=False))
+        self.assertEqual(u.check(), B)
+        u.apply()
+        self.assertFalse((root / "bin" / "uni-vpn-core").exists())
+        self.assertEqual(self.run_.calls, [])
+
+    def test_handover_installs_the_go_core_with_the_new_version(self):
+        root = app(A)
+        u = self.updater_for(root, release())
+        self.assertEqual(u.check(), B)
+        self.assertFalse((root / "bin" / "uni-vpn-core").exists())
+        u.apply()
+        core = root / "bin" / "uni-vpn-core"
+        self.assertEqual(core.read_bytes(), b"\x7fELF go core")
+        self.assertTrue(os.access(core, os.X_OK))
+        self.assertEqual((root / "uni_vpn" / "__init__.py").read_text(), GOOD["uni_vpn/__init__.py"])
+        self.assertEqual(updater.installed_commit(root), B)
+        self.assertEqual(len(self.run_.calls), 1)
+        self.assertEqual(sorted(p.name for p in root.parent.iterdir()), ["app"])
+
+    def test_current_python_still_moves_over(self):
+        root = app(B)
+        u = self.updater_for(root, release())
+        self.assertEqual(u.check(), B)
+        u.apply()
+        self.assertTrue((root / "bin" / "uni-vpn-core").exists())
+        # Only the Go core was added; nothing of the Python version was touched or removed.
+        self.assertTrue((root / "uni_vpn" / "gone.py").exists())
+        self.assertEqual((root / "uni_vpn" / "__init__.py").read_text(), "__version__ = '1'\n")
+
+    def test_once_moved_over_nothing_more_happens(self):
+        root = app(B)
+        (root / "bin").mkdir()
+        (root / "bin" / "uni-vpn-core").write_bytes(b"old")
+        opener = github(release=release())
+        self.assertIsNone(updater.Updater(root, opener=opener).check())
+        self.assertEqual(opener.asked, [updater.LATEST_URL])
+
+    def test_manifest_of_another_commit_waits(self):
+        root = app(B)
+        self.assertIsNone(self.updater_for(root, release(commit="c" * 40)).check())
+
+    def test_missing_manifest_waits(self):
+        root = app(B)
+        self.assertIsNone(self.updater_for(root, {}).check())
+
+    def test_damaged_download_changes_nothing(self):
+        for rel in (release(sha="0" * 64), release(size=5), release(data=b"not a zip")):
+            root = app(A)
+            with self.assertRaises(updater.UpdateError):
+                self.updater_for(root, rel).check()
+            self.assertFalse((root / "bin").exists())
+            self.assertEqual((root / "uni_vpn" / "__init__.py").read_text(), "__version__ = '1'\n")
+            self.assertEqual(sorted(p.name for p in root.parent.iterdir()), ["app"])
+
+    def test_core_that_does_not_start_changes_nothing(self):
+        root = app(A)
+        with self.assertRaises(updater.UpdateError) as ctx:
+            self.updater_for(root, release(), version="uni-vpn 0.1.0 " + "c" * 40).check()
+        self.assertIn("does not start", str(ctx.exception))
+        self.assertEqual(sorted(p.name for p in root.parent.iterdir()), ["app"])
+
+
+class CoreNameTests(unittest.TestCase):
+    def test_names(self):
+        cases = [("linux", "x86_64", "uni-vpn-core-linux-amd64.zip"), ("linux", "aarch64", "uni-vpn-core-linux-arm64.zip"),
+                 ("darwin", "arm64", "uni-vpn-core-darwin-arm64.zip"), ("win32", "AMD64", "uni-vpn-core-windows-amd64.zip"),
+                 ("linux", "riscv64", None), ("freebsd14", "amd64", None)]
+        for system, machine, name in cases:
+            with mock.patch.object(updater.sys, "platform", system), \
+                    mock.patch.object(updater._platform, "machine", lambda m=machine: m):
+                self.assertEqual(updater.core_name(), name, (system, machine))
+
+    def test_source_is_fixed(self):
+        self.assertEqual(updater.CORE_MANIFEST_URL,
+                         "https://github.com/DavidVinu/uni-vpn/releases/latest/download/core-manifest.json")
 
 
 class RestartTests(unittest.TestCase):

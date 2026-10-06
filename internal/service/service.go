@@ -102,6 +102,9 @@ type Manager struct {
 	BrewPrefix func() string // macOS: Homebrew prefix for PATH, "" when none
 	// HTTPPort returns http_port from config.toml; nil or an error means the default 1081.
 	HTTPPort func() (int, error)
+	// Conhost is System32's conhost.exe on Windows: the task runs the binary in a console
+	// that is never shown (winsys.RenderTaskBinary). "" runs the binary directly.
+	Conhost string
 }
 
 // New acts on this machine.
@@ -113,6 +116,7 @@ func New() *Manager {
 		Sleep:      time.Sleep,
 		Getenv:     os.Getenv,
 		BrewPrefix: brewPrefix,
+		Conhost:    winsys.Conhost(),
 	}
 }
 
@@ -296,7 +300,8 @@ func (m *Manager) installWindows(target, binary string, dryRun bool) ([]string, 
 		// Runs elevated: anything the user can change could gain administrator rights.
 		m.printf("   Warning: %s is not in Program Files, use install.ps1 to install", binary)
 	}
-	text := winsys.RenderTaskBinary(binary, winsys.CurrentUser(), filepath.Dir(binary))
+	// The working directory is the installation, the parent of bin, as for the Python core.
+	text := winsys.RenderTaskBinary(m.Conhost, binary, winsys.CurrentUser(), filepath.Dir(filepath.Dir(binary)))
 	if dryRun {
 		m.printf("-> would register the scheduled task %s (%s) and start it", winsys.TaskName, target)
 		return []string{target}, nil

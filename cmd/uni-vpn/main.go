@@ -1,8 +1,9 @@
 // Command uni-vpn is the Go core of uni-vpn. It serves the same local API as the Python
 // service and reads the same config.toml and keyring entries.
 //
-// So far it implements the "daemon" subcommand (cmd_daemon of uni_vpn/cli.py); the other
-// commands stay with the Python core.
+// It implements what the service, the installers and the app need: daemon, update, setup,
+// uninstall and app. The other commands of uni_vpn/cli.py run in the Python core while it is
+// installed next to this one (fallback.go).
 package main
 
 import (
@@ -24,7 +25,7 @@ import (
 	"github.com/DavidVinu/uni-vpn/internal/wintunnel"
 )
 
-const usage = "usage: uni-vpn [--config CONFIG] [--version] daemon"
+const usage = "usage: uni-vpn [--config CONFIG] [--version] {daemon,update,setup,uninstall,app} ..."
 
 func main() {
 	// The hidden Ctrl+C helper of the Windows tunnel; returns for any other argv.
@@ -39,12 +40,12 @@ func run(argv []string) int {
 			args = append(args, a)
 		}
 	}
-	configPath, command := "", ""
+	configPath, command, dryRun := "", "", false
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
 		case a == "--version":
-			fmt.Println("uni-vpn " + daemon.Version)
+			fmt.Println(versionLine())
 			return 0
 		case a == "-h" || a == "--help":
 			fmt.Println(usage)
@@ -58,8 +59,16 @@ func run(argv []string) int {
 			configPath = args[i]
 		case strings.HasPrefix(a, "--config="):
 			configPath = strings.TrimPrefix(a, "--config=")
+		case a == "--dry-run" && command == "update":
+			dryRun = true
+		case a == "--dry-run":
+			fmt.Fprintf(os.Stderr, "%s\nuni-vpn: error: unrecognized arguments: %s\n", usage, a)
+			return 2
 		case command == "":
 			command = a
+			if run, ok := installCommands[command]; ok { // setup.go
+				return run(configPath, args[i+1:])
+			}
 		default:
 			fmt.Fprintf(os.Stderr, "%s\nuni-vpn: error: unrecognized arguments: %s\n", usage, a)
 			return 2
@@ -68,15 +77,21 @@ func run(argv []string) int {
 	switch command {
 	case "daemon":
 		return cmdDaemon(configPath)
+	case "update":
+		return cmdUpdate(dryRun)
 	case "":
 		fmt.Fprintln(os.Stderr, usage+"\nuni-vpn: error: the following arguments are required: command")
 	default:
+		if code, ok := runPython(argv); ok {
+			return code
+		}
 		fmt.Fprintf(os.Stderr, "uni-vpn: '%s' is not available in the Go core yet, use the Python core\n", command)
 	}
 	return 2
 }
 
 func cmdDaemon(configArg string) int {
+	exe := executable()
 	harden()
 	umask() // lock file, log and everything else readable only by the user
 	lockPath := platform.LockFile()
@@ -133,7 +148,7 @@ func cmdDaemon(configArg string) int {
 	}
 	_, statErr := os.Stat(cfgPath)
 	d := daemon.New(cfg, log, daemon.Options{ConfigError: configError, LogTail: tail.Lines, ConfigPath: cfgPath,
-		NeedsSetup: errors.Is(statErr, fs.ErrNotExist)})
+		NeedsSetup: errors.Is(statErr, fs.ErrNotExist), Updater: coreUpdater()})
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGTERM, os.Interrupt)
 	go func() {
@@ -144,7 +159,10 @@ func cmdDaemon(configArg string) int {
 	log.Info("uni-vpn stopped")
 	if d.RestartRequested {
 		lock.Close()
-		return restart()
+		if h, ok := log.Handler().(interface{ Close() error }); ok {
+			h.Close() // the new program opens the log file again
+		}
+		return restart(exe)
 	}
 	return 0
 }

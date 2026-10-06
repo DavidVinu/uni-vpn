@@ -166,6 +166,13 @@ func (t *Tunnel) Command(port int) []string {
 		// "exec" so that dash does not leave an sh running next to ocproxy.
 		fmt.Sprintf("--script=exec %s %d", ShellQuote(t.Wrapper), port),
 	)
+	// The openconnect from the .pkg was built against Homebrew's certificate file, which a Mac
+	// without Homebrew does not have.
+	if platform.IsMacOS && platform.IsBundled(t.OpenConnect) {
+		if st, err := os.Stat(platform.MacOSCAFile); err == nil && st.Mode().IsRegular() {
+			cmd = append(cmd, "--cafile="+platform.MacOSCAFile)
+		}
+	}
 	cmd = append(cmd, t.TokenArgs()...)
 	return append(cmd, t.Cfg.Host)
 }

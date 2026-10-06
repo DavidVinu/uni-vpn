@@ -4,6 +4,7 @@ package winsys
 
 import (
 	"errors"
+	"os"
 	"os/exec"
 	"strconv"
 	"sync"
@@ -89,6 +90,19 @@ func SystemDirs() (system, windowsDir string, err error) {
 	return system, windowsDir, err
 }
 
+// Conhost is System32's conhost.exe for RenderTaskBinary, "" when it is not there.
+func Conhost() string {
+	system, err := windows.GetSystemDirectory()
+	if err != nil {
+		return ""
+	}
+	path := system + `\conhost.exe`
+	if _, err := os.Stat(path); err != nil {
+		return ""
+	}
+	return path
+}
+
 // AwakeSeconds is the time the machine was awake. The monotonic clock keeps counting through
 // sleep on Windows, so the daemon's resume detection uses this instead.
 func AwakeSeconds() float64 {
@@ -127,7 +141,9 @@ func KillChildrenWithUs() bool {
 		return false
 	}
 	var info windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
-	info.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+	// Breakaway allowed: the Repair installer must outlive the service it restarts.
+	info.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE |
+		windows.JOB_OBJECT_LIMIT_BREAKAWAY_OK
 	if _, err := windows.SetInformationJobObject(job, windows.JobObjectExtendedLimitInformation,
 		uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info))); err != nil {
 		windows.CloseHandle(job)

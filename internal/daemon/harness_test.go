@@ -108,6 +108,9 @@ func newHarness(t *testing.T) *harness {
 	cfg := config.Default()
 	cfg.User, cfg.Host, cfg.OpenConnect, cfg.OCProxy = "u", "vpn.example", exe, exe
 	cfg.SocksPort, cfg.HTTPPort = freePort(t), freePort(t)
+	for cfg.HTTPPort == cfg.SocksPort { // the system may hand out a just freed port again
+		cfg.HTTPPort = freePort(t)
+	}
 	cfg.IdleMinutes, cfg.ReadyTimeout, cfg.ClientWait, cfg.StopGrace = 0.01, 4, 2, 1
 	cfg.HalfcloseGrace, cfg.DemandWindow, cfg.RetryInterval, cfg.Tick = 0.5, 0.3, 0.2, 0.1
 	cfg.Backoff = []float64{0.1, 0.1}
