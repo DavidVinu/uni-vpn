@@ -23,15 +23,17 @@ switches back. Go setup registers the service with `bin/uni-vpn-core daemon` dir
 
 ## Release files
 
-CI builds, on every push, one zip per platform with the files that differ from the source tree:
+CI builds (`packaging/build-core.sh`), on every push, one zip per platform holding the binary:
 
     uni-vpn-core-linux-amd64.zip     bin/uni-vpn-core
     uni-vpn-core-linux-arm64.zip     bin/uni-vpn-core
     uni-vpn-core-darwin-arm64.zip    bin/uni-vpn-core
     uni-vpn-core-darwin-amd64.zip    bin/uni-vpn-core
-    uni-vpn-core-windows-amd64.zip   bin/uni-vpn-core.exe, desktop/Uni VPN.exe
+    uni-vpn-core-windows-amd64.zip   bin/uni-vpn-core.exe
 
-and `core-manifest.json`:
+The app windows and openconnect come with the installers and are not part of these updates.
+
+Next to them, `core-manifest.json`:
 
     {"commit": "<40 hex>", "handover": false,
      "files": {"uni-vpn-core-linux-amd64.zip": {"sha256": "<64 hex>", "size": 123}, ...}}

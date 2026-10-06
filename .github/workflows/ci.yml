@@ -20,7 +20,7 @@ jobs:
         run: python3 -m unittest discover -s tests -t . -v
       - name: Shell syntax
         run: |
-          bash -n install.sh get.sh packaging/stage-app.sh packaging/macos/*.sh packaging/linux/build.sh
+          bash -n install.sh get.sh packaging/stage-app.sh packaging/macos/*.sh packaging/linux/build.sh packaging/build-core.sh
           sh -n packaging/uni-vpn-open packaging/macos/scripts/postinstall
       - name: Installer dry run
         run: ./install.sh --dry-run --user citest
@@ -106,6 +106,34 @@ jobs:
         run: |
           go build -o /tmp/uni-vpn-go ./cmd/uni-vpn
           UNI_VPN_CORE="/tmp/uni-vpn-go daemon" python3 -m unittest tests.contract.test_contract -v
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # A Python installation updates itself to the Go core the way users' copies will.
+      - name: Hand-over from the Python core
+        shell: bash
+        run: |
+          exe="$RUNNER_TEMP/uni-vpn-core"
+          [ "$RUNNER_OS" = Windows ] && exe="$exe.exe"
+          go build -ldflags "-X github.com/DavidVinu/uni-vpn/internal/daemon.Commit=$GITHUB_SHA" -o "$exe" ./cmd/uni-vpn
+          python tests/handover_e2e.py "$exe" "$GITHUB_SHA"
+
+  # The Go core for the updaters (docs/go-switch.md), published with the installers.
+  core-files:
+    needs: go
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: packaging/build-core.sh "$GITHUB_SHA" out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: core-files
+          path: out/*
+          retention-days: 7
 
   # Clients update themselves from "stable" (uni_vpn/updater.py): every green commit on main
   # moves it forward. Fast-forward only, so a slower older run never moves it back.
@@ -387,7 +415,7 @@ jobs:
           retention-days: 7
 
   publish:
-    needs: [promote, macos-pkg, linux-packages, windows-installer]
+    needs: [promote, macos-pkg, linux-packages, windows-installer, core-files]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -400,6 +428,10 @@ jobs:
           pattern: installer-*
           path: out
           merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: core-files
+          path: core
       # One release whose files are always the newest green main, like the "stable" branch.
       - name: Replace the files of the "latest" release
         env:
@@ -419,3 +451,6 @@ jobs:
           # uni-vpn-openconnect-win64.zip: what install.ps1 downloads when run without the installer.
           gh release upload latest out/uni-vpn.pkg out/uni-vpn-setup.exe out/uni-vpn.deb out/uni-vpn.rpm \
             out/uni-vpn-openconnect-win64.zip --clobber
+          # The manifest last: it must never name a file that is not there yet.
+          gh release upload latest core/uni-vpn-core-*.zip --clobber
+          gh release upload latest core/core-manifest.json --clobber
