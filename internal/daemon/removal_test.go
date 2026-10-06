@@ -52,6 +52,15 @@ func TestPackageGoneOnlyForACopyFromAnInstaller(t *testing.T) {
 	if PackageGone(copyDir) {
 		t.Fatal("Go-native copy looked for the Python program")
 	}
+	// A copy of the Python program after the package was replaced by one of the Go core alone.
+	copyDir, marker := installerCopy(t, false)
+	os.Remove(marker)
+	core := filepath.Join(PackageDir(copyDir), "app", "bin", "uni-vpn-core")
+	os.MkdirAll(filepath.Dir(core), 0o755)
+	os.WriteFile(core, nil, 0o755)
+	if PackageGone(copyDir) {
+		t.Fatal("a package of the Go core counted as removed")
+	}
 }
 
 func TestRemovedAppUninstallsAfterTwoChecks(t *testing.T) {
