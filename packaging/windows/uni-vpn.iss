@@ -143,9 +143,8 @@ begin
   SignedIn := OriginalUser();
   if CompareText(SignedIn, GetUserNameString()) <> 0 then
   begin
-    Reason := 'Installed as ' + GetUserNameString() + ' instead of ' + SignedIn +
-               '. uni-vpn has to run elevated as the signed-in user,' + #13#10 +
-               'so install it from an account with administrator rights.';
+    Reason := 'Uni VPN was installed with the account ' + GetUserNameString() + ', but it has to be set up for ' +
+               SignedIn + '.' + #13#10 + 'Sign in to Windows with an account that can install apps and open the installer again.';
     SaveStringToFile(LogFile, Reason + #13#10, False);
     SuppressibleMsgBox(SetupMessage(msgErrorTitle) + #13#10#13#10 + Reason, mbError, MB_OK, IDOK);
     Exit;
