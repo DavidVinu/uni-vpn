@@ -4,6 +4,7 @@ package winsys
 
 import (
 	"errors"
+	"os"
 	"os/exec"
 	"strconv"
 	"sync"
@@ -87,6 +88,19 @@ func SystemDirs() (system, windowsDir string, err error) {
 	}
 	windowsDir, err = windows.GetSystemWindowsDirectory()
 	return system, windowsDir, err
+}
+
+// Conhost is System32's conhost.exe for RenderTaskBinary, "" when it is not there.
+func Conhost() string {
+	system, err := windows.GetSystemDirectory()
+	if err != nil {
+		return ""
+	}
+	path := system + `\conhost.exe`
+	if _, err := os.Stat(path); err != nil {
+		return ""
+	}
+	return path
 }
 
 // AwakeSeconds is the time the machine was awake. The monotonic clock keeps counting through
