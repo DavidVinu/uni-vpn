@@ -69,6 +69,28 @@ class ParseTests(unittest.TestCase):
         with self.assertRaises(socks.DnsError):
             socks.parse_response(b"\x00\x01", 1)
 
+    def test_truncated_address_record(self):
+        query = socks.build_query("x.example", 7)
+        with self.assertRaisesRegex(socks.DnsError, "truncated answer"):
+            socks.parse_response(answer(query, ["1.2.3.4"])[:-2], 7)
+
+    def test_reason_never_empty(self):
+        self.assertEqual(socks.reason(asyncio.TimeoutError()), "timed out")
+        self.assertEqual(socks.reason(ConnectionResetError()), "ConnectionResetError")
+        self.assertEqual(socks.reason(socks.DnsError("host not found")), "host not found")
+
+
+class ResolveTests(unittest.IsolatedAsyncioTestCase):
+    async def test_timeout_is_named(self):
+        loop = asyncio.get_running_loop()
+        silent, _ = await loop.create_datagram_endpoint(asyncio.DatagramProtocol, local_addr=("127.0.0.1", 0))
+        try:
+            port = silent.get_extra_info("sockname")[1]
+            with self.assertRaisesRegex(socks.DnsError, r"^x\.example: timed out$"):
+                await socks.resolve("x.example", ["127.0.0.1"], "127.0.0.1", timeout=0.1, port=port)
+        finally:
+            silent.close()
+
 
 class ServerTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -141,6 +163,37 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         writer.write(b"\x05\x01\x02")
         self.assertEqual(await reader.readexactly(2), b"\x05\xff")
         writer.close()
+
+    async def test_wrong_version_is_dropped_before_reading_methods(self):
+        reader, writer = await asyncio.open_connection("127.0.0.1", self.port)
+        writer.write(b"\x04\xff")  # announces 255 methods that never come
+        self.assertEqual(await asyncio.wait_for(reader.read(10), 2), b"")
+        writer.close()
+
+    async def test_wrong_request_version_fails(self):
+        reader, writer = await asyncio.open_connection("127.0.0.1", self.port)
+        writer.write(b"\x05\x01\x00" + b"\x04\x01\x00\x01" + socket.inet_aton("127.0.0.1") + b"\x00\x50")
+        self.assertEqual(await reader.readexactly(2), b"\x05\x00")
+        self.assertEqual((await asyncio.wait_for(reader.readexactly(10), 2))[1], socks.REP_FAILURE)
+        self.assertEqual(await asyncio.wait_for(reader.read(10), 2), b"")
+        writer.close()
+
+    async def test_every_handshake_read_times_out(self):
+        old = socks.HANDSHAKE_TIMEOUT
+        socks.HANDSHAKE_TIMEOUT = 0.2
+        try:
+            for data in (b"\x05\x02\x00",  # one of two methods
+                         b"\x05\x01\x00\x05\x01\x00\x03\x10abc",  # short host name
+                         b"\x05\x01\x00\x05\x01\x00\x01\x7f\x00\x00\x01\x00"):  # half a port
+                reader, writer = await asyncio.open_connection("127.0.0.1", self.port)
+                writer.write(data)
+                received = await asyncio.wait_for(reader.read(10), 2)
+                if received == b"\x05\x00":
+                    received = await asyncio.wait_for(reader.read(10), 2)
+                self.assertEqual(received, b"", data)
+                writer.close()
+        finally:
+            socks.HANDSHAKE_TIMEOUT = old
 
     async def test_bind_command_unsupported(self):
         reader, writer = await asyncio.open_connection("127.0.0.1", self.port)

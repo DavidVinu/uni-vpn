@@ -173,7 +173,7 @@ def restore(saved: dict, run=subprocess.run) -> None:
     if "mode" in saved:
         _set(["gsettings", "set", SCHEMA, "mode", saved.get("mode") or "none"], run)
         _set(["gsettings", "set", SCHEMA, "autoconfig-url", saved.get("url") or ""], run)
-    if "kde" in saved:
+    if isinstance(saved.get("kde"), dict):  # "kde": null is no KDE setting
         _kde_set(str(saved["kde"].get("type") or "0"), saved["kde"].get("url") or "", run, desktop_only=False)
 
 
@@ -234,6 +234,8 @@ def uninstall(backup: Path | None = None, run=subprocess.run) -> str:
         saved = json.loads(backup.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return "unset"
+    if not isinstance(saved, dict):
+        return "unset"  # not a backup uni-vpn wrote
     try:
         restore(saved, run=run)
     except (OSError, subprocess.SubprocessError):

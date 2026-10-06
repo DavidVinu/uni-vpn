@@ -195,7 +195,7 @@ def load(path: Path | None = None) -> Config:
                 if tkey not in TIMING_KEYS:
                     raise ConfigError(f"unknown key '{tkey}'", line=_line_of_key(text, tkey, "timing"))
                 _check(tkey, tvalue, TIMING_KEYS[tkey], text, "timing")
-                if tkey == "backoff" and not all(isinstance(v, _NUMBER) for v in tvalue):
+                if tkey == "backoff" and not all(isinstance(v, _NUMBER) and not isinstance(v, bool) for v in tvalue):
                     raise ConfigError("'backoff' must be a list of numbers", line=_line_of_key(text, tkey, "timing"))
                 setattr(cfg, tkey, tvalue)
             continue
@@ -332,7 +332,7 @@ def ports_from_broken(path: Path | None) -> dict[str, int]:
     """
     try:
         text = (path or default_path()).read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return {}
     ports: dict[str, int] = {}
     for line in text.splitlines():

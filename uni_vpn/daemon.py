@@ -19,7 +19,7 @@ from . import config as config_mod
 from . import universities as unis
 from .config import Config
 from .forwarder import Forwarder
-from .tunnel import SAML_REQUIRED, PasswordEncodingError, Tunnel, remove_stale_token_files
+from .tunnel import SAML_REQUIRED, TOTP_UNUSABLE, PasswordEncodingError, TotpSecretError, Tunnel, remove_stale_token_files
 from .updater import UpdateError, Updater
 
 
@@ -554,6 +554,9 @@ class Daemon:
                     self.log.error("TOTP secret not readable: %s", exc)
                     self._final(State.keyring, M.TOTP_UNREADABLE)
                     return
+                if not totp:
+                    self._final(State.keyring, M.TOTP_MISSING)
+                    return
 
             self._set(State.connecting, M.CONNECTING)
             try:
@@ -564,6 +567,12 @@ class Daemon:
                 self.tunnel = None
                 self.log.error("%s", exc)
                 self._final(State.keyring, M.PASSWORD_UNSUPPORTED)
+                return
+            except TotpSecretError as exc:
+                # Like openconnect's "Soft token string is invalid" with totp_field.
+                self.tunnel = None
+                self.log.error("TOTP secret unusable: %s", exc)
+                self._final(State.auth_failed, TOTP_UNUSABLE)
                 return
             except OSError as exc:
                 self.tunnel = None

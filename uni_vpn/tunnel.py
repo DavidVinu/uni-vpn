@@ -34,14 +34,17 @@ LOGIN_REJECTED = {"totp_append": APPEND_REJECTED, "duo_push": DUO_REJECTED}
 AUTH_REJECTED = messages.AUTH_REJECTED
 SAML_REQUIRED = messages.SAML_REQUIRED
 HOSTSCAN_REQUIRED = messages.HOSTSCAN_REQUIRED
+TOTP_UNUSABLE = messages.TOTP_UNUSABLE
 OTP_GENERATED = "Generating OATH TOTP token code"
 LOGIN_FAILED = "Login failed"
 TOKEN_PREFIX = "totp-"
+# Longer output lines are cut here; asyncio's readline() would raise and end the reader.
+MAX_LINE = 64 * 1024
 
 # (substring of the openconnect output, state, message). The first match wins.
 MARKERS: list[tuple[str, str, str]] = [
     ("Server is rejecting the soft token", "auth_failed", TOTP_REJECTED),
-    ("Soft token string is invalid", "auth_failed", messages.TOTP_UNUSABLE),
+    ("Soft token string is invalid", "auth_failed", TOTP_UNUSABLE),
     ("User input required in non-interactive mode", "auth_failed", AUTH_REJECTED),
     ("Server asked us to run CSD", "auth_failed", HOSTSCAN_REQUIRED),
     ("Cisco Secure Desktop", "auth_failed", HOSTSCAN_REQUIRED),
@@ -117,6 +120,27 @@ def port_open(port: int) -> bool:
 
 class PasswordEncodingError(OSError):
     """The password cannot be passed to openconnect on this system."""
+
+
+class TotpSecretError(ValueError):
+    """The TOTP secret is missing or no code can be computed from it (totp_append)."""
+
+
+async def read_line(stream: asyncio.StreamReader, limit: int = MAX_LINE) -> bytes:
+    """Next line including its newline, b"" at EOF. Bytes beyond limit are dropped."""
+    kept = b""
+    while True:
+        try:
+            part = await stream.readuntil(b"\n")
+            done = True
+        except asyncio.IncompleteReadError as exc:  # EOF: the last line has no newline
+            part, done = exc.partial, True
+        except asyncio.LimitOverrunError as exc:  # longer than the buffer: take what is there
+            part, done = await stream.read(exc.consumed), False
+        if len(kept) < limit:
+            kept += part[:limit - len(kept)]
+        if done:
+            return kept
 
 
 class Tunnel:
@@ -224,8 +248,11 @@ class Tunnel:
         mfa = self.cfg.mfa
         if mfa == "totp_append":
             if not totp:
-                raise ValueError("totp_append needs a TOTP secret")
-            code = totp_mod.code(totp)
+                raise TotpSecretError("totp_append needs a TOTP secret")
+            try:
+                code = totp_mod.code(totp)
+            except ValueError as exc:
+                raise TotpSecretError(str(exc)) from None
             self.otp_generated_at = time.time()
             return self._password_bytes(password + self.cfg.totp_separator.encode() + code.encode()) + b"\n"
         data = self._password_bytes(password) + b"\n"
@@ -269,7 +296,7 @@ class Tunnel:
     async def _read_output(self) -> None:
         assert self.proc and self.proc.stdout
         while True:
-            line = await self.proc.stdout.readline()
+            line = await read_line(self.proc.stdout)
             if not line:
                 break
             text = line.decode(errors="replace").rstrip()
@@ -327,7 +354,11 @@ class Tunnel:
         # Pattern without a leading hyphen and after "--", otherwise pkill reads it as an option.
         pattern = f"ocproxy -D 127.0.0.1:{self.port} "
         self.log.warning("ocproxy still holds port %s, running pkill", self.port)
-        result = subprocess.run(["pkill", "-9", "-U", str(os.getuid()), "-f", "--", pattern], check=False)
+        try:
+            result = subprocess.run(["pkill", "-9", "-U", str(os.getuid()), "-f", "--", pattern], check=False)
+        except OSError as exc:  # pkill not installed: stop() must still finish
+            self.log.warning("pkill failed: %s", exc)
+            return
         self.log.warning("pkill exit code %s (0 = matched, 1 = no match, 2 = syntax error)", result.returncode)
 
     def reconnect(self) -> None:

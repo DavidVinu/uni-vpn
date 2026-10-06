@@ -112,6 +112,23 @@ class LinuxTests(unittest.TestCase):
             self.assertEqual(sysproxy.uninstall(backup=backup, run=Runner()), "failed")
         self.assertTrue(backup.exists())
 
+    def test_backup_that_is_not_an_object_counts_as_unset(self):
+        for text in ("[1]", "null", '"x"', "3"):
+            backup = Path(tempfile.mkdtemp()) / "proxy-backup.json"
+            backup.write_text(text)
+            run = Runner()
+            self.assertEqual(sysproxy.uninstall(backup=backup, run=run), "unset", text)
+            self.assertEqual(run.calls, [])
+
+    def test_backup_with_kde_null_restores_the_rest(self):
+        backup = Path(tempfile.mkdtemp()) / "proxy-backup.json"
+        backup.write_text(json.dumps({"mode": "none", "url": "", "kde": None}))
+        run = Runner()
+        with mock.patch.object(pf, "find_binary", lambda name, override=None: f"/usr/bin/{name}"):
+            self.assertEqual(sysproxy.uninstall(backup=backup, run=run), "restored")
+        self.assertIn(["gsettings", "set", "org.gnome.system.proxy", "mode", "none"], run.calls)
+        self.assertFalse([c for c in run.calls if "kwriteconfig6" in c[0]])
+
     def test_install_backs_up_then_applies_and_uninstall_restores(self):
         backup = Path(tempfile.mkdtemp()) / "proxy-backup.json"
         run = Runner({"gsettings get org.gnome.system.proxy mode": (0, "'none'\n"),
