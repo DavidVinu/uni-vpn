@@ -21,6 +21,57 @@ var (
 
 const Security = "/usr/bin/security"
 
+// MacOSCAFile holds the certificates macOS itself ships, in the form OpenSSL and GnuTLS read.
+const MacOSCAFile = "/etc/ssl/cert.pem"
+
+// PackageDir is where the installers (packaging/) put a read-only copy of the program, which
+// each user's own copy in AppInstallDir starts from; on macOS also openconnect and ocproxy.
+// Empty on Windows, where the installer installs straight into AppInstallDir.
+func PackageDir() string {
+	switch {
+	case IsMacOS:
+		return "/Applications/Uni VPN.app/Contents/Resources"
+	case IsWindows:
+		return ""
+	}
+	return "/usr/share/uni-vpn"
+}
+
+// BundledBinDir is, on macOS, the folder with openconnect and ocproxy from the .pkg, built for
+// this processor. Empty elsewhere or when it does not exist.
+func BundledBinDir() string {
+	if !IsMacOS {
+		return ""
+	}
+	machine := map[string]string{"amd64": "x86_64", "arm64": "arm64"}[runtime.GOARCH]
+	dir := filepath.Join(PackageDir(), machine, "bin")
+	if st, err := os.Stat(dir); err != nil || !st.IsDir() || machine == "" {
+		return ""
+	}
+	return dir
+}
+
+// IsBundled reports whether path lies inside PackageDir.
+func IsBundled(path string) bool {
+	pkg := PackageDir()
+	if pkg == "" || IsWindows {
+		return false
+	}
+	return strings.HasPrefix(realpath(path), realpath(pkg)+string(os.PathSeparator))
+}
+
+// realpath resolves symlinks as far as the path exists, like os.path.realpath.
+func realpath(p string) string {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return p
+	}
+	if r, err := filepath.EvalSymlinks(abs); err == nil {
+		return r
+	}
+	return abs
+}
+
 func programFiles() []string {
 	var out []string
 	seen := map[string]bool{}
@@ -54,7 +105,9 @@ func CiscoVPN() string {
 // SearchDirs are looked through after PATH (never PATH on Windows).
 func SearchDirs() []string {
 	if IsWindows {
-		var out []string
+		// openconnect.exe with Wintun comes with uni-vpn (packaging/windows/build-openconnect.sh);
+		// a separately installed OpenConnect still counts.
+		out := []string{filepath.Join(programFiles()[0], App, "openconnect")}
 		for _, base := range programFiles() {
 			for _, name := range []string{"OpenConnect-GUI", "OpenConnect"} {
 				out = append(out, filepath.Join(base, name))
@@ -142,7 +195,8 @@ func executable(p string) bool {
 	return IsWindows || st.Mode().Perm()&0o111 != 0
 }
 
-// FindBinary looks up a program: the override from config.toml, then PATH, then SearchDirs.
+// FindBinary looks up a program: the override from config.toml, then the macOS package, then
+// PATH, then SearchDirs.
 func FindBinary(name, override string) string {
 	if IsWindows && override != "" && !AdminOnly(override) {
 		// Neither PATH nor config.toml (both writable by the user) for the elevated service.
@@ -153,6 +207,11 @@ func FindBinary(name, override string) string {
 			return override
 		}
 		return ""
+	}
+	if dir := BundledBinDir(); dir != "" {
+		if c := filepath.Join(dir, name); executable(c) {
+			return c
+		}
 	}
 	if !IsWindows {
 		if found, err := exec.LookPath(name); err == nil {
