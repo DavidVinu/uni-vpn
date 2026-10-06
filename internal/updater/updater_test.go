@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -201,7 +202,8 @@ func TestUpdateInstallsTheNewCoreAndKeepsEverythingElse(t *testing.T) {
 	if read(t, filepath.Join(f.root, "bin", "uni-vpn-core")) != "new core" {
 		t.Fatal("not installed")
 	}
-	if st, _ := os.Stat(filepath.Join(f.root, "bin", "uni-vpn-core")); st.Mode().Perm() != 0o755 {
+	// Windows has no executable bit.
+	if st, _ := os.Stat(filepath.Join(f.root, "bin", "uni-vpn-core")); runtime.GOOS != "windows" && st.Mode().Perm() != 0o755 {
 		t.Fatal(st.Mode())
 	}
 	if read(t, filepath.Join(f.root, "bin", "uni-vpn")) != "python entry point" ||
