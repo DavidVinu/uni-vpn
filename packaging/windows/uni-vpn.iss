@@ -1,8 +1,8 @@
 ; One-click Windows installer (role model: Signal and Zoom: no pages, one administrator
 ; prompt, progress bar, the app opens at the end). Built by .github/workflows/ci.yml:
 ;   iscc /DAppVersion=0.1.42 /DSourceDir=stage /DOutputDir=out packaging\windows\uni-vpn.iss
-; The program goes to Program Files, where install.ps1 expects it; install.ps1 then adds
-; Python and OpenConnect if missing and sets uni-vpn up for the signed-in user.
+; The Go core (bin\uni-vpn-core.exe), OpenConnect and the app window go to Program Files; then
+; "uni-vpn-core.exe setup" sets uni-vpn up for the signed-in user. No Python.
 
 #ifndef AppVersion
   #define AppVersion "0.1.0"
@@ -54,9 +54,20 @@ Name: "zh"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
+[InstallDelete]
+; What the Python version had here: Python, its program and the install scripts.
+Type: filesandordirs; Name: "{app}\python"
+Type: filesandordirs; Name: "{app}\uni_vpn"
+Type: filesandordirs; Name: "{app}\launchd"
+Type: filesandordirs; Name: "{app}\systemd"
+Type: files; Name: "{app}\bin\uni-vpn"
+Type: files; Name: "{app}\install.ps1"
+Type: files; Name: "{app}\install.cmd"
+Type: files; Name: "{app}\install.sh"
+
 [UninstallRun]
-; "< nul": uninstall would otherwise wait for an answer nobody can see.
-Filename: "{cmd}"; Parameters: "/c powershell.exe -NoProfile -ExecutionPolicy Bypass -File ""{app}\install.ps1"" -Uninstall -Unattended < nul"; Flags: runhidden waituntilterminated; RunOnceId: "uninstall"
+; --yes: nobody could answer the question about the keyring entries.
+Filename: "{app}\bin\uni-vpn-core.exe"; Parameters: "uninstall --yes"; Flags: runhidden waituntilterminated; RunOnceId: "uninstall"
 
 [UninstallDelete]
 ; Files the automatic updates added after the installation.
@@ -70,7 +81,7 @@ var
   NameFile: String;
 begin
   { With a standard account, Windows asks for an administrator's password and this runs as that
-    administrator; install.ps1 has to know who will use uni-vpn. }
+    administrator, but uni-vpn has to be set up for the account that will use it. }
   Result := GetUserNameString();
   NameFile := ExpandConstant('{tmp}\user.txt');
   if ExecAsOriginalUser(ExpandConstant('{cmd}'), '/c echo %USERNAME%>"' + NameFile + '"', '', SW_HIDE,
@@ -100,22 +111,49 @@ begin
   Result := 'http://127.0.0.1:' + Port + '/';
 end;
 
+procedure StopRunning();
+var
+  ResultCode: Integer;
+begin
+  { An earlier version keeps its files open while it runs: the service (also the Python one),
+    openconnect and the app window. Ending the task first keeps Task Scheduler from starting
+    it again. }
+  Exec(ExpandConstant('{sys}\schtasks.exe'), '/End /TN uni-vpn', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), '-NoProfile -NonInteractive -Command "Get-Process | Where-Object { $_.Path -like ''' +
+       ExpandConstant('{app}') + '\*'' } | Stop-Process -Force"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
-  LogDir, LogFile: String;
+  LogDir, LogFile, SignedIn, Reason: String;
   Log: AnsiString;
   Start: Integer;
 begin
+  if (CurStep = ssInstall) and DirExists(ExpandConstant('{app}')) then
+    StopRunning();
   if CurStep <> ssPostInstall then
     Exit;
   WizardForm.StatusLabel.Caption := SetupMessage(msgStatusRunProgram);
   LogDir := ExpandConstant('{localappdata}\uni-vpn\logs');
   ForceDirectories(LogDir);
   LogFile := LogDir + '\install.log';
+  { Setup registers the service and the proxy setting for the account it runs as, like
+    install.ps1 -ForUser did. }
+  SignedIn := OriginalUser();
+  if CompareText(SignedIn, GetUserNameString()) <> 0 then
+  begin
+    Reason := 'Installed as ' + GetUserNameString() + ' instead of ' + SignedIn +
+               '. uni-vpn has to run elevated as the signed-in user,' + #13#10 +
+               'so install it from an account with administrator rights.';
+    SaveStringToFile(LogFile, Reason + #13#10, False);
+    SuppressibleMsgBox(SetupMessage(msgErrorTitle) + #13#10#13#10 + Reason, mbError, MB_OK, IDOK);
+    Exit;
+  end;
+  { "< nul": nobody can answer a question here. cmd /S /C drops the outer quotes. }
   if not Exec(ExpandConstant('{cmd}'),
-              '/c powershell.exe -NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\install.ps1') +
-              '" -Unattended -NoBrowser -ForUser "' + OriginalUser() + '" < nul > "' + LogFile + '" 2>&1',
+              '/S /C ""' + ExpandConstant('{app}\bin\uni-vpn-core.exe') + '" setup --no-browser < nul > "' +
+              LogFile + '" 2>&1"',
               '', SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
   begin
     LoadStringFromFile(LogFile, Log);

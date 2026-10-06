@@ -1,6 +1,6 @@
 # Built by packaging/linux/build.sh from a staging folder (paths below are relative to it).
 name: uni-vpn
-arch: all
+arch: ${ARCH}
 platform: linux
 version: ${VERSION}
 version_schema: none
@@ -15,6 +15,7 @@ description: |-
   Your university's VPN, only for university websites.
   Opens the university's websites through its VPN when needed, everything else stays on the normal connection.
 contents:
+  # The Go core and what it needs (packaging/stage-app.sh --go).
   - src: ./app
     dst: /usr/share/uni-vpn/app
     type: tree
@@ -32,18 +33,16 @@ contents:
 overrides:
   deb:
     depends:
-      - python3 (>= 3.11) | python3.11
       - openconnect
       - ocproxy
       - libsecret-tools
-      # The app window (app/linux); without it the browser opens instead.
+      # The app window (app/linux/uni-vpn-app.py); without it the browser opens instead.
       - python3-gi
       - gir1.2-webkit2-4.1 | gir1.2-webkit2-4.0
     recommends:
       - gir1.2-ayatanaappindicator3-0.1
   rpm:
     depends:
-      - python3 >= 3.11
       - openconnect
       - ocproxy
       - /usr/bin/secret-tool
