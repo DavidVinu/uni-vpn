@@ -12,12 +12,13 @@ import (
 	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"hash"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/DavidVinu/uni-vpn/internal/i18n"
 )
 
 // Algorithms maps the otpauth algorithm names to the token prefixes openconnect knows.
@@ -35,7 +36,7 @@ var base32RE = regexp.MustCompile(`^[A-Z2-7]+$`)
 func Normalize(text string) (string, error) {
 	text = strings.TrimFunc(text, pyIsSpace)
 	if strings.ContainsAny(text, "\n\r") {
-		return "", errors.New("Secret must not contain a line break")
+		return "", i18n.T("totp.line_break")
 	}
 	algorithm := "SHA1"
 	var secret string
@@ -45,7 +46,7 @@ func Normalize(text string) (string, error) {
 			return "", err
 		}
 		if strings.ToLower(netloc) != "totp" {
-			return "", errors.New("Only time-based tokens (otpauth://totp/...) are supported")
+			return "", i18n.T("totp.only_totp")
 		}
 		query := parseQuery(rawQuery)
 		secret = unquote(query["secret"])
@@ -53,10 +54,10 @@ func Normalize(text string) (string, error) {
 			algorithm = pyUpper(v)
 		}
 		if _, ok := Algorithms[algorithm]; !ok {
-			return "", fmt.Errorf("Algorithm %s is not supported", algorithm)
+			return "", i18n.T("totp.algorithm", "algorithm", algorithm)
 		}
 		if getDefault(query, "digits", "6") != "6" || getDefault(query, "period", "30") != "30" {
-			return "", errors.New("Only 6 digits and 30 seconds are supported")
+			return "", i18n.T("totp.digits")
 		}
 	} else {
 		secret = text
@@ -70,13 +71,13 @@ func Normalize(text string) (string, error) {
 	}
 	cleaned := strings.TrimRight(pyUpper(b.String()), "=")
 	if cleaned == "" {
-		return "", errors.New("Paste the secret first")
+		return "", i18n.T("totp.empty")
 	}
 	if !base32RE.MatchString(cleaned) {
-		return "", errors.New("That is not the secret. Copy the line starting with otpauth://, or the letters after secret=")
+		return "", i18n.T("totp.not_secret")
 	}
 	if len(cleaned) < MinChars {
-		return "", errors.New("The secret is incomplete. Copy the whole line")
+		return "", i18n.T("totp.incomplete")
 	}
 	if _, err := decode(cleaned); err != nil {
 		return "", err
@@ -107,7 +108,7 @@ func decode(cleaned string) ([]byte, error) {
 	padded := cleaned + strings.Repeat("=", (8-len(cleaned)%8)%8)
 	out, err := b32decode(padded)
 	if err != nil {
-		return nil, errors.New("Secret is not valid Base32")
+		return nil, i18n.T("totp.base32")
 	}
 	return out, nil
 }
@@ -131,7 +132,7 @@ func CodeAt(token string, now time.Time) (string, error) {
 		}
 	}
 	if !strings.HasPrefix(token, "base32:") {
-		return "", errors.New("Unknown token format")
+		return "", i18n.T("totp.unknown")
 	}
 	key, err := decode(token[len("base32:"):])
 	if err != nil {

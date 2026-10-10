@@ -406,7 +406,7 @@ func TestSecrets(t *testing.T) {
 		want     []string
 	}{
 		{"totp asked alone when the password is there", "present", "gezd gnbv gy3t qojq gezd gnbv gy3t qojq", 1, 0, 1, nil},
-		{"invalid totp is reported", "missing", "0189", 2, 1, 0, []string{"That is not the secret", "in the app, under Settings"}},
+		{"invalid totp is reported", "missing", "0189", 2, 1, 0, []string{"That's not the setup key", "in the app, under Settings"}},
 		{"empty totp points to the app", "missing", "", 2, 1, 0, []string{"in the app, under Settings"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

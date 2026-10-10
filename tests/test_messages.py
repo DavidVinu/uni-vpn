@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from uni_vpn import messages, repair, tunnel
+from uni_vpn import i18n, messages, repair, tunnel
 from uni_vpn import platform as pf
 
 UI = Path(__file__).resolve().parent.parent / "uni_vpn" / "ui" / "index.html"
@@ -30,7 +30,7 @@ class MessageTests(unittest.TestCase):
         self.assertIsNone(messages.id_of("plain text"))
         self.assertIsNone(messages.action_of("plain text"))
         with self.assertRaises(ValueError):
-            messages.Message("x", "x", "reinstall")
+            messages.Message("connected", "reinstall")
 
     def test_tunnel_verdicts_come_from_the_list(self):
         for _needle, _state, message in tunnel.MARKERS:
@@ -42,7 +42,19 @@ class MessageTests(unittest.TestCase):
         text = UI.read_text(encoding="utf-8")
         for needle in ("uni-vpn service", "uni-vpn log", "uni-vpn password", "uni-vpn totp", "Run:"):
             self.assertNotIn(needle, text)
-        self.assertIn(messages.NOT_RUNNING, text)
+        self.assertIn('data-t="msg.not_running"', text)
+
+    def test_every_app_text_is_plain(self):
+        # Every language, not only the messages: labels, hints and errors too.
+        for code in i18n.CODES:
+            for key, text in i18n.catalog(code).items():
+                if key != "settings.log":
+                    self.assertIsNone(JARGON.search(text), f"{code} {key}: {text}")
+
+    def test_every_message_has_its_text_in_every_language(self):
+        for id in messages.all_messages():
+            for code in i18n.CODES:
+                self.assertIn("msg." + id, i18n.catalog(code), code)
 
 
 class RepairCommandTests(unittest.TestCase):

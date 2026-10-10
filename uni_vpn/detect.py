@@ -21,6 +21,7 @@ from dataclasses import asdict, dataclass, field
 from xml.sax.saxutils import escape
 
 from . import universities as unis
+from .i18n import as_json, t
 
 INIT_REQUEST = (
     '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -31,7 +32,7 @@ INIT_REQUEST = (
 )
 MAX_REPLY = 256 * 1024
 MAX_REDIRECTS = 3
-NOT_CISCO = "This address does not answer like a Cisco AnyConnect gateway"
+NOT_CISCO = t("detect.not_cisco")
 
 
 @dataclass
@@ -63,6 +64,8 @@ class Detection:
 
     def as_dict(self) -> dict:
         data = asdict(self)
+        data["error"] = str(self.error)
+        data["error_t"] = as_json(self.error)
         data["suggestion"] = self.suggestion()
         return data
 
@@ -100,7 +103,7 @@ def parse_reply(data: bytes, host: str, usergroup: str = "") -> Detection:
     result.cisco = True
     auth = root.find("auth")
     if auth is None:
-        result.error = "The gateway sent no login form"
+        result.error = t("detect.no_form")
         return result
     result.message = (auth.findtext("message") or "").strip()
     result.saml = auth.find("sso-v2-login") is not None or any(i.get("type") == "sso" for i in auth.iter("input"))
@@ -159,9 +162,9 @@ def probe(host: str, usergroup: str = "", group: str = "", *, useragent: str = u
     try:
         data = opener(request, timeout)
     except urllib.error.HTTPError as exc:
-        return Detection(host=host, usergroup=usergroup, reachable=True, error=f"{NOT_CISCO} (HTTP {exc.code})")
+        return Detection(host=host, usergroup=usergroup, reachable=True, error=t("detect.not_cisco_http", code=exc.code))
     # A garbled HTTP reply or a port above 65535 fails outside OSError; the page must still get an answer.
     except (urllib.error.URLError, OSError, http.client.HTTPException, OverflowError, ValueError) as exc:
         reason = getattr(exc, "reason", None) or exc
-        return Detection(host=host, usergroup=usergroup, error=f"Could not reach {host}: {reason}")
+        return Detection(host=host, usergroup=usergroup, error=t("detect.unreachable", host=host, reason=reason))
     return parse_reply(data, host, usergroup)

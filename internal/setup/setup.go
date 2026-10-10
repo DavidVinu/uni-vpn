@@ -454,7 +454,7 @@ func (s *Setup) AskOther() (university string, overrides []config.Setting, ok bo
 	if usergroup != "" {
 		overrides = append(overrides, config.Setting{Key: "usergroup", Value: usergroup})
 	}
-	if result.Error != "" {
+	if result.Error.Key != "" {
 		s.printf("   %s", result.Error)
 	}
 	if len(result.Groups) > 1 {

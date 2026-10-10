@@ -18,6 +18,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/DavidVinu/uni-vpn/internal/i18n"
 	"github.com/DavidVinu/uni-vpn/internal/platform"
 	unis "github.com/DavidVinu/uni-vpn/internal/universities"
 )
@@ -66,6 +67,7 @@ type Config struct {
 	OpenConnect    string // "" when not set
 	OCProxy        string // "" when not set
 	AutoUpdate     bool
+	Language       string // "" follows the system, otherwise a code from i18n.Languages
 	// [timing], all in seconds
 	ReadyTimeout   float64
 	ClientWait     float64
@@ -201,7 +203,7 @@ func ProfileConfig(university string, overrides []Setting) (Config, error) {
 		cfg.setProfileField(s.Key, s.Value)
 	}
 	if cfg.Host == "" {
-		return Config{}, &unis.FieldError{Field: "host", Message: "Enter the VPN address, for example vpn.example.edu"}
+		return Config{}, unis.TextError("host", i18n.T("address.invalid"))
 	}
 	return cfg, nil
 }
@@ -220,6 +222,7 @@ const (
 var topKeys = map[string]kind{
 	"host": kStr, "user": kStr, "idle_minutes": kNumber, "socks_port": kInt, "http_port": kInt,
 	"useragent": kStr, "openconnect": kStr, "ocproxy": kStr, "auto_update": kBool, "university": kStr,
+	"language": kStr,
 	// unis.ProfileFields
 	"usergroup": kStr, "authgroup": kStr, "username_suffix": kStr, "os": kStr, "no_external_auth": kBool,
 	"mfa": kStr, "totp_separator": kStr, "mfa_portal_url": kStr,
@@ -479,6 +482,9 @@ func Load(path string) (*Config, error) {
 		cfg.setTop(key, value)
 	}
 
+	if !i18n.Valid(cfg.Language) {
+		return nil, &ConfigError{"'language' must be empty or one of " + i18n.Codes(), lineOfKey(text, "language", "")}
+	}
 	if cfg.User == "" {
 		return nil, &ConfigError{Message: "'user' (university ID) is missing"}
 	}
@@ -520,6 +526,8 @@ func (c *Config) setTop(key string, value any) {
 		c.OCProxy = value.(string)
 	case "auto_update":
 		c.AutoUpdate = value.(bool)
+	case "language":
+		c.Language = value.(string)
 	case "idle_minutes":
 		c.IdleMinutes, _ = number(value)
 		_, c.IdleMinutesInt = value.(int64)

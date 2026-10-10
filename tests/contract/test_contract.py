@@ -27,7 +27,7 @@ import urllib.request
 from pathlib import Path
 
 from uni_vpn import config as config_mod
-from uni_vpn import messages, pac, totp
+from uni_vpn import i18n, messages, pac, totp
 from uni_vpn import universities as unis
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -44,7 +44,7 @@ STATUS_KEYS = {
     "protocol", "version", "state", "message", "since", "host", "user", "university", "university_name",
     "mfa", "mfa_portal_url", "mfa_steps", "socks_port", "http_port", "idle_minutes", "active_connections",
     "bytes_in", "bytes_out", "connects", "last_error", "domains", "pac_url", "pac_refresh", "log_tail",
-    "setup_needed", "busy", "error_kind", "platform", "elevated", "message_id", "action",
+    "setup_needed", "busy", "error_kind", "platform", "elevated", "message_id", "action", "language", "message_t",
 }
 STATES = {"idle", "offline", "blocked", "connecting", "connected", "disconnecting", "auth_failed", "keyring",
           "error"}
@@ -195,6 +195,7 @@ class ContractTest(unittest.TestCase):
         self.assertEqual(status["state"], "idle")
         self.assertEqual(status["message"], "Setup needed")
         self.assertEqual(status["message_id"], message_id("Setup needed"))
+        self.assertEqual(status["message_t"], {"key": "msg.setup_needed", "args": {}})
         self.assertEqual(status["platform"], "linux")
         self.assertIsNone(status["elevated"])
         code, headers, page = self.request("GET", "/")
@@ -205,9 +206,9 @@ class ContractTest(unittest.TestCase):
     def test_setup_names_the_step_to_change(self):
         self.start(port=1081)
         cases = [
-            ({"user": "", "password": "pw"}, "user", "Invalid university ID"),
+            ({"user": "", "password": "pw"}, "user", "Check your username"),
             ({"user": "ab123", "password": ""}, "password", "Enter your password"),
-            ({"user": "ab123", "password": "pw"}, "totp", "Paste the secret first"),
+            ({"user": "ab123", "password": "pw"}, "totp", "Paste the setup key first"),
             ({"user": "ab123", "password": "pw", "university": "nowhere"}, "university", None),
             ({"user": "ab123", "password": "pw", "secret": "not base32 !"}, "totp", None),
             ({"user": "ab123", "password": "pw", "university": "fu-berlin"}, "university", None),
@@ -220,6 +221,7 @@ class ContractTest(unittest.TestCase):
                 self.assertEqual(payload["field"], field)
                 if message:
                     self.assertEqual(payload["error"], message)
+                    self.assertEqual(i18n.t(payload["error_t"]["key"], **payload["error_t"]["args"]), message)
         self.assertFalse((self.config_dir / "config.toml").exists())
         self.assertEqual(self.secrets(), {})
 
@@ -284,7 +286,38 @@ class ContractTest(unittest.TestCase):
         self.assertEqual(written, pac.HEADER + "example.org\nuni-heidelberg.de\n")
         code, payload = self.post("/api/domains", {"text": "not a host!"})
         self.assertEqual(code, 400)
+        self.assertEqual(payload["error"], 'Line 1: "not a host!" is not a website')
+        self.assertEqual(payload["error_t"], {"key": "app.lines", "args": {"lines": [
+            {"key": "domains.not_hostname", "args": {"line": 1, "text": "not a host!"}}]}})
         self.assertEqual(self.post("/api/domains", {"text": 5})[0], 400)
+
+    # --- Languages ---------------------------------------------------------
+
+    def test_translations_and_the_language_setting(self):
+        self.write_config()
+        self.start()
+        code, _headers, payload = self.request("GET", "/locales.json")
+        self.assertEqual(code, 200)
+        self.assertEqual(json.loads(payload), i18n.catalogs())
+        self.assertEqual(self.status()["language"], "")
+        self.assertNotIn("menu", self.status())
+        menu = lambda accepted: json.loads(self.request("GET", f"/status.json?menu={accepted}")[2])["menu"]
+        self.assertEqual(menu("fr-CA%2Cen"), i18n.menu("fr"))
+
+        self.assertEqual(self.post("/api/language", {"language": "de"}), (200, {"ok": True, "language": "de"}))
+        self.assertEqual(self.status()["language"], "de")
+        self.assertEqual(config_mod.load(self.config_dir / "config.toml").language, "de")
+        self.assertEqual(menu("fr"), i18n.menu("de"))
+        self.assertEqual(self.post("/api/language", {"language": "xx"})[0], 400)
+        self.assertEqual(self.post("/api/language", {"language": 1})[0], 400)
+        self.assertEqual(self.post("/api/language", {"language": ""})[0], 200)
+        self.assertEqual(config_mod.load(self.config_dir / "config.toml").language, "")
+
+    def test_language_waits_for_setup(self):
+        self.start(port=1081)
+        code, payload = self.post("/api/language", {"language": "de"})
+        self.assertEqual(code, 409)
+        self.assertEqual(payload["error_t"], {"key": "setup.finish_first", "args": {}})
 
     def test_check_code_without_saving(self):
         self.write_config()
@@ -294,7 +327,9 @@ class ContractTest(unittest.TestCase):
         self.assertEqual(payload["code"], totp.code(totp.normalize(SECRET)))
         self.assertTrue(1 <= payload["remaining"] <= 30)
         self.assertEqual(self.secrets(), {})
-        self.assertEqual(self.post("/api/totp/check", {"secret": "!!"})[0], 400)
+        code, payload = self.post("/api/totp/check", {"secret": "!!"})
+        self.assertEqual(code, 400)
+        self.assertEqual(payload["error_t"], {"key": "totp.not_secret", "args": {}})
 
     def test_password_and_secret_changes(self):
         self.write_config()

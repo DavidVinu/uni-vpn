@@ -18,7 +18,6 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -27,12 +26,13 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/DavidVinu/uni-vpn/internal/i18n"
 )
 
 const (
 	MaxReply     = 256 * 1024
 	MaxRedirects = 3
-	NotCisco     = "This address does not answer like a Cisco AnyConnect gateway"
 	// DefaultTimeout is the socket timeout: it bounds connect and every single read or write,
 	// not the whole probe, as Python's socket timeout does.
 	DefaultTimeout = 10 * time.Second
@@ -68,7 +68,7 @@ type Detection struct {
 	Fields         []Field
 	SecondPassword bool
 	Message        string
-	Error          string
+	Error          i18n.Text // Key "" for none
 }
 
 // Suggestion returns profile values for the setup assistant. The second factor is a guess: a
@@ -109,10 +109,22 @@ func (d Detection) MarshalJSON() ([]byte, error) {
 		SecondPassword bool       `json:"second_password"`
 		Message        string     `json:"message"`
 		Error          string     `json:"error"`
+		ErrorT         any        `json:"error_t"`
 		Suggestion     Suggestion `json:"suggestion"`
 	}{d.Host, d.Usergroup, d.Reachable, d.Cisco, d.SAML, groups, d.Group, fields,
-		d.SecondPassword, d.Message, d.Error, d.Suggestion()})
+		d.SecondPassword, d.Message, d.Error.String(), d.errorJSON(), d.Suggestion()})
 }
+
+// errorJSON is error_t: the error's catalog key and arguments, nil without an error.
+func (d Detection) errorJSON() any {
+	if d.Error.Key == "" {
+		return nil
+	}
+	return d.Error.JSON()
+}
+
+// NotCisco: the address answers, but not like a Cisco AnyConnect gateway.
+var NotCisco = i18n.T("detect.not_cisco")
 
 // SplitAddress turns "https://vpn.example.edu/staff" into ("vpn.example.edu", "staff").
 // The error is a *FieldError.
@@ -180,7 +192,7 @@ func ParseReply(data []byte, host, usergroup string) Detection {
 	result.Cisco = true
 	auth := root.find("auth")
 	if auth == nil {
-		result.Error = "The gateway sent no login form"
+		result.Error = i18n.T("detect.no_form")
 		return result
 	}
 	result.Message = pyStrip(auth.findText("message"))
@@ -270,11 +282,11 @@ func Probe(ctx context.Context, host, usergroup, group string, opts Options) (De
 	var he *httpError
 	if errors.As(err, &he) {
 		return Detection{Host: host, Usergroup: usergroup, Reachable: true,
-			Error: fmt.Sprintf("%s (HTTP %d)", NotCisco, he.code)}, nil
+			Error: i18n.T("detect.not_cisco_http", "code", he.code)}, nil
 	}
 	if err != nil {
 		return Detection{Host: host, Usergroup: usergroup,
-			Error: fmt.Sprintf("Could not reach %s: %s", host, reason(err))}, nil
+			Error: i18n.T("detect.unreachable", "host", host, "reason", reason(err))}, nil
 	}
 	return ParseReply(data, host, usergroup), nil
 }
@@ -393,7 +405,7 @@ func redirectTarget(resp *http.Response) (string, bool) {
 	return next, true
 }
 
-// reason turns a network error into roughly what Python puts after "Could not reach host: ".
+// reason turns a network error into roughly what Python passes as the reason of detect.unreachable.
 func reason(err error) string {
 	var ue *url.Error
 	if errors.As(err, &ue) {

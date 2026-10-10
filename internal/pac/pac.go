@@ -18,6 +18,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/DavidVinu/uni-vpn/internal/i18n"
 	"github.com/DavidVinu/uni-vpn/internal/platform"
 )
 
@@ -52,8 +53,8 @@ func NormalizeHost(value string) string {
 
 // ParseDomainList returns (domains, errors). Errors name the line so the status page can
 // show them. Both slices are non-nil.
-func ParseDomainList(text string) (domains []string, errs []string) {
-	domains, errs = []string{}, []string{}
+func ParseDomainList(text string) (domains []string, errs []i18n.Text) {
+	domains, errs = []string{}, []i18n.Text{}
 	seen := map[string]bool{}
 	for i, raw := range splitLines(text) {
 		before, _, _ := strings.Cut(raw, "#")
@@ -63,7 +64,7 @@ func ParseDomainList(text string) (domains []string, errs []string) {
 		}
 		line = strings.TrimPrefix(line, "*.")
 		if !validHost(line) {
-			errs = append(errs, fmt.Sprintf("line %d: '%s' is not a hostname", i+1, strings.TrimFunc(raw, pyIsSpace)))
+			errs = append(errs, i18n.T("domains.not_hostname", "line", i+1, "text", strings.TrimFunc(raw, pyIsSpace)))
 			continue
 		}
 		if !seen[line] {

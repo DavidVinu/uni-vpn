@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Awaitable, Callable
 
 from . import PROTOCOL, __version__, credentials, pac, removal, repair, sysproxy
+from . import i18n
 from . import messages as M
 from . import platform as pf
 from . import config as config_mod
@@ -203,11 +204,14 @@ class Daemon:
             "version": __version__,
             "commit": self.commit,
             "auto_update": self.cfg.auto_update,
+            "language": self.cfg.language,
             "update_pending": self.updater.pending,
             "state": self.state.value,
             "message": self.message,
-            # For translations and the app's fix button, see messages.py.
+            # For the app's fix button and tests, see messages.py. The text to show in the user's
+            # language is message_t: catalog key (locales/<lang>.json) and arguments.
             "message_id": M.id_of(self.message),
+            "message_t": i18n.as_json(self.message),
             "action": self.action(),
             "since": self.since,
             "host": self.cfg.host,
@@ -294,13 +298,13 @@ class Daemon:
         Raises unis.FieldError naming the step to change, ValueError otherwise."""
         user = user.strip()
         if not config_mod.valid_user(user):
-            raise unis.FieldError("user", "Invalid university ID")
+            raise unis.FieldError("user", i18n.t("setup.invalid_user"))
         overrides = config_mod.check_overrides(overrides or {})
         profile = config_mod.profile_config(university, overrides)
         if profile.mfa == "saml":
             raise unis.FieldError("university", SAML_REQUIRED)
         if profile.needs_totp and not token:
-            raise unis.FieldError("totp", "Paste the secret first")
+            raise unis.FieldError("totp", i18n.t("totp.empty"))
         path = self.config_path or config_mod.default_path()
         loop = asyncio.get_running_loop()
         # Secrets first: if the keyring refuses, no config.toml exists yet and the assistant
@@ -368,7 +372,7 @@ class Daemon:
     async def set_domains(self, text: str) -> list[str]:
         domains, errors = pac.parse_domain_list(text)
         if errors:
-            raise ValueError("\n".join(errors))
+            raise ValueError(i18n.t("app.lines", lines=errors))
         pac.write_domains(self.domains_path, domains)
         self.log.info("Domain list saved: %s", ", ".join(domains) or "(empty)")
         await asyncio.get_running_loop().run_in_executor(None, self.proxy_refresh, self.cfg.http_port)
@@ -682,9 +686,20 @@ class Daemon:
                 and (self._loop_task is None or self._loop_task.done())
                 and self.state not in (State.connecting, State.connected, State.disconnecting))
 
+    async def set_language(self, code: str) -> None:
+        """The app's language; "" follows the system."""
+        if not i18n.valid(code):
+            raise ValueError(f"unknown language {code!r}")
+        if self.needs_setup or not self.config_path or not self.config_path.exists():
+            raise ValueError(i18n.t("setup.finish_first"))
+        await asyncio.get_running_loop().run_in_executor(
+            None, lambda: config_mod.set_values(self.config_path, {"language": code}))
+        self.cfg.language = code
+        self.log.info("Language %s", code or "from the system")
+
     async def set_auto_update(self, enabled: bool) -> None:
         if self.needs_setup or not self.config_path or not self.config_path.exists():
-            raise ValueError("Finish the setup first")
+            raise ValueError(i18n.t("setup.finish_first"))
         await asyncio.get_running_loop().run_in_executor(
             None, lambda: config_mod.set_values(self.config_path, {"auto_update": enabled}))
         self.cfg.auto_update = enabled

@@ -9,6 +9,8 @@ import unicodedata
 from dataclasses import dataclass, fields
 from pathlib import Path
 
+from .i18n import t
+
 REGISTRY_FILE = Path(__file__).resolve().parent / "universities.json"
 DEFAULT_ID = "heidelberg"  # config.toml without "university"
 OTHER_ID = "other"  # a university that is not listed: everything comes from config.toml
@@ -93,11 +95,11 @@ def check_field(name: str, value, strict: bool = True):
     elif name == "host":
         value = value.strip().lower().rstrip(".")
         if not HOST_RE.fullmatch(value):
-            raise FieldError(name, "Enter the VPN address, for example vpn.example.edu")
+            raise FieldError(name, t("address.invalid"))
     elif name == "usergroup":
         value = value.strip().strip("/")
         if not USERGROUP_RE.fullmatch(value):
-            raise FieldError(name, "The path after the address may only contain letters, digits and . _ ~ + -")
+            raise FieldError(name, t("address.path"))
     elif name == "mfa":
         if value not in MFA_MODES:
             raise FieldError(name, f"'mfa' must be one of {', '.join(MFA_MODES)}")

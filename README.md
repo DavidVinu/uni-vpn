@@ -277,6 +277,7 @@ no WebKitGTK on Linux) the entry opens `http://127.0.0.1:1081/` in the browser i
 | Google sign-in | one question per card, Next bottom right, Back bottom left, inline errors |
 | Google Authenticator | the check code with a countdown ring |
 | iOS and macOS Settings | grouped settings list, hints behind info icons |
+| Mullvad VPN, Spotify | language follows the system, Settings, Language overrides it, each language in its own name |
 
 ### Development
 
@@ -284,6 +285,13 @@ no WebKitGTK on Linux) the entry opens `http://127.0.0.1:1081/` in the browser i
 openconnect, on Linux, macOS and Windows. Design: `docs/superpowers/specs/2026-09-07-uni-vpn-design.md`,
 other universities: `docs/superpowers/specs/2026-10-05-multi-university-design.md`. End-to-end tests:
 `docs/e2e.md` (Linux), `docs/macos-test.md`, `docs/windows-test.md`.
+
+Languages: English, German, French, Spanish, Chinese (Simplified and Traditional), one per
+university language in the list. Every text the app, the menus and the service show lives in
+`uni_vpn/locales/<code>.json`, `en.json` is the source; a new language is a copy of it plus an
+entry in `uni_vpn/i18n.py` and `internal/i18n/i18n.go`; the Go core embeds the files. Service
+messages are keys into it (`msg.<message_id>`): `status.json` carries them as `message_t`, API
+errors as `error_t`.
 
 ## License
 

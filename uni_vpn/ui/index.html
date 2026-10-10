@@ -9,7 +9,8 @@
      status screen (one state, one button, settings behind a gear), Google sign-in for the setup
      assistant (one step per card, primary action bottom right, Back bottom left), Google
      Authenticator for the check code with its countdown ring, iOS/macOS Settings for the
-     grouped settings list. -->
+     grouped settings list, Mullvad VPN and Spotify for the language (follows the system, can be
+     changed in Settings, every language in its own name). -->
 <style>
 :root{
   --bg:#f4f5f7;--card:#fff;--text:#1d1d1f;--muted:#6e6e73;--line:#e3e3e8;--field:#fff;
@@ -41,6 +42,8 @@ h2{font-size:24px;font-weight:500;margin:0 0 6px;outline:none}
 input,textarea,select{width:100%;font:inherit;color:var(--text);background:var(--field);border:1px solid var(--line);border-radius:10px;padding:11px 12px;outline:none}
 input::placeholder,textarea::placeholder{color:var(--muted);opacity:.7}
 input:focus,textarea:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.item select{width:auto;max-width:60%;border:0;background:none;color:var(--muted);padding:0 0 0 12px;text-align:right;cursor:pointer}
+.item select:focus{box-shadow:none}.item select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .input input{padding-right:44px}
 .input .icon-btn{position:absolute;right:2px;top:2px}
 .error{color:var(--bad);font-size:13px;margin:-8px 0 14px}
@@ -113,77 +116,77 @@ input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
 </head>
 <body>
 <div class="wrap">
-  <div class="offline" id="offline" role="alert" hidden>Uni VPN is not running. Restart the computer to start it again.</div>
+  <div class="offline" id="offline" role="alert" data-t="msg.not_running" hidden></div>
 
   <!-- Setup assistant -->
   <section id="setup" hidden>
-    <div class="bar"><button class="icon-btn" id="cancel-change" aria-label="Back" hidden><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button><h1 class="brand">Uni VPN</h1><span style="width:40px"></span></div>
+    <div class="bar"><button class="icon-btn" id="cancel-change" data-t-label="app.back" hidden><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button><h1 class="brand">Uni VPN</h1><span style="width:40px"></span></div>
     <div class="card">
       <form id="step0" autocomplete="off">
         <p class="step"></p>
-        <h2>University</h2>
-        <div class="field"><span class="row-title"><label for="s-uni">Find your university</label>
-          <span class="info"><button type="button" aria-label="More help"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></button>
-            <span class="pop" hidden>Not in the list? Choose "Not listed" and enter the address your university gives for Cisco AnyConnect or Cisco Secure Client.</span></span></span>
-          <input id="s-uni" role="combobox" aria-expanded="false" aria-controls="s-uni-list" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="Name or city">
-          <ul class="options" id="s-uni-list" role="listbox" aria-label="Universities" hidden></ul></div>
+        <h2 data-t="app.university"></h2>
+        <div class="field"><span class="row-title"><label for="s-uni" data-t="setup.find"></label>
+          <span class="info"><button type="button" data-t-label="app.help"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></button>
+            <span class="pop" data-t="setup.find_help" hidden></span></span></span>
+          <input id="s-uni" role="combobox" aria-expanded="false" aria-controls="s-uni-list" aria-autocomplete="list" autocomplete="off" spellcheck="false" data-t-placeholder="setup.find_placeholder">
+          <ul class="options" id="s-uni-list" role="listbox" data-t-label="setup.universities" hidden></ul></div>
         <div id="s-other" hidden>
-          <label class="field"><span>VPN address</span>
+          <label class="field"><span data-t="setup.vpn_address"></span>
             <input id="s-host" autocapitalize="none" spellcheck="false" placeholder="vpn.example.edu"></label>
-          <button class="btn text" type="button" id="s-detect">Detect</button>
-          <label class="field" id="s-group-row" hidden><span>Group</span><select id="s-group"></select></label>
-          <label class="field" id="s-mfa-row" hidden><span>Second factor</span><select id="s-mfa">
-            <option value="none">None</option><option value="totp_field">One-time code, own field</option>
-            <option value="totp_append">One-time code after the password</option><option value="duo_push">Duo push</option></select></label>
+          <button class="btn text" type="button" id="s-detect" data-t="setup.detect"></button>
+          <label class="field" id="s-group-row" hidden><span data-t="setup.group"></span><select id="s-group"></select></label>
+          <label class="field" id="s-mfa-row" hidden><span data-t="app.second_factor"></span><select id="s-mfa">
+            <option value="none" data-t="setup.mfa.none"></option><option value="totp_field" data-t="setup.mfa.totp_field"></option>
+            <option value="totp_append" data-t="setup.mfa.totp_append"></option><option value="duo_push" data-t="setup.mfa.duo_push"></option></select></label>
         </div>
         <p class="error" id="s0-err" role="alert" hidden></p>
-        <div class="actions"><span></span><button class="btn primary" type="submit">Next</button></div>
+        <div class="actions"><span></span><button class="btn primary" type="submit" data-t="app.next"></button></div>
       </form>
 
       <form id="step1" autocomplete="on" hidden>
         <p class="step"></p>
-        <h2>Sign in</h2>
-        <p class="sub">Your university account, the same as for email.</p>
-        <label class="field"><span>Username</span>
+        <h2 data-t="setup.sign_in"></h2>
+        <p class="sub" data-t="setup.sign_in_sub"></p>
+        <label class="field"><span data-t="app.username"></span>
           <input id="s-user" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="ab123"></label>
-        <label class="field"><span>Password</span>
+        <label class="field"><span data-t="app.password"></span>
           <div class="input"><input id="s-pw" type="password" name="password" autocomplete="current-password">
-            <button type="button" class="icon-btn reveal" data-for="s-pw" aria-label="Show password"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button></div></label>
+            <button type="button" class="icon-btn reveal" data-for="s-pw" data-t-label="app.show_password"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button></div></label>
         <p class="error" id="s1-err" role="alert" hidden></p>
-        <div class="actions"><button class="btn text" type="button" data-back="step0">Back</button><button class="btn primary" type="submit">Next</button></div>
+        <div class="actions"><button class="btn text" type="button" data-back="step0" data-t="app.back"></button><button class="btn primary" type="submit" data-t="app.next"></button></div>
       </form>
 
       <form id="step2" hidden>
         <p class="step"></p>
-        <h2>Second factor</h2>
-        <p class="sub">Add this computer as a token, like a second phone.</p>
+        <h2 data-t="app.second_factor"></h2>
+        <p class="sub" data-t="setup.totp_sub"></p>
         <ol class="steps" id="s-steps"></ol>
-        <div class="field"><span class="row-title"><label for="s-totp">Token secret</label>
-          <span class="info"><button type="button" aria-label="More help"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></button>
-            <span class="pop" hidden>No otpauth:// line? Copy the letters after "secret=" instead. Already have a token on your phone? Add a second one for this computer; both keep working.</span></span></span>
+        <div class="field"><span class="row-title"><label for="s-totp" data-t="setup.token_secret"></label>
+          <span class="info"><button type="button" data-t-label="app.help"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></button>
+            <span class="pop" data-t="setup.totp_help" hidden></span></span></span>
           <div class="input">          <input id="s-totp" type="password" autocomplete="one-time-code" spellcheck="false" placeholder="otpauth://totp/...">
-            <button type="button" class="icon-btn reveal" data-for="s-totp" aria-label="Show secret"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div>
+            <button type="button" class="icon-btn reveal" data-for="s-totp" data-t-label="setup.show_secret"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div>
         <p class="error" id="s2-err" role="alert" hidden></p>
         <div class="code" id="s-code" hidden>
           <svg class="ring" viewBox="0 0 24 24"><circle class="bg" cx="12" cy="12" r="10"/><circle class="fg" cx="12" cy="12" r="10"/></svg>
-          <b></b><span class="hint">Check code</span>
+          <b></b><span class="hint" data-t="setup.check_code"></span>
         </div>
-        <div class="actions"><button class="btn text" type="button" data-back="step1">Back</button><button class="btn primary" type="submit" disabled>Next</button></div>
+        <div class="actions"><button class="btn text" type="button" data-back="step1" data-t="app.back"></button><button class="btn primary" type="submit" data-t="app.next" disabled></button></div>
       </form>
 
       <div id="step3" hidden class="center">
         <div class="spinner"></div>
         <p class="step"></p>
-        <h2 tabindex="-1">Connecting</h2>
+        <h2 tabindex="-1" data-t="look.connecting"></h2>
         <p class="sub" id="s3-msg" aria-live="polite">&nbsp;</p>
-        <div class="actions"><button class="btn text" type="button" id="s3-back">Back</button><button class="btn text" type="button" id="s3-skip" hidden>Finish</button></div>
+        <div class="actions"><button class="btn text" type="button" id="s3-back" data-t="app.back"></button><button class="btn text" type="button" id="s3-skip" data-t="setup.finish" hidden></button></div>
       </div>
 
       <div id="step4" hidden class="center">
         <div class="badge ok"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
-        <h2 tabindex="-1">All set</h2>
-        <p class="sub" id="s4-msg">University websites now open through the VPN by themselves. Close and reopen your browser once.</p>
-        <div class="actions" style="justify-content:center"><button class="btn primary" type="button" id="s4-done">Done</button></div>
+        <h2 tabindex="-1" data-t="setup.all_set"></h2>
+        <p class="sub" id="s4-msg"></p>
+        <div class="actions" style="justify-content:center"><button class="btn primary" type="button" id="s4-done" data-t="app.done"></button></div>
       </div>
     </div>
   </section>
@@ -191,45 +194,49 @@ input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
   <!-- Status -->
   <section id="main" hidden>
     <div class="bar"><h1 class="brand">Uni VPN</h1>
-      <button class="icon-btn" id="open-settings" aria-label="Settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button></div>
+      <button class="icon-btn" id="open-settings" data-t-label="settings.title"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button></div>
     <div class="card center">
       <div class="badge" id="badge"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
       <div aria-live="polite"><p class="state" id="state">&nbsp;</p>
       <p class="msg" id="msg">&nbsp;</p></div>
       <button class="btn primary big" id="fix" type="button" hidden></button>
-      <button class="btn primary big" id="toggle" type="button">Connect</button>
+      <button class="btn primary big" id="toggle" type="button"></button>
     </div>
   </section>
 
   <!-- Settings -->
   <section id="settings" hidden>
-    <div class="bar"><button class="icon-btn" id="close-settings" aria-label="Back"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button><h1>Settings</h1><span style="width:40px"></span></div>
-    <p class="group">Account</p>
+    <div class="bar"><button class="icon-btn" id="close-settings" data-t-label="app.back"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button><h1 data-t="settings.title"></h1><span style="width:40px"></span></div>
+    <p class="group" data-t="settings.account"></p>
     <div class="list">
-      <button class="item" type="button" id="row-uni"><span>University</span><span class="val" id="v-uni"></span></button>
-      <button class="item" type="button" id="row-user"><span>Username</span><span class="val" id="v-user"></span></button>
-      <details id="d-pw"><summary><span>Password</span></summary><div class="body">
-        <form id="pwform"><div class="input"><input type="password" id="pw" autocomplete="current-password" aria-label="Password">
-          <button type="button" class="icon-btn reveal" data-for="pw" aria-label="Show password"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
-        <button class="btn primary" type="submit">Save</button><span class="saved" id="pwmsg" role="status"></span></form></div></details>
-      <details id="d-totp"><summary><span>Second factor</span></summary><div class="body">
-        <form id="totpform"><input type="password" id="totp" autocomplete="one-time-code" spellcheck="false" placeholder="otpauth://totp/..." aria-label="Token secret">
-        <button class="btn primary" type="submit">Save</button><span class="saved" id="totpmsg" role="status"></span></form></div></details>
+      <button class="item" type="button" id="row-uni"><span data-t="app.university"></span><span class="val" id="v-uni"></span></button>
+      <button class="item" type="button" id="row-user"><span data-t="app.username"></span><span class="val" id="v-user"></span></button>
+      <details id="d-pw"><summary><span data-t="app.password"></span></summary><div class="body">
+        <form id="pwform"><div class="input"><input type="password" id="pw" autocomplete="current-password" data-t-label="app.password">
+          <button type="button" class="icon-btn reveal" data-for="pw" data-t-label="app.show_password"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
+        <button class="btn primary" type="submit" data-t="app.save"></button><span class="saved" id="pwmsg" role="status"></span></form></div></details>
+      <details id="d-totp"><summary><span data-t="app.second_factor"></span></summary><div class="body">
+        <form id="totpform"><input type="password" id="totp" autocomplete="one-time-code" spellcheck="false" placeholder="otpauth://totp/..." data-t-label="setup.token_secret">
+        <button class="btn primary" type="submit" data-t="app.save"></button><span class="saved" id="totpmsg" role="status"></span></form></div></details>
     </div>
-    <p class="group">Websites</p>
+    <p class="group" data-t="settings.websites"></p>
     <div class="list">
-      <details id="d-dom"><summary><span class="row-title">Through the university
-        <span class="info"><button type="button" aria-label="About"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></button>
-          <span class="pop" hidden>One domain per line, subdomains included. Everything else goes direct.</span></span></span>
+      <details id="d-dom"><summary><span class="row-title"><span data-t="settings.through"></span>
+        <span class="info"><button type="button" data-t-label="settings.about_domains"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></button>
+          <span class="pop" data-t="settings.domains_help" hidden></span></span></span>
         <span class="val" id="v-dom"></span></summary><div class="body">
-        <form id="domform"><textarea id="domains" rows="5" spellcheck="false" aria-label="Domains"></textarea>
-        <button class="btn primary" type="submit">Save</button><span class="saved" id="dommsg" role="status"></span></form></div></details>
+        <form id="domform"><textarea id="domains" rows="5" spellcheck="false" data-t-label="settings.domains"></textarea>
+        <button class="btn primary" type="submit" data-t="app.save"></button><span class="saved" id="dommsg" role="status"></span></form></div></details>
     </div>
-    <p class="group">About</p>
+    <p class="group" data-t="settings.general"></p>
     <div class="list">
-      <details><summary><span>Log</span></summary><div class="body"><pre id="log"></pre></div></details>
-      <label class="item"><span>Automatic updates</span><input type="checkbox" class="switch" id="auto-update" role="switch"></label>
-      <div class="item"><span>Version</span><span class="small" id="v-ver"></span></div>
+      <label class="item"><span data-t="settings.language"></span><select id="language"></select></label>
+    </div>
+    <p class="group" data-t="settings.about"></p>
+    <div class="list">
+      <details><summary><span data-t="settings.log"></span></summary><div class="body"><pre id="log"></pre></div></details>
+      <label class="item"><span data-t="settings.auto_update"></span><input type="checkbox" class="switch" id="auto-update" role="switch"></label>
+      <div class="item"><span data-t="settings.version"></span><span class="small" id="v-ver"></span></div>
     </div>
   </section>
 </div>
@@ -238,7 +245,7 @@ input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
 const $ = (id) => document.getElementById(id);
 const H = {"X-Uni-VPN": "1", "Content-Type": "application/json"};
 let S = null, view = null, setupDone = false, submitting = false, setupSent = false, domainsShown = false, connectRequested = 0,
-  codeTimer = null, refreshing = false, autoUpdateSaving = false, changing = false;
+  codeTimer = null, refreshing = false, autoUpdateSaving = false, changing = false, languageSaving = false;
 // Inside the Uni VPN app window (not a browser tab): no page title, no browser context menu.
 if (new URLSearchParams(location.search).has("app")) {
   document.body.classList.add("app");
@@ -251,6 +258,60 @@ async function post(path, body) {
   let data = null;
   try { data = JSON.parse(text); } catch (e) { /* plain text error */ }
   return {ok: r.ok, data, text};
+}
+
+// --- language ----------------------------------------------------------------
+// Like macOS and Windows apps: the system's language unless chosen in Settings, else English.
+let L = {languages: [["en", "English"]], catalogs: {en: {}}}, lang = "en";
+
+async function loadLocales() {
+  try { L = await (await fetch("/locales.json", {cache: "no-store"})).json(); } catch (e) { /* English keys stay */ }
+}
+
+function systemLanguage() {
+  const codes = L.languages.map(([code]) => code);
+  for (const tag of navigator.languages || [navigator.language || ""]) {
+    const [base, ...rest] = tag.toLowerCase().split("-");
+    if (base === "zh") return !rest.includes("hans") && rest.some((p) => ["hant", "tw", "hk", "mo"].includes(p)) ? "zh-Hant" : "zh-Hans";
+    if (codes.includes(base)) return base;
+  }
+  return "en";
+}
+
+function t(key, args) {
+  const text = L.catalogs[lang]?.[key] ?? L.catalogs.en?.[key] ?? key;
+  return text.replace(/\{(\w+)\}/g, (m, name) => (args && name in args ? arg(args[name]) : m));
+}
+function arg(value) {
+  if (Array.isArray(value)) return value.map(arg).join("\n");
+  return value && typeof value === "object" ? t(value.key, value.args) : String(value);
+}
+function plural(key, n) { return t(key + "." + new Intl.PluralRules(lang).select(n), {n}); }
+
+// A message from the service: in the user's language when it came with a key.
+function tr(text, key) { return key ? t(key.key, key.args) : String(text || ""); }
+function errText(r) { return r.data ? tr(r.data.error, r.data.error_t) || r.text : r.text; }
+
+// code: the setting from Settings, "" for the system's language.
+function applyLanguage(code) {
+  const next = L.catalogs[code] ? code : systemLanguage();
+  if (next === lang && document.documentElement.dataset.ready) {
+    if (document.activeElement !== $("language")) $("language").value = L.catalogs[code] ? code : "";
+    return;
+  }
+  lang = next;
+  document.documentElement.lang = lang;
+  document.documentElement.dataset.ready = "1";
+  for (const el of document.querySelectorAll("[data-t]")) el.textContent = t(el.dataset.t);
+  for (const el of document.querySelectorAll("[data-t-placeholder]")) el.placeholder = t(el.dataset.tPlaceholder);
+  for (const el of document.querySelectorAll("[data-t-label]")) el.setAttribute("aria-label", t(el.dataset.tLabel));
+  $("language").replaceChildren(new Option(t("settings.language_system"), ""),
+    ...L.languages.map(([c, name]) => new Option(name, c)));
+  $("language").value = L.catalogs[code] ? code : "";
+  OTHER.name = t("setup.not_listed");
+  if (uni && uni.id === "other") $("s-uni").value = OTHER.name;
+  if (UNIS) numberSteps();
+  if (!$("step2").hidden) renderMfaSteps();
 }
 
 function show(id) {
@@ -267,40 +328,34 @@ function step(id, focusId) {
   if (focus) focus.focus();
 }
 
-const NOT_RUNNING = "Uni VPN is not running. Restart the computer to start it again.";
-
-const WAITING = "Testing the connection. This can take a minute.";
 
 function err(id, text) { $(id).textContent = text || ""; $(id).hidden = !text; }
 
 // --- status ------------------------------------------------------------------
 // Message ids (messages.py) whose state label says it all.
 const QUIET = ["not_connected", "disconnected", "connecting", "connected", "disconnecting", "setup_needed"];
-const FIX = {password: "Update password", totp: "Update second factor", repair: "Repair"};
+const FIX = {password: "main.update_password", totp: "main.update_totp", repair: "main.repair"};
 const LOOK = {
-  connected: ["ok", "Connected"], connecting: ["warn busy", "Connecting"], disconnecting: ["warn busy", "Disconnecting"],
-  idle: ["", "Not connected"], offline: ["warn", "No network"], blocked: ["warn", "Paused"],
-  auth_failed: ["bad", "Sign-in failed"], keyring: ["bad", "Action needed"], error: ["bad", "Error"],
+  connected: "ok", connecting: "warn busy", disconnecting: "warn busy", idle: "", offline: "warn", blocked: "warn",
+  auth_failed: "bad", keyring: "bad", error: "bad",
 };
 
 function render() {
-  const [cls, label] = LOOK[S.state] || ["", S.state];
-  $("badge").className = "badge " + cls;
-  $("state").textContent = label;
+  $("badge").className = "badge " + (LOOK[S.state] || "");
+  $("state").textContent = S.state in LOOK ? t("look." + S.state) : S.state;
   // Normal states speak for themselves; only show the service's text when it explains something.
   const quiet = QUIET.includes(S.message_id);
-  const hint = {idle: "Connects by itself when you open a university website.",
-                connected: "University websites go through the VPN."}[S.state];
-  $("msg").textContent = quiet ? hint || "\u00a0" : S.message;
+  const hint = {idle: t("main.hint.idle"), connected: t("main.hint.connected")}[S.state];
+  $("msg").textContent = quiet ? hint || "\u00a0" : tr(S.message, S.message_t);
   // Role model Tailscale: the problem in one sentence, the fix on the button below it.
-  const fix = FIX[S.action];
+  const fix = FIX[S.action] ? t(FIX[S.action]) : "";
   $("fix").hidden = !fix;
   $("fix").textContent = fix || "";
   $("fix").disabled = !!S.repairing;
   // With a fix offered, it is the way forward; retrying stays possible.
   const stopped = ["auth_failed", "keyring"].includes(S.state);
   $("toggle").className = fix ? "btn text" : "btn primary big";
-  $("toggle").textContent = isOn() ? "Disconnect" : fix || stopped ? "Try again" : "Connect";
+  $("toggle").textContent = t(isOn() ? "main.disconnect" : fix || stopped ? "main.try_again" : "main.connect");
   $("toggle").disabled = S.state === "disconnecting";
   $("v-uni").textContent = S.university_name;
   $("v-user").textContent = S.user;
@@ -308,7 +363,7 @@ function render() {
   $("v-ver").textContent = S.version;
   $("v-ver").title = S.commit ? S.commit.slice(0, 7) : "";
   if (!autoUpdateSaving) $("auto-update").checked = S.auto_update !== false;
-  $("v-dom").textContent = (S.domains || []).length + " domains";
+  $("v-dom").textContent = plural("settings.domain_count", (S.domains || []).length);
   // Only on change, so a selection in the log survives the next poll.
   const log = (S.log_tail || []).join("\n");
   if ($("log").textContent !== log) $("log").textContent = log;
@@ -330,6 +385,7 @@ async function refresh() {
   } finally {
     refreshing = false;
   }
+  if (!languageSaving) applyLanguage(S.language);
   if (S.setup_needed && !setupDone) {
     if (view !== "setup") { show("setup"); await loadUniversities(); step(uni ? "step1" : "step0", uni && $("s-user").value ? "s-pw" : null); }
     return;
@@ -348,10 +404,7 @@ async function refresh() {
 // Role models: eduroam CAT (find your institution), Thunderbird account setup (list, detect, manual).
 const USER_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(@[A-Za-z0-9][A-Za-z0-9.-]{0,252})?$/;
 const TOTP_MODES = ["totp_field", "totp_append"];
-const OTHER = {id: "other", name: "Not listed", country: "", mfa: "none", mfa_portal_url: "", mfa_steps: []};
-const SAML = "Your university signs in through a web page. Uni VPN cannot do that yet.";
-const GENERIC_STEPS = ["Open your university's {portal} and add a time-based token (TOTP) for this computer.",
-  "Copy the line starting with otpauth://, or the letters after secret=.", "Paste it below."];
+const OTHER = {id: "other", name: "", country: "", mfa: "none", mfa_portal_url: "", mfa_steps: []};
 let UNIS = null, uni = null, active = -1, detectSeq = 0;
 
 // The installer passes what it was given (setup --user, --university) in the address.
@@ -381,7 +434,7 @@ function needsTotp() { return TOTP_MODES.includes(mfa()); }
 
 function numberSteps() {
   const ids = ["step0", "step1", ...(needsTotp() ? ["step2"] : []), "step3"];
-  ids.forEach((id, i) => { $(id).querySelector(".step").textContent = `Step ${i + 1} of ${ids.length}`; });
+  ids.forEach((id, i) => { $(id).querySelector(".step").textContent = t("setup.step", {n: i + 1, total: ids.length}); });
 }
 
 function closeList() { $("s-uni-list").hidden = true; $("s-uni").setAttribute("aria-expanded", "false"); active = -1; }
@@ -410,7 +463,7 @@ function pick(u) {
   $("s-uni").value = u.name;
   closeList();
   $("s-other").hidden = u.id !== "other";
-  err("s0-err", u.mfa === "saml" ? SAML : "");
+  err("s0-err", u.mfa === "saml" ? t("setup.saml") : "");
   numberSteps();
   if (u.id === "other") $("s-host").focus();
 }
@@ -430,7 +483,7 @@ $("s-uni").onkeydown = (e) => {
 
 async function detect(group) {
   const host = $("s-host").value.trim(), seq = ++detectSeq;
-  if (!host) { err("s0-err", "Enter the VPN address"); return; }
+  if (!host) { err("s0-err", t("setup.enter_address")); return; }
   err("s0-err", "");
   $("s-detect").disabled = true;
   const r = await send("/api/detect", {host, group});
@@ -438,11 +491,11 @@ async function detect(group) {
   $("s-detect").disabled = false;
   const d = r.data;
   $("s-mfa-row").hidden = false;
-  if (!d || !d.ok) { err("s0-err", (d && d.error) || r.text); return; }
-  if (d.error) { err("s0-err", d.error); return; }
+  if (!d || !d.ok) { err("s0-err", errText(r)); return; }
+  if (d.error) { err("s0-err", tr(d.error, d.error_t)); return; }
   $("s-group").replaceChildren(...d.groups.map((g) => new Option(g, g, false, g === d.group)));
   $("s-group-row").hidden = d.groups.length < 2;
-  if (d.saml) { err("s0-err", SAML); return; }
+  if (d.saml) { err("s0-err", t("setup.saml")); return; }
   $("s-mfa").value = d.suggestion.mfa;
   numberSteps();
 }
@@ -462,27 +515,27 @@ function profileOverrides() {
 
 $("step0").onsubmit = (e) => {
   e.preventDefault();
-  if (!uni) { err("s0-err", "Choose your university, or Not listed"); return; }
-  if (uni.mfa === "saml") { err("s0-err", SAML); return; }
-  if (uni.id === "other" && !$("s-host").value.trim()) { err("s0-err", "Enter the VPN address"); return; }
+  if (!uni) { err("s0-err", t("setup.choose")); return; }
+  if (uni.mfa === "saml") { err("s0-err", t("setup.saml")); return; }
+  if (uni.id === "other" && !$("s-host").value.trim()) { err("s0-err", t("setup.enter_address")); return; }
   if (uni.id === "other" && $("s-mfa-row").hidden) { detect(""); return; }
   err("s0-err", "");
   step("step1");
 };
 
 function renderMfaSteps() {
-  const steps = uni && uni.mfa_steps && uni.mfa_steps.length ? uni.mfa_steps : GENERIC_STEPS;
-  $("s-steps").replaceChildren(...steps.map((text) => {
+  $("s-steps").replaceChildren(...mfaSteps().map((text) => {
+
     const li = document.createElement("li"), [before, after] = text.split("{portal}");
     li.append(before);
     if (after !== undefined) {
       const url = uni && uni.mfa_portal_url;
       if (url) {
         const a = document.createElement("a");
-        Object.assign(a, {href: url, target: "_blank", rel: "noopener", textContent: "MFA portal"});
+        Object.assign(a, {href: url, target: "_blank", rel: "noopener", textContent: t("setup.mfa_portal")});
         li.append(a);
       } else {
-        li.append("MFA portal");
+        li.append(t("setup.mfa_portal"));
       }
       li.append(after);
     }
@@ -490,11 +543,19 @@ function renderMfaSteps() {
   }));
 }
 
+// A university's own steps, translated where the catalog has them (uni.<id>.mfa.<n>).
+function mfaSteps() {
+  const own = uni && uni.mfa_steps && uni.mfa_steps.length ? uni.mfa_steps : null;
+  if (!own) return [1, 2, 3].map((n) => t("setup.generic_step." + n));
+  const cat = L.catalogs[lang] || {};
+  return own.map((text, i) => cat[`uni.${uni.id}.mfa.${i + 1}`] ?? text);
+}
+
 $("step1").onsubmit = (e) => {
   e.preventDefault();
   const user = $("s-user").value.trim();
-  if (!USER_RE.test(user)) { err("s1-err", "Enter your username, for example ab123"); return; }
-  if (!$("s-pw").value) { err("s1-err", "Enter your password"); return; }
+  if (!USER_RE.test(user)) { err("s1-err", t("setup.enter_user")); return; }
+  if (!$("s-pw").value) { err("s1-err", t("setup.enter_password")); return; }
   err("s1-err", "");
   if (needsTotp()) step("step2"); else submitSetup();
 };
@@ -508,7 +569,7 @@ $("s-totp").oninput = async () => {
   if (!secret) { err("s2-err", ""); return; }
   const r = await post("/api/totp/check", {secret});
   if (seq !== checkSeq) return;
-  if (!r.ok) { err("s2-err", r.text); return; }
+  if (!r.ok) { err("s2-err", errText(r)); return; }
   err("s2-err", "");
   next.disabled = false;
   showCode(r.data.code, r.data.remaining, secret);
@@ -536,7 +597,7 @@ async function submitSetup() {
   submitting = setupSent = true;
   clearInterval(codeTimer);
   step("step3");
-  $("s3-msg").textContent = WAITING;
+  $("s3-msg").textContent = t("setup.waiting");
   $("s3-skip").hidden = true;
   let r;
   try {
@@ -544,12 +605,12 @@ async function submitSetup() {
                                   secret: needsTotp() ? $("s-totp").value.trim() : "", university: uni.id,
                                   profile: profileOverrides()});
   } catch (e) {
-    r = {ok: false, data: null, text: NOT_RUNNING};
+    r = {ok: false, data: null, text: t("msg.not_running")};
   } finally {
     submitting = false;
   }
   if (!r.ok) {
-    const field = r.data && r.data.field, text = (r.data && r.data.error) || r.text;
+    const field = r.data && r.data.field, text = errText(r);
     if (PROFILE_FIELDS.includes(field)) {
       step("step0");
       err("s0-err", text);
@@ -574,7 +635,7 @@ function setupProgress() {
     const totp = S.error_kind === "totp";
     setupDone = false;
     step(totp ? "step2" : "step1", totp ? "s-totp" : "s-pw");
-    err(totp ? "s2-err" : "s1-err", S.message);
+    err(totp ? "s2-err" : "s1-err", tr(S.message, S.message_t));
     return;
   }
   if (S.state === "idle" && !S.busy && settled) {
@@ -584,7 +645,7 @@ function setupProgress() {
   }
   const stuck = ["offline", "blocked", "error"].includes(S.state);
   const waiting = S.message_id === "waiting_for_code";
-  $("s3-msg").textContent = stuck || waiting ? S.message : WAITING;
+  $("s3-msg").textContent = stuck || waiting ? tr(S.message, S.message_t) : t("setup.waiting");
   $("s3-skip").hidden = !stuck;
 }
 
@@ -592,9 +653,7 @@ for (const b of document.querySelectorAll("[data-back]")) b.onclick = () => { if
 $("s3-back").onclick = () => { if (!submitting) { setupDone = false; step(needsTotp() ? "step2" : "step1"); } };
 // Without default domains nothing goes through the university yet: say where to add them.
 function finish() {
-  $("s4-msg").textContent = (S.domains || []).length
-    ? "University websites now open through the VPN by themselves. Close and reopen your browser once."
-    : "Add the websites that should go through the university under Settings, Websites.";
+  $("s4-msg").textContent = t((S.domains || []).length ? "setup.all_set_sub" : "setup.all_set_no_domains");
   step("step4");
 }
 $("s3-skip").onclick = () => { if (setupDone) { if (changing) endChange(); else finish(); } };
@@ -664,25 +723,25 @@ $("cancel-change").onclick = () => { if (!submitting) endChange(); };
 $("close-settings").onclick = () => { show("main"); render(); };
 
 async function send(path, body) {
-  try { return await post(path, body); } catch (e) { return {ok: false, data: null, text: NOT_RUNNING}; }
+  try { return await post(path, body); } catch (e) { return {ok: false, data: null, text: t("msg.not_running")}; }
 }
 
 function saved(id, r, okText) {
   $(id).className = "saved" + (r.ok ? "" : " bad");
-  $(id).textContent = r.ok ? okText : r.text;
+  $(id).textContent = r.ok ? okText : errText(r);
 }
 
 $("pwform").onsubmit = async (e) => {
   e.preventDefault();
   const r = await send("/api/password", {password: $("pw").value});
-  saved("pwmsg", r, "Saved");
+  saved("pwmsg", r, t("app.saved"));
   if (r.ok) $("pw").value = "";
   refresh();
 };
 $("totpform").onsubmit = async (e) => {
   e.preventDefault();
   const r = await send("/api/totp", {secret: $("totp").value});
-  saved("totpmsg", r, r.ok ? "Saved, check code " + r.data.code : "");
+  saved("totpmsg", r, r.ok ? t("app.saved_code", {code: r.data.code}) : "");
   if (r.ok) $("totp").value = "";
   refresh();
 };
@@ -696,11 +755,22 @@ $("auto-update").onchange = async () => {
   autoUpdateSaving = false;
   refresh();
 };
+$("language").onchange = async () => {
+  const box = $("language"), previous = S ? S.language || "" : "";
+  languageSaving = true;
+  box.disabled = true;
+  applyLanguage(box.value);  // at once, like Mullvad; the service keeps it for next time
+  const r = await send("/api/language", {language: box.value});
+  if (!r.ok) { box.value = previous; applyLanguage(previous); }
+  box.disabled = false;
+  languageSaving = false;
+  refresh();
+};
 $("domform").onsubmit = async (e) => {
   e.preventDefault();
   const r = await send("/api/domains", {text: $("domains").value});
   if (r.ok) $("domains").value = r.data.domains.join("\n");
-  saved("dommsg", r, S && S.pac_refresh === "manual" ? "Saved, restart the browser" : "Saved");
+  saved("dommsg", r, t(S && S.pac_refresh === "manual" ? "app.saved_restart" : "app.saved"));
   refresh();
 };
 
@@ -723,8 +793,7 @@ const closePops = () => { for (const p of document.querySelectorAll(".pop")) p.h
 document.addEventListener("click", closePops);
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePops(); });
 
-refresh();
-setInterval(refresh, 1500);
+loadLocales().then(() => { applyLanguage(""); refresh(); setInterval(refresh, 1500); });
 </script>
 </body>
 </html>

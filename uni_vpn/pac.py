@@ -10,6 +10,8 @@ import json
 import re
 from pathlib import Path
 
+from .i18n import t
+
 DEFAULT_DOMAINS = [
     "sogo.uni-heidelberg.de",
     "elearning-med.uni-heidelberg.de",
@@ -41,7 +43,7 @@ def parse_domain_list(text: str) -> tuple[list[str], list[str]]:
         if line.startswith("*."):
             line = line[2:]
         if not HOST_RE.fullmatch(line):
-            errors.append(f"line {number}: '{raw.strip()}' is not a hostname")
+            errors.append(t("domains.not_hostname", line=number, text=raw.strip()))
             continue
         if line not in seen:
             seen.add(line)

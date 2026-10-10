@@ -22,8 +22,8 @@ class DomainListTests(unittest.TestCase):
         domains, errors = pac.parse_domain_list(text)
         self.assertEqual(domains, ["sogo.uni-heidelberg.de", "example.org"])
         self.assertEqual(len(errors), 2)
-        self.assertIn("line 6", errors[0])
-        self.assertIn("line 7", errors[1])
+        self.assertIn("Line 6", errors[0])
+        self.assertIn("Line 7", errors[1])
 
     def test_parse_rejects_single_label_and_too_long(self):
         domains, errors = pac.parse_domain_list("localhost\n" + "a" * 64 + ".de\n")

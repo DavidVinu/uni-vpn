@@ -248,7 +248,7 @@ class SetupTests(SetupHarness):
         rc, out = self.run_setup(user="ab123", getpass_fn=lambda p: "pw" if "password" in p else "0189")
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.stored_totp, [])
-        self.assertIn("That is not the secret", out)
+        self.assertIn("That's not the setup key", out)
         self.assertIn("in the app, under Settings", out)
 
     def test_empty_totp_input_points_to_the_app(self):

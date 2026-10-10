@@ -16,6 +16,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/DavidVinu/uni-vpn/internal/i18n"
 )
 
 // fixture returns a reply recorded on 2026-10-05 with the init request and no credentials.
@@ -142,7 +144,7 @@ func TestOtherRepliesAreNotCisco(t *testing.T) {
 		if len(head) > 40 {
 			head = head[:40]
 		}
-		if d.Cisco || !d.Reachable || !strings.Contains(d.Error, "Cisco") {
+		if d.Cisco || !d.Reachable || d.Error.Key != "detect.not_cisco" {
 			t.Errorf("%q: %+v", head, d)
 		}
 	}
@@ -162,8 +164,8 @@ func TestEdgeRepliesAreCisco(t *testing.T) {
 	if d.Message != "Grüße" {
 		t.Errorf("message %q", d.Message)
 	}
-	if d := ParseReply([]byte("<config-auth/>"), "h.example.edu", ""); d.Error != "The gateway sent no login form" {
-		t.Errorf("error %q", d.Error)
+	if d := ParseReply([]byte("<config-auth/>"), "h.example.edu", ""); d.Error.Key != "detect.no_form" {
+		t.Errorf("error %v", d.Error)
 	}
 }
 
@@ -185,7 +187,7 @@ func TestAsDictIsJSONReady(t *testing.T) {
 	}
 	empty, _ := json.Marshal(Detection{Host: "h.example.edu"})
 	const wantEmpty = `{"host":"h.example.edu","usergroup":"","reachable":false,"cisco":false,"saml":false,` +
-		`"groups":[],"group":"","fields":[],"second_password":false,"message":"","error":"",` +
+		`"groups":[],"group":"","fields":[],"second_password":false,"message":"","error":"","error_t":null,` +
 		`"suggestion":{"host":"h.example.edu","usergroup":"","authgroup":"","mfa":"none"}}`
 	if string(empty) != wantEmpty {
 		t.Errorf("got %s", empty)
@@ -301,7 +303,7 @@ func TestProbeUsesUsergroupAndUserAgent(t *testing.T) {
 		strings.Contains(string(r.body), "group-select") {
 		t.Errorf("%+v", r)
 	}
-	if d.Usergroup != "staff" || d.Error != "The gateway sent no login form" {
+	if d.Usergroup != "staff" || d.Error.Key != "detect.no_form" {
 		t.Errorf("%+v", d)
 	}
 }
@@ -317,13 +319,14 @@ func TestUnreachableAndHTTPErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d.Reachable || !strings.Contains(d.Error, "Could not reach "+closed) || !strings.Contains(d.Error, "Connection refused") {
+	if d.Reachable || d.Error.Key != "detect.unreachable" || arg(d.Error, "host") != closed ||
+		!strings.Contains(arg(d.Error, "reason").(string), "Connection refused") {
 		t.Errorf("%+v", d)
 	}
 
 	g := newGateway(t, func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) })
 	d, _ = Probe(context.Background(), g.host(), "", "", g.opts())
-	if !d.Reachable || d.Cisco || d.Error != NotCisco+" (HTTP 404)" {
+	if !d.Reachable || d.Cisco || !notCiscoHTTP(d, 404) {
 		t.Errorf("%+v", d)
 	}
 }
@@ -331,7 +334,7 @@ func TestUnreachableAndHTTPErrors(t *testing.T) {
 func TestUntrustedCertificateIsUnreachable(t *testing.T) {
 	g := newGateway(t, func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("<config-auth/>")) })
 	d, _ := Probe(context.Background(), g.host(), "", "", Options{})
-	if d.Reachable || !strings.HasPrefix(d.Error, "Could not reach "+g.host()+": ") || len(g.seen()) != 0 {
+	if d.Reachable || d.Error.Key != "detect.unreachable" || arg(d.Error, "host") != g.host() || len(g.seen()) != 0 {
 		t.Errorf("%+v", d)
 	}
 }
@@ -346,7 +349,7 @@ func TestTimeoutIsUnreachable(t *testing.T) {
 	opts := g.opts()
 	opts.Timeout = 200 * time.Millisecond
 	d, _ := Probe(context.Background(), g.host(), "", "", opts)
-	if d.Reachable || d.Error != "Could not reach "+g.host()+": timed out" {
+	if d.Reachable || arg(d.Error, "host") != g.host() || arg(d.Error, "reason") != "timed out" {
 		t.Errorf("%+v", d)
 	}
 }
@@ -414,7 +417,7 @@ func TestRedirectAwayFromHTTPSIsRefused(t *testing.T) {
 		http.Redirect(w, r, "http://"+r.Host+"/", http.StatusFound)
 	})
 	d, _ := Probe(context.Background(), g.host(), "", "", g.opts())
-	if !d.Reachable || d.Error != NotCisco+" (HTTP 302)" || len(g.seen()) != 1 {
+	if !d.Reachable || !notCiscoHTTP(d, 302) || len(g.seen()) != 1 {
 		t.Errorf("%+v", d)
 	}
 }
@@ -425,7 +428,7 @@ func TestRedirectLimits(t *testing.T) {
 		http.Redirect(w, r, r.URL.Path+"x", http.StatusTemporaryRedirect)
 	})
 	d, _ := Probe(context.Background(), g.host(), "", "", g.opts())
-	if d.Error != NotCisco+" (HTTP 307)" || len(g.seen()) != 1+MaxRedirects {
+	if !notCiscoHTTP(d, 307) || len(g.seen()) != 1+MaxRedirects {
 		t.Errorf("%+v after %d requests", d, len(g.seen()))
 	}
 	// One and the same URL: max_repeats (4) applies instead.
@@ -433,7 +436,7 @@ func TestRedirectLimits(t *testing.T) {
 		http.Redirect(w, r, "/same", http.StatusMovedPermanently)
 	})
 	d, _ = Probe(context.Background(), g.host(), "", "", g.opts())
-	if d.Error != NotCisco+" (HTTP 301)" || len(g.seen()) != 1+maxRepeats {
+	if !notCiscoHTTP(d, 301) || len(g.seen()) != 1+maxRepeats {
 		t.Errorf("%+v after %d requests", d, len(g.seen()))
 	}
 }
@@ -443,7 +446,22 @@ func TestOversizedReplyIsNotCisco(t *testing.T) {
 		_, _ = w.Write([]byte("<config-auth>" + strings.Repeat("x", MaxReply) + "</config-auth>"))
 	})
 	d, _ := Probe(context.Background(), g.host(), "", "", g.opts())
-	if !d.Reachable || d.Cisco || d.Error != NotCisco {
+	if !d.Reachable || d.Cisco || d.Error.Key != "detect.not_cisco" {
 		t.Errorf("%+v", d)
 	}
+}
+
+// arg is the value of a named argument of a text, nil if it has none.
+func arg(text i18n.Text, name string) any {
+	for _, a := range text.Args {
+		if a.Name == name {
+			return a.Value
+		}
+	}
+	return nil
+}
+
+// notCiscoHTTP: the address answered with this HTTP status instead of a Cisco reply.
+func notCiscoHTTP(d Detection, code int) bool {
+	return d.Error.Key == "detect.not_cisco_http" && arg(d.Error, "code") == code
 }

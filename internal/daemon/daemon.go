@@ -29,6 +29,7 @@ import (
 	"github.com/DavidVinu/uni-vpn/internal/credentials"
 	"github.com/DavidVinu/uni-vpn/internal/forwarder"
 	"github.com/DavidVinu/uni-vpn/internal/httpapi"
+	"github.com/DavidVinu/uni-vpn/internal/i18n"
 	"github.com/DavidVinu/uni-vpn/internal/messages"
 	"github.com/DavidVinu/uni-vpn/internal/pac"
 	"github.com/DavidVinu/uni-vpn/internal/platform"
@@ -480,11 +481,14 @@ func (d *Daemon) Status() (pyjson.Object, error) {
 		"version", Version,
 		"commit", nullable(d.opts.Updater.Installed()),
 		"auto_update", cfg.AutoUpdate,
+		"language", cfg.Language,
 		"update_pending", nullable(d.opts.Updater.Pending()),
 		"state", string(d.state),
 		"message", d.message.Text,
-		// For translations and the app's fix button, see messages.
+		// For the app's fix button and tests, see messages. The text to show in the user's
+		// language is message_t: catalog key (uni_vpn/locales/<lang>.json) and arguments.
 		"message_id", nullable(d.message.ID),
+		"message_t", d.message.JSON(),
 		"action", nullable(d.actionLocked()),
 		"since", d.since,
 		"host", cfg.Host,
@@ -589,7 +593,7 @@ func (d *Daemon) watchRepair(process Process) {
 func (d *Daemon) CompleteSetup(user, password, token, university string, overrides []config.Setting) error {
 	user = httpapi.PyStrip(user)
 	if !config.ValidUser(user) {
-		return &unis.FieldError{Field: "user", Message: "Invalid university ID"}
+		return unis.TextError("user", i18n.T("setup.invalid_user"))
 	}
 	checked, err := config.CheckOverrides(overrides)
 	if err != nil {
@@ -600,10 +604,10 @@ func (d *Daemon) CompleteSetup(user, password, token, university string, overrid
 		return err
 	}
 	if profile.MFA == "saml" {
-		return &unis.FieldError{Field: "university", Message: tunnel.SAMLRequired}
+		return unis.TextError("university", i18n.T(messages.KeyPrefix+messages.SAMLRequired.ID))
 	}
 	if profile.NeedsTOTP() && token == "" {
-		return &unis.FieldError{Field: "totp", Message: "Paste the secret first"}
+		return unis.TextError("totp", i18n.T("totp.empty"))
 	}
 	d.mu.Lock()
 	path := d.configPath
@@ -744,7 +748,11 @@ func (d *Daemon) PAC() (string, error) {
 func (d *Daemon) SetDomains(text string) ([]string, error) {
 	domains, errs := pac.ParseDomainList(text)
 	if len(errs) > 0 {
-		return nil, &httpapi.ValueError{Msg: strings.Join(errs, "\n")}
+		lines := make([]any, len(errs))
+		for i, e := range errs {
+			lines[i] = e
+		}
+		return nil, httpapi.TextValueError(i18n.T("app.lines", "lines", lines))
 	}
 	if err := pac.WriteDomains(d.opts.DomainsPath, domains); err != nil {
 		return nil, errors.New(pyErr(err))
@@ -761,13 +769,41 @@ func (d *Daemon) SetDomains(text string) ([]string, error) {
 	return domains, nil
 }
 
+// SetLanguage stores the app's language; "" follows the system.
+func (d *Daemon) SetLanguage(code string) error {
+	if !i18n.Valid(code) {
+		return fmt.Errorf("unknown language %s", unis.Repr(code))
+	}
+	d.mu.Lock()
+	path, needsSetup := d.configPath, d.needsSetup
+	d.mu.Unlock()
+	if needsSetup || path == "" || !exists(path) {
+		return httpapi.TextValueError(i18n.T("setup.finish_first"))
+	}
+	if err := config.SetValues(path, []config.Setting{{Key: "language", Value: code}}); err != nil {
+		var ce *config.ConfigError
+		if errors.As(err, &ce) {
+			return err
+		}
+		return errors.New(pyErr(err))
+	}
+	d.mu.Lock()
+	d.cfg.Language = code
+	d.mu.Unlock()
+	if code == "" {
+		code = "from the system"
+	}
+	d.logf(slog.LevelInfo, "Language %s", code)
+	return nil
+}
+
 // SetAutoUpdate stores the setting. Switching it on checks right away, like Tailscale.
 func (d *Daemon) SetAutoUpdate(enabled bool) error {
 	d.mu.Lock()
 	path, needsSetup := d.configPath, d.needsSetup
 	d.mu.Unlock()
 	if needsSetup || path == "" || !exists(path) {
-		return &httpapi.ValueError{Msg: "Finish the setup first"}
+		return httpapi.TextValueError(i18n.T("setup.finish_first"))
 	}
 	if err := config.SetValues(path, []config.Setting{{Key: "auto_update", Value: enabled}}); err != nil {
 		var ce *config.ConfigError

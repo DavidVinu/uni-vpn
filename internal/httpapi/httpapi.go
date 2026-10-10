@@ -13,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -22,6 +23,7 @@ import (
 
 	"github.com/DavidVinu/uni-vpn/internal/config"
 	"github.com/DavidVinu/uni-vpn/internal/detect"
+	"github.com/DavidVinu/uni-vpn/internal/i18n"
 	"github.com/DavidVinu/uni-vpn/internal/pyjson"
 	"github.com/DavidVinu/uni-vpn/internal/totp"
 	unis "github.com/DavidVinu/uni-vpn/internal/universities"
@@ -40,9 +42,23 @@ var contentLength = regexp.MustCompile(`\A[0-9]+\z`)
 
 // ValueError is an input problem the daemon reports (Python's ValueError); its text goes to
 // the page.
-type ValueError struct{ Msg string }
+type ValueError struct {
+	Msg  string
+	Text *i18n.Text // the message as a catalog text, nil when it has none
+}
 
 func (e *ValueError) Error() string { return e.Msg }
+
+// Unwrap hands the catalog text to i18n.Of.
+func (e *ValueError) Unwrap() error {
+	if e.Text == nil {
+		return nil
+	}
+	return *e.Text
+}
+
+// TextValueError is a ValueError with a catalog text.
+func TextValueError(text i18n.Text) *ValueError { return &ValueError{Msg: text.String(), Text: &text} }
 
 // Daemon is what the API needs from the daemon.
 type Daemon interface {
@@ -55,6 +71,8 @@ type Daemon interface {
 	SetPassword(password string) error
 	SetDomains(text string) ([]string, error)
 	SetAutoUpdate(enabled bool) error
+	// SetLanguage: the app's language, "" follows the system. A *ValueError before setup.
+	SetLanguage(code string) error
 	SetTOTP(token string) error
 	NoteCodeShown()
 	// CompleteSetup: token "" means none. The error is a *unis.FieldError naming the step,
@@ -267,13 +285,13 @@ func (s *Server) handle(c net.Conn) {
 		}
 	}
 	c.SetReadDeadline(time.Time{})
-	path, _, _ := strings.Cut(target, "?")
+	path, query, _ := strings.Cut(target, "?")
 	host, present := hdrs.get("host")
 	if !AllowedHost(host, present, s.Port) {
 		s.respond(c, 403, "text/plain", []byte("forbidden"), hdrs)
 		return
 	}
-	status, ctype, payload := s.routeSafe(method, path, hdrs, body)
+	status, ctype, payload := s.routeSafe(method, path, query, hdrs, body)
 	s.respond(c, status, ctype, payload, hdrs)
 }
 
@@ -302,14 +320,14 @@ func (s *Server) respond(c net.Conn, status int, ctype string, payload []byte, r
 	c.Write(out)
 }
 
-func (s *Server) routeSafe(method, path string, hdrs headers, body []byte) (status int, ctype string, payload []byte) {
+func (s *Server) routeSafe(method, path, query string, hdrs headers, body []byte) (status int, ctype string, payload []byte) {
 	defer func() {
 		if r := recover(); r != nil {
 			s.log.Error(fmt.Sprintf("HTTP error: %v", r))
 			status, ctype, payload = 500, "text/plain", []byte("internal error")
 		}
 	}()
-	status, ctype, payload, err := s.route(method, path, hdrs, body)
+	status, ctype, payload, err := s.route(method, path, query, hdrs, body)
 	if err != nil {
 		// The status page must never die.
 		s.log.Error(fmt.Sprintf("HTTP error: %s", err))
@@ -324,6 +342,13 @@ func jsonReply(status int, v any) (int, string, []byte, error) {
 
 func text(status int, msg string) (int, string, []byte, error) {
 	return status, "text/plain", []byte(msg), nil
+}
+
+// problem is an error for the app: the English text, plus key and arguments (error_t) when it
+// can be translated. extra are name, value pairs that go before them.
+func problem(status int, err error, extra ...any) (int, string, []byte, error) {
+	payload := append(pyjson.O("ok", false), pyjson.O(extra...)...)
+	return jsonReply(status, append(payload, pyjson.O("error", err.Error(), "error_t", i18n.Of(err))...))
 }
 
 // loads is json.loads(body.decode("utf-8")); utf8 is false for a UnicodeDecodeError.
@@ -344,7 +369,7 @@ func item(data any, key string) (any, bool) {
 	return obj.Get(key)
 }
 
-func (s *Server) route(method, path string, hdrs headers, body []byte) (int, string, []byte, error) {
+func (s *Server) route(method, path, query string, hdrs headers, body []byte) (int, string, []byte, error) {
 	if method == "OPTIONS" {
 		return 204, "text/plain", nil, nil
 	}
@@ -357,7 +382,16 @@ func (s *Server) route(method, path string, hdrs headers, body []byte) (int, str
 			if err != nil {
 				return 0, "", nil, err
 			}
+			// The native app's menus ask with their system languages: ?menu=de-DE,en
+			values, _ := url.ParseQuery(query)
+			if wanted := values.Get("menu"); wanted != "" {
+				language, _ := status.Get("language")
+				setting, _ := language.(string)
+				status = append(status, pyjson.Member{Key: "menu", Value: i18n.Menu(i18n.Negotiate(setting, wanted))})
+			}
 			return jsonReply(200, status)
+		case "/locales.json":
+			return jsonReply(200, i18n.Catalogs())
 		case "/proxy.pac":
 			text, err := s.daemon.PAC()
 			if err != nil {
@@ -390,6 +424,8 @@ func (s *Server) route(method, path string, hdrs headers, body []byte) (int, str
 		return s.domains(body)
 	case "/api/auto-update":
 		return s.autoUpdate(body)
+	case "/api/language":
+		return s.language(body)
 	case "/api/totp":
 		return s.totp(body)
 	case "/api/totp/check":
@@ -415,10 +451,10 @@ func (s *Server) password(body []byte) (int, string, []byte, error) {
 		return text(400, "password empty")
 	}
 	if strings.ContainsAny(password, "\n\r") {
-		return text(400, "Password must not contain a line break")
+		return problem(400, i18n.T("password.line_break"))
 	}
 	if err := s.daemon.SetPassword(password); err != nil {
-		return text(500, err.Error()) // the error text goes to the page
+		return problem(500, err) // the error text goes to the page
 	}
 	return jsonReply(200, pyjson.O("ok", true, "state", s.daemon.StateName()))
 }
@@ -437,9 +473,9 @@ func (s *Server) domains(body []byte) (int, string, []byte, error) {
 	if err != nil {
 		var ve *ValueError
 		if errors.As(err, &ve) {
-			return text(400, ve.Msg)
+			return problem(400, ve)
 		}
-		return text(500, err.Error())
+		return problem(500, err)
 	}
 	return jsonReply(200, pyjson.O("ok", true, "domains", domains))
 }
@@ -457,11 +493,31 @@ func (s *Server) autoUpdate(body []byte) (int, string, []byte, error) {
 	if err := s.daemon.SetAutoUpdate(enabled); err != nil {
 		var ve *ValueError
 		if errors.As(err, &ve) {
-			return text(409, ve.Msg)
+			return problem(409, ve)
 		}
-		return text(500, err.Error())
+		return problem(500, err)
 	}
 	return jsonReply(200, pyjson.O("ok", true, "enabled", enabled))
+}
+
+func (s *Server) language(body []byte) (int, string, []byte, error) {
+	data, utf8OK, err := loads(body)
+	value, ok := item(data, "language")
+	if !utf8OK || err != nil || !ok {
+		return text(400, "expected JSON with 'language'")
+	}
+	language, isStr := value.(string)
+	if !isStr || !i18n.Valid(language) {
+		return text(400, "unknown language")
+	}
+	if err := s.daemon.SetLanguage(language); err != nil {
+		var ve *ValueError
+		if errors.As(err, &ve) {
+			return problem(409, ve)
+		}
+		return problem(500, err)
+	}
+	return jsonReply(200, pyjson.O("ok", true, "language", language))
 }
 
 func (s *Server) totp(body []byte) (int, string, []byte, error) {
@@ -476,10 +532,10 @@ func (s *Server) totp(body []byte) (int, string, []byte, error) {
 	}
 	token, err := totp.Normalize(secret)
 	if err != nil {
-		return text(400, err.Error())
+		return problem(400, err)
 	}
 	if err := s.daemon.SetTOTP(token); err != nil {
-		return text(500, err.Error())
+		return problem(500, err)
 	}
 	code, err := totp.Code(token)
 	if err != nil {
@@ -496,7 +552,7 @@ func (s *Server) totpCheck(body []byte) (int, string, []byte, error) {
 		return text(400, "expected JSON with 'secret'")
 	}
 	if err != nil {
-		return text(400, err.Error()) // a JSONDecodeError is a ValueError here
+		return problem(400, err) // a JSONDecodeError is a ValueError here
 	}
 	value, ok := item(data, "secret")
 	if !ok {
@@ -505,7 +561,7 @@ func (s *Server) totpCheck(body []byte) (int, string, []byte, error) {
 	secret, _ := value.(string)
 	token, err := totp.Normalize(secret)
 	if err != nil {
-		return text(400, err.Error())
+		return problem(400, err)
 	}
 	remaining := totp.Step - int(time.Now().Unix())%totp.Step
 	s.daemon.NoteCodeShown()
@@ -532,9 +588,6 @@ func (s *Server) detect(body []byte) (int, string, []byte, error) {
 	if !ok1 || !ok2 {
 		return text(400, "host and group must be text")
 	}
-	fieldError := func(field, msg string) (int, string, []byte, error) {
-		return jsonReply(400, pyjson.O("ok", false, "field", field, "error", msg))
-	}
 	host, usergroup, err := detect.SplitAddress(addr)
 	var result detect.Detection
 	if err == nil {
@@ -545,9 +598,9 @@ func (s *Server) detect(body []byte) (int, string, []byte, error) {
 		var ue *unis.FieldError
 		switch {
 		case errors.As(err, &fe):
-			return fieldError(fe.Field, fe.Message)
+			return problem(400, fe, "field", fe.Field)
 		case errors.As(err, &ue):
-			return fieldError(ue.Field, ue.Message)
+			return problem(400, ue, "field", ue.Field)
 		}
 		return 0, "", nil, err
 	}
@@ -560,15 +613,15 @@ func (s *Server) detect(body []byte) (int, string, []byte, error) {
 
 // setup: errors name the step that has to change, so the assistant can go back to it.
 func (s *Server) setup(body []byte) (int, string, []byte, error) {
-	fail := func(status int, field any, msg string) (int, string, []byte, error) {
-		return jsonReply(status, pyjson.O("ok", false, "field", field, "error", msg))
+	fail := func(status int, field any, err error) (int, string, []byte, error) {
+		return problem(status, err, "field", field)
 	}
 	data, utf8OK, err := loads(body)
 	obj, isObj := data.(pyjson.Object)
 	userV, ok1 := obj.Get("user")
 	passwordV, ok2 := obj.Get("password")
 	if !utf8OK || err != nil || !isObj || !ok1 || !ok2 {
-		return fail(400, nil, "expected JSON with 'user' and 'password'")
+		return fail(400, nil, errors.New("expected JSON with 'user' and 'password'"))
 	}
 	get := func(key string, def any) any {
 		if v, ok := obj.Get(key); ok {
@@ -588,19 +641,19 @@ func (s *Server) setup(body []byte) (int, string, []byte, error) {
 	university, okN := universityV.(string)
 	overrides, okO := overridesV.(pyjson.Object)
 	if !okU || !okP || !okS || !okN || !okO {
-		return fail(400, nil, "user, password, secret and university must be text, profile an object")
+		return fail(400, nil, errors.New("user, password, secret and university must be text, profile an object"))
 	}
 	if !config.ValidUser(PyStrip(user)) {
-		return fail(400, "user", "Invalid university ID")
+		return fail(400, "user", i18n.T("setup.invalid_user"))
 	}
 	if password == "" || strings.ContainsAny(password, "\n\r") {
-		return fail(400, "password", "Enter your password")
+		return fail(400, "password", i18n.T("setup.enter_password"))
 	}
 	token := ""
 	if PyStrip(secret) != "" {
 		token, err = totp.Normalize(secret)
 		if err != nil {
-			return fail(400, "totp", err.Error())
+			return fail(400, "totp", err)
 		}
 	}
 	settings := make([]config.Setting, len(overrides))
@@ -612,11 +665,11 @@ func (s *Server) setup(body []byte) (int, string, []byte, error) {
 		var ve *ValueError
 		switch {
 		case errors.As(err, &ue):
-			return fail(400, ue.Field, ue.Message)
+			return fail(400, ue.Field, ue)
 		case errors.As(err, &ve):
-			return fail(400, "user", ve.Msg)
+			return fail(400, "user", ve)
 		}
-		return fail(500, nil, err.Error())
+		return fail(500, nil, err)
 	}
 	var code any
 	if token != "" {
