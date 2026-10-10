@@ -50,7 +50,7 @@ CONNECTING = _m("connecting")
 CONNECTED = _m("connected")
 DISCONNECTING = _m("disconnecting")
 SETUP_NEEDED = _m("setup_needed")
-# The setup assistant shows this one while it waits (message_id "msg.waiting_for_code").
+# The setup assistant shows this one while it waits (message_id "waiting_for_code").
 WAITING_FOR_CODE = _m("waiting_for_code")
 BLOCKED = _m("blocked")
 OFFLINE = _m("offline")
@@ -102,8 +102,3 @@ def action_of(text: str) -> str | None:
 
 def id_of(text: str) -> str | None:
     return getattr(text, "id", None)
-
-
-def key_of(text: str) -> str | None:
-    """The catalog key of a message, also for other translatable texts (i18n.Text)."""
-    return getattr(text, "key", None)

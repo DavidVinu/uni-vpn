@@ -164,5 +164,20 @@ class RedirectTests(unittest.TestCase):
         self.assertEqual(handler.max_redirections, 3)
 
 
+    def test_garbled_reply_and_port_overflow_are_unreachable(self):
+        import http.client
+
+        def garbled(request, timeout):
+            raise http.client.BadStatusLine("x")
+
+        result = detect.probe("vpn.example.edu", opener=garbled)
+        self.assertFalse(result.reachable)
+        self.assertTrue(result.error.startswith("Can't reach vpn.example.edu"))
+
+        def overflow(request, timeout):
+            raise OverflowError("port must be 0-65535.")
+
+        self.assertTrue(detect.probe("vpn.example.edu:99999", opener=overflow).error.startswith("Can't reach"))
+
 if __name__ == "__main__":
     unittest.main()

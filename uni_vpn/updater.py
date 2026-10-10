@@ -4,8 +4,11 @@ writes to Program Files, so nothing the user can change may decide which code it
 
 from __future__ import annotations
 
+import hashlib
 import io
+import json
 import os
+import platform as _platform
 import re
 import shutil
 import subprocess
@@ -24,6 +27,11 @@ CHANNEL = "stable"
 LATEST_URL = f"https://api.github.com/repos/{REPO}/commits/{CHANNEL}"
 ARCHIVE_URL = f"https://codeload.github.com/{REPO}/zip/{{commit}}"
 GIT_URL = f"https://github.com/{REPO}.git"
+# The Go core's release files (docs/go-switch.md). With "handover" set, installing the Go core
+# next to bin/uni-vpn moves this installation over to it.
+CORE_MANIFEST_URL = f"https://github.com/{REPO}/releases/latest/download/core-manifest.json"
+CORE_FILE_URL = f"https://github.com/{REPO}/releases/latest/download/{{name}}"
+CORE_MAX_BYTES = 200 * 1024 * 1024
 COMMIT_FILE = ".commit"
 # Exit code of a daemon that updated itself and wants to be started again (EX_TEMPFAIL).
 RESTART_EXIT = 75
@@ -43,6 +51,43 @@ for module in pkgutil.iter_modules(uni_vpn.__path__):
 
 class UpdateError(Exception):
     pass
+
+
+def core_name() -> str | None:
+    """The Go core's zip for this computer, None where none is built."""
+    system = {"linux": "linux", "darwin": "darwin", "win32": "windows"}.get(sys.platform)
+    machine = {"x86_64": "amd64", "amd64": "amd64", "arm64": "arm64", "aarch64": "arm64"}.get(
+        _platform.machine().lower())
+    return f"uni-vpn-core-{system}-{machine}.zip" if system and machine else None
+
+
+def core_binary() -> str:
+    return "bin/uni-vpn-core.exe" if pf.IS_WINDOWS else "bin/uni-vpn-core"
+
+
+def core_for(commit: str, opener=None, timeout: float = 20) -> dict | None:
+    """{"name", "sha256", "size"} of the Go core to install with commit, when the manifest says
+    this installation moves over. Any problem reading it means: stay on Python for now."""
+    opener = opener or urllib.request.urlopen
+    name = core_name()
+    if not name:
+        return None
+    request = urllib.request.Request(CORE_MANIFEST_URL, headers={"User-Agent": "uni-vpn"})
+    try:
+        with opener(request, timeout=timeout) as response:
+            manifest = json.loads(response.read(1024 * 1024))
+        entry = manifest["files"][name]
+        if (manifest.get("handover") is not True or manifest.get("commit") != commit
+                or not re.fullmatch(r"[0-9a-f]{64}", entry["sha256"])
+                or not isinstance(entry["size"], int) or not 0 < entry["size"] <= CORE_MAX_BYTES):
+            return None
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return {"name": name, "sha256": entry["sha256"], "size": entry["size"]}
+
+
+def core_installed(root: Path) -> bool:
+    return (root / core_binary()).is_file()
 
 
 def _no_window() -> dict:
@@ -144,10 +189,12 @@ def remove_stale(root: Path, keep: set[str]) -> None:
 
 
 class Staged:
-    """A new version unpacked next to the program, not yet in place."""
+    """A new version unpacked next to the program, not yet in place. partial: only some files
+    (the Go core), the others stay."""
 
-    def __init__(self, root: Path, folder: Path, files: dict[str, tuple[str, Path]], commit: str | None):
-        self.root, self.folder, self.files, self.commit = root, folder, files, commit
+    def __init__(self, root: Path, folder: Path, files: dict[str, tuple[str, Path]], commit: str | None,
+                 partial: bool = False):
+        self.root, self.folder, self.files, self.commit, self.partial = root, folder, files, commit, partial
 
     def install(self) -> None:
         # File by file: on Windows the running service has the program folder as its working
@@ -156,7 +203,8 @@ class Staged:
             destination.parent.mkdir(parents=True, exist_ok=True)
             os.replace(self.folder / relative, destination)
         self.discard()
-        remove_stale(self.root, set(self.files))
+        if not self.partial:
+            remove_stale(self.root, set(self.files))
         if self.commit:
             (self.root / COMMIT_FILE).write_text(self.commit + "\n", encoding="ascii")
 
@@ -200,6 +248,47 @@ def stage(root: Path, url: str, commit: str | None = None, opener=None, check=No
     return Staged(root, folder, files, commit)
 
 
+def stage_core(staged: Staged | None, root: Path, core: dict, commit: str, opener=None, run=subprocess.run) -> Staged:
+    """Adds the Go core to staged (or stages it alone): download, check size and SHA-256, unpack
+    bin/uni-vpn-core and test that it starts and is the expected version."""
+    opener = opener or urllib.request.urlopen
+    url = CORE_FILE_URL.format(name=core["name"])
+    with opener(urllib.request.Request(url, headers={"User-Agent": "uni-vpn"}), timeout=120) as response:
+        data = response.read(core["size"] + 1)
+    if len(data) != core["size"] or hashlib.sha256(data).hexdigest() != core["sha256"]:
+        raise ValueError("the download is damaged, try again")
+    binary = core_binary()
+    root = root.resolve()
+    folder = staged.folder if staged else Path(tempfile.mkdtemp(prefix=".uni-vpn-update-", dir=root.parent))
+    try:
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                content = archive.read(binary)
+        except (zipfile.BadZipFile, zlib.error, EOFError, KeyError) as exc:
+            raise ValueError(f"the download is damaged, try again ({exc})") from None
+        target = folder / binary
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+        target.chmod(0o755)
+        try:
+            result = run([str(target), "--version"], capture_output=True, text=True, timeout=60, **_no_window())
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ValueError(f"the new version does not start: {exc}") from None
+        if result.returncode != 0 or commit not in (result.stdout or ""):
+            raise ValueError("the new version does not start: " + ((result.stdout or "").strip()[:80] or
+                                                                   "exit " + str(result.returncode)))
+    except BaseException:
+        if staged:
+            staged.discard()
+        else:
+            shutil.rmtree(folder, ignore_errors=True)
+        raise
+    if staged:
+        staged.files[binary] = (binary, root / binary)
+        return staged
+    return Staged(root, folder, {binary: (binary, root / binary)}, commit, partial=True)
+
+
 # --- the service's updater ---------------------------------------------------------------
 
 class Updater:
@@ -225,14 +314,21 @@ class Updater:
             commit = self._check_git()
         else:
             commit = latest_commit(self.opener)
-            if commit == self.installed():
+            current = commit == self.installed()
+            core = None if core_installed(self.root) else core_for(commit, self.opener)
+            if current and not core:
                 return None
             try:
-                self._staged = stage(self.root, ARCHIVE_URL.format(commit=commit), commit, self.opener,
-                                     check=lambda folder: smoke_test(folder, self.python, self.run))
+                if not current:
+                    self._staged = stage(self.root, ARCHIVE_URL.format(commit=commit), commit, self.opener,
+                                         check=lambda folder: smoke_test(folder, self.python, self.run))
+                if core:
+                    self._staged = stage_core(self._staged, self.root, core, commit, self.opener, self.run)
             except ValueError as exc:
+                self.discard()
                 raise UpdateError(str(exc)) from None
             except OSError as exc:
+                self.discard()
                 raise UpdateError(f"downloading the update failed: {exc}") from None
         self.pending = commit
         return commit

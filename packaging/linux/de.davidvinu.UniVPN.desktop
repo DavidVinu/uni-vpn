@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Uni VPN
+Comment=University VPN for selected websites
+Exec=/usr/share/uni-vpn/uni-vpn-open
+Icon=de.davidvinu.UniVPN
+StartupWMClass=de.davidvinu.UniVPN
+Categories=Network;
+Terminal=false

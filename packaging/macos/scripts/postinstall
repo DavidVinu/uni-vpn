@@ -1,0 +1,10 @@
+#!/bin/sh
+# Sets uni-vpn up for whoever is signed in, as that user: own copy of the program, the
+# background service, the proxy rule, then the setup assistant opens. Without anyone signed
+# in, opening "Uni VPN" does the same later.
+user=$(stat -f%Su /dev/console)
+case "$user" in ""|root|loginwindow) exit 0 ;; esac
+uid=$(id -u "$user") || exit 0
+launchctl asuser "$uid" sudo -u "$user" -H "/Applications/Uni VPN.app/Contents/Resources/uni-vpn-open" --setup
+# A failed setup already showed its message; the files are in place and opening the app retries.
+exit 0

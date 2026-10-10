@@ -223,7 +223,7 @@ class DaemonCommandTests(unittest.TestCase):
         self.assertEqual(results, [0])
         self.assertIsNotNone(data, "status.json not reachable")
         self.assertEqual(data["state"], "error")
-        self.assertEqual(data["message_id"], "msg.settings_broken")
+        self.assertEqual(data["message_id"], "settings_broken")
         self.assertTrue(data["setup_needed"])  # the app shows the setup assistant again
         self.assertEqual(data["http_port"], http_port)
         self.assertEqual(data["socks_port"], socks_port)

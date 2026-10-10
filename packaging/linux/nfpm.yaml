@@ -1,0 +1,52 @@
+# Built by packaging/linux/build.sh from a staging folder (paths below are relative to it).
+name: uni-vpn
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+version_schema: none
+release: 1
+section: net
+priority: optional
+maintainer: David Vinu <me@davidvinu.de>
+vendor: uni-vpn
+homepage: https://github.com/DavidVinu/uni-vpn
+license: AGPL-3.0-or-later
+description: |-
+  Your university's VPN, only for university websites.
+  Opens the university's websites through its VPN when needed, everything else stays on the normal connection.
+contents:
+  # The Go core and what it needs (packaging/stage-app.sh --go).
+  - src: ./app
+    dst: /usr/share/uni-vpn/app
+    type: tree
+  - src: ./uni-vpn-open
+    dst: /usr/share/uni-vpn/uni-vpn-open
+    file_info:
+      mode: 0755
+  # Same name as the entry setup writes for each user, which then takes its place.
+  - src: ./de.davidvinu.UniVPN.desktop
+    dst: /usr/share/applications/de.davidvinu.UniVPN.desktop
+  - src: ./de.davidvinu.UniVPN.metainfo.xml
+    dst: /usr/share/metainfo/de.davidvinu.UniVPN.metainfo.xml
+  - src: ./icon.svg
+    dst: /usr/share/icons/hicolor/scalable/apps/de.davidvinu.UniVPN.svg
+overrides:
+  deb:
+    depends:
+      - openconnect
+      - ocproxy
+      - libsecret-tools
+      # The app window (app/linux/uni-vpn-app.py); without it the browser opens instead.
+      - python3-gi
+      - gir1.2-webkit2-4.1 | gir1.2-webkit2-4.0
+    recommends:
+      - gir1.2-ayatanaappindicator3-0.1
+  rpm:
+    depends:
+      - openconnect
+      - ocproxy
+      - /usr/bin/secret-tool
+      - python3-gobject
+      - webkit2gtk4.1
+    recommends:
+      - libayatana-appindicator-gtk3

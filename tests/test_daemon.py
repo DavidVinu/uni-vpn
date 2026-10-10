@@ -667,6 +667,25 @@ class ProfileTests(DaemonHarness):
         self.assertEqual(self.pw_lines(), ["pw-s3cret123456"])
         self.assertFalse(self.tokenfile.exists())
 
+    async def test_totp_append_without_a_secret_is_reported_like_a_missing_one(self):
+        self.cfg.mfa = "totp_append"
+        self.totp = b"  "
+        d = await self.start_daemon()
+        await d.request_connect()
+        await wait_state(d, dm.State.keyring)
+        self.assertEqual(d.message, messages.TOTP_MISSING)
+        self.assertEqual(self.pw_lines(), [], "openconnect must not start without a secret")
+
+    async def test_totp_append_with_a_malformed_secret_is_a_final_auth_failure(self):
+        self.cfg.mfa = "totp_append"
+        self.totp = b"base32:!!!"
+        d = await self.start_daemon()
+        await d.request_connect()
+        await wait_state(d, dm.State.auth_failed)
+        self.assertEqual(d.message, messages.TOTP_UNUSABLE)
+        self.assertIsNone(d.tunnel)
+        self.assertEqual(self.pw_lines(), [])
+
     async def test_duo_push_sends_push_and_needs_no_secret(self):
         self.cfg.mfa = "duo_push"
         self.totp = credentials.TotpMissing("x")

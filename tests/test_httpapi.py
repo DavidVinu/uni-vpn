@@ -368,7 +368,7 @@ class SetupTests(DaemonHarness):
         d._set(dm.State.auth_failed, messages.TOTP_REJECTED)
         self.assertEqual(d.status()["error_kind"], "totp")
         self.assertEqual(d.status()["action"], "totp")
-        self.assertEqual(d.status()["message_id"], "msg.totp_rejected")
+        self.assertEqual(d.status()["message_id"], "totp_rejected")
         d._set(dm.State.keyring, messages.PASSWORD_MISSING)
         self.assertEqual(d.status()["error_kind"], "password")
         d._set(dm.State.idle, messages.NOT_CONNECTED)

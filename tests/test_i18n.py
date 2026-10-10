@@ -144,7 +144,7 @@ class ApiTests(DaemonHarness):
         state = json.loads((await http(self.cfg.http_port, "GET", "/status.json"))[2])
         self.assertEqual(state["language"], "")
         self.assertEqual(state["message_t"]["key"], "msg.not_connected")
-        self.assertEqual(state["message_id"], "msg.not_connected")
+        self.assertEqual(state["message_id"], "not_connected")
 
     async def test_menu_for_the_native_app(self):
         await self.start_daemon()

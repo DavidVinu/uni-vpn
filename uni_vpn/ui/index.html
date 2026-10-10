@@ -333,7 +333,7 @@ function err(id, text) { $(id).textContent = text || ""; $(id).hidden = !text; }
 
 // --- status ------------------------------------------------------------------
 // Message ids (messages.py) whose state label says it all.
-const QUIET = ["not_connected", "disconnected", "connecting", "connected", "disconnecting", "setup_needed"].map((id) => "msg." + id);
+const QUIET = ["not_connected", "disconnected", "connecting", "connected", "disconnecting", "setup_needed"];
 const FIX = {password: "main.update_password", totp: "main.update_totp", repair: "main.repair"};
 const LOOK = {
   connected: "ok", connecting: "warn busy", disconnecting: "warn busy", idle: "", offline: "warn", blocked: "warn",
@@ -644,7 +644,7 @@ function setupProgress() {
     post("/api/connect").catch(() => {});
   }
   const stuck = ["offline", "blocked", "error"].includes(S.state);
-  const waiting = S.message_id === "msg.waiting_for_code";
+  const waiting = S.message_id === "waiting_for_code";
   $("s3-msg").textContent = stuck || waiting ? tr(S.message, S.message_t) : t("setup.waiting");
   $("s3-skip").hidden = !stuck;
 }

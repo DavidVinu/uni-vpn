@@ -168,3 +168,30 @@ class OpenUrlTests(unittest.TestCase):
             self.assertEqual(pf.app_install_dir(), Path("/tmp/data/uni-vpn/app"))
         with mock.patch.object(pf, "IS_MACOS", True):
             self.assertEqual(pf.app_install_dir(), Path.home() / "Library" / "Application Support" / "uni-vpn" / "app")
+
+
+class PackagedTests(unittest.TestCase):
+    def setUp(self):
+        self.package = Path(tempfile.mkdtemp())
+
+    def test_packaged_needs_the_program_copy(self):
+        self.assertFalse(pf.packaged(str(self.package)))
+        (self.package / "app" / "uni_vpn").mkdir(parents=True)
+        (self.package / "app" / "uni_vpn" / "__init__.py").write_text("")
+        self.assertTrue(pf.packaged(str(self.package)))
+
+    @posix_only
+    def test_bundled_programs_only_on_macos_for_this_processor(self):
+        directory = self.package / os.uname().machine / "bin"
+        directory.mkdir(parents=True)
+        tool = directory / "ocproxy"
+        tool.write_text("#!/bin/sh\n")
+        tool.chmod(0o755)
+        with mock.patch.object(pf, "IS_MACOS", False):
+            self.assertIsNone(pf.bundled_bin_dir(str(self.package)))
+        with mock.patch.object(pf, "IS_MACOS", True), mock.patch.object(pf, "PACKAGE_DIR", str(self.package)):
+            self.assertEqual(pf.bundled_bin_dir(), str(directory))
+            # Before anything on the PATH or in Homebrew.
+            self.assertEqual(pf.find_binary("ocproxy"), str(tool))
+            self.assertTrue(pf.is_bundled(str(tool)))
+            self.assertFalse(pf.is_bundled("/opt/homebrew/bin/ocproxy"))
