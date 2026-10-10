@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/DavidVinu/uni-vpn/internal/pyjson"
 )
 
 func TestDefaults(t *testing.T) {
@@ -30,10 +32,10 @@ func TestParseNormalizesAndReportsErrorsWithLineNumbers(t *testing.T) {
 	if !reflect.DeepEqual(domains, []string{"sogo.uni-heidelberg.de", "example.org"}) {
 		t.Fatal(domains)
 	}
-	if len(errs) != 2 || !strings.Contains(errs[0], "line 6") || !strings.Contains(errs[1], "line 7") {
+	if len(errs) != 2 || errs[1].String() != `Line 7: "http://x.y" is not a website` {
 		t.Fatal(errs)
 	}
-	if errs[0] != "line 6: 'not valid' is not a hostname" {
+	if errs[0].String() != `Line 6: "not valid" is not a website` || errs[0].JSON()[1].Value.(pyjson.Object)[0].Value != 6 {
 		t.Fatal(errs[0])
 	}
 }
@@ -53,7 +55,8 @@ func TestParsePythonCompatibility(t *testing.T) {
 	if !reflect.DeepEqual(domains, []string{"a.b", "c.d", "e.f", "g.h", "i.j", long[:253]}) {
 		t.Fatal(domains)
 	}
-	if len(errs) != 2 || errs[0] != "line 6: '\u0130.de' is not a hostname" || !strings.HasPrefix(errs[1], "line 7: ") {
+	if len(errs) != 2 || errs[0].String() != "Line 6: \"\u0130.de\" is not a website" ||
+		!strings.HasPrefix(errs[1].String(), "Line 7: ") {
 		t.Fatal(errs)
 	}
 	if Matches("\u0130ntra.example", []string{"intra.example"}) {

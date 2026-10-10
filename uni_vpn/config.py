@@ -112,7 +112,7 @@ def profile_config(university: str, overrides: dict | None = None) -> Config:
     for key, value in check_overrides(overrides or {}).items():
         setattr(cfg, key, value)
     if not cfg.host:
-        raise unis.FieldError("host", "Enter the VPN address, for example vpn.example.edu")
+        raise unis.FieldError("host", i18n.t("address.invalid"))
     return cfg
 
 

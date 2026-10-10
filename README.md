@@ -289,8 +289,9 @@ other universities: `docs/superpowers/specs/2026-10-05-multi-university-design.m
 Languages: English, German, French, Spanish, Chinese (Simplified and Traditional), one per
 university language in the list. Every text the app, the menus and the service show lives in
 `uni_vpn/locales/<code>.json`, `en.json` is the source; a new language is a copy of it plus an
-entry in `uni_vpn/i18n.py`. Service messages (`uni_vpn/messages.py`) are keys into it:
-`status.json` carries `message_id` and `message_t`, API errors `error_t`.
+entry in `uni_vpn/i18n.py` and `internal/i18n/i18n.go`; the Go core embeds the files. Service
+messages are keys into it (`msg.<message_id>`): `status.json` carries them as `message_t`, API
+errors as `error_t`.
 
 ## License
 

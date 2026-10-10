@@ -1,10 +1,14 @@
 package totp
 
 import (
+	"errors"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/DavidVinu/uni-vpn/internal/i18n"
+	"github.com/DavidVinu/uni-vpn/internal/pyjson"
 )
 
 // RFC 6238, Appendix B: secret "12345678901234567890" (SHA1), or 32 bytes for SHA256.
@@ -62,7 +66,7 @@ func TestRejectsUnusualDigitsOrPeriod(t *testing.T) {
 
 func TestRejectsUnknownAlgorithm(t *testing.T) {
 	err := mustFail(t, "otpauth://totp/x?secret="+rfcSHA1+"&algorithm=MD5")
-	if err.Error() != "Algorithm MD5 is not supported" {
+	if keyOf(err) != "totp.algorithm" || i18n.Of(err).(pyjson.Object)[1].Value.(pyjson.Object)[0].Value != "MD5" {
 		t.Fatal(err)
 	}
 }
@@ -99,17 +103,17 @@ func TestPythonCompatibility(t *testing.T) {
 		mustNormalize(t, in, want)
 	}
 	msgs := map[string]string{
-		"AAAAAAAAAAAAAAAAA":                                 "Secret is not valid Base32", // 17 chars: bad padding
-		"AAAAAAAAAAAAAAA":                                   "The secret is incomplete. Copy the whole line",
-		"otpauth:totp/x?secret=" + rfcSHA1:                  "Only time-based tokens (otpauth://totp/...) are supported",
+		"AAAAAAAAAAAAAAAAA":                                 "totp.base32", // 17 chars: bad padding
+		"AAAAAAAAAAAAAAA":                                   "totp.incomplete",
+		"otpauth:totp/x?secret=" + rfcSHA1:                  "totp.only_totp",
 		"otpauth://[totp/x":                                 "Invalid IPv6 URL",
-		"otpauth://totp/x?secret=" + rfcSHA1 + "&digits=06": "Only 6 digits and 30 seconds are supported",
-		"otpauth://totp/x?algorithm=%E2%82":                 "Algorithm \ufffd is not supported",
-		"otpauth://totp/x":                                  "Paste the secret first",
-		"a\rb":                                              "Secret must not contain a line break",
+		"otpauth://totp/x?secret=" + rfcSHA1 + "&digits=06": "totp.digits",
+		"otpauth://totp/x?algorithm=%E2%82":                 "totp.algorithm",
+		"otpauth://totp/x":                                  "totp.empty",
+		"a\rb":                                              "totp.line_break",
 	}
 	for in, want := range msgs {
-		if err := mustFail(t, in); err.Error() != want {
+		if err := mustFail(t, in); keyOf(err) != want {
 			t.Errorf("Normalize(%q): %q, want %q", in, err, want)
 		}
 	}
@@ -150,12 +154,12 @@ func TestCodeUsesCurrentTimeByDefault(t *testing.T) {
 
 func TestCodeRejectsUnknownFormat(t *testing.T) {
 	for token, want := range map[string]string{
-		"hex:3132":              "Unknown token format",
-		"sha1:sha256:base32:AA": "Unknown token format",
-		"base32:gezdgnbv":       "Secret is not valid Base32",
-		"base32:A\nAAAAAAA":     "Secret is not valid Base32",
+		"hex:3132":              "totp.unknown",
+		"sha1:sha256:base32:AA": "totp.unknown",
+		"base32:gezdgnbv":       "totp.base32",
+		"base32:A\nAAAAAAA":     "totp.base32",
 	} {
-		if _, err := Code(token); err == nil || err.Error() != want {
+		if _, err := Code(token); err == nil || keyOf(err) != want {
 			t.Errorf("Code(%q): %v, want %q", token, err, want)
 		}
 	}
@@ -179,4 +183,13 @@ func TestB32DecodeMatchesPython(t *testing.T) {
 	if err != nil || string(got) != "foo" {
 		t.Fatal(got, err)
 	}
+}
+
+// keyOf is the catalog key of an error, its text when it has none.
+func keyOf(err error) string {
+	var text i18n.Text
+	if errors.As(err, &text) {
+		return text.Key
+	}
+	return err.Error()
 }

@@ -988,8 +988,8 @@ func TestStatusKeyOrderLikePython(t *testing.T) {
 	for _, m := range s {
 		keys = append(keys, m.Key)
 	}
-	want := []string{"protocol", "version", "commit", "auto_update", "update_pending", "state", "message",
-		"message_id", "action", "since", "host", "user", "university", "university_name", "mfa", "mfa_portal_url",
+	want := []string{"protocol", "version", "commit", "auto_update", "language", "update_pending", "state", "message",
+		"message_id", "message_t", "action", "since", "host", "user", "university", "university_name", "mfa", "mfa_portal_url",
 		"mfa_steps", "socks_port", "http_port", "idle_minutes", "active_connections", "bytes_in", "bytes_out",
 		"connects", "last_error", "domains", "pac_url", "pac_refresh", "log_tail", "setup_needed", "repairing",
 		"busy", "error_kind", "platform", "elevated"}

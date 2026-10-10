@@ -280,7 +280,8 @@ func TestPasswordEndpointRejectsNewline(t *testing.T) {
 	for _, password := range []string{"a\nb", "a\rb", "pw\n", "pw\r\ndelete-generic-password -s x"} {
 		body, _ := json.Marshal(map[string]string{"password": password})
 		r := h.post("/api/password", string(body))
-		if r.status != 400 || string(r.body) != "Password must not contain a line break" {
+		if r.status != 400 || string(r.body) != `{"ok": false, "error": "The password must be on one line", `+
+			`"error_t": {"key": "password.line_break", "args": {}}}` {
 			t.Fatal(password, r.status, string(r.body))
 		}
 	}
@@ -823,7 +824,7 @@ func TestDomainsEndpointRejectsInvalidLinesAndChangesNothing(t *testing.T) {
 	h := newHarness(t)
 	h.start(nil)
 	r := h.post("/api/domains", `{"text": "sogo.uni-heidelberg.de\nbroken\n"}`)
-	if r.status != 400 || !bytes.Contains(r.body, []byte("line 2")) {
+	if r.status != 400 || !bytes.Contains(r.body, []byte(`"key": "domains.not_hostname", "args": {"line": 2`)) {
 		t.Fatal(r.status, string(r.body))
 	}
 	if _, err := os.Stat(h.domainsPath); err == nil || len(h.refreshed) != 0 {
@@ -845,11 +846,13 @@ func TestAnswersAreByteForByteLikePython(t *testing.T) {
 	h := newHarness(t)
 	h.start(nil)
 	r := h.http("POST", "/api/totp/check", apiHeaders, "{not json")
-	if r.status != 400 || string(r.body) != "Expecting property name enclosed in double quotes: line 1 column 2 (char 1)" {
+	if r.status != 400 || string(r.body) != `{"ok": false, "error": "Expecting property name enclosed in double `+
+		`quotes: line 1 column 2 (char 1)", "error_t": null}` {
 		t.Fatal(r.status, string(r.body))
 	}
 	r = h.http("POST", "/api/auto-update", apiHeaders, `{"enabled": true}`)
-	if r.status != 409 || string(r.body) != "Finish the setup first" {
+	if r.status != 409 || string(r.body) != `{"ok": false, "error": "Finish the setup first", `+
+		`"error_t": {"key": "setup.finish_first", "args": {}}}` {
 		t.Fatal(r.status, string(r.body))
 	}
 	c, err := net.Dial("tcp", "127.0.0.1:"+strconv.Itoa(h.cfg.HTTPPort))

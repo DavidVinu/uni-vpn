@@ -14,6 +14,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
+	"github.com/DavidVinu/uni-vpn/internal/i18n"
 	assets "github.com/DavidVinu/uni-vpn/uni_vpn"
 )
 
@@ -63,9 +64,23 @@ func hostOK(s string) bool {
 type FieldError struct {
 	Field   string
 	Message string
+	Text    *i18n.Text // the message as a catalog text, nil when it has none
 }
 
 func (e *FieldError) Error() string { return e.Message }
+
+// Unwrap hands the catalog text to i18n.Of.
+func (e *FieldError) Unwrap() error {
+	if e.Text == nil {
+		return nil
+	}
+	return *e.Text
+}
+
+// TextError is a FieldError with a catalog text.
+func TextError(field string, text i18n.Text) *FieldError {
+	return &FieldError{Field: field, Message: text.String(), Text: &text}
+}
 
 type Profile struct {
 	ID             string
@@ -195,47 +210,47 @@ func (p *Profile) setField(name string, value any) {
 // anything openconnect accepts (a URL, a single name), so only whitespace and quotes are refused.
 func CheckField(name string, value any, strict bool) (any, error) {
 	if !slices.Contains(ProfileFields, name) {
-		return nil, &FieldError{name, fmt.Sprintf("unknown setting '%s'", name)}
+		return nil, &FieldError{Field: name, Message: fmt.Sprintf("unknown setting '%s'", name)}
 	}
 	if IsBoolField(name) {
 		if b, ok := value.(bool); ok {
 			return b, nil
 		}
-		return nil, &FieldError{name, fmt.Sprintf("'%s' must be true or false", name)}
+		return nil, &FieldError{Field: name, Message: fmt.Sprintf("'%s' must be true or false", name)}
 	}
 	s, ok := value.(string)
 	if !ok {
-		return nil, &FieldError{name, fmt.Sprintf("'%s' must be text", name)}
+		return nil, &FieldError{Field: name, Message: fmt.Sprintf("'%s' must be text", name)}
 	}
 	switch {
 	case name == "host" && !strict:
 		if !looseHostRE.MatchString(s) {
-			return nil, &FieldError{name, "'host' must not be empty or contain spaces or quotes"}
+			return nil, &FieldError{Field: name, Message: "'host' must not be empty or contain spaces or quotes"}
 		}
 	case name == "host":
 		s = strings.TrimRight(lower(strip(s)), ".")
 		if !hostOK(s) {
-			return nil, &FieldError{name, "Enter the VPN address, for example vpn.example.edu"}
+			return nil, TextError(name, i18n.T("address.invalid"))
 		}
 	case name == "usergroup":
 		s = strings.Trim(strip(s), "/")
 		if !usergroupRE.MatchString(s) {
-			return nil, &FieldError{name, "The path after the address may only contain letters, digits and . _ ~ + -"}
+			return nil, TextError(name, i18n.T("address.path"))
 		}
 	case name == "mfa":
 		if !slices.Contains(MFAModes, s) {
-			return nil, &FieldError{name, "'mfa' must be one of " + strings.Join(MFAModes, ", ")}
+			return nil, &FieldError{Field: name, Message: "'mfa' must be one of " + strings.Join(MFAModes, ", ")}
 		}
 	case name == "os":
 		if !slices.Contains(OSValues, s) {
-			return nil, &FieldError{name, "'os' must be one of " + OSChoices}
+			return nil, &FieldError{Field: name, Message: "'os' must be one of " + OSChoices}
 		}
 	case name == "mfa_portal_url":
 		if s != "" && !urlRE.MatchString(s) {
-			return nil, &FieldError{name, "'mfa_portal_url' must be an https:// address"}
+			return nil, &FieldError{Field: name, Message: "'mfa_portal_url' must be an https:// address"}
 		}
 	case !textRE.MatchString(s):
-		return nil, &FieldError{name, fmt.Sprintf("'%s' must not contain quotes, backslashes or line breaks", name)}
+		return nil, &FieldError{Field: name, Message: fmt.Sprintf("'%s' must not contain quotes, backslashes or line breaks", name)}
 	}
 	return s, nil
 }
