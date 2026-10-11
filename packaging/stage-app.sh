@@ -19,7 +19,7 @@ out=$(cd "$1" && pwd)
 # build GOOS GOARCH FILE: the core as the release zips have it, with the commit it updates from.
 build() {
   (cd "$repo" && CGO_ENABLED=0 GOOS="$1" GOARCH="$2" go build -trimpath \
-    -ldflags "-X github.com/DavidVinu/uni-vpn/internal/daemon.Commit=${GITHUB_SHA:-}" -o "$3" ./cmd/uni-vpn)
+    -ldflags "-X github.com/DavidVinu/uni-vpn/internal/daemon.Commit=${GITHUB_SHA:-}${UNI_VPN_VERSION:+ -X github.com/DavidVinu/uni-vpn/internal/daemon.Version=$UNI_VPN_VERSION}" -o "$3" ./cmd/uni-vpn)
 }
 
 if [ -z "$target" ]; then

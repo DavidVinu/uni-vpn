@@ -2,6 +2,9 @@ name: CI
 on:
   push:
   pull_request:
+# The release number the installers and the core carry (and Settings shows).
+env:
+  UNI_VPN_VERSION: 0.1.${{ github.run_number }}
 jobs:
   tests:
     strategy:
@@ -238,7 +241,7 @@ jobs:
             echo "MACOS_NOTARY_PROFILE=uni-vpn"
           } >> "$GITHUB_ENV"
       - name: Build uni-vpn.pkg
-        run: packaging/macos/build-pkg.sh runtime "0.1.${{ github.run_number }}" uni-vpn.pkg
+        run: packaging/macos/build-pkg.sh runtime "$UNI_VPN_VERSION" uni-vpn.pkg
       - name: Install it like a user would
         run: |
           sudo installer -pkg uni-vpn.pkg -target / </dev/null &
@@ -296,7 +299,7 @@ jobs:
           go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.43.0
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - name: Build the .deb and .rpm files (amd64 and arm64)
-        run: packaging/linux/build.sh "0.1.${{ github.run_number }}" out
+        run: packaging/linux/build.sh "$UNI_VPN_VERSION" out
       - name: Install the .deb like a user would
         run: |
           sudo apt-get update -qq
@@ -404,7 +407,7 @@ jobs:
           Copy-Item -Recurse openconnect-win64 stage\openconnect
           New-Item -ItemType Directory -Force out | Out-Null
           Compress-Archive -Path openconnect-win64\* -DestinationPath out\uni-vpn-openconnect-win64.zip
-          iscc.exe /Q "/DAppVersion=0.1.${{ github.run_number }}" "/DSourceDir=$PWD\stage" "/DOutputDir=$PWD\out" packaging\windows\uni-vpn.iss
+          iscc.exe /Q "/DAppVersion=$env:UNI_VPN_VERSION" "/DSourceDir=$PWD\stage" "/DOutputDir=$PWD\out" packaging\windows\uni-vpn.iss
           if ($LASTEXITCODE -ne 0) { exit 1 }
       # Switches on by itself once the Azure Trusted Signing secrets exist (see docs/superpowers/specs).
       - name: Sign
@@ -516,3 +519,4 @@ jobs:
           # The manifest last: it must never name a file that is not there yet.
           gh release upload latest core/uni-vpn-core-*.zip --clobber
           gh release upload latest core/core-manifest.json --clobber
+          gh release edit latest --notes "Version $UNI_VPN_VERSION, $(date -u +%Y-%m-%d). Download the file for your computer and open it: uni-vpn.pkg (Mac), uni-vpn-setup.exe (Windows), uni-vpn.deb (Ubuntu, Debian, Mint) or uni-vpn.rpm (Fedora)."
