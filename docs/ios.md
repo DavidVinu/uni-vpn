@@ -53,7 +53,7 @@ thin SwiftUI shell around the core.
 |---|---|---|
 | Home | Tailscale iOS | Large title with the settings gear, one card with the state and the switch above everything, the list below (websites instead of devices) |
 | System prompt | Tailscale iOS | iOS's "Add VPN Configurations" right after setup, from the last page's Done |
-| Control Center button | Tailscale iOS | One tap on or off (iOS 18); before setup the app is the way in |
+| Control Center button | Tailscale iOS | One tap on or off (iOS 18); the tap's intent runs in the app's process, which may change the VPN configuration; before setup the app is the way in |
 | Welcome, Add a device | WhatsApp, Signal linked devices | Scan the code the computer shows; the code under the QR code to type instead |
 | University | eduroam CAT | Search by name or city, "Not listed" for a VPN address |
 | Sign-in code | Google Authenticator | "Scan QR code" with VisionKit's scanner (one camera prompt), or type the setup key; the live test code |

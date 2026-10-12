@@ -6,7 +6,7 @@ import WidgetKit
 /// Control Center button (iOS 18): one tap turns Uni VPN on or off, like the Android app's
 /// Quick Settings tile (role model: Tailscale's control). Before setup, or before the user
 /// allowed the VPN configuration in the app, there is nothing to turn on: the tap does nothing
-/// and the app is the way in.
+/// and the app is the way in. The tap's intent (SetVPN.swift) runs in the app's process.
 @main
 struct UniVPNControls: WidgetBundle {
     var body: some Widget {
@@ -33,33 +33,12 @@ struct VPNState: ControlValueProvider {
     var previewValue: Bool { false }
 
     func currentValue() async throws -> Bool {
-        guard let manager = try await NETunnelProviderManager.loadAllFromPreferences().first else { return false }
+        // Reading the configuration may be the app's privilege; then what the app last wrote.
+        guard let managers = try? await NETunnelProviderManager.loadAllFromPreferences() else {
+            return UserDefaults(suiteName: SetVPN.appGroup)?.bool(forKey: SetVPN.onKey) ?? false
+        }
+        guard let manager = managers.first else { return false }
         let running: [NEVPNStatus] = [.connected, .connecting, .reasserting]
         return manager.isOnDemandEnabled || running.contains(manager.connection.status)
-    }
-}
-
-struct SetVPN: SetValueIntent {
-    static let title: LocalizedStringResource = "Uni VPN"
-
-    @Parameter(title: "Uni VPN")
-    var value: Bool
-
-    func perform() async throws -> some IntentResult {
-        let setupDone = UserDefaults(suiteName: "group.de.davidvinu.univpn")?.bool(forKey: "setup_done") ?? false
-        guard setupDone, let manager = try await NETunnelProviderManager.loadAllFromPreferences().first else {
-            return .result()
-        }
-        // The same as the app's switch: on demand keeps the VPN up.
-        manager.isEnabled = true
-        manager.isOnDemandEnabled = value
-        try await manager.saveToPreferences()
-        try await manager.loadFromPreferences()
-        if value {
-            try manager.connection.startVPNTunnel()
-        } else {
-            manager.connection.stopVPNTunnel()
-        }
-        return .result()
     }
 }
