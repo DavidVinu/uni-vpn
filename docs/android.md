@@ -37,6 +37,10 @@ the Go core does the work and the app only talks to its local API.
   (`UNI_VPN_SECRETS_KEY`), stored wrapped by an AES key in the Android Keystore. Not tied to
   unlocking, so reconnects work in a pocket. Backups and device transfer exclude the app's data.
 - **Updates** come from the store; the core's self-updater is off on Android.
+- **Later: openconnect in the core's own process.** The iPhone app runs libopenconnect inside
+  the core, with a userspace network stack instead of ocproxy (`docs/ios.md`, build tag
+  `libopenconnect`). Android could use the same engine, which would drop the two extra programs
+  and their child processes; not done yet.
 
 ## Screens and their role models
 
