@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -31,7 +32,7 @@ func TestFileStoreRoundtrip(t *testing.T) {
 	if bytes.Contains(data, []byte("pässwort")) || bytes.Contains(data, []byte("JBSWY3DP")) {
 		t.Fatal("secret stored in clear")
 	}
-	if info, _ := os.Stat(path); info.Mode().Perm() != 0o600 {
+	if info, _ := os.Stat(path); runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("mode %v", info.Mode().Perm())
 	}
 	// Another key cannot read it.
