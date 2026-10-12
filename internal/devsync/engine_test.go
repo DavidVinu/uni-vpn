@@ -602,6 +602,12 @@ func TestCancelWithdrawsTheCode(t *testing.T) {
 	if err := desktop.Enter(ctx, second.Code); err != nil {
 		t.Fatal(err)
 	}
+	// The laptop finishes the pairing and its sync (both write sync.json) before the test's
+	// folder goes, as in pair.
+	waitState(t, laptop.Engine, "done")
+	if err := laptop.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestExpiredCode(t *testing.T) {
