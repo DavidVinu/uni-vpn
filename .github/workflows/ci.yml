@@ -529,8 +529,17 @@ jobs:
           print([d["identifier"] for d in json.load(sys.stdin)["devicetypes"] if d["name"].startswith("iPhone")][-1])')
             udid=$(xcrun simctl create "CI iPhone" "$device" "$runtime")
           fi
+          echo "SIM_UDID=$udid" >> "$GITHUB_ENV"
           xcodebuild -project UniVPN.xcodeproj -scheme UniVPN \
             -destination "id=$udid" -resultBundlePath build/tests.xcresult -quiet test
+      - name: Why the tests failed
+        if: failure()
+        run: |
+          cd app/ios
+          xcrun xcresulttool get test-results tests --path build/tests.xcresult --compact || true
+          # The core's own log in the simulator's App Group folder.
+          find ~/Library/Developer/CoreSimulator/Devices/"$SIM_UDID"/data/Containers/Shared/AppGroup \
+            -name '*.log' -type f -print -exec tail -n 80 {} \; 2>/dev/null || true
       - name: Unsigned archive for phones
         run: |
           cd app/ios
