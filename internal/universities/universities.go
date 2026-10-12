@@ -97,6 +97,10 @@ type Profile struct {
 	TOTPSeparator  string
 	MFAPortalURL   string
 	MFASteps       []string
+	MFAPictures    []string // ui/guides/<name>, one per step
+	// MFAEnroll is the kind of MFA portal uni-vpn can add its own code generator to by itself
+	// ("linotp"), "" if only the guide works.
+	MFAEnroll      string
 	DefaultDomains []string
 	Aliases        []string
 	Verified       bool
@@ -119,6 +123,8 @@ type PublicProfile struct {
 	TOTPSeparator  string   `json:"totp_separator"`
 	MFAPortalURL   string   `json:"mfa_portal_url"`
 	MFASteps       []string `json:"mfa_steps"`
+	MFAPictures    []string `json:"mfa_pictures"`
+	MFAEnroll      string   `json:"mfa_enroll"`
 	DefaultDomains []string `json:"default_domains"`
 	Aliases        []string `json:"aliases"`
 	Verified       bool     `json:"verified"`
@@ -136,14 +142,15 @@ func (p *Profile) Public() PublicProfile {
 		ID: p.ID, Name: p.Name, Country: p.Country, Host: p.Host, Usergroup: p.Usergroup,
 		Authgroup: p.Authgroup, UsernameSuffix: p.UsernameSuffix, Useragent: p.Useragent, OS: p.OS,
 		NoExternalAuth: p.NoExternalAuth, MFA: p.MFA, TOTPSeparator: p.TOTPSeparator,
-		MFAPortalURL: p.MFAPortalURL, MFASteps: nonNil(p.MFASteps),
+		MFAPortalURL: p.MFAPortalURL, MFASteps: nonNil(p.MFASteps), MFAPictures: nonNil(p.MFAPictures),
+		MFAEnroll:      p.MFAEnroll,
 		DefaultDomains: nonNil(p.DefaultDomains), Aliases: nonNil(p.Aliases), Verified: p.Verified,
 	}
 }
 
 func newProfile(id, name string) Profile {
 	return Profile{ID: id, Name: name, Useragent: DefaultUseragent, NoExternalAuth: true, MFA: "none",
-		MFASteps: []string{}, DefaultDomains: []string{}, Aliases: []string{}}
+		MFASteps: []string{}, MFAPictures: []string{}, DefaultDomains: []string{}, Aliases: []string{}}
 }
 
 // Other is the profile for a university that is not listed.
@@ -255,9 +262,12 @@ func CheckField(name string, value any, strict bool) (any, error) {
 	return s, nil
 }
 
+// EnrollKinds are the MFA portals uni-vpn adds its code generator to by itself (internal/linotp).
+var EnrollKinds = []string{"", "linotp"}
+
 var entryKeys = []string{"id", "name", "country", "host", "usergroup", "authgroup", "username_suffix",
 	"useragent", "os", "no_external_auth", "mfa", "totp_separator", "mfa_portal_url", "mfa_steps",
-	"default_domains", "aliases", "verified", "notes"}
+	"mfa_pictures", "mfa_enroll", "default_domains", "aliases", "verified", "notes"}
 
 // isOne is Python's `== 1` on a JSON value: 1, 1.0 and true all qualify.
 func isOne(v any) bool {
@@ -331,6 +341,13 @@ func Parse(data []byte) ([]Profile, error) {
 				p.Notes = s
 			}
 		}
+		if v, present := entry["mfa_enroll"]; present {
+			s, ok := v.(string)
+			if !ok || !slices.Contains(EnrollKinds, s) {
+				return nil, fmt.Errorf("%s: 'mfa_enroll' must be 'linotp' or empty", uid)
+			}
+			p.MFAEnroll = s
+		}
 		if v, present := entry["verified"]; present {
 			b, ok := v.(bool)
 			if !ok {
@@ -338,7 +355,7 @@ func Parse(data []byte) ([]Profile, error) {
 			}
 			p.Verified = b
 		}
-		for _, key := range []string{"mfa_steps", "default_domains", "aliases"} {
+		for _, key := range []string{"mfa_steps", "mfa_pictures", "default_domains", "aliases"} {
 			items := []string{}
 			if v, present := entry[key]; present {
 				arr, ok := v.([]any)
@@ -356,10 +373,20 @@ func Parse(data []byte) ([]Profile, error) {
 			switch key {
 			case "mfa_steps":
 				p.MFASteps = items
+			case "mfa_pictures":
+				p.MFAPictures = items
 			case "default_domains":
 				p.DefaultDomains = items
 			default:
 				p.Aliases = items
+			}
+		}
+		if len(p.MFAPictures) > 0 && len(p.MFAPictures) != len(p.MFASteps) {
+			return nil, fmt.Errorf("%s: 'mfa_pictures' needs one picture per step", uid)
+		}
+		for _, name := range p.MFAPictures {
+			if !assets.HasGuide(name) {
+				return nil, fmt.Errorf("%s: no picture ui/guides/%s", uid, name)
 			}
 		}
 		for _, domain := range p.DefaultDomains {

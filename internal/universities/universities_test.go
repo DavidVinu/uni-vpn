@@ -66,6 +66,24 @@ func TestHeidelbergKeepsTodaysValues(t *testing.T) {
 	}
 }
 
+// The guide needs a step that takes the QR code and one that shows the code to test, and a
+// picture for every step.
+func TestHeidelbergGuideIsComplete(t *testing.T) {
+	hd := mustGet(t, "heidelberg")
+	joined := strings.Join(hd.MFASteps, "\n")
+	for _, marker := range []string{"{portal}", "{shot}", "{secret}", "{code}", "Abschließen"} {
+		if !strings.Contains(joined, marker) {
+			t.Errorf("no %s in %q", marker, hd.MFASteps)
+		}
+	}
+	if len(hd.MFAPictures) != len(hd.MFASteps) {
+		t.Fatal(hd.MFAPictures)
+	}
+	if public := hd.Public(); !slices.Equal(public.MFAPictures, hd.MFAPictures) {
+		t.Fatal(public.MFAPictures)
+	}
+}
+
 func TestOnlyHeidelbergIsVerified(t *testing.T) {
 	var verified []string
 	for _, p := range Registry() {
@@ -243,6 +261,9 @@ func TestParseMessages(t *testing.T) {
 		{registryWith(`"mfa": "sms"`), "example: 'mfa' must be one of none, totp_field, totp_append, duo_push, saml"},
 		{registryWith(`"aliases": "x"`), "example: 'aliases' must be a list of text"},
 		{registryWith(`"country": 1`), "example: 'country' must be text"},
+		{registryWith(`"mfa_steps": ["a", "b"], "mfa_pictures": ["generic-1.svg"]`), "example: 'mfa_pictures' needs one picture per step"},
+		{registryWith(`"mfa_steps": ["a"], "mfa_pictures": ["nope.svg"]`), "example: no picture ui/guides/nope.svg"},
+		{registryWith(`"mfa_steps": ["a"], "mfa_pictures": ["../index.html"]`), "example: no picture ui/guides/../index.html"},
 	}
 	for _, tt := range tests {
 		if _, err := Parse(tt.data); err == nil || err.Error() != tt.want {

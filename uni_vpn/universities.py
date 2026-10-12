@@ -12,6 +12,8 @@ from pathlib import Path
 from .i18n import t
 
 REGISTRY_FILE = Path(__file__).resolve().parent / "universities.json"
+GUIDES = REGISTRY_FILE.parent / "ui" / "guides"  # the second-factor guide's pictures
+GUIDE_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,62}\.svg")
 DEFAULT_ID = "heidelberg"  # config.toml without "university"
 OTHER_ID = "other"  # a university that is not listed: everything comes from config.toml
 DEFAULT_USERAGENT = "AnyConnect Linux_64 5.1.18.314"
@@ -61,6 +63,10 @@ class Profile:
     totp_separator: str = ""
     mfa_portal_url: str = ""
     mfa_steps: tuple[str, ...] = ()
+    mfa_pictures: tuple[str, ...] = ()
+    # The kind of MFA portal uni-vpn adds its own code generator to by itself ("linotp", Go core
+    # only), "" if only the guide works.
+    mfa_enroll: str = ""
     default_domains: tuple[str, ...] = ()
     aliases: tuple[str, ...] = ()
     verified: bool = False
@@ -69,10 +75,12 @@ class Profile:
     def public(self) -> dict:
         """What the setup assistant gets: everything except the notes for contributors."""
         data = {f.name: getattr(self, f.name) for f in fields(self) if f.name != "notes"}
-        for key in ("mfa_steps", "default_domains", "aliases"):
+        for key in ("mfa_steps", "mfa_pictures", "default_domains", "aliases"):
             data[key] = list(data[key])
         return data
 
+
+ENROLL_KINDS = ("", "linotp")
 
 OTHER = Profile(id=OTHER_ID, name="Other university")
 
@@ -139,13 +147,21 @@ def parse(data: dict) -> dict[str, Profile]:
         for key in ("country", "notes"):
             if not isinstance(values.get(key, ""), str):
                 raise ValueError(f"{uid}: '{key}' must be text")
+        if values.get("mfa_enroll", "") not in ENROLL_KINDS:
+            raise ValueError(f"{uid}: 'mfa_enroll' must be 'linotp' or empty")
         if not isinstance(values.get("verified", False), bool):
             raise ValueError(f"{uid}: 'verified' must be true or false")
-        for key in ("mfa_steps", "default_domains", "aliases"):
+        for key in ("mfa_steps", "mfa_pictures", "default_domains", "aliases"):
             items = values.get(key, [])
             if not isinstance(items, list) or not all(isinstance(i, str) for i in items):
                 raise ValueError(f"{uid}: '{key}' must be a list of text")
             values[key] = tuple(items)
+        pictures = values["mfa_pictures"]
+        if pictures and len(pictures) != len(values["mfa_steps"]):
+            raise ValueError(f"{uid}: 'mfa_pictures' needs one picture per step")
+        for name in pictures:
+            if not GUIDE_RE.fullmatch(name) or not (GUIDES / name).is_file():
+                raise ValueError(f"{uid}: no picture ui/guides/{name}")
         for domain in values["default_domains"]:
             if not DOMAIN_RE.fullmatch(domain):
                 raise ValueError(f"{uid}: '{domain}' is not a host name")

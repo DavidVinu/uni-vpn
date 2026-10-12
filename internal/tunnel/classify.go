@@ -27,6 +27,7 @@ var (
 
 const (
 	OTPGenerated = "Generating OATH TOTP token code"
+	OTPForm      = "second factor (otp)" // Heidelberg's OTP form, lower case
 	LoginFailed  = "Login failed"
 	TokenPrefix  = "totp-"
 	// MaxLine cuts longer output lines (the Python core's asyncio readline limit).
@@ -102,7 +103,9 @@ func (c *Classifier) Feed(line string) (Verdict, bool) {
 		return c.verdict, true
 	}
 	lowered := strings.ToLower(line)
-	if strings.Contains(lowered, strings.ToLower(OTPGenerated)) {
+	// The OTP form: the password was accepted. With a typed code (OncePrefix) openconnect
+	// generates nothing, so the form's own text counts too.
+	if strings.Contains(lowered, strings.ToLower(OTPGenerated)) || strings.Contains(lowered, OTPForm) {
 		c.OTPGenerated = true
 		return Verdict{}, false
 	}

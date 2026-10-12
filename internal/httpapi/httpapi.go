@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/subtle"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -26,7 +27,9 @@ import (
 	"github.com/DavidVinu/uni-vpn/internal/detect"
 	"github.com/DavidVinu/uni-vpn/internal/i18n"
 	"github.com/DavidVinu/uni-vpn/internal/pyjson"
+	"github.com/DavidVinu/uni-vpn/internal/qrscan"
 	"github.com/DavidVinu/uni-vpn/internal/totp"
+	"github.com/DavidVinu/uni-vpn/internal/tunnel"
 	unis "github.com/DavidVinu/uni-vpn/internal/universities"
 	assets "github.com/DavidVinu/uni-vpn/uni_vpn"
 )
@@ -34,6 +37,8 @@ import (
 const (
 	MaxHeader = 16 * 1024
 	MaxBody   = 64 * 1024
+	// MaxPictureBody: a screenshot for /api/totp/qr, a full 6K screen as PNG.
+	MaxPictureBody = 32 * 1024 * 1024
 	// asyncio's StreamReader limit: readuntil gives up on a head longer than this.
 	streamLimit = 64 * 1024
 	ioTimeout   = 10 * time.Second
@@ -88,6 +93,13 @@ type Syncer interface {
 	Sync(action string, data pyjson.Object) (pyjson.Object, error)
 }
 
+// Enroller is a daemon that adds its own code generator in the university's MFA portal.
+type Enroller interface {
+	// Enroll: a code from the user's authenticator app starts the setup or answers its
+	// question for the next code; cancel stops it. A *ValueError for a code that isn't one.
+	Enroll(code string, cancel bool) error
+}
+
 // ErrNotFound: no such route.
 var ErrNotFound = errors.New("not found")
 
@@ -99,6 +111,9 @@ type Server struct {
 	Host     string
 	Port     int
 	Detector DetectFunc
+	// Reachable reports whether an https:// address answers from this computer; tests
+	// replace it.
+	Reachable func(ctx context.Context, address string) bool
 	// Token, when set, must come in the X-Uni-VPN-Token header of every request but the PAC
 	// file's. On Android every app can reach 127.0.0.1, so there only our own app may talk to
 	// the core; the browsers still read the PAC file.
@@ -123,7 +138,8 @@ func New(daemon Daemon, host string, port int, log *slog.Logger) *Server {
 	return &Server{Host: host, Port: port, daemon: daemon, log: log, conns: map[net.Conn]struct{}{},
 		Detector: func(ctx context.Context, host, usergroup, group string) (detect.Detection, error) {
 			return detect.Probe(ctx, host, usergroup, group, detect.Options{})
-		}}
+		},
+		Reachable: reachable}
 }
 
 // AllowedOrigin: "null" (sandboxed iframe, data: page) is a foreign origin, not a missing one.
@@ -300,7 +316,11 @@ func (s *Server) handle(c net.Conn) {
 	if trimmed == "" {
 		length, err = 0, nil
 	}
-	if err != nil || length > MaxBody {
+	limit := MaxBody
+	if v, _ := hdrs.get("x-uni-vpn"); v == "1" && parts[0] == "POST" && strings.SplitN(target, "?", 2)[0] == pictureRoute {
+		limit = MaxPictureBody
+	}
+	if err != nil || length > limit {
 		s.respond(c, 413, "text/plain", []byte("too large"), hdrs)
 		return
 	}
@@ -436,6 +456,13 @@ func (s *Server) route(method, path, query string, hdrs headers, body []byte) (i
 				return 0, "", nil, err
 			}
 			return 200, "application/x-ns-proxy-autoconfig", []byte(text), nil
+		}
+		if name, ok := strings.CutPrefix(path, "/guides/"); ok {
+			if data, found := assets.Guide(name); found {
+				return 200, "image/svg+xml", data, nil
+			}
+		}
+		switch path {
 		case "/universities.json":
 			return jsonReply(200, pyjson.O("default", unis.DefaultID, "universities", unis.PublicList()))
 		}
@@ -468,6 +495,12 @@ func (s *Server) route(method, path, query string, hdrs headers, body []byte) (i
 		return s.totp(body)
 	case "/api/totp/check":
 		return s.totpCheck(body)
+	case pictureRoute:
+		return s.totpPicture(body)
+	case "/api/portal-check":
+		return s.portalCheck(body)
+	case "/api/totp/auto":
+		return s.enroll(body)
 	case "/api/detect":
 		return s.detect(body)
 	case "/api/setup":
@@ -641,6 +674,104 @@ func (s *Server) totpCheck(body []byte) (int, string, []byte, error) {
 	return jsonReply(200, pyjson.O("ok", true, "code", code, "remaining", remaining))
 }
 
+// pictureRoute takes a picture with the portal's QR code (the raw PNG, JPEG or GIF bytes).
+const pictureRoute = "/api/totp/qr"
+
+// totpPicture: the setup key from a screenshot of the portal's QR code, so the user doesn't
+// have to find and copy its text. The key is only read, not stored: the assistant checks it
+// with /api/totp/check like a pasted one.
+func (s *Server) totpPicture(body []byte) (int, string, []byte, error) {
+	texts, err := qrscan.Texts(body)
+	if errors.Is(err, qrscan.ErrNotPicture) {
+		return problem(400, i18n.T("totp.not_picture"))
+	}
+	if err != nil {
+		return problem(400, i18n.T("totp.no_qr"))
+	}
+	var first error
+	for _, text := range texts {
+		if _, err := totp.Normalize(text); err == nil {
+			return jsonReply(200, pyjson.O("ok", true, "secret", text))
+		} else if first == nil && strings.HasPrefix(strings.ToLower(text), "otpauth:") {
+			first = err // a sign-in QR code, but one we can't use (an HOTP or 8-digit one)
+		}
+	}
+	if first != nil {
+		return problem(400, first)
+	}
+	return problem(400, i18n.T("totp.qr_not_key"))
+}
+
+// enroll: {"code": "123456"} or {"cancel": true}; the progress is status.json "enroll".
+func (s *Server) enroll(body []byte) (int, string, []byte, error) {
+	enroller, ok := s.daemon.(Enroller)
+	if !ok {
+		return text(404, "not found")
+	}
+	data, utf8OK, err := loads(body)
+	obj, isObj := data.(pyjson.Object)
+	if !utf8OK || err != nil || !isObj {
+		return text(400, "expected JSON with 'code' or 'cancel'")
+	}
+	if v, ok := obj.Get("cancel"); ok && v == true {
+		enroller.Enroll("", true)
+		return jsonReply(200, pyjson.O("ok", true))
+	}
+	value, _ := obj.Get("code")
+	code, isStr := value.(string)
+	if !isStr {
+		return text(400, "expected JSON with 'code' or 'cancel'")
+	}
+	if err := enroller.Enroll(code, false); err != nil {
+		var ve *ValueError
+		if errors.As(err, &ve) {
+			return problem(400, ve)
+		}
+		return 0, "", nil, err
+	}
+	return jsonReply(200, pyjson.O("ok", true))
+}
+
+// portalCheck: whether the MFA portal of a listed university opens from here. Most only do on
+// the university's network, so the assistant says that before the user runs into it.
+func (s *Server) portalCheck(body []byte) (int, string, []byte, error) {
+	data, utf8OK, err := loads(body)
+	value, ok := item(data, "university")
+	if !utf8OK || err != nil || !ok {
+		return text(400, "expected JSON with 'university'")
+	}
+	id, _ := value.(string)
+	profile, found := unis.Get(id)
+	if !found || profile.MFAPortalURL == "" {
+		return text(404, "no MFA portal")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), portalTimeout)
+	defer cancel()
+	return jsonReply(200, pyjson.O("ok", true, "reachable", s.Reachable(ctx, profile.MFAPortalURL)))
+}
+
+const portalTimeout = 6 * time.Second
+
+// reachable: a TLS handshake with the address's host succeeds. Off campus, university
+// firewalls reset or drop the connection.
+func reachable(ctx context.Context, address string) bool {
+	u, err := url.Parse(address)
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" {
+		return false
+	}
+	port := u.Port()
+	if port == "" {
+		port = "443"
+	}
+	dialer := &tls.Dialer{Config: &tls.Config{ServerName: u.Hostname()}}
+	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(u.Hostname(), port))
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
+}
+
 // detect: "Not listed" in the setup assistant, what the gateway's login form looks like.
 func (s *Server) detect(body []byte) (int, string, []byte, error) {
 	data, utf8OK, err := loads(body)
@@ -699,6 +830,7 @@ func (s *Server) setup(body []byte) (int, string, []byte, error) {
 		return def
 	}
 	secretV := get("secret", "")
+	codeV := get("code", "")
 	universityV := get("university", unis.DefaultID)
 	overridesV := get("profile", nil)
 	if !pyjson.Truthy(overridesV) {
@@ -709,7 +841,8 @@ func (s *Server) setup(body []byte) (int, string, []byte, error) {
 	secret, okS := secretV.(string)
 	university, okN := universityV.(string)
 	overrides, okO := overridesV.(pyjson.Object)
-	if !okU || !okP || !okS || !okN || !okO {
+	code, okC := codeV.(string)
+	if !okU || !okP || !okS || !okN || !okO || !okC {
 		return fail(400, nil, errors.New("user, password, secret and university must be text, profile an object"))
 	}
 	if !config.ValidUser(PyStrip(user)) {
@@ -724,6 +857,13 @@ func (s *Server) setup(body []byte) (int, string, []byte, error) {
 		if err != nil {
 			return fail(400, "totp", err)
 		}
+	} else if code = strings.Join(strings.Fields(code), ""); code != "" {
+		// A code from the user's authenticator app: sign in with it once and add uni-vpn's own
+		// code generator in the MFA portal (Enroller).
+		if _, ok := s.daemon.(Enroller); !ok || !enrollCode.MatchString(code) {
+			return fail(400, "totp", i18n.T("enroll.enter_code"))
+		}
+		token = tunnel.OncePrefix + code
 	}
 	settings := make([]config.Setting, len(overrides))
 	for i, m := range overrides {
@@ -740,16 +880,18 @@ func (s *Server) setup(body []byte) (int, string, []byte, error) {
 		}
 		return fail(500, nil, err)
 	}
-	var code any
-	if token != "" {
+	var check any
+	if _, once := tunnel.IsOnce(token); token != "" && !once {
 		c, err := totp.Code(token)
 		if err != nil {
 			return 0, "", nil, err
 		}
-		code = c
+		check = c
 	}
-	return jsonReply(200, pyjson.O("ok", true, "state", s.daemon.StateName(), "code", code))
+	return jsonReply(200, pyjson.O("ok", true, "state", s.daemon.StateName(), "code", check))
 }
+
+var enrollCode = regexp.MustCompile(`\A[0-9]{6,8}\z`)
 
 // PyStrip is Python's str.strip(): Unicode whitespace including the separators \x1c-\x1f.
 func PyStrip(s string) string { return strings.TrimFunc(s, PyIsSpace) }

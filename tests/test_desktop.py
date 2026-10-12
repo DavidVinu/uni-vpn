@@ -65,7 +65,7 @@ class MacTests(Harness):
     def test_info_plist_carries_port_and_url_scheme(self):
         info = plistlib.loads(plistlib.dumps(desktop.info_plist(1099)))
         self.assertEqual(info["UniVPNPort"], "1099")
-        self.assertEqual(info["CFBundleURLTypes"][0]["CFBundleURLSchemes"], ["uni-vpn"])
+        self.assertEqual(info["CFBundleURLTypes"][0]["CFBundleURLSchemes"], ["uni-vpn", "otpauth"])
         self.assertEqual(info["CFBundleExecutable"], "Uni VPN")
         self.assertNotIn("LSUIElement", info)  # a Dock icon while the window is open
 

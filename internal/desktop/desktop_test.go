@@ -416,7 +416,8 @@ func TestWindowsRegistersTheShippedApp(t *testing.T) {
 func TestDesktopEntryQuotesAndNamesTheWindowClass(t *testing.T) {
 	h := newHarness(t, "linux")
 	text := h.d.DesktopEntry("/usr/bin/python3", 1081, false)
-	for _, want := range []string{`Exec="/usr/bin/python3" `, "--port 1081\n", "StartupWMClass=de.davidvinu.UniVPN",
+	for _, want := range []string{`Exec="/usr/bin/python3" `, "--port 1081 %u\n", "StartupWMClass=de.davidvinu.UniVPN",
+		"MimeType=x-scheme-handler/otpauth;",
 		"Icon=de.davidvinu.UniVPN"} {
 		if !strings.Contains(text, want) {
 			t.Fatal(want, text)
@@ -426,7 +427,7 @@ func TestDesktopEntryQuotesAndNamesTheWindowClass(t *testing.T) {
 		t.Fatal(text)
 	}
 	hidden := h.d.DesktopEntry("/usr/bin/python3", 1081, true)
-	if !strings.Contains(hidden, "--hidden") || !strings.Contains(hidden, "NoDisplay=true") {
+	if !strings.Contains(hidden, "--hidden") || !strings.Contains(hidden, "NoDisplay=true") || strings.Contains(hidden, "otpauth") {
 		t.Fatal(hidden)
 	}
 	if got := DesktopQuote(`a "b" $c 100%`); got != `"a \"b\" \$c 100%%"` {
@@ -561,4 +562,39 @@ func TestRunningFindsTheProcessAndItsEnvironment(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("not found")
+}
+
+// otpauth:// links open the app, unless a desktop authenticator already takes them; uninstalling
+// gives them back.
+func TestWindowsTakesOTPAuthLinks(t *testing.T) {
+	for _, other := range []bool{false, true} {
+		h := newHarness(t, "windows")
+		h.reply = func(args []string) service.Result {
+			if args[1] == "query" && other {
+				return service.Result{Stdout: `(Default) REG_SZ "C:\Authy\Authy.exe" "%1"`}
+			}
+			if args[1] == "query" {
+				return service.Result{Code: 1}
+			}
+			return service.Result{}
+		}
+		h.d.windowsEntries(1081, func(string) {})
+		command := `"` + h.d.WindowsExe() + `" --port 1081 "%1"`
+		if h.ran("reg.exe", "add", OTPAuthKey+`\shell\open\command`, "/ve", "/d", command, "/f") == other {
+			t.Fatal(other, h.commands)
+		}
+		h.commands = nil
+		h.d.Uninstall()
+		if h.ran("reg.exe", "delete", OTPAuthKey, "/f") {
+			t.Fatal("not ours", h.commands)
+		}
+	}
+	h := newHarness(t, "windows")
+	h.reply = func([]string) service.Result {
+		return service.Result{Stdout: `"` + h.d.WindowsExe() + `" --port 1081 "%1"`}
+	}
+	h.d.Uninstall()
+	if !h.ran("reg.exe", "delete", OTPAuthKey, "/f") {
+		t.Fatal(h.commands)
+	}
 }

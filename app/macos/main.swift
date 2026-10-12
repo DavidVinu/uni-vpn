@@ -4,6 +4,7 @@
 // Built by "uni-vpn setup" with swiftc; the port comes from Info.plist (UniVPNPort).
 
 import Cocoa
+import UniformTypeIdentifiers
 import WebKit
 
 let port = (Bundle.main.object(forInfoDictionaryKey: "UniVPNPort") as? String).flatMap { Int($0) } ?? 1081
@@ -204,10 +205,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
 
     func applicationShouldTerminateAfterLastWindowClosed(_ app: NSApplication) -> Bool { false }
 
-    // uni-vpn://settings, uni-vpn://open?user=ab123 (from "uni-vpn app" and the installer).
+    // uni-vpn://settings, uni-vpn://open?user=ab123 (from "uni-vpn app" and the installer), and
+    // otpauth:// links (the MFA portal's "follow this link"), whose key the assistant reads.
     func application(_ app: NSApplication, open urls: [URL]) {
-        for url in urls where url.scheme == "uni-vpn" {
-            let page = url.host == "settings" ? "#settings" : (url.query.map { "&" + $0 } ?? "")
+        for url in urls {
+            let page: String
+            switch url.scheme?.lowercased() {
+            case "uni-vpn":
+                page = url.host == "settings" ? "#settings" : (url.query.map { "&" + $0 } ?? "")
+            case "otpauth":
+                page = "#otpauth=" + (url.absoluteString.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")
+            default:
+                continue
+            }
             if launched { show(page) } else { pending = page }
         }
     }
@@ -227,6 +237,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     func webView(_ view: WKWebView, createWebViewWith config: WKWebViewConfiguration, for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         if let url = action.request.url { NSWorkspace.shared.open(url) }
         return nil
+    }
+
+    // "Choose picture" in the sign-in code guide: WKWebView shows no file picker by itself.
+    @objc(webView:runOpenPanelWithParameters:initiatedByFrame:completionHandler:)
+    func webView(_ view: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+        panel.allowedContentTypes = [.image]
+        panel.directoryURL = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
+        if let win = window {
+            panel.beginSheetModal(for: win) { completionHandler($0 == .OK ? panel.urls : nil) }
+        } else {
+            panel.begin { completionHandler($0 == .OK ? panel.urls : nil) }
+        }
     }
 
     // The daemon is still starting (login) or restarting (update): try again shortly.

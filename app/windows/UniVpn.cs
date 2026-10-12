@@ -79,6 +79,9 @@ static class Options
     // What to show: --page, or nothing at all with --hidden.
     public static string Page(string[] args)
     {
+        // An otpauth:// link (the MFA portal's "follow this link"): the assistant reads its key.
+        foreach (string arg in args)
+            if (arg.StartsWith("otpauth:", StringComparison.OrdinalIgnoreCase)) return "#otpauth=" + Uri.EscapeDataString(arg);
         string page = Value(args, "--page");
         if (page != null) return page;
         return Array.IndexOf(args, "--hidden") >= 0 ? null : "";

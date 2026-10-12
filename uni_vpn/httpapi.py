@@ -20,6 +20,8 @@ MAX_BODY = 64 * 1024
 CONTENT_LENGTH = re.compile(r"[0-9]+")
 
 UI_FILE = Path(__file__).resolve().parent / "ui" / "index.html"
+GUIDES = UI_FILE.parent / "guides"
+GUIDE_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,62}\.svg")
 
 
 def status_page() -> bytes:
@@ -150,6 +152,9 @@ class HttpApi:
             if path == "/universities.json":
                 payload = {"default": unis.DEFAULT_ID, "universities": unis.public_list()}
                 return 200, "application/json", json.dumps(payload).encode()
+            name = path.removeprefix("/guides/")
+            if name != path and GUIDE_NAME.fullmatch(name) and (GUIDES / name).is_file():
+                return 200, "image/svg+xml", (GUIDES / name).read_bytes()
             return 404, "text/plain", b"not found"
         if method != "POST":
             return 405, "text/plain", b"method not allowed"
