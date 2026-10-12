@@ -8,7 +8,9 @@
 // waiting lockWaitMs), 2 error. All arguments are C strings; the core copies them.
 int UniVPNStart(char *configHome, char *stateHome, char *apiToken, char *secretsKeyHex, char *deviceName, char *lockWaitMs);
 
-// Returns once the daemon stopped and released its lock and ports.
+// Stops the daemon. Returns within about 5 seconds with the lock and the ports released, so
+// the other process can start its daemon right away; a daemon slow to end (a tunnel saying
+// goodbye to the gateway) finishes in the background.
 void UniVPNStop(void);
 
 // 1 while the daemon runs in this process.

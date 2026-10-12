@@ -102,6 +102,16 @@ func (f *Forwarder) Addr() net.Addr {
 	return f.ln.Addr()
 }
 
+// Unbind frees the port at once; Stop still ends the connections.
+func (f *Forwarder) Unbind() {
+	f.mu.Lock()
+	ln := f.ln
+	f.mu.Unlock()
+	if ln != nil {
+		ln.Close()
+	}
+}
+
 // Stop closes the listener and all connections and waits up to 5 s for the handlers.
 func (f *Forwarder) Stop() {
 	f.mu.Lock()

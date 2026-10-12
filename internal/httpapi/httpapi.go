@@ -169,6 +169,16 @@ func (s *Server) Addr() net.Addr {
 	return s.ln.Addr()
 }
 
+// Unbind frees the port at once; Stop still waits for the requests in progress.
+func (s *Server) Unbind() {
+	s.mu.Lock()
+	ln := s.ln
+	s.mu.Unlock()
+	if ln != nil {
+		ln.Close()
+	}
+}
+
 // Stop closes the listener and waits up to 5 s for the requests in progress.
 func (s *Server) Stop() {
 	s.mu.Lock()

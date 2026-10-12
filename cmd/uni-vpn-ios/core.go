@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"log/slog"
 	"os"
 	"runtime/debug"
 	"sync"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/DavidVinu/uni-vpn/internal/coremain"
 	"github.com/DavidVinu/uni-vpn/internal/credentials"
+	"github.com/DavidVinu/uni-vpn/internal/daemon"
 	"github.com/DavidVinu/uni-vpn/internal/platform"
 )
 
@@ -31,7 +33,15 @@ var (
 	mu       sync.Mutex
 	cancel   context.CancelFunc
 	finished chan struct{} // closed once coremain.Run returned
+	release  func()        // frees the lock and the ports without waiting for the daemon
 )
+
+// stopWait is how long stop waits for the daemon to end by itself (a tunnel saying goodbye
+// to the gateway) before it frees the lock and the ports and leaves the rest in the background.
+var stopWait = 5 * time.Second
+
+// extend is for tests, which make the daemon slow to stop.
+var extend func(*slog.Logger, *daemon.Options)
 
 // start runs the core like "uni-vpn daemon" in the background. Paths are the shared App Group
 // container's, the key is FileStore's (64 hex digits), lockWait how long to wait for a core of
@@ -63,14 +73,15 @@ func start(configHome, stateHome, apiToken, keyHex, deviceName string, lockWait 
 	started := make(chan struct{})
 	result := make(chan error, 1)
 	done := make(chan struct{})
+	var now func()
 	go func() {
 		result <- coremain.Run(ctx, coremain.Options{APIToken: apiToken, LockWait: lockWait,
-			Started: func() { close(started) }})
+			Extend: extend, Release: func(f func()) { now = f }, Started: func() { close(started) }})
 		close(done)
 	}()
 	select {
 	case <-started:
-		cancel, finished = stop, done
+		cancel, finished, release = stop, done, now
 		return startOK
 	case err := <-result:
 		stop()
@@ -81,7 +92,8 @@ func start(configHome, stateHome, apiToken, keyHex, deviceName string, lockWait 
 	}
 }
 
-// stop ends the core and returns once it released its lock and ports.
+// stop ends the core. It returns once the core released its lock and ports, after stopWait
+// at most: what is left of a slow daemon then ends in the background.
 func stop() {
 	mu.Lock()
 	defer mu.Unlock()
@@ -89,8 +101,12 @@ func stop() {
 		return
 	}
 	cancel()
-	<-finished
-	cancel, finished = nil, nil
+	select {
+	case <-finished:
+	case <-time.After(stopWait):
+		release()
+	}
+	cancel, finished, release = nil, nil, nil
 }
 
 func running() bool {

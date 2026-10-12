@@ -44,6 +44,10 @@ type Options struct {
 	Extend func(log *slog.Logger, o *daemon.Options)
 	// Started runs once the daemon serves its ports.
 	Started func()
+	// Release, when set, receives a function that stops the daemon and frees the lock and
+	// the ports at once, while the daemon may still be ending (a tunnel slow to say goodbye).
+	// It may be called any time, also after Run returned.
+	Release func(now func())
 }
 
 // lockPoll is how often a waiting core tries the lock again.
@@ -127,6 +131,13 @@ func Run(ctx context.Context, o Options) error {
 	defer close(stopped)
 	stopOnCancel := context.AfterFunc(ctx, d.Stop)
 	defer stopOnCancel()
+	if o.Release != nil {
+		o.Release(func() {
+			d.Stop()
+			d.Unbind()
+			lockFile.Close()
+		})
+	}
 	if o.Started != nil {
 		go func() {
 			select {

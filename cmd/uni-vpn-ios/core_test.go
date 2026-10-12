@@ -3,7 +3,9 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -15,6 +17,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/DavidVinu/uni-vpn/internal/credentials"
+	"github.com/DavidVinu/uni-vpn/internal/daemon"
 	"github.com/DavidVinu/uni-vpn/internal/platform"
 )
 
@@ -125,4 +128,60 @@ func TestBadKey(t *testing.T) {
 			t.Fatal(k, got)
 		}
 	}
+}
+
+// blockingStore keeps the daemon's sync from ending, so the daemon is slow to stop.
+type blockingStore struct{ release chan struct{} }
+
+func (s blockingStore) Load(context.Context) (string, error) { <-s.release; return "", nil }
+func (blockingStore) Save(string) error                      { return nil }
+func (blockingStore) Delete() error                          { return nil }
+
+// However slow the daemon is to end, UniVPNStop returns in time with the lock and the ports
+// free, so the other process (app or extension) can start its core right away.
+func TestStopIsBounded(t *testing.T) {
+	configHome, stateHome, httpPort := container(t)
+	store := blockingStore{make(chan struct{})}
+	extend = func(_ *slog.Logger, o *daemon.Options) { o.SyncStore = store }
+	oldWait := stopWait
+	stopWait = 300 * time.Millisecond
+	t.Cleanup(func() { extend, stopWait = nil, oldWait })
+	if got := start(configHome, stateHome, "", key, "", 0); got != startOK {
+		t.Fatal(got)
+	}
+	core := finished
+	begin := time.Now()
+	stop()
+	if took := time.Since(begin); took > 2*time.Second {
+		t.Fatal("stop took", took)
+	}
+	select {
+	case <-core:
+		t.Fatal("the daemon was not slow")
+	default:
+	}
+	if running() {
+		t.Fatal("still running")
+	}
+	f, err := os.OpenFile(filepath.Join(configHome, "uni-vpn", "daemon.lock"), os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		t.Fatal("lock still held:", err)
+	}
+	f.Close()
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", httpPort))
+	if err != nil {
+		t.Fatal("status port still held:", err)
+	}
+	ln.Close()
+	// A new core starts while the old one is still ending.
+	extend = nil
+	if got := start(configHome, stateHome, "", key, "", 0); got != startOK {
+		t.Fatal(got)
+	}
+	stop()
+	close(store.release)
+	<-core
 }

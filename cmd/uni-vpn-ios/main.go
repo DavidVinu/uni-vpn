@@ -22,7 +22,8 @@ func UniVPNStart(configHome, stateHome, apiToken, secretsKeyHex, deviceName, loc
 		C.GoString(secretsKeyHex), C.GoString(deviceName), time.Duration(wait)*time.Millisecond))
 }
 
-// UniVPNStop returns when the core stopped and released its lock and ports.
+// UniVPNStop stops the core. It returns within about 5 s (stopWait) with the lock and the
+// ports released; a daemon slow to end finishes in the background.
 //
 //export UniVPNStop
 func UniVPNStop() { stop() }

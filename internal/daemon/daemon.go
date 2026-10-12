@@ -940,6 +940,15 @@ func (d *Daemon) Run() {
 // Stop ends Run.
 func (d *Daemon) Stop() { d.stopOnce.Do(func() { close(d.stop) }) }
 
+// Unbind frees the SOCKS and status ports at once, for a caller that will not wait for Run to
+// end (cmd/uni-vpn-ios). Call it after Stop, so the ticker no longer binds the SOCKS port again.
+func (d *Daemon) Unbind() {
+	d.forwarder.Unbind()
+	if server := d.HTTP(); server != nil {
+		server.Unbind()
+	}
+}
+
 // bindForwarder opens the browser's port. If another program holds it, the ticker tries again
 // until it is free.
 func (d *Daemon) bindForwarder() {
