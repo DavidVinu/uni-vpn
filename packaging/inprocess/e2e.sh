@@ -23,7 +23,7 @@ fi
 
 work=$(mktemp -d)
 ca_store=/usr/local/share/ca-certificates/uni-vpn-e2e.crt
-core_pid="" http_pid=""
+core_pid="" http_pid="" dns_pid=""
 
 logs() {
   echo "--- core"
@@ -36,6 +36,7 @@ logs() {
 cleanup() {
   [ -n "$core_pid" ] && kill "$core_pid" 2> /dev/null && wait "$core_pid" 2> /dev/null
   [ -n "$http_pid" ] && kill "$http_pid" 2> /dev/null
+  [ -n "$dns_pid" ] && $sudo kill "$dns_pid" 2> /dev/null
   if [ -f /run/uni-vpn-e2e-ocserv.pid ]; then
     $sudo kill "$(cat /run/uni-vpn-e2e-ocserv.pid)" 2> /dev/null || true
   fi
@@ -138,6 +139,27 @@ if [ "$got" != "$page" ]; then
 fi
 echo "page through the tunnel: $got"
 grep -q "openconnect: CSTP connected" "$work/state/uni-vpn/daemon.log"
+
+# Names go to the VPN's DNS server (ocserv's dns = 10.77.0.1) over UDP through the tunnel.
+cat > "$work/dns.py" << 'EOF'
+import socket
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.bind(("10.77.0.1", 53))
+while True:
+    q, peer = s.recvfrom(512)
+    end = q.index(b"\0", 12) + 5
+    answer = b"\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\x3c\x00\x04" + bytes([10, 77, 0, 1])
+    s.sendto(q[:2] + b"\x81\x80" + q[4:6] + b"\x00\x01\x00\x00\x00\x00" + q[12:end] + answer, peer)
+EOF
+$sudo python3 "$work/dns.py" > "$work/dns.log" 2>&1 &
+dns_pid=$!
+sleep 1
+got=$(curl -fsS --max-time 20 --socks5-hostname 127.0.0.1:1080 http://intranet.uni-vpn.test:8080/hello.txt)
+if [ "$got" != "$page" ]; then
+  echo "by name through the tunnel: '$got', expected '$page'" >&2
+  false
+fi
+echo "page by name through the tunnel: $got"
 
 api /api/setup "{\"user\": \"test\", \"password\": \"wrong\", $profile}"
 api /api/connect '{}'
