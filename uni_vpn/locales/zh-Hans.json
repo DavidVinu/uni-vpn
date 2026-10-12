@@ -191,5 +191,6 @@
   "phone.msg.repairing": "正在修复。",
   "phone.msg.repair_failed": "修复未完成。请再次轻点“修复”，或重启手机。",
   "phone.msg.not_running": "Uni VPN 未在运行。请关闭应用后重新打开。",
-  "phone.msg.hostscan_required": "你所在的大学会在连接前检查设备。Uni VPN 目前还无法做到。"
+  "phone.msg.hostscan_required": "你所在的大学会在连接前检查设备。Uni VPN 目前还无法做到。",
+  "phone.camera_use": "Uni VPN 使用相机扫描二维码。"
 }

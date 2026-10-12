@@ -1,0 +1,65 @@
+import SwiftUI
+
+/// The setup key of the second factor, role model Google Authenticator: scan the QR code of the
+/// university's security page, or type the key. A valid key shows the current test code with
+/// the time it has left, for the security page's "test" step. Rows of a Form section.
+struct TotpEntry: View {
+    let model: AppModel
+    @Binding var secret: String
+    @Binding var valid: Bool
+    let error: String?
+    @State private var code: String?
+    @State private var left = 0
+    @State private var checkError: String?
+    @State private var checks = 0
+
+    var body: some View {
+        ScanButton(model: model, title: model.t("phone.scan_qr")) { secret = $0 }
+        PasswordField(model: model, label: model.t("setup.token_secret"), text: $secret, showLabel: "setup.show_secret")
+            .task(id: "\(secret)|\(checks)") { await check() }
+        ErrorText(text: checkError ?? error)
+        if let code {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle().stroke(Color.secondary.opacity(0.25), lineWidth: 3)
+                    Circle()
+                        .trim(from: 0, to: CGFloat(left) / 30)
+                        .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                        .animation(.linear(duration: 1), value: left)
+                }
+                .frame(width: 24, height: 24)
+                Text(String(code.prefix(3)) + " " + String(code.dropFirst(3)))
+                    .font(.title.monospacedDigit())
+                Spacer()
+                Text(model.t("setup.check_code"))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func check() async {
+        code = nil
+        valid = false
+        checkError = nil
+        let trimmed = secret.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return }
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        if Task.isCancelled { return }
+        let result = await model.post("/api/totp/check", ["secret": trimmed])
+        if Task.isCancelled { return }
+        guard result.ok else {
+            checkError = result.error
+            return
+        }
+        valid = true
+        code = result.json?.string("code")
+        left = result.json?.int("remaining", 30) ?? 30
+        while left > 0 {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            if Task.isCancelled { return }
+            left -= 1
+        }
+        checks += 1 // the next code
+    }
+}

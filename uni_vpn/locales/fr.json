@@ -191,5 +191,6 @@
   "phone.msg.repairing": "Réparation en cours.",
   "phone.msg.repair_failed": "La réparation n'a pas abouti. Touche Réparer pour réessayer, ou redémarre le téléphone.",
   "phone.msg.not_running": "Uni VPN ne fonctionne pas. Ferme l'application et rouvre-la.",
-  "phone.msg.hostscan_required": "Ton université vérifie l'appareil avant qu'il se connecte. Uni VPN ne sait pas encore le faire."
+  "phone.msg.hostscan_required": "Ton université vérifie l'appareil avant qu'il se connecte. Uni VPN ne sait pas encore le faire.",
+  "phone.camera_use": "Uni VPN utilise l'appareil photo pour scanner les codes QR."
 }

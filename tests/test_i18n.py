@@ -71,15 +71,20 @@ class CatalogTests(unittest.TestCase):
         self.assertGreater(len(used), 60)
 
     def test_every_key_the_android_app_uses_exists(self):
+        # And the iPhone app's: the same keys, written the same way (t("...")).
         source = i18n.catalog("en")
-        android = Path(i18n.__file__).parent.parent / "app" / "android" / "app" / "src" / "main"
-        code = "\n".join(p.read_text(encoding="utf-8") for p in android.rglob("*.kt"))
-        used = set(re.findall(r'\bt\("([a-z_.]+[a-z])"', code))
-        used |= {"look." + state for state in ("connected", "connecting", "disconnecting", "idle", "offline", "blocked",
-                                               "auth_failed", "keyring", "error")}
-        used |= {f"setup.mfa.{m}" for m in ("none", "totp_field", "totp_append", "duo_push")}
-        self.assertEqual(used - set(source), set())
-        self.assertGreater(len(used), 50)
+        apps = Path(i18n.__file__).parent.parent / "app"
+        android = [p for p in (apps / "android" / "app" / "src" / "main").rglob("*.kt")]
+        ios = [p for p in (apps / "ios").rglob("*.swift") if "Tests" not in p.relative_to(apps / "ios").parts]
+        for name, files, extra in (("android", android, set()), ("ios", ios, {"phone.camera_use"})):
+            with self.subTest(app=name):
+                code = "\n".join(p.read_text(encoding="utf-8") for p in files)
+                used = set(re.findall(r'\bt\("([a-z_.]+[a-z])"', code)) | extra
+                used |= {"look." + state for state in ("connected", "connecting", "disconnecting", "idle", "offline",
+                                                       "blocked", "auth_failed", "keyring", "error")}
+                used |= {f"setup.mfa.{m}" for m in ("none", "totp_field", "totp_append", "duo_push")}
+                self.assertEqual(used - set(source), set())
+                self.assertGreater(len(used), 50)
 
     def test_languages_are_named_in_their_own_language(self):
         self.assertEqual(dict(i18n.LANGUAGES)["de"], "Deutsch")
