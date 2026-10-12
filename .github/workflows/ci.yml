@@ -121,6 +121,30 @@ jobs:
           go build -ldflags "-X github.com/DavidVinu/uni-vpn/internal/daemon.Commit=$GITHUB_SHA" -o "$exe" ./cmd/uni-vpn
           python tests/handover_e2e.py "$exe" "$GITHUB_SHA"
 
+  # The iPhone app's tunnel (libopenconnect, userspace network stack, SOCKS server in the
+  # core's own process) built for Linux: end to end against a local ocserv, and against
+  # Heidelberg's gateway with a made-up account.
+  inprocess:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: libopenconnect and ocserv
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq libopenconnect-dev ocserv gnutls-bin pkg-config > /dev/null
+      - name: go vet with libopenconnect
+        run: go vet -tags libopenconnect ./...
+      - name: go test -race with libopenconnect
+        run: go test -race -tags libopenconnect ./...
+      - name: Heidelberg's gateway with a made-up account
+        run: UNI_VPN_NET_TESTS=1 go test -tags libopenconnect -run Heidelberg -v ./internal/octunnel/
+      - name: End to end against ocserv
+        run: packaging/inprocess/e2e.sh
+
   # The sync relay (relay/): its own tests, then the Go client's tests against it.
   relay:
     runs-on: ubuntu-latest
