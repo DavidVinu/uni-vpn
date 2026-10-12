@@ -458,3 +458,32 @@ func TestWindowsFileNotInUseIsReplacedDirectly(t *testing.T) {
 		t.Fatal("moved aside without need")
 	}
 }
+
+// The open app window stays where it is when the update has the same file.
+func TestUnchangedFilesStay(t *testing.T) {
+	data := makeZip(t, file{name: "bin/uni-vpn-core.exe", body: "new core"},
+		file{name: "desktop/Uni VPN.exe", body: "app window"})
+	f := newFixture(t, data)
+	name := ZipName("windows", "amd64")
+	f.release.files[name] = data
+	f.release.manifest = Manifest{Commit: commitB, Files: map[string]FileDigest{name: digest(data)}}
+	f.u.GOOS, f.u.Exe, f.u.Windows = "windows", ExeName("windows"), true
+	app := filepath.Join(f.root, "desktop", "Uni VPN.exe")
+	write(t, app, "app window")
+	if err := os.Chmod(app, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.u.Files = &winFS{busy: map[string]bool{app: true}}
+	if _, err := f.u.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.u.Apply(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(app + ".old"); err == nil {
+		t.Fatal("moved aside without need")
+	}
+	if read(t, filepath.Join(f.root, FilesList)) != "bin/uni-vpn-core.exe\ndesktop/Uni VPN.exe\n" {
+		t.Fatal(read(t, filepath.Join(f.root, FilesList)))
+	}
+}

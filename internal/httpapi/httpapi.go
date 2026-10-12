@@ -98,6 +98,9 @@ type Server struct {
 	Host     string
 	Port     int
 	Detector DetectFunc
+	// AppPolled is told of each status request of the native app (status.json?menu=), with
+	// whether the app restarts itself after updates ("shell=1"); nil ignores them.
+	AppPolled func(restartsItself bool)
 
 	daemon Daemon
 	log    *slog.Logger
@@ -395,6 +398,9 @@ func (s *Server) route(method, path, query string, hdrs headers, body []byte) (i
 			// The native app's menus ask with their system languages: ?menu=de-DE,en
 			values, _ := url.ParseQuery(query)
 			if wanted := values.Get("menu"); wanted != "" {
+				if s.AppPolled != nil {
+					s.AppPolled(values.Get("shell") != "")
+				}
 				language, _ := status.Get("language")
 				setting, _ := language.(string)
 				status = append(status, pyjson.Member{Key: "menu", Value: i18n.Menu(i18n.Negotiate(setting, wanted))})
