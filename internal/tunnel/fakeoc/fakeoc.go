@@ -4,7 +4,8 @@
 //
 // Environment variables:
 //
-//	FAKE_MODE           ok (default) | auth_fail | input_required | totp_rejected | never_ready | ignore_sigterm | exit_after_ready
+//	FAKE_MODE           ok (default) | auth_fail | input_required | totp_rejected | totp_replayed | never_ready |
+//	                    ignore_sigterm | exit_after_ready | clientcert_auth_fail | gateway_503 | cstp_503
 //	FAKE_DELAY          seconds until the port listens (default 0.2)
 //	FAKE_EXIT_AFTER     with exit_after_ready: seconds after becoming ready (default 0.5)
 //	FAKE_PASSWORD_FILE  file every line read from stdin is appended to (password, "push" for Duo)
@@ -154,6 +155,14 @@ func openconnect(args []string) int {
 	if mode == "" {
 		mode = "ok"
 	}
+	if mode == "totp_replayed" {
+		// Another device of the account used this window's code (LinOTP takes each code once):
+		// only the first start is rejected. FAKE_ARGS_FILE counts the starts.
+		mode = "ok"
+		if data, _ := os.ReadFile(os.Getenv("FAKE_ARGS_FILE")); len(data) == 0 {
+			mode = "totp_rejected"
+		}
+	}
 	// Before the password is recorded: a test that has seen the password line knows the
 	// signals are handled (with -race the binary takes a while to get here).
 	sigs := make(chan os.Signal, 4)
@@ -201,6 +210,37 @@ func openconnect(args []string) int {
 		log("***")
 		log("User input required in non-interactive mode")
 		log("Failed to complete authentication")
+		return 1
+	case "clientcert_auth_fail":
+		// An ASA that asks for an optional client certificate (auth.c, PRG_INFO), then the
+		// wrong-password sequence measured on 2026-09-08.
+		log("Connected to HTTPS on fake.example with ciphersuite (TLS1.3)-(ECDHE-SECP256R1)-(AES-256-GCM)")
+		log("Server requested SSL client certificate; none was configured")
+		log("POST https://fake.example/")
+		log("XML POST enabled")
+		time.Sleep(delay)
+		log("Please enter your username and password.")
+		log("Login failed.")
+		log("Please enter your username and password.")
+		log("User input required in non-interactive mode")
+		log("Failed to complete authentication")
+		return 1
+	case "gateway_503":
+		// Real openconnect 9.21 when the gateway answers the login POST with an HTTP error
+		// (http.c "Unexpected %d result from server", main.c "Failed to complete authentication").
+		log("Connected to 192.0.2.1:443")
+		log("SSL negotiation with fake.example")
+		log("Connected to HTTPS on fake.example with ciphersuite (TLS1.3)-(ECDHE-SECP256R1)-(AES-256-GCM)")
+		log("Unexpected 503 result from server")
+		log("Failed to complete authentication")
+		return 1
+	case "cstp_503":
+		// Login accepted, then the tunnel CONNECT is refused (cstp.c), main.c exits 1.
+		log("Bitte geben Sie ihren Benutzernamen und ihr Passwort ein.")
+		log("POST https://fake.example/")
+		log("Got inappropriate HTTP CONNECT response: HTTP/1.1 503 Service Unavailable")
+		log("Creating SSL connection failed")
+		log("Unknown error; exiting.")
 		return 1
 	case "input_required":
 		log("User input required in non-interactive mode")
