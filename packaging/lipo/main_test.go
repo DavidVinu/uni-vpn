@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -55,7 +56,8 @@ func TestBothProcessorsInOneFile(t *testing.T) {
 			t.Fatal("changed", w.cpu)
 		}
 	}
-	if st, err := os.Stat(out); err != nil || st.Mode().Perm()&0o100 == 0 {
+	// Windows has no executable bit.
+	if st, err := os.Stat(out); err != nil || (runtime.GOOS != "windows" && st.Mode().Perm()&0o100 == 0) {
 		t.Fatal("not executable", err)
 	}
 	// A Linux program by mistake: refused, nothing written.

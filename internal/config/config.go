@@ -14,12 +14,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/DavidVinu/uni-vpn/internal/atomicfile"
 	"github.com/DavidVinu/uni-vpn/internal/i18n"
 	"github.com/DavidVinu/uni-vpn/internal/platform"
 	unis "github.com/DavidVinu/uni-vpn/internal/universities"
@@ -349,7 +349,7 @@ func check(key string, value any, k kind, text, table string) error {
 
 // readText is Path.read_text(encoding="utf-8"): universal newlines.
 func readText(path string) (string, error) {
-	data, err := os.ReadFile(path)
+	data, err := atomicfile.Read(path)
 	if err != nil {
 		return "", err
 	}
@@ -366,36 +366,7 @@ func writeText(path, text string) error {
 	if runtime.GOOS == "windows" {
 		text = strings.ReplaceAll(text, "\n", "\r\n")
 	}
-	mode := fs.FileMode(0o600)
-	if st, err := os.Stat(path); err == nil {
-		mode = st.Mode().Perm()
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*")
-	if err != nil {
-		return err
-	}
-	_, err = tmp.WriteString(text)
-	if err == nil {
-		err = tmp.Sync()
-	}
-	if cerr := tmp.Close(); err == nil {
-		err = cerr
-	}
-	if err == nil {
-		err = os.Chmod(tmp.Name(), mode)
-	}
-	if err == nil {
-		err = os.Rename(tmp.Name(), path)
-		// Windows refuses while someone reads the file (the status page, a virus scanner).
-		for try := 0; err != nil && runtime.GOOS == "windows" && try < 50; try++ {
-			time.Sleep(20 * time.Millisecond)
-			err = os.Rename(tmp.Name(), path)
-		}
-	}
-	if err != nil {
-		os.Remove(tmp.Name())
-	}
-	return err
+	return atomicfile.Write(path, []byte(text))
 }
 
 // edits serializes the changes to config.toml: the app's settings, the assistant and syncing
