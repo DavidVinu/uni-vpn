@@ -30,6 +30,7 @@ import (
 
 func TestMain(m *testing.M) {
 	fakeoc.MaybeRun()
+	SyncRelay = "" // tests never reach the real relay; sync_test.go starts its own
 	os.Exit(m.Run())
 }
 

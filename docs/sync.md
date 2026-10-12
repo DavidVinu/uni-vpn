@@ -115,7 +115,8 @@ Guessing a code means scrypt per guess against an id space of 2^60 within ten mi
 
 ## Relay
 
-Base URL in `SyncRelay` (`internal/daemon/sync.go`); `UNI_VPN_SYNC_RELAY` replaces it. All
+Base URL in `SyncRelay` (`internal/daemon/sync.go`), `https://uni-vpn-sync.david-noel-vinu.workers.dev`;
+`UNI_VPN_SYNC_RELAY` replaces it. The daemon's tests set it to "" and start their own. All
 bodies are `application/octet-stream`.
 
 | Request | Answer |
@@ -136,6 +137,7 @@ tests against it instead of the in-memory copy.
 
 `.github/workflows/relay.yml` deploys on every push to main that changes `relay/`, and by
 hand. It needs two repository secrets: `CLOUDFLARE_API_TOKEN` (a token with the "Edit
-Cloudflare Workers" template plus D1 Edit) and `CLOUDFLARE_ACCOUNT_ID`. It creates the D1
-database on first run and prints the Worker's URL, which goes into `SyncRelay`. The free plan
+Cloudflare Workers" template plus D1 Edit) and `CLOUDFLARE_ACCOUNT_ID`. It finds the D1
+database by name (it creates it on first run) and prints the Worker's URL, which goes into
+`SyncRelay`. The same steps work by hand with both variables set in the shell. The free plan
 covers 100,000 requests a day, about 2,000 devices at their usual pace.

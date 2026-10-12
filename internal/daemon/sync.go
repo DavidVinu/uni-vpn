@@ -22,7 +22,7 @@ import (
 
 // SyncRelay is the relay this build syncs through (relay/, docs/sync.md); "" hides
 // syncing. UNI_VPN_SYNC_RELAY replaces it, for a relay of one's own or for tests.
-var SyncRelay = ""
+var SyncRelay = "https://uni-vpn-sync.david-noel-vinu.workers.dev"
 
 func syncRelay() string {
 	if v := os.Getenv("UNI_VPN_SYNC_RELAY"); v != "" {
