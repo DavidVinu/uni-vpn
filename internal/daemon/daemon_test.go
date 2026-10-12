@@ -500,8 +500,13 @@ func TestDisconnectDuringASecretsRestartWins(t *testing.T) {
 	d.RequestConnect()
 	waitState(t, d, Connecting)
 	waitFor(2*time.Second, func() bool { tun := d.tunnelNow(); return tun != nil && pidOf(tun) > 0 })
+	d.mu.Lock()
+	gen := d.secretsGen
+	d.mu.Unlock()
 	saving := make(chan struct{})
 	go func() { d.SetPassword("second"); close(saving) }()
+	// The Disconnect must land while the restart stops the tunnel, not before it starts.
+	waitFor(2*time.Second, func() bool { d.mu.Lock(); defer d.mu.Unlock(); return d.secretsGen != gen })
 	time.Sleep(50 * time.Millisecond)
 	d.RequestDisconnect()
 	<-saving
