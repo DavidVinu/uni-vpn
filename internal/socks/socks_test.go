@@ -174,15 +174,15 @@ func TestParseIPv4LikePython(t *testing.T) {
 
 func TestResolveErrors(t *testing.T) {
 	ctx := context.Background()
-	if _, err := Resolve(ctx, "x.example", nil, "127.0.0.1", time.Second, 53); err == nil || err.Error() != "no DNS server from the VPN" {
+	if _, err := Resolve(ctx, "x.example", nil, "127.0.0.1", time.Second, 53, nil); err == nil || err.Error() != "no DNS server from the VPN" {
 		t.Fatal(err)
 	}
 	dns := startFakeDNS(t, map[string]string{})
-	_, err := Resolve(ctx, "x.example", []string{"::1", "127.0.0.1"}, "127.0.0.1", time.Second, dns.port())
+	_, err := Resolve(ctx, "x.example", []string{"::1", "127.0.0.1"}, "127.0.0.1", time.Second, dns.port(), nil)
 	if err == nil || err.Error() != "x.example: host not found" {
 		t.Fatal(err)
 	}
-	_, err = Resolve(ctx, "x.example", []string{"::1"}, "127.0.0.1", time.Second, dns.port())
+	_, err = Resolve(ctx, "x.example", []string{"::1"}, "127.0.0.1", time.Second, dns.port(), nil)
 	if err == nil || err.Error() != "x.example: unusable DNS server ::1" {
 		t.Fatal(err)
 	}
@@ -190,11 +190,11 @@ func TestResolveErrors(t *testing.T) {
 	silent, _ := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	defer silent.Close()
 	_, err = Resolve(ctx, "x.example", []string{"127.0.0.1"}, "127.0.0.1", 100*time.Millisecond,
-		silent.LocalAddr().(*net.UDPAddr).Port)
+		silent.LocalAddr().(*net.UDPAddr).Port, nil)
 	if err == nil || err.Error() != "x.example: timed out" {
 		t.Fatalf("%q", err)
 	}
-	if got, err := Resolve(ctx, "10.0.0.1", nil, "127.0.0.1", time.Second, 53); got != "10.0.0.1" || err != nil {
+	if got, err := Resolve(ctx, "10.0.0.1", nil, "127.0.0.1", time.Second, 53, nil); got != "10.0.0.1" || err != nil {
 		t.Fatal(got, err)
 	}
 }
@@ -428,6 +428,77 @@ func TestSetRoute(t *testing.T) {
 	s.SetRoute("10.0.0.2", []string{"10.0.0.54"})
 	if src, dns := s.Route(); src != "10.0.0.2" || !reflect.DeepEqual(dns, []string{"10.0.0.54"}) {
 		t.Fatal(src, dns)
+	}
+}
+
+// fakeNet stands in for the netstack: it records each dial, answers DNS queries for
+// intra.example with 10.9.9.9 and echoes TCP.
+type fakeNet struct {
+	mu    sync.Mutex
+	dials []string
+}
+
+func (f *fakeNet) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	f.mu.Lock()
+	f.dials = append(f.dials, network+" "+address)
+	f.mu.Unlock()
+	mine, theirs := net.Pipe()
+	go func() {
+		defer theirs.Close()
+		buf := make([]byte, 2048)
+		for {
+			n, err := theirs.Read(buf)
+			if err != nil {
+				return
+			}
+			if network == "udp" {
+				want, _ := BuildQuery("intra.example", binary.BigEndian.Uint16(buf))
+				if !bytes.Equal(buf[:n], want) {
+					return
+				}
+				theirs.Write(answer(buf[:n], []string{"10.9.9.9"}, 0, false))
+				continue
+			}
+			theirs.Write(buf[:n])
+		}
+	}()
+	return mine, nil
+}
+
+func (f *fakeNet) seen() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string{}, f.dials...)
+}
+
+func TestConnectThroughNet(t *testing.T) {
+	fake := &fakeNet{}
+	e := &env{server: NewServer(freePort(t), "", []string{"10.0.0.53"}, nil)}
+	e.server.Net = fake
+	if err := e.server.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(e.server.Stop)
+
+	c, code := e.connect(t, 1, []byte{10, 1, 2, 3}, 80)
+	if code != RepOK {
+		t.Fatal(code)
+	}
+	c.Write([]byte("hi"))
+	if got := readN(t, c, 2); string(got) != "hi" {
+		t.Fatal(got)
+	}
+	if got := fake.seen(); !reflect.DeepEqual(got, []string{"tcp 10.1.2.3:80"}) {
+		t.Fatal(got)
+	}
+
+	name := "intra.example"
+	if _, code = e.connect(t, 3, append([]byte{byte(len(name))}, name...), 443); code != RepOK {
+		t.Fatal(code)
+	}
+	want := []string{"tcp 10.1.2.3:80", "udp 10.0.0.53:53", "tcp 10.9.9.9:443"}
+	if got := fake.seen(); !reflect.DeepEqual(got, want) {
+		t.Fatal(got)
 	}
 }
 

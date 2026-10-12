@@ -18,7 +18,16 @@ var (
 	IsMacOS   = runtime.GOOS == "darwin"
 	IsWindows = runtime.GOOS == "windows"
 	IsAndroid = runtime.GOOS == "android"
+	IsIOS     = runtime.GOOS == "ios"
 )
+
+// InProcessEnv set to 1 runs openconnect inside the core (libtunnel) in a build with the tag
+// libopenconnect; the Linux end to end test uses it.
+const InProcessEnv = "UNI_VPN_INPROCESS"
+
+// InProcessOpenConnect: the core drives libopenconnect itself instead of running the
+// openconnect program and ocproxy. Always on iOS, which runs no child processes.
+var InProcessOpenConnect = IsIOS || (withLibOpenConnect && os.Getenv(InProcessEnv) == "1")
 
 // NativeDirEnv names the variable with the Android app's native library folder. Android only
 // lets an app run programs from there, so the app ships openconnect and ocproxy as

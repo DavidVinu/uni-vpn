@@ -49,6 +49,11 @@ const (
 // handshakeTimeout applies to each read of the handshake (a variable for the tests).
 var handshakeTimeout = 30 * time.Second
 
+// Dialer opens connections through some network, like net.Dialer.
+type Dialer interface {
+	DialContext(ctx context.Context, network, address string) (net.Conn, error)
+}
+
 // Server is the SOCKS5 server. Set the exported fields before Start.
 type Server struct {
 	Port           int
@@ -56,6 +61,9 @@ type Server struct {
 	DNSPort        int           // default 53
 	ConnectTimeout time.Duration // default 20 s
 	Log            *slog.Logger
+	// Net, when set, carries connections and DNS lookups instead of the host's sockets (the
+	// in-process tunnel's userspace network stack); the source address is then unused.
+	Net Dialer
 
 	mu     sync.Mutex
 	source string
@@ -285,7 +293,11 @@ func (s *Server) negotiate(c net.Conn) (net.Conn, error) {
 		return nil, reply(c, RepAtypUnsupported, nil, 0)
 	}
 	source, dns := s.Route()
-	address, err := Resolve(s.ctx, host, dns, source, dnsTimeout, s.DNSPort)
+	var dialDNS func(ctx context.Context, network, address string) (net.Conn, error)
+	if s.Net != nil {
+		dialDNS = s.Net.DialContext
+	}
+	address, err := Resolve(s.ctx, host, dns, source, dnsTimeout, s.DNSPort, dialDNS)
 	if err != nil {
 		if s.ctx.Err() != nil {
 			return nil, err
@@ -322,12 +334,22 @@ func (s *Server) negotiate(c net.Conn) (net.Conn, error) {
 }
 
 func (s *Server) dial(source, address string, port int) (net.Conn, error) {
+	target := net.JoinHostPort(address, strconv.Itoa(port))
+	if s.Net != nil {
+		ctx := s.ctx
+		if s.ConnectTimeout > 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, s.ConnectTimeout)
+			defer cancel()
+		}
+		return s.Net.DialContext(ctx, "tcp", target)
+	}
 	laddr, err := net.ResolveTCPAddr("tcp", net.JoinHostPort(source, "0"))
 	if err != nil {
 		return nil, err
 	}
 	d := net.Dialer{LocalAddr: laddr, Timeout: s.ConnectTimeout}
-	return d.DialContext(s.ctx, "tcp", net.JoinHostPort(address, strconv.Itoa(port)))
+	return d.DialContext(s.ctx, "tcp", target)
 }
 
 func reply(c net.Conn, code byte, ip net.IP, port int) error {

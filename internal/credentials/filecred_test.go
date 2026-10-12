@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -57,5 +59,34 @@ func TestFileStoreWithoutKey(t *testing.T) {
 	var ke *KeyringError
 	if err := k.StorePassword("ab123", "x"); !errors.As(err, &ke) {
 		t.Fatalf("store without key: %v", err)
+	}
+}
+
+// The iPhone app keeps its secrets like the Android app.
+func TestIOSUsesTheFileStore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), SecretsFile)
+	k := &Keyring{GOOS: "ios", Cred: &FileStore{Path: path, Key: bytes.Repeat([]byte{7}, 32)}}
+	if err := k.StorePassword("ab123", "pw"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := k.GetPassword(context.Background(), "ab123", time.Second, nil); err != nil || string(got) != "pw" {
+		t.Fatal(got, err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The iOS core starts again in the same process, possibly with another folder.
+func TestReloadFileStore(t *testing.T) {
+	for _, n := range []byte{1, 2} {
+		dir := t.TempDir()
+		t.Setenv("XDG_CONFIG_HOME", dir)
+		t.Setenv(KeyEnv, strings.Repeat(fmt.Sprintf("%02x", n), 32))
+		s := ReloadFileStore()
+		if s != AndroidStore() || s.Path != filepath.Join(dir, "uni-vpn", SecretsFile) ||
+			!bytes.Equal(s.Key, bytes.Repeat([]byte{n}, 32)) {
+			t.Fatalf("%+v", s)
+		}
 	}
 }

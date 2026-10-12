@@ -97,6 +97,9 @@ jobs:
           if [ -n "$unformatted" ]; then echo "$unformatted"; exit 1; fi
       - name: go vet
         run: go vet ./...
+      - name: Packet throughput of the in-process network stack
+        if: runner.os == 'macOS'
+        run: go test -count=1 -run TestBulkTransfer -v ./internal/netstack/
       - name: go test -race
         if: runner.os != 'Windows'
         run: go test -race ./...
@@ -120,6 +123,32 @@ jobs:
           [ "$RUNNER_OS" = Windows ] && exe="$exe.exe"
           go build -ldflags "-X github.com/DavidVinu/uni-vpn/internal/daemon.Commit=$GITHUB_SHA" -o "$exe" ./cmd/uni-vpn
           python tests/handover_e2e.py "$exe" "$GITHUB_SHA"
+
+  # The iPhone app's tunnel (libopenconnect, userspace network stack, SOCKS server in the
+  # core's own process) built for Linux: end to end against a local ocserv, and against
+  # Heidelberg's gateway with a made-up account.
+  inprocess:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: libopenconnect and ocserv
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq libopenconnect-dev ocserv gnutls-bin pkg-config > /dev/null
+      - name: go vet with libopenconnect
+        run: go vet -tags libopenconnect ./...
+      - name: go test -race with libopenconnect
+        run: |
+          go test -race -tags libopenconnect ./...
+          go test -race -tags "libopenconnect iosapi" ./cmd/uni-vpn-ios/
+      - name: Heidelberg's gateway with a made-up account
+        run: UNI_VPN_NET_TESTS=1 go test -tags libopenconnect -run Heidelberg -v ./internal/octunnel/
+      - name: End to end against ocserv
+        run: packaging/inprocess/e2e.sh
 
   # The sync relay (relay/): its own tests, then the Go client's tests against it.
   relay:
@@ -403,7 +432,12 @@ jobs:
           java-version: "17"
       - name: Android NDK and SDK parts
         run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;28.2.13676358" "platforms;android-36" "build-tools;36.0.0" > /dev/null
+          # The SDK download is now and then cut off ("unknown archive"); a second try gets it.
+          for attempt in 1 2 3; do
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;28.2.13676358" "platforms;android-36" "build-tools;36.0.0" > /dev/null && break
+            [ "$attempt" = 3 ] && exit 1
+            sleep 10
+          done
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
           sudo apt-get install -y -qq autoconf automake libtool pkg-config > /dev/null
       # openconnect, ocproxy and their libraries take minutes; they change only with the script.
@@ -453,6 +487,136 @@ jobs:
           name: android-app
           path: out/*
           retention-days: 7
+
+  # The iPhone app (app/ios, docs/ios.md): libopenconnect, OpenSSL and the Go core for iOS, the
+  # Xcode project, the simulator tests against Heidelberg's real gateway, and an unsigned device
+  # archive. Signed and sent to TestFlight from main once the Apple Developer secrets exist.
+  ios:
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      HAS_IOS_SIGNING: ${{ secrets.IOS_CERTIFICATE_P12_BASE64 != '' && secrets.APP_STORE_CONNECT_API_KEY_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build tools
+        run: brew install xcodegen autoconf automake libtool pkg-config
+      # openconnect and OpenSSL for three slices take long; they change only with the script.
+      - uses: actions/cache@v4
+        with:
+          path: app/ios/build/native
+          key: ios-native-${{ hashFiles('packaging/ios/build-native.sh') }}
+      - name: The core for iOS
+        run: packaging/ios/build-core.sh "$GITHUB_SHA"
+      - name: Xcode project
+        run: cd app/ios && xcodegen
+      - name: Tests in the simulator
+        run: |
+          cd app/ios
+          # Runner images change which simulators they carry: take any iPhone, else make one.
+          pick() {
+            xcrun simctl list devices available -j | python3 -c 'import json, sys
+          for runtime, devices in sorted(json.load(sys.stdin)["devices"].items(), reverse=True):
+              for d in devices:
+                  if "iOS" in runtime and d["name"].startswith("iPhone"):
+                      print(d["udid"]); sys.exit()'
+          }
+          udid=$(pick)
+          if [ -z "$udid" ]; then
+            xcodebuild -downloadPlatform iOS
+            runtime=$(xcrun simctl list runtimes -j | python3 -c 'import json, sys
+          print([r["identifier"] for r in json.load(sys.stdin)["runtimes"] if r["platform"] == "iOS" and r["isAvailable"]][-1])')
+            device=$(xcrun simctl list devicetypes -j | python3 -c 'import json, sys
+          print([d["identifier"] for d in json.load(sys.stdin)["devicetypes"] if d["name"].startswith("iPhone")][-1])')
+            udid=$(xcrun simctl create "CI iPhone" "$device" "$runtime")
+          fi
+          echo "SIM_UDID=$udid" >> "$GITHUB_ENV"
+          xcodebuild -project UniVPN.xcodeproj -scheme UniVPN \
+            -destination "id=$udid" -resultBundlePath build/tests.xcresult -quiet test
+      - name: Why the tests failed
+        if: failure()
+        run: |
+          cd app/ios
+          xcrun xcresulttool get test-results tests --path build/tests.xcresult --compact || true
+          # The core's own log in the simulator's App Group folder.
+          find ~/Library/Developer/CoreSimulator/Devices/"$SIM_UDID"/data/Containers/Shared/AppGroup \
+            -name '*.log' -type f -print -exec tail -n 80 {} \; 2>/dev/null || true
+      - name: Unsigned archive for phones
+        run: |
+          cd app/ios
+          xcodebuild -project UniVPN.xcodeproj -scheme UniVPN -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath build/UniVPN.xcarchive \
+            MARKETING_VERSION="$UNI_VPN_VERSION" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+            CODE_SIGNING_ALLOWED=NO -quiet archive
+          mkdir -p ../../out
+          ditto -c -k --keepParent build/UniVPN.xcarchive ../../out/UniVPN-unsigned.xcarchive.zip
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ios-test-results
+          path: app/ios/build/tests.xcresult
+          retention-days: 7
+      - name: Signing keys
+        if: env.HAS_IOS_SIGNING == 'true'
+        env:
+          IOS_CERTIFICATE_P12_BASE64: ${{ secrets.IOS_CERTIFICATE_P12_BASE64 }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          APP_STORE_CONNECT_API_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_BASE64 }}
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+        run: |
+          keychain="$RUNNER_TEMP/ios-signing.keychain-db"
+          security create-keychain -p ci "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p ci "$keychain"
+          echo "$IOS_CERTIFICATE_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/ios-distribution.p12"
+          security import "$RUNNER_TEMP/ios-distribution.p12" -k "$keychain" -P "$IOS_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci "$keychain"
+          security list-keychains -d user -s "$keychain" login.keychain
+          # Where xcodebuild and altool find the App Store Connect key.
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          echo "$APP_STORE_CONNECT_API_KEY_BASE64" | base64 --decode \
+            > "$HOME/.appstoreconnect/private_keys/AuthKey_$APP_STORE_CONNECT_API_KEY_ID.p8"
+      # Automatic signing with the API key: Xcode fetches or makes the profiles of the app, the
+      # tunnel and the Control Center button itself.
+      - name: Signed app to TestFlight
+        if: env.HAS_IOS_SIGNING == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+        run: |
+          cd app/ios
+          auth=(-allowProvisioningUpdates
+            -authenticationKeyPath "$HOME/.appstoreconnect/private_keys/AuthKey_$APP_STORE_CONNECT_API_KEY_ID.p8"
+            -authenticationKeyID "$APP_STORE_CONNECT_API_KEY_ID" -authenticationKeyIssuerID "$APP_STORE_CONNECT_API_ISSUER_ID")
+          xcodebuild -project UniVPN.xcodeproj -scheme UniVPN -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath build/UniVPN-signed.xcarchive \
+            MARKETING_VERSION="$UNI_VPN_VERSION" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" "${auth[@]}" -quiet archive
+          cat > build/export.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>teamID</key><string>$APPLE_TEAM_ID</string>
+            <key>destination</key><string>export</string>
+          </dict></plist>
+          EOF
+          xcodebuild -exportArchive -archivePath build/UniVPN-signed.xcarchive \
+            -exportOptionsPlist build/export.plist -exportPath build/export "${auth[@]}"
+          cp build/export/UniVPN.ipa ../../out/UniVPN.ipa
+          xcrun altool --upload-app -f build/export/UniVPN.ipa -t ios \
+            --apiKey "$APP_STORE_CONNECT_API_KEY_ID" --apiIssuer "$APP_STORE_CONNECT_API_ISSUER_ID"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-app
+          path: out/*
+          retention-days: 7
+
   windows-openconnect:
     runs-on: ubuntu-latest
     timeout-minutes: 30

@@ -140,8 +140,10 @@ func parseIPv4(s string) (string, bool) {
 }
 
 // Resolve returns the first IPv4 address of name, asked from each server in turn over UDP
-// from source. Python's defaults are a 3 s timeout and port 53.
-func Resolve(ctx context.Context, name string, servers []string, source string, timeout time.Duration, port int) (string, error) {
+// from source, or through dial when it is not nil. Python's defaults are a 3 s timeout and
+// port 53.
+func Resolve(ctx context.Context, name string, servers []string, source string, timeout time.Duration, port int,
+	dial func(ctx context.Context, network, address string) (net.Conn, error)) (string, error) {
 	if ip, ok := parseIPv4(name); ok {
 		return ip, nil
 	}
@@ -151,7 +153,13 @@ func Resolve(ctx context.Context, name string, servers []string, source string, 
 	var last error = dnsErr("no answer")
 	for _, server := range servers {
 		qid := uint16(rand.IntN(1 << 16))
-		conn, err := dialUDP(ctx, source, server, port)
+		var conn net.Conn
+		var err error
+		if dial != nil {
+			conn, err = dial(ctx, "udp", net.JoinHostPort(server, strconv.Itoa(port)))
+		} else {
+			conn, err = dialUDP(ctx, source, server, port)
+		}
 		if err != nil {
 			if ctx.Err() != nil {
 				return "", ctx.Err()
@@ -215,7 +223,7 @@ func dialUDP(ctx context.Context, source, server string, port int) (*net.UDPConn
 	return conn, nil
 }
 
-func exchange(ctx context.Context, conn *net.UDPConn, name string, qid uint16, timeout time.Duration) (string, error) {
+func exchange(ctx context.Context, conn net.Conn, name string, qid uint16, timeout time.Duration) (string, error) {
 	query, err := BuildQuery(name, qid)
 	if err != nil {
 		return "", err

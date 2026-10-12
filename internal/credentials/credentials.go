@@ -135,9 +135,12 @@ func (k *Keyring) goos() string {
 func (k *Keyring) isMacOS() bool   { return k.goos() == "darwin" }
 func (k *Keyring) isWindows() bool { return k.goos() == "windows" }
 
-// credStore: Windows keeps secrets in Credential Manager, Android in an encrypted file
+// credStore: Windows keeps secrets in Credential Manager, the phones in an encrypted file
 // (filecred.go). Both go through CredStore.
-func (k *Keyring) credStore() bool { return k.isWindows() || k.goos() == "android" }
+func (k *Keyring) credStore() bool { return k.isWindows() || k.phone() }
+
+// phone: the Android and iPhone apps keep secrets in FileStore.
+func (k *Keyring) phone() bool { return k.goos() == "android" || k.goos() == "ios" }
 
 func (k *Keyring) run(cmd []string, input []byte, timeout time.Duration) (Result, error) {
 	if k.Run != nil {
@@ -150,7 +153,7 @@ func (k *Keyring) cred() CredStore {
 	if k.Cred != nil {
 		return k.Cred
 	}
-	if k.goos() == "android" {
+	if k.phone() {
 		return AndroidStore()
 	}
 	return nativeCred{}

@@ -1,0 +1,4 @@
+module UniVPNCore {
+    header "UniVPNCore.h"
+    export *
+}

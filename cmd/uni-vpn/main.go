@@ -7,23 +7,20 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 
-	"github.com/DavidVinu/uni-vpn/internal/config"
+	"github.com/DavidVinu/uni-vpn/internal/coremain"
 	"github.com/DavidVinu/uni-vpn/internal/credentials"
 	"github.com/DavidVinu/uni-vpn/internal/daemon"
 	"github.com/DavidVinu/uni-vpn/internal/desktop"
-	"github.com/DavidVinu/uni-vpn/internal/logsetup"
 	"github.com/DavidVinu/uni-vpn/internal/platform"
-	"github.com/DavidVinu/uni-vpn/internal/winsys"
 	"github.com/DavidVinu/uni-vpn/internal/wintunnel"
 )
 
@@ -99,58 +96,6 @@ func cmdDaemon(configArg string) int {
 	exe := executable()
 	harden()
 	umask() // lock file, log and everything else readable only by the user
-	lockPath := platform.LockFile()
-	if err := os.MkdirAll(filepath.Dir(lockPath), 0o700); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	lock, err := acquireLock(lockPath)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	if lock == nil {
-		fmt.Fprintln(os.Stderr, "uni-vpn daemon is already running")
-		return 0
-	}
-	defer lock.Close()
-	log, tail, err := logsetup.Setup(platform.LogFile(), slog.LevelInfo)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	cfgPath := configArg
-	if cfgPath == "" {
-		cfgPath = config.DefaultPath()
-	}
-	configError := ""
-	cfg, err := config.Load(configArg)
-	if err != nil {
-		var ce *config.ConfigError
-		if !errors.As(err, &ce) {
-			log.Error(err.Error())
-			return 1
-		}
-		fallback := config.Default()
-		ports := config.PortsFromBroken(configArg)
-		if p, ok := ports["socks_port"]; ok {
-			fallback.SocksPort = p
-		}
-		if p, ok := ports["http_port"]; ok {
-			fallback.HTTPPort = p
-		}
-		cfg = &fallback
-		configError = err.Error()
-		log.Error(configError)
-	}
-	log.Info(fmt.Sprintf("uni-vpn %s starting (SOCKS %d, status %d)", daemon.Version, cfg.SocksPort, cfg.HTTPPort))
-	if platform.IsWindows {
-		winsys.KillChildrenWithUs()
-		winsys.AllowCtrlCForChildren()
-		if !winsys.IsAdmin() {
-			log.Warn("Not running elevated: openconnect cannot create the Wintun adapter")
-		}
-	}
 	// The Android app hands over its keys this way; openconnect and ocproxy need neither.
 	apiToken := os.Getenv(apiTokenEnv)
 	os.Unsetenv(apiTokenEnv)
@@ -158,29 +103,30 @@ func cmdDaemon(configArg string) int {
 		credentials.AndroidStore()
 		os.Unsetenv(credentials.KeyEnv)
 	}
-	_, statErr := os.Stat(cfgPath)
-	u := coreUpdater()
-	app := desktop.New(u.Root)
-	if platform.IsMacOS {
-		go app.UseUpdatedApp()
-	}
-	windows := &appWindows{restart: app.RestartApp, log: log}
-	d := daemon.New(cfg, log, daemon.Options{ConfigError: configError, LogTail: tail.Lines, ConfigPath: cfgPath,
-		NeedsSetup: errors.Is(statErr, fs.ErrNotExist), Updater: u, AppPolled: windows.polled, APIToken: apiToken})
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, syscall.SIGTERM, os.Interrupt)
-	go func() {
-		<-signals
-		d.Stop()
-	}()
-	d.Run()
-	log.Info("uni-vpn stopped")
-	if d.RestartRequested {
-		lock.Close()
-		if h, ok := log.Handler().(interface{ Close() error }); ok {
-			h.Close() // the new program opens the log file again
-		}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+	defer stop()
+	err := coremain.Run(ctx, coremain.Options{ConfigArg: configArg, APIToken: apiToken,
+		Extend: func(log *slog.Logger, o *daemon.Options) {
+			u := coreUpdater()
+			app := desktop.New(u.Root)
+			if platform.IsMacOS {
+				go app.UseUpdatedApp()
+			}
+			windows := &appWindows{restart: app.RestartApp, log: log}
+			o.Updater, o.AppPolled = u, windows.polled
+		}})
+	var logged *coremain.LoggedError
+	switch {
+	case err == nil:
+		return 0
+	case errors.Is(err, coremain.ErrRestart):
 		return restart(exe)
+	case errors.Is(err, coremain.ErrLocked):
+		fmt.Fprintln(os.Stderr, err)
+		return 0
+	case errors.As(err, &logged):
+		return 1
 	}
-	return 0
+	fmt.Fprintln(os.Stderr, err)
+	return 1
 }

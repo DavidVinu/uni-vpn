@@ -208,6 +208,7 @@
   "phone.msg.repair_failed": "La réparation n'a pas abouti. Touche Réparer pour réessayer, ou redémarre le téléphone.",
   "phone.msg.not_running": "Uni VPN ne fonctionne pas. Ferme l'application et rouvre-la.",
   "phone.msg.hostscan_required": "Ton université vérifie l'appareil avant qu'il se connecte. Uni VPN ne sait pas encore le faire.",
+  "phone.camera_use": "Uni VPN utilise l'appareil photo pour scanner les codes QR.",
   "setup.token_secret": "Clé de configuration",
   "setup.show_secret": "Afficher la clé",
   "setup.totp_help": "Pas de ligne commençant par otpauth:// ? Copiez plutôt les lettres après « secret= ». Les codes sur votre téléphone continuent de fonctionner.",
