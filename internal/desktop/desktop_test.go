@@ -286,6 +286,10 @@ func TestRestartAppMacOS(t *testing.T) {
 	touch(t, filepath.Join(h.d.Root, filepath.FromSlash(UpdatedAppFile("darwin"))), "")
 	touch(t, filepath.Join(h.d.Root, ".core-files"), UpdatedAppFile("darwin")+"\n")
 	login := filepath.Join(h.home, "Library", "LaunchAgents", LoginLabel+".plist")
+	if h.d.RestartApp(1081) {
+		t.Fatal("restarted without the login item")
+	}
+	touch(t, login, "")
 	if !h.d.RestartApp(1081) || read(login) != LoginPlist(filepath.Join(h.d.Root, filepath.FromSlash(UpdatedAppFile("darwin")))) {
 		t.Fatal(read(login))
 	}

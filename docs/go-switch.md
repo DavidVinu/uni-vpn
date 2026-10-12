@@ -48,8 +48,9 @@ when the copy in /Applications sees the updated one. They say so with `shell=1` 
 request (`status.json?menu=...&shell=1`). An app window of an earlier version, which asks
 without it, is switched by the service: once the updates have installed the app, it ends it and
 starts the new one without a window (`desktop.RestartApp`; on Linux in the desktop session of the
-old one, read from /proc). The service tries that once, and again only after an app window that
-restarts itself has asked.
+old one, read from /proc). The service does that once per start, so a window the user
+opens later from an old copy (on macOS the one in /Applications) is left alone, and never when
+the user removed the app's login item.
 
 Next to them, `core-manifest.json`:
 

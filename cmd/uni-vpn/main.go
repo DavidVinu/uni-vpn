@@ -16,7 +16,6 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/DavidVinu/uni-vpn/internal/config"
 	"github.com/DavidVinu/uni-vpn/internal/daemon"
@@ -154,7 +153,7 @@ func cmdDaemon(configArg string) int {
 	if platform.IsMacOS {
 		go app.UseUpdatedApp()
 	}
-	windows := &appWindows{restart: app.RestartApp, log: log, now: time.Now}
+	windows := &appWindows{restart: app.RestartApp, log: log}
 	d := daemon.New(cfg, log, daemon.Options{ConfigError: configError, LogTail: tail.Lines, ConfigPath: cfgPath,
 		NeedsSetup: errors.Is(statErr, fs.ErrNotExist), Updater: u, AppPolled: windows.polled})
 	signals := make(chan os.Signal, 1)

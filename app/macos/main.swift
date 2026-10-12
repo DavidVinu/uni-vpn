@@ -71,14 +71,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
 
     func applicationDidFinishLaunching(_ note: Notification) {
         // Started by the copy it replaces after an update: that one quits first.
-        if let after = argument("--after").flatMap({ pid_t($0) }) {
+        let after = argument("--after").flatMap { pid_t($0) }
+        if let after = after {
             for _ in 0..<100 where kill(after, 0) == 0 { usleep(100_000) }
         }
         // One menu bar item: the login item and the installer's "open" can start a second copy
         // at the same moment. The newer one hands its page to the older one and quits.
         let me = NSRunningApplication.current
         let older = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
-            .filter { $0 != me && !$0.isTerminated }
+            .filter { $0 != me && !$0.isTerminated && $0.processIdentifier != after }
             .first { other in
                 let (a, b) = (other.launchDate ?? .distantPast, me.launchDate ?? .distantFuture)
                 return a < b || (a == b && other.processIdentifier < me.processIdentifier)

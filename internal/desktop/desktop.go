@@ -719,6 +719,10 @@ func (d *Desktop) RestartApp(port int) bool {
 	}
 	switch {
 	case d.macOS():
+		// A login item the user removed stays removed.
+		if !exists(d.LoginPath()) {
+			return false
+		}
 		d.stopRunning()
 		return d.registerMacOS(d.UpdatedMacApp(), func(string) {})
 	case d.windows():
