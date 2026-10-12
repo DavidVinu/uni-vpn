@@ -499,18 +499,20 @@ func TestStoreRejectsNewlineInUser(t *testing.T) {
 func TestKeychainText(t *testing.T) {
 	for in, want := range map[string]string{
 		"70c3a4737320776f7264": "p\u00e4ss word", // non-ASCII: decoded
-		"6869090a":             "hi\t\n",         // control characters: decoded
 		"c3a4\n":               "\u00e4",         // Python's $ matches before a final newline
-		"cafe":                 "cafe",           // decodes to non-ASCII bytes
 		"616263":               "616263",         // printable ASCII: kept
 		"abc":                  "abc",            // odd length
 		"CAFE":                 "CAFE",           // upper case is not security's hex
 		"c3a4\n\n":             "c3a4\n\n",
 		"secret":               "secret",
+		// Passwords that only look like hex: security prints them as they are. Decoded they
+		// would be control characters or no UTF-8 at all, which StoreSecret never stores.
+		"12345678":   "12345678",
+		"20041998":   "20041998",
+		"a1b2c3d4e5": "a1b2c3d4e5",
+		"cafe":       "cafe",
+		"6869090a":   "6869090a",
 	} {
-		if in == "cafe" {
-			want = "\xca\xfe"
-		}
 		if got := string(KeychainText([]byte(in))); got != want {
 			t.Errorf("%q: got %q, want %q", in, got, want)
 		}
