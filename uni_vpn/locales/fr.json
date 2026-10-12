@@ -211,6 +211,7 @@
   "phone.msg.not_running": "Uni VPN ne fonctionne pas. Fermez l'application et rouvrez-la.",
   "phone.msg.hostscan_required": "Votre université vérifie l'appareil avant qu'il se connecte. Uni VPN ne sait pas encore le faire.",
   "phone.camera_use": "Uni VPN utilise l'appareil photo pour scanner les codes QR.",
+  "phone.camera_denied": "Uni VPN n'a pas accès à l'appareil photo. Autorisez l'accès dans Réglages.",
   "setup.token_secret": "Clé de configuration",
   "setup.show_secret": "Afficher la clé",
   "setup.totp_help": "Pas de ligne commençant par otpauth:// ? Copiez plutôt les lettres après « secret= ». Les codes sur votre téléphone continuent de fonctionner.",

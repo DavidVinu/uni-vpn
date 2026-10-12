@@ -16,6 +16,7 @@ final class VPN {
     private(set) var onDemand = false
     @ObservationIgnored private var manager: NETunnelProviderManager?
     @ObservationIgnored private var observer: NSObjectProtocol?
+    @ObservationIgnored private var configObserver: NSObjectProtocol?
     /// Called on every change of `status`.
     @ObservationIgnored var onStatus: ((NEVPNStatus) -> Void)?
 
@@ -31,6 +32,11 @@ final class VPN {
         if observer == nil {
             observer = NotificationCenter.default.addObserver(forName: .NEVPNStatusDidChange, object: nil, queue: .main) { [weak self] _ in
                 Task { @MainActor in self?.update() }
+            }
+            // The Control Center button saves its own copy of the configuration (SetVPN): read
+            // it again, as WireGuard's app does, else the switch keeps the old connect on demand.
+            configObserver = NotificationCenter.default.addObserver(forName: .NEVPNConfigurationChange, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in await self?.load() }
             }
         }
     }

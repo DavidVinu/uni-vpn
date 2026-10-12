@@ -8,6 +8,7 @@
 #include <stdbool.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <Security/Security.h>
+#include <openssl/crypto.h>
 
 #include "shim.h"
 
@@ -43,6 +44,13 @@ int uni_vpn_trust(struct openconnect_info *vpninfo, const char *host)
 		}
 		if (der)
 			CFRelease(der);
+	}
+	/* With OpenSSL the library frees only the array (openssl.c never sets cert_list_size, which
+	 * its free uses): free each certificate here, else every connection leaks a chain. NULL
+	 * keeps a fixed library from freeing them twice. */
+	for (i = 0; i < n; i++) {
+		OPENSSL_free(chain[i].der_data);
+		chain[i].der_data = NULL;
 	}
 	openconnect_free_peer_cert_chain(vpninfo, chain);
 

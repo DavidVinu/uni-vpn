@@ -205,6 +205,7 @@
   "phone.msg.not_running": "Uni VPN is not running. Close the app and open it again.",
   "phone.msg.hostscan_required": "Your university checks the device before it connects. Uni VPN cannot do that yet.",
   "phone.camera_use": "Uni VPN uses the camera to scan QR codes.",
+  "phone.camera_denied": "Uni VPN may not use the camera. Allow it in Settings.",
   "setup.token_secret": "Setup key",
   "setup.show_secret": "Show key",
   "setup.totp_help": "No line starting with otpauth://? Copy the letters after \"secret=\" instead. Codes on your phone keep working.",

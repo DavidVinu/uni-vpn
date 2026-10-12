@@ -174,14 +174,36 @@ struct SecondFactorView: View {
     @State private var secret = ""
     @State private var valid = false
     @State private var error: String?
+    /// The university takes one code instead of the key (AutoEnroll); nil until known.
+    @State private var offersAuto: Bool?
+    @State private var byHand = false
 
     var body: some View {
+        Group {
+            if offersAuto == nil && !model.auto.running {
+                ProgressView()
+            } else if (offersAuto == true || model.auto.running) && !byHand {
+                AutoEntry(model: model, auto: model.auto, setup: nil) { byHand = true }
+            } else {
+                keyForm
+            }
+        }
+        .navigationTitle(model.t("app.second_factor"))
+        .task {
+            let id = model.status?.string("university") ?? ""
+            let list = await model.get("/universities.json")?.objects("universities") ?? []
+            offersAuto = list.contains { $0.string("id") == id && $0.string("mfa_enroll") == "linotp" }
+        }
+        // Leaving stops a run started here, as Back does on the desktop page.
+        .onDisappear { if !model.auto.inSetup { model.auto.cancel() } }
+    }
+
+    private var keyForm: some View {
         Form {
             Section {
                 TotpEntry(model: model, secret: $secret, valid: $valid, error: error)
             }
         }
-        .navigationTitle(model.t("app.second_factor"))
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 InfoButton(model: model, text: model.t("setup.totp_help"))

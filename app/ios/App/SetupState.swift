@@ -10,6 +10,7 @@ struct University: Identifiable {
     var mfa: String { json.string("mfa") }
     var portal: String { json.string("mfa_portal_url") }
     var steps: [String] { json.strings("mfa_steps") }
+    var enroll: String { json.string("mfa_enroll") }
     var search: [String] { [id, name, json.string("host")] + json.strings("aliases") }
 }
 
@@ -39,6 +40,8 @@ final class SetupState {
     var password = ""
     var secret = ""
     var secretValid = false
+    /// The second factor with the key after all, where the one code (AutoEnroll) is offered.
+    var byHand = false
     var pairCode = ""
     var error: String?
     var busy = false
@@ -87,6 +90,8 @@ final class SetupState {
     var isOther: Bool { uniId == "other" }
     var mfa: String { isOther ? otherMfa : (uni?.mfa ?? "totp_field") }
     var needsTotp: Bool { SetupState.totpModes.contains(mfa) }
+    /// One code from the user's app sets up the second factor (the desktop's "enroll").
+    var offersAuto: Bool { uni?.enroll == "linotp" }
     var total: Int { needsTotp ? 4 : 3 }
 
     /// Where setup starts, once per run: Settings changes the account, a phone that can sync
@@ -122,25 +127,7 @@ final class SetupState {
         if sending { return }
         model.setupFinishing = true
         go(.connecting)
-        var profile: [String: Any] = [:]
-        if isOther {
-            var address = host.trimmingCharacters(in: .whitespacesAndNewlines)
-            for scheme in ["https://", "http://"] where address.lowercased().hasPrefix(scheme) {
-                address = String(address.dropFirst(scheme.count))
-            }
-            let parts = address.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
-            profile["host"] = parts[0]
-            profile["mfa"] = otherMfa
-            if parts.count > 1 && !parts[1].isEmpty { profile["usergroup"] = parts[1] }
-            if groups.count > 1 && !group.isEmpty { profile["authgroup"] = group }
-        }
-        let body: [String: Any] = [
-            "user": user.trimmingCharacters(in: .whitespacesAndNewlines),
-            "password": password,
-            "secret": needsTotp ? secret.trimmingCharacters(in: .whitespacesAndNewlines) : "",
-            "university": uniId,
-            "profile": profile,
-        ]
+        let body = request(secret: needsTotp ? secret.trimmingCharacters(in: .whitespacesAndNewlines) : "")
         sending = true
         sentAt = nil
         Task {
@@ -154,7 +141,33 @@ final class SetupState {
         }
     }
 
-    private func failed(_ model: AppModel, _ result: PostResult) {
+    /// What /api/setup gets: the account and the key, or a code from the user's app instead
+    /// (AutoEnroll).
+    func request(secret: String, code: String = "") -> [String: Any] {
+        var profile: [String: Any] = [:]
+        if isOther {
+            var address = host.trimmingCharacters(in: .whitespacesAndNewlines)
+            for scheme in ["https://", "http://"] where address.lowercased().hasPrefix(scheme) {
+                address = String(address.dropFirst(scheme.count))
+            }
+            let parts = address.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+            profile["host"] = parts[0]
+            profile["mfa"] = otherMfa
+            if parts.count > 1 && !parts[1].isEmpty { profile["usergroup"] = parts[1] }
+            if groups.count > 1 && !group.isEmpty { profile["authgroup"] = group }
+        }
+        var body: [String: Any] = [
+            "user": user.trimmingCharacters(in: .whitespacesAndNewlines),
+            "password": password,
+            "secret": secret,
+            "university": uniId,
+            "profile": profile,
+        ]
+        if !code.isEmpty { body["code"] = code }
+        return body
+    }
+
+    func failed(_ model: AppModel, _ result: PostResult) {
         if !model.changingAccount { model.setupFinishing = false }
         let field = result.json?.string("field") ?? ""
         if SetupState.profileFields.contains(field) {
@@ -250,5 +263,146 @@ final class SetupState {
         let q = SetupState.fold(query.trimmingCharacters(in: .whitespacesAndNewlines))
         let matches = universities.filter { u in q.isEmpty || u.search.contains { SetupState.fold($0).contains(q) } }
         return Array(matches.prefix(8))
+    }
+}
+
+/// The second factor the short way, as on the desktop page (step2a): the user types the code
+/// their authenticator app shows, the core signs in with it and adds itself in the MFA portal
+/// as a code generator, asking for the next code if the portal wants one (status.json
+/// "enroll"). Held by the AppModel, as the run goes on while the user reads the next code in
+/// the other app.
+@MainActor
+@Observable
+final class AutoEnroll {
+    static let runningStages: Set<String> = ["connecting", "code", "working"]
+
+    var code = ""
+    var error: String?
+    /// A run was started here and is followed until it is done or failed.
+    private(set) var running = false
+    /// The request is out.
+    private(set) var sending = false
+    /// The run belongs to setup, else to Settings, second factor.
+    private(set) var inSetup = false
+    private var sentAt = Date.distantPast
+    /// What the request just sent started, until the status catches up.
+    private var pending = ""
+    @ObservationIgnored private var cancelledAt = Date.distantPast
+
+    func stage(_ status: JSON?) -> String {
+        guard running else { return "" }
+        if Date().timeIntervalSince(sentAt) < 1.5 { return pending }
+        return status?.object("enroll")?.string("stage") ?? ""
+    }
+
+    /// Nothing to type: the request is out or the core is busy.
+    func busy(_ status: JSON?) -> Bool {
+        let now = stage(status)
+        return sending || now == "connecting" || now == "working"
+    }
+
+    /// The line above the field, as on the desktop page.
+    func text(_ model: AppModel) -> String {
+        let status = model.status ?? JSON([:])
+        let now = stage(status)
+        if now == "code", let e = status.object("enroll") {
+            return model.strings.message(e.string("error"), e.object("error_t"))
+        }
+        if now == "connecting" && ["offline", "blocked", "error"].contains(status.string("state")) {
+            return model.strings.message(status.string("message"), status.object("message_t"))
+        }
+        if busy(status) { return model.t(now == "working" ? "setup.auto_working" : "setup.waiting") }
+        return model.t("setup.auto_sub")
+    }
+
+    /// Next: a code the core asks for answers the run; else the first code starts one, with the
+    /// account in setup (also when the account changes), alone from Settings.
+    func send(_ model: AppModel, setup: SetupState?) async {
+        if sending { return }
+        let typed = code.filter { !$0.isWhitespace }
+        guard (6...8).contains(typed.count), typed.allSatisfy({ $0.isASCII && $0.isNumber }) else {
+            error = model.t("enroll.enter_code")
+            return
+        }
+        let answer = stage(model.status) == "code"
+        sending = true
+        error = nil
+        let result: PostResult
+        if let setup, !answer {
+            model.setupFinishing = true
+            result = await model.post("/api/setup", setup.request(secret: "", code: typed), timeout: 60)
+        } else {
+            result = await model.post("/api/totp/auto", ["code": typed])
+        }
+        sending = false
+        guard result.ok else {
+            // A wrong university, username or password: back to its step.
+            let field = result.json?.string("field") ?? ""
+            if let setup, !answer, !field.isEmpty, field != "totp" {
+                setup.failed(model, result)
+                return
+            }
+            error = result.error
+            return
+        }
+        running = true
+        inSetup = setup != nil
+        sentAt = Date()
+        pending = answer || (setup == nil && model.status?.string("state") == "connected") ? "working" : "connecting"
+        code = ""
+    }
+
+    /// Back or by hand: the core stops the run.
+    func cancel() {
+        code = ""
+        error = nil
+        guard running else { return }
+        running = false
+        cancelledAt = Date()
+        Task { _ = await API.post("/api/totp/auto", ["cancel": true]) }
+    }
+
+    /// Every status: the end of the run, or a run the app does not follow yet.
+    func progress(_ model: AppModel) {
+        guard let status = model.status else { return }
+        let e = status.object("enroll")
+        let now = e?.string("stage") ?? ""
+        if !running {
+            // Opened again while a run goes on (in the VPN's core): back to its page.
+            guard !sending, AutoEnroll.runningStages.contains(now),
+                  Date().timeIntervalSince(cancelledAt) > 3 else { return }
+            running = true
+            sentAt = .distantPast
+            inSetup = model.setupNeeded || model.changingAccount || model.setupFinishing
+            if inSetup {
+                model.setup.byHand = false
+                model.setup.go(.secondFactor)
+            } else if model.path.last != .secondFactor {
+                model.path = [.settings, .secondFactor]
+            }
+            return
+        }
+        guard Date().timeIntervalSince(sentAt) > 1.5 else { return }
+        if now == "done" {
+            running = false
+            if !inSetup {
+                if model.path.last == .secondFactor { model.back() }
+            } else if model.changingAccount {
+                model.finishSetup()
+            } else {
+                model.setup.go(.done)
+            }
+        } else if e == nil || now == "failed" {
+            running = false
+            // No run at all: the core was stopped meanwhile (iOS ended the app's time in the
+            // background), so the code is used up.
+            let text = e.map { model.strings.message($0.string("error"), $0.object("error_t")) } ?? model.t("enroll.failed")
+            if inSetup && status.string("error_kind") == "password" {
+                model.setup.go(.signIn)
+                model.setup.error = text
+            } else {
+                error = text
+            }
+        }
     }
 }

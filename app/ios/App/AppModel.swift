@@ -39,9 +39,13 @@ final class AppModel {
     /// Setup finished in this run and its last page ("All set") is still open.
     var setupFinishing = false
     var setup = SetupState()
+    /// The second factor from one code, in setup or Settings.
+    let auto = AutoEnroll()
 
     let vpn = VPN()
     @ObservationIgnored private var poll: Task<Void, Never>?
+    /// The core kept running in the background for a sign-in (wentToBackground).
+    @ObservationIgnored private var keepAlive: Task<Void, Never>?
     @ObservationIgnored private var lastStart = Date.distantPast
     /// Turning the VPN on or off: the core changes hands, the app must not start its own.
     @ObservationIgnored private var switching = false
@@ -74,6 +78,9 @@ final class AppModel {
     /// The app is on screen: run the core here unless the VPN runs it, and poll its status like
     /// the desktop apps.
     func becameActive() {
+        // Back before the sign-in ended: it goes on in the core that kept running.
+        keepAlive?.cancel()
+        keepAlive = nil
         guard poll == nil else { return }
         poll = Task { [weak self] in
             await self?.vpn.load()
@@ -98,9 +105,37 @@ final class AppModel {
         // fails its start, and connect on demand tries again.
         let task = BackgroundTask()
         task.id = UIApplication.shared.beginBackgroundTask(withName: "stop core") { task.end() }
-        CoreHost.shared.stop {
-            Task { @MainActor in task.end() }
+        keepAlive?.cancel()
+        keepAlive = nil
+        guard signingIn else {
+            CoreHost.shared.stop {
+                Task { @MainActor in task.end() }
+            }
+            return
         }
+        // The user approves a Duo push or reads the next code in another app: the sign-in goes
+        // on for as long as iOS lets the app run, and the core still stops in time (iOS ends an
+        // app that is suspended holding the lock in the shared container). Stopped anyway, the
+        // one-code setup asks for a new code on return (AutoEnroll.progress).
+        keepAlive = Task { [weak self] in
+            while !Task.isCancelled, self?.signingIn == true, UIApplication.shared.backgroundTimeRemaining > 10 {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                await self?.refresh()
+            }
+            if Task.isCancelled {
+                task.end()
+                return
+            }
+            CoreHost.shared.stop {
+                Task { @MainActor in task.end() }
+            }
+        }
+    }
+
+    /// A sign-in the user waits for runs in the app's core (the VPN's core runs on by itself):
+    /// setup's first one, or the one-code setup.
+    private var signingIn: Bool {
+        vpn.idle && (setup.sending || (setup.step == .connecting && setup.sentAt != nil) || auto.sending || auto.running)
     }
 
     /// Starts the app's core while the VPN is off. Cheap to call often.
@@ -193,6 +228,7 @@ final class AppModel {
             stringsFor = key
         }
         setup.statusChanged(self)
+        auto.progress(self)
     }
 
     /// POST to the core; the error text is in the user's language.
@@ -220,6 +256,7 @@ final class AppModel {
         changingAccount = false
         setupFinishing = false
         setup = SetupState()
+        auto.cancel()
         home()
     }
 }

@@ -41,7 +41,19 @@ struct SetupView: View {
     private func back(_ setup: SetupState) -> (() -> Void)? {
         switch setup.step {
         case .signIn: return { setup.go(.university) }
-        case .secondFactor: return { setup.go(.signIn) }
+        case .secondFactor:
+            // The key by hand goes back to the one code, as on the desktop page.
+            if setup.byHand && setup.offersAuto {
+                return {
+                    setup.byHand = false
+                    setup.error = nil
+                }
+            }
+            if model.auto.sending { return nil }
+            return {
+                model.auto.cancel()
+                setup.go(.signIn)
+            }
         case .code: return { setup.go(.welcome) }
         case .university:
             if model.changingAccount { return { model.finishSetup() } }
@@ -256,6 +268,7 @@ private struct SignInPage: View {
         } else if setup.password.isEmpty {
             setup.error = model.t("setup.enter_password")
         } else if setup.needsTotp {
+            setup.byHand = false
             setup.go(.secondFactor)
         } else {
             setup.submit(model)
@@ -268,6 +281,17 @@ private struct SecondFactorPage: View {
     @Bindable var setup: SetupState
 
     var body: some View {
+        if (setup.offersAuto || model.auto.running) && !setup.byHand {
+            AutoEntry(model: model, auto: model.auto, setup: setup) {
+                setup.byHand = true
+                setup.error = nil
+            }
+        } else {
+            keyForm
+        }
+    }
+
+    private var keyForm: some View {
         Form {
             Section {
                 if let portal = setup.uni?.portal, let url = URL(string: portal), !portal.isEmpty {

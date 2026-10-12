@@ -211,6 +211,7 @@
   "phone.msg.not_running": "Uni VPN läuft nicht. Schließe die App und öffne sie erneut.",
   "phone.msg.hostscan_required": "Deine Universität prüft das Gerät, bevor es sich verbindet. Das kann Uni VPN noch nicht.",
   "phone.camera_use": "Uni VPN nutzt die Kamera, um QR-Codes zu scannen.",
+  "phone.camera_denied": "Uni VPN darf die Kamera nicht nutzen. Erlaube es in den Einstellungen.",
   "setup.token_secret": "Einrichtungsschlüssel",
   "setup.show_secret": "Schlüssel anzeigen",
   "setup.totp_help": "Keine Zeile mit otpauth://? Kopiere stattdessen die Zeichen nach „secret=“. Die Codes auf deinem Handy funktionieren weiter.",

@@ -1,5 +1,6 @@
 import AVFoundation
 import SwiftUI
+import UIKit
 import VisionKit
 
 /// Scans one QR code with the camera, VisionKit's scanner: it finds the code by itself, nothing
@@ -88,16 +89,28 @@ struct ScanButton: View {
     let title: String
     let onCode: (String) -> Void
     @State private var scanning = false
+    @State private var denied = false
 
     var body: some View {
         if QRScanner.supported {
             Button {
+                // Said no before: iOS does not ask again, only Settings can allow the camera.
+                if AVCaptureDevice.authorizationStatus(for: .video) == .denied {
+                    denied = true
+                    return
+                }
                 Task { if await QRScanner.allowed() { scanning = true } }
             } label: {
                 Label(title, systemImage: "qrcode.viewfinder")
             }
             .sheet(isPresented: $scanning) {
                 ScanSheet(model: model, onCode: onCode)
+            }
+            .alert(model.t("phone.camera_denied"), isPresented: $denied) {
+                Button(model.t("app.back"), role: .cancel) {}
+                Button(model.t("settings.title")) {
+                    if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                }
             }
         }
     }
