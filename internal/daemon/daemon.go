@@ -135,6 +135,8 @@ type Options struct {
 	SyncStatePath string
 	// APIToken: every request but the PAC file's must carry it (httpapi.Server.Token).
 	APIToken string
+	// AppPolled: the native app asked for the status on httpPort (httpapi.Server.AppPolled).
+	AppPolled func(httpPort int, restartsItself bool)
 }
 
 type lastError struct {
@@ -882,6 +884,9 @@ func (d *Daemon) Run() {
 	d.mu.Unlock()
 	server := httpapi.New(d, "127.0.0.1", httpPort, d.log)
 	server.Token = d.opts.APIToken
+	if d.opts.AppPolled != nil {
+		server.AppPolled = func(restartsItself bool) { d.opts.AppPolled(httpPort, restartsItself) }
+	}
 	if err := server.Start(); err != nil {
 		d.logf(slog.LevelError, "Status port %d not available: %s", httpPort, bindErrorString(err, httpPort))
 		server = nil

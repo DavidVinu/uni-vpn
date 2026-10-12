@@ -5,7 +5,8 @@ desktop shows them (Ubuntu, KDE, most others; GNOME only with the AppIndicator e
 Role models: GNOME apps (one window per app, a second start raises it), Tailscale and Cisco
 Secure Client (panel icon with the state, Connect/Disconnect, Settings, Quit).
 Runs with the distribution's Python, which has PyGObject; "uni-vpn setup" picks it.
-Arguments: --port N, --hidden (sign-in: panel icon only), --page P ("#settings", "&user=ab123").
+Arguments: --port N, --hidden (sign-in: panel icon only), --page P ("#settings", "&user=ab123"),
+--after PID (the copy this one replaces after an update, which quits first).
 """
 
 import json
@@ -48,6 +49,7 @@ TEXTS = {"look.connected": "Connected", "look.connecting": "Connecting", "look.d
          "look.auth_failed": "Sign-in failed", "look.keyring": "Action needed", "look.error": "Error",
          "menu.not_running": "Not running", "menu.connect": "Connect", "menu.disconnect": "Disconnect",
          "menu.open": "Open Uni VPN", "menu.settings": "Settings", "menu.quit_short": "Quit"}
+SCRIPT = os.path.abspath(__file__)
 # The loopback API needs no proxy, and the system proxy is uni-vpn's own rule.
 OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
@@ -65,6 +67,25 @@ def option(args, name):
     return args[args.index(name) + 1] if name in args[:-1] else None
 
 
+def stamp():
+    """Identifies this program's file, which an update replaces."""
+    try:
+        st = os.stat(SCRIPT)
+    except OSError:
+        return None
+    return st.st_ino, st.st_size, st.st_mtime_ns
+
+
+def wait_for(pid, seconds=10.0):
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return
+        time.sleep(0.1)
+
+
 def page_from(args):
     """What to show: --page, nothing with --hidden, otherwise the window as it is."""
     page = option(args, "--page")
@@ -77,6 +98,7 @@ class App(Gtk.Application):
     def __init__(self):
         super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
         self.base = "http://127.0.0.1:1081/"
+        self.port = "1081"
         self.window = None
         self.view = None
         self.indicator = None
@@ -86,6 +108,9 @@ class App(Gtk.Application):
         self.started = False
         self.misses = 0
         self.last_start = 0.0
+        self.program = stamp()
+        self.seen = None
+        self.restarting = False
 
     # A second start (app grid, "uni-vpn app") reaches the running instance here.
     def do_command_line(self, command_line):
@@ -95,6 +120,7 @@ class App(Gtk.Application):
             port = option(args, "--port")
             if port and port.isdigit():
                 self.base = f"http://127.0.0.1:{int(port)}/"
+                self.port = str(int(port))
             if AppIndicator:
                 self.start_indicator()
             self.poll()
@@ -138,7 +164,8 @@ class App(Gtk.Application):
     def poll(self):
         def fetch():
             try:
-                url = self.base + "status.json?menu=" + urllib.parse.quote(system_languages())
+                # shell=1: this app restarts itself after updates (restart_if_updated).
+                url = self.base + "status.json?menu=" + urllib.parse.quote(system_languages()) + "&shell=1"
                 with OPENER.open(url, timeout=3) as response:
                     data = json.loads(response.read().decode("utf-8"))
             except (OSError, ValueError):
@@ -160,9 +187,28 @@ class App(Gtk.Application):
         except OSError:
             pass
 
+    def restart_if_updated(self):
+        """After an update the new version takes over without a window, once this one's window is
+        closed (Chrome, Tailscale). The same file twice in a row: the update is complete."""
+        now = stamp()
+        changed = now is not None and now != self.program and now == self.seen
+        self.seen = now
+        if not changed or self.restarting or (self.window and self.window.get_visible()):
+            return
+        self.restarting = True
+        try:
+            subprocess.Popen([sys.executable, SCRIPT, "--port", self.port, "--hidden", "--after", str(os.getpid())],
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             start_new_session=True)
+        except OSError:
+            self.program, self.restarting = now, False  # stays as it is; tried again after the next update
+            return
+        self.quit()
+
     def render(self, data):
         self.reachable = data is not None
         self.start_service_if_down()
+        self.restart_if_updated()
         self.status = data or {}
         TEXTS.update(self.status.get("menu") or {})
         state = self.status.get("state", "")
@@ -255,6 +301,9 @@ class App(Gtk.Application):
 
 
 def main():
+    after = option(sys.argv, "--after")
+    if after and after.isdigit():
+        wait_for(int(after))
     GLib.set_prgname(APP_ID)
     GLib.set_application_name("Uni VPN")
     return App().run(sys.argv)

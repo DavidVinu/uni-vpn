@@ -150,6 +150,29 @@ func openconnect(args []string) int {
 			tokenPath = p
 		}
 	}
+	mode := os.Getenv("FAKE_MODE")
+	if mode == "" {
+		mode = "ok"
+	}
+	// Before the password is recorded: a test that has seen the password line knows the
+	// signals are handled (with -race the binary takes a while to get here).
+	sigs := make(chan os.Signal, 4)
+	signal.Notify(sigs, append([]os.Signal{syscall.SIGTERM, os.Interrupt}, extraSignals...)...)
+	go func() {
+		for s := range sigs {
+			if isReconnectSignal(s) {
+				log("SIGUSR2 received")
+				continue
+			}
+			if mode == "ignore_sigterm" {
+				log("SIGTERM ignored")
+				continue
+			}
+			log("User cancelled (SIGINT/SIGTERM); exiting.")
+			os.Exit(0)
+		}
+	}()
+
 	if f := os.Getenv("FAKE_ARGS_FILE"); f != "" {
 		appendFile(f, jsonList(args)+"\n")
 	}
@@ -164,10 +187,6 @@ func openconnect(args []string) int {
 		appendFile(f, b.String())
 	}
 	log("POST https://fake.example/")
-	mode := os.Getenv("FAKE_MODE")
-	if mode == "" {
-		mode = "ok"
-	}
 	delay := seconds("FAKE_DELAY", "0.2")
 
 	switch mode {
@@ -210,23 +229,6 @@ func openconnect(args []string) int {
 			return 0
 		}
 	}
-
-	sigs := make(chan os.Signal, 4)
-	signal.Notify(sigs, append([]os.Signal{syscall.SIGTERM, os.Interrupt}, extraSignals...)...)
-	go func() {
-		for s := range sigs {
-			if isReconnectSignal(s) {
-				log("SIGUSR2 received")
-				continue
-			}
-			if mode == "ignore_sigterm" {
-				log("SIGTERM ignored")
-				continue
-			}
-			log("User cancelled (SIGINT/SIGTERM); exiting.")
-			os.Exit(0)
-		}
-	}()
 
 	time.Sleep(delay)
 	if tokenPath != "" {

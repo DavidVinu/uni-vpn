@@ -499,7 +499,9 @@ func TestDisconnectDuringASecretsRestartWins(t *testing.T) {
 	d := h.start(nil)
 	d.RequestConnect()
 	waitState(t, d, Connecting)
-	waitFor(2*time.Second, func() bool { tun := d.tunnelNow(); return tun != nil && pidOf(tun) > 0 })
+	// Not just a pid: before the fake ignores SIGTERM the stop ends at once, the restart is
+	// over before the Disconnect and rightly starts a second attempt.
+	waitFor(5*time.Second, func() bool { return len(h.pwLines()) > 0 })
 	d.mu.Lock()
 	gen := d.secretsGen
 	d.mu.Unlock()

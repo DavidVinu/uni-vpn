@@ -9,6 +9,28 @@ import WebKit
 let port = (Bundle.main.object(forInfoDictionaryKey: "UniVPNPort") as? String).flatMap { Int($0) } ?? 1081
 let base = URL(string: "http://127.0.0.1:\(port)/")!
 let windowSize = NSSize(width: 420, height: 660)
+let showNote = Notification.Name("de.davidvinu.uni-vpn.app.show")
+// Where the automatic updates put the new app (internal/desktop): /Applications belongs to root.
+let updatedApp = NSHomeDirectory() + "/Library/Application Support/uni-vpn/app/desktop/Uni VPN.app"
+
+func argument(_ name: String) -> String? {
+    let args = CommandLine.arguments
+    guard let i = args.firstIndex(of: name), i + 1 < args.count else { return nil }
+    return args[i + 1]
+}
+
+func resolved(_ path: String) -> String { URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path }
+
+// The app that should run: the updated one once there is one.
+func currentApp() -> String {
+    resolved(FileManager.default.fileExists(atPath: updatedApp + "/Contents/MacOS/Uni VPN") ? updatedApp : Bundle.main.bundlePath)
+}
+
+// Identifies the program file of app, which an update replaces.
+func stamp(_ app: String) -> String? {
+    guard let a = try? FileManager.default.attributesOfItem(atPath: app + "/Contents/MacOS/Uni VPN") else { return nil }
+    return "\(a[.systemFileNumber] ?? "")|\(a[.size] ?? "")|\((a[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0)"
+}
 
 struct Status {
     var state = "unknown"
@@ -43,8 +65,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     var launched = false
     var misses = 0
     var lastStart = Date.distantPast
+    var program: String?
+    var seen: String?
+    var restarting = false
 
     func applicationDidFinishLaunching(_ note: Notification) {
+        // Started by the copy it replaces after an update: that one quits first.
+        let after = argument("--after").flatMap { pid_t($0) }
+        if let after = after {
+            for _ in 0..<100 where kill(after, 0) == 0 { usleep(100_000) }
+        }
+        // One menu bar item: the login item and the installer's "open" can start a second copy
+        // at the same moment. The newer one hands its page to the older one and quits.
+        let me = NSRunningApplication.current
+        let older = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
+            .filter { $0 != me && !$0.isTerminated && $0.processIdentifier != after }
+            .first { other in
+                let (a, b) = (other.launchDate ?? .distantPast, me.launchDate ?? .distantFuture)
+                return a < b || (a == b && other.processIdentifier < me.processIdentifier)
+            }
+        if let older = older {
+            if !CommandLine.arguments.contains("--hidden") || pending != nil {
+                DistributedNotificationCenter.default().postNotificationName(
+                    showNote, object: pending ?? "", userInfo: nil, deliverImmediately: true)
+                older.activate(options: [])
+            }
+            exit(0)
+        }
+        DistributedNotificationCenter.default().addObserver(forName: showNote, object: nil, queue: .main) { [weak self] note in
+            self?.show(note.object as? String ?? "")
+        }
         buildMenus()
         stateItem.isEnabled = false
         toggleItem.target = self
@@ -54,6 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         poll()
         Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in self?.poll() }
         launched = true
+        program = stamp(Bundle.main.bundlePath)
         if !CommandLine.arguments.contains("--hidden") || pending != nil {
             show(pending ?? "")
         }
@@ -211,7 +262,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     func poll() {
         let languages = Locale.preferredLanguages.joined(separator: ",")
         var parts = URLComponents(url: base.appendingPathComponent("status.json"), resolvingAgainstBaseURL: false)!
-        parts.queryItems = [URLQueryItem(name: "menu", value: languages)]
+        // shell=1: this app restarts itself after updates (restartIfUpdated).
+        parts.queryItems = [URLQueryItem(name: "menu", value: languages), URLQueryItem(name: "shell", value: "1")]
         var request = URLRequest(url: parts.url!)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.timeoutInterval = 3
@@ -227,8 +279,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
                 self?.status = next
                 self?.render()
                 self?.startServiceIfDown()
+                self?.restartIfUpdated()
             }
         }.resume()
+    }
+
+    // After an update the new version takes over without a window, once this one's window is
+    // closed (Chrome, Tailscale). The same file twice in a row: the update is complete.
+    func restartIfUpdated() {
+        let app = currentApp()
+        let now = stamp(app)
+        let me = resolved(Bundle.main.bundlePath)
+        let changed = now != nil && (app != me || now != program) && now == seen
+        seen = now
+        guard changed, !restarting, !(window?.isVisible ?? false), !(window?.isMiniaturized ?? false) else { return }
+        restarting = true
+        let config = NSWorkspace.OpenConfiguration()
+        config.createsNewApplicationInstance = true
+        config.activates = false
+        config.arguments = ["--hidden", "--after", String(getpid())]
+        NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: app), configuration: config) { started, _ in
+            DispatchQueue.main.async {
+                if started != nil { exit(0) }
+                // Stays as it is; tried again after the next update.
+                self.program = now
+                self.restarting = app != me
+            }
+        }
     }
 
     // Nobody should need a terminal: a stopped service is started again from here.

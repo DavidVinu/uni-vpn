@@ -448,7 +448,12 @@ func (u *Updater) install(s *staged) error {
 		return err
 	}
 	for _, rel := range s.files {
-		if err := u.replace(filepath.Join(s.folder, filepath.FromSlash(rel)), u.path(rel)); err != nil {
+		src := filepath.Join(s.folder, filepath.FromSlash(rel))
+		// Unchanged files stay: on Windows the open app window is not moved aside for nothing.
+		if same(src, u.path(rel)) {
+			continue
+		}
+		if err := u.replace(src, u.path(rel)); err != nil {
 			return err
 		}
 	}
@@ -464,6 +469,24 @@ func (u *Updater) install(s *staged) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(u.Root, CommitFile), []byte(s.commit+"\n"), 0o644)
+}
+
+// same reports whether dest is a regular file with the content and permissions of src.
+func same(src, dest string) bool {
+	a, err := os.Lstat(src)
+	if err != nil {
+		return false
+	}
+	b, err := os.Lstat(dest)
+	if err != nil || !b.Mode().IsRegular() || a.Size() != b.Size() || a.Mode().Perm() != b.Mode().Perm() {
+		return false
+	}
+	x, err := os.ReadFile(src)
+	if err != nil {
+		return false
+	}
+	y, err := os.ReadFile(dest)
+	return err == nil && bytes.Equal(x, y)
 }
 
 // replace puts src in place of dest. A file Windows keeps open (the running program, the
@@ -525,8 +548,11 @@ func (u *Updater) RemoveOld() {
 
 // InstalledFiles reads the list of files the updater installed; lines that are not a plain
 // relative path are skipped.
-func (u *Updater) InstalledFiles() []string {
-	data, err := os.ReadFile(filepath.Join(u.Root, FilesList))
+func (u *Updater) InstalledFiles() []string { return Listed(u.Root) }
+
+// Listed is InstalledFiles of the installation at root.
+func Listed(root string) []string {
+	data, err := os.ReadFile(filepath.Join(root, FilesList))
 	if err != nil {
 		return nil
 	}

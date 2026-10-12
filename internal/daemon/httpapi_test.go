@@ -104,6 +104,24 @@ func TestStatusJSON(t *testing.T) {
 	}
 }
 
+// The native app's status requests reach AppPolled, with whether it restarts itself.
+func TestAppPolls(t *testing.T) {
+	h := newHarness(t)
+	var got []string
+	h.start(func(o *Options) {
+		o.AppPolled = func(port int, restartsItself bool) { got = append(got, fmt.Sprint(port, restartsItself)) }
+	})
+	for _, path := range []string{"/status.json", "/status.json?menu=de", "/status.json?menu=de&shell=1"} {
+		if r := h.http("GET", path, nil, ""); r.status != 200 {
+			t.Fatal(path, r.status)
+		}
+	}
+	port := h.cfg.HTTPPort
+	if fmt.Sprint(got) != fmt.Sprint([]string{fmt.Sprint(port, false), fmt.Sprint(port, true)}) {
+		t.Fatal(got)
+	}
+}
+
 func TestStatusPage(t *testing.T) {
 	h := newHarness(t)
 	h.start(nil)

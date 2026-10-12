@@ -3,7 +3,8 @@
 // fixed window, right click shows the menu, closing the window keeps the icon), Tailscale
 // (menu with the state on top and Exit at the bottom).
 // Built by "uni-vpn setup" with the csc.exe of the .NET Framework (C# 5) against the WebView2 SDK.
-// Arguments: --port N, --hidden (sign-in: icon only), --page P ("#settings", "&user=ab123").
+// Arguments: --port N, --hidden (sign-in: icon only), --page P ("#settings", "&user=ab123"),
+// --after PID (the copy this one replaces after an update, which quits first).
 
 using System;
 using System.Collections.Generic;
@@ -24,9 +25,18 @@ using Microsoft.Win32;
 
 static class Program
 {
+    // Taken at the start: an update moves the running file aside and puts the new one here.
+    public static readonly string ExePath = Application.ExecutablePath;
+
     [STAThread]
     static void Main(string[] args)
     {
+        int after;
+        if (int.TryParse(Options.Value(args, "--after") ?? "", out after))
+        {
+            try { using (Process old = Process.GetProcessById(after)) old.WaitForExit(10000); }
+            catch (Exception) { }
+        }
         bool first;
         string pipe = "uni-vpn-app-" + Environment.UserName;
         using (Mutex mutex = new Mutex(true, "Local\\uni-vpn-app", out first))
@@ -78,6 +88,7 @@ static class Options
 class TrayApp : ApplicationContext
 {
     readonly string baseUrl;
+    readonly int port;
     readonly NotifyIcon icon = new NotifyIcon();
     readonly ToolStripMenuItem stateItem = new ToolStripMenuItem();
     readonly ToolStripMenuItem toggleItem = new ToolStripMenuItem();
@@ -101,10 +112,12 @@ class TrayApp : ApplicationContext
     bool polling;
     int misses;
     DateTime lastStart = DateTime.MinValue;
+    string program = Stamp();
+    string seen;
+    bool restarting;
 
     public TrayApp(string[] args, string pipe)
     {
-        int port;
         if (!int.TryParse(Options.Value(args, "--port") ?? "", out port)) port = 1081;
         baseUrl = "http://127.0.0.1:" + port + "/";
         ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
@@ -215,9 +228,48 @@ class TrayApp : ApplicationContext
             client.Dispose();
             Render();
             StartServiceIfDown();
+            RestartIfUpdated();
         };
         string languages = CultureInfo.CurrentUICulture.Name + "," + CultureInfo.InstalledUICulture.Name;
-        client.DownloadStringAsync(new Uri(baseUrl + "status.json?menu=" + Uri.EscapeDataString(languages)));
+        // shell=1: this app restarts itself after updates (RestartIfUpdated).
+        client.DownloadStringAsync(new Uri(baseUrl + "status.json?menu=" + Uri.EscapeDataString(languages) + "&shell=1"));
+    }
+
+    // Identifies the program file, which an update replaces.
+    static string Stamp()
+    {
+        try
+        {
+            FileInfo file = new FileInfo(Program.ExePath);
+            return file.Exists ? file.LastWriteTimeUtc.Ticks + "|" + file.Length : null;
+        }
+        catch (Exception) { return null; }
+    }
+
+    // After an update the new version takes over without a window, once this one's window is
+    // closed (Chrome, Tailscale). The same file twice in a row: the update is complete.
+    void RestartIfUpdated()
+    {
+        string now = Stamp();
+        bool changed = now != null && now != program && now == seen;
+        seen = now;
+        if (!changed || restarting || (window != null && !window.IsDisposed && window.Visible)) return;
+        restarting = true;
+        try
+        {
+            ProcessStartInfo info = new ProcessStartInfo(Program.ExePath,
+                "--port " + port + " --hidden --after " + Process.GetCurrentProcess().Id);
+            info.UseShellExecute = false;
+            Process.Start(info).Dispose();
+        }
+        catch (Exception)
+        {
+            // Stays as it is; tried again after the next update.
+            program = now;
+            restarting = false;
+            return;
+        }
+        Exit();
     }
 
     // Nobody should need a terminal: a stopped service is started again from here.
