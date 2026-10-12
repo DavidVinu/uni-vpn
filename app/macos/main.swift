@@ -9,6 +9,7 @@ import WebKit
 let port = (Bundle.main.object(forInfoDictionaryKey: "UniVPNPort") as? String).flatMap { Int($0) } ?? 1081
 let base = URL(string: "http://127.0.0.1:\(port)/")!
 let windowSize = NSSize(width: 420, height: 660)
+let showNote = Notification.Name("de.davidvinu.uni-vpn.app.show")
 
 struct Status {
     var state = "unknown"
@@ -45,6 +46,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     var lastStart = Date.distantPast
 
     func applicationDidFinishLaunching(_ note: Notification) {
+        // One menu bar item: the login item and the installer's "open" can start a second copy
+        // at the same moment. The newer one hands its page to the older one and quits.
+        let me = NSRunningApplication.current
+        let older = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
+            .filter { $0 != me && !$0.isTerminated }
+            .first { other in
+                let (a, b) = (other.launchDate ?? .distantPast, me.launchDate ?? .distantFuture)
+                return a < b || (a == b && other.processIdentifier < me.processIdentifier)
+            }
+        if let older = older {
+            if !CommandLine.arguments.contains("--hidden") || pending != nil {
+                DistributedNotificationCenter.default().postNotificationName(
+                    showNote, object: pending ?? "", userInfo: nil, deliverImmediately: true)
+                older.activate(options: [])
+            }
+            exit(0)
+        }
+        DistributedNotificationCenter.default().addObserver(forName: showNote, object: nil, queue: .main) { [weak self] note in
+            self?.show(note.object as? String ?? "")
+        }
         buildMenus()
         stateItem.isEnabled = false
         toggleItem.target = self
