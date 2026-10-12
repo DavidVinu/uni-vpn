@@ -309,6 +309,7 @@ func TestRestartAppWindows(t *testing.T) {
 }
 
 func TestRestartAppLinuxUsesTheDesktopOfTheRunningShell(t *testing.T) {
+	posixOnly(t)
 	h := newHarness(t, "linux")
 	script := filepath.Join(h.d.Root, "app", "linux", "uni-vpn-app.py")
 	touch(t, script, "")
