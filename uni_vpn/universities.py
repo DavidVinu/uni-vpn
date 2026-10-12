@@ -12,6 +12,8 @@ from pathlib import Path
 from .i18n import t
 
 REGISTRY_FILE = Path(__file__).resolve().parent / "universities.json"
+GUIDES = REGISTRY_FILE.parent / "ui" / "guides"  # the second-factor guide's pictures
+GUIDE_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,62}\.svg")
 DEFAULT_ID = "heidelberg"  # config.toml without "university"
 OTHER_ID = "other"  # a university that is not listed: everything comes from config.toml
 DEFAULT_USERAGENT = "AnyConnect Linux_64 5.1.18.314"
@@ -147,6 +149,12 @@ def parse(data: dict) -> dict[str, Profile]:
             if not isinstance(items, list) or not all(isinstance(i, str) for i in items):
                 raise ValueError(f"{uid}: '{key}' must be a list of text")
             values[key] = tuple(items)
+        pictures = values["mfa_pictures"]
+        if pictures and len(pictures) != len(values["mfa_steps"]):
+            raise ValueError(f"{uid}: 'mfa_pictures' needs one picture per step")
+        for name in pictures:
+            if not GUIDE_RE.fullmatch(name) or not (GUIDES / name).is_file():
+                raise ValueError(f"{uid}: no picture ui/guides/{name}")
         for domain in values["default_domains"]:
             if not DOMAIN_RE.fullmatch(domain):
                 raise ValueError(f"{uid}: '{domain}' is not a host name")

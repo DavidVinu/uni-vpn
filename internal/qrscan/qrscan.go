@@ -16,7 +16,10 @@ import (
 )
 
 // MaxPixels bounds the decoded picture: a 6K screen is about 20 million pixels.
-const MaxPixels = 40_000_000
+const MaxPixels = 25_000_000
+
+// one decode at a time: a large picture takes a few hundred MB while it is read.
+var one = make(chan struct{}, 1)
 
 var (
 	// ErrNotPicture: the data is no PNG, JPEG or GIF picture.
@@ -34,6 +37,8 @@ func Texts(data []byte) ([]string, error) {
 	if config.Width*config.Height > MaxPixels {
 		return nil, ErrNotPicture
 	}
+	one <- struct{}{}
+	defer func() { <-one }()
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return nil, ErrNotPicture

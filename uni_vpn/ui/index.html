@@ -184,7 +184,7 @@ input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
       <form id="step2" hidden>
         <p class="step"></p>
         <h2 data-t="app.second_factor"></h2>
-        <img class="shot" id="g-shot" alt="" hidden>
+        <img class="shot" id="g-shot" alt="" hidden onerror="this.hidden=true">
         <p class="guide-text" id="g-text" aria-live="polite"></p>
         <p class="warn" id="g-away" data-t="setup.portal_away" hidden></p>
         <div class="drop" id="g-drop" tabindex="0" hidden>
@@ -381,7 +381,11 @@ function show(id) {
 
 function step(id, focusId) {
   for (const s of ["step0", "step1", "step2", "step3", "step4"]) $(s).hidden = s !== id;
-  if (id === "step2") { renderGuide(); checkPortal(); }
+  if (id === "step2") {
+    renderGuide();
+    checkPortal();
+    if (keyRead) useKey($("s-totp").value, true);  // the code shown must be the current one
+  }
   const focus = focusId ? $(focusId) : $(id).querySelector("input:not([hidden])") || $(id).querySelector("h2");
   if (focus) focus.focus();
 }
@@ -644,7 +648,7 @@ function renderGuide() {
 async function checkPortal() {
   const seq = ++portalSeq;
   portalAway = false;
-  if (!uni || !uni.mfa_portal_url || uni.id === "other" || (S && S.state === "connected")) return;
+  if (!uni || !uni.mfa_portal_url || uni.id === "other") return;
   const r = await send("/api/portal-check", {university: uni.id});
   if (seq !== portalSeq || !r.ok) return;
   portalAway = !r.data.reachable;
@@ -673,6 +677,7 @@ async function useKey(secret, refresh) {
   const seq = ++checkSeq;
   secret = secret.trim();
   clearInterval(codeTimer);
+  const previous = keyRead ? $("s-totp").value : "";
   if (!refresh) {
     keyRead = false;
     $("s-totp").value = secret;
@@ -682,7 +687,15 @@ async function useKey(secret, refresh) {
   let r;
   try { r = await post("/api/totp/check", {secret}); } catch (e) { r = {ok: false, data: null, text: t("msg.not_running")}; }
   if (seq !== checkSeq) return;
-  if (!r.ok) { keyRead = false; $("s-totp").value = ""; err("s2-err", errText(r)); renderGuide(); return; }
+  if (!r.ok) {
+    // A stray paste keeps the key that was already read.
+    keyRead = !!previous;
+    $("s-totp").value = previous;
+    err("s2-err", errText(r));
+    renderGuide();
+    if (previous) useKey(previous, true);
+    return;
+  }
   showCode(r.data.code, r.data.remaining, secret);
   if (refresh) return;
   err("s2-err", "");
@@ -705,7 +718,8 @@ async function readPicture(blob) {
     const text = await res.text();
     let data = null;
     try { data = JSON.parse(text); } catch (e) { /* plain text error */ }
-    r = {ok: res.ok, data, text: res.status === 413 ? t("totp.not_picture") : text};
+    // 413: too large; 404: a core that reads no pictures (the Python one). Pasting the text works.
+    r = {ok: res.ok, data, text: res.status === 413 ? t("totp.not_picture") : res.status === 404 ? t("setup.drop_help") : text};
   } catch (e) {
     r = {ok: false, data: null, text: t("msg.not_running")};
   }

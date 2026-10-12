@@ -294,7 +294,7 @@ func (s *Server) handle(c net.Conn) {
 		length, err = 0, nil
 	}
 	limit := MaxBody
-	if v, _ := hdrs.get("x-uni-vpn"); v == "1" && parts[0] == "POST" && strings.HasPrefix(target, pictureRoute) {
+	if v, _ := hdrs.get("x-uni-vpn"); v == "1" && parts[0] == "POST" && strings.SplitN(target, "?", 2)[0] == pictureRoute {
 		limit = MaxPictureBody
 	}
 	if err != nil || length > limit {
