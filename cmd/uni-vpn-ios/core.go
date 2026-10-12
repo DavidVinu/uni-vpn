@@ -48,7 +48,6 @@ func start(configHome, stateHome, apiToken, keyHex, deviceName string, lockWait 
 	}
 	os.Setenv("XDG_CONFIG_HOME", configHome)
 	os.Setenv("XDG_STATE_HOME", stateHome)
-	os.Setenv("HOME", configHome)
 	if deviceName != "" {
 		os.Setenv("UNI_VPN_DEVICE_NAME", deviceName)
 	} else {
