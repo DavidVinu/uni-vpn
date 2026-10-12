@@ -90,6 +90,9 @@ func TestPortalWithoutTestStepAndRefusedEnroll(t *testing.T) {
 	if tested, err := c.Verify(ctx, serial, "000000"); tested || err != nil {
 		t.Fatal(tested, err)
 	}
+	if tokens, err := c.Tokens(ctx); err != nil || len(tokens) != 1 || tokens[0] != (linotp.Token{Serial: serial, Description: "Uni VPN"}) {
+		t.Fatal(tokens, err)
+	}
 	if err := c.Delete(ctx, serial); err != nil || len(p.Tokens) != 0 {
 		t.Fatal(err, p.Tokens)
 	}

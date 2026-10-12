@@ -1439,6 +1439,11 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 				return
 			}
 			d.set(Error, message)
+			if _, once := tunnel.IsOnce(secret); once {
+				// The typed code is used up and a retry would take the keyring's secret (none on
+				// a first setup): the setup ends with "try again with a new code" (enroll.go).
+				break
+			}
 			if !d.backoff(ctx) {
 				if ctx.Err() != nil {
 					return

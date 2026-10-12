@@ -53,6 +53,7 @@
   "enroll.code_wrong": "这个验证码无效。请等下一个验证码后重试。",
   "enroll.refused": "你的大学不允许这样做。请改为手动设置。",
   "enroll.failed": "没有成功。请用新的验证码重试，或改为手动设置。",
+  "enroll.clock": "请检查这台电脑的时间是否正确，然后用新的验证码重试。",
   "enroll.enter_code": "输入 App 中的 6 位验证码。",
   "enroll.not_here": "这对你的大学不适用。请改为手动设置。",
   "setup.finish": "完成",

@@ -53,6 +53,7 @@
   "enroll.code_wrong": "Ese código no ha funcionado. Espera al siguiente y vuelve a intentarlo.",
   "enroll.refused": "Tu universidad no lo permite. Configúralo a mano.",
   "enroll.failed": "No ha funcionado. Inténtalo con un código nuevo o configúralo a mano.",
+  "enroll.clock": "Comprueba que la hora de este ordenador es correcta y vuelve a intentarlo con un código nuevo.",
   "enroll.enter_code": "Escribe el código de 6 dígitos de tu app.",
   "enroll.not_here": "Esto no funciona con tu universidad. Configúralo a mano.",
   "setup.finish": "Finalizar",

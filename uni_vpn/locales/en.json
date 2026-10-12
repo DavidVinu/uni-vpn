@@ -52,6 +52,7 @@
   "enroll.code_wrong": "That code didn't work. Wait for the next one and try again.",
   "enroll.refused": "Your university didn't allow this. Set it up by hand instead.",
   "enroll.failed": "That didn't work. Try again with a new code, or set it up by hand.",
+  "enroll.clock": "Check that this computer's clock is right, then try again with a new code.",
   "enroll.enter_code": "Type the 6-digit code from your app.",
   "enroll.not_here": "This doesn't work for your university. Set it up by hand instead.",
   "setup.finish": "Finish",

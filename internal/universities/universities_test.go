@@ -194,6 +194,8 @@ func TestSearchIgnoresCaseAndUmlautsAndPrefersAnExactID(t *testing.T) {
 		{"MÜNSTER", []string{"muenster"}},
 		{"fasrc", []string{"harvard-fasrc"}},
 		{"bonn", []string{"bonn"}},
+		{"Uni Heidelberg", []string{"heidelberg"}}, // every word, in any field
+		{"uni  bonn", []string{"bonn"}},
 		{"   ", []string{}},
 	}
 	for _, tt := range tests {

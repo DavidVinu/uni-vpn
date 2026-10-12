@@ -30,6 +30,10 @@ type Portal struct {
 	NoVerify bool
 	// RefuseEnroll is the error message of a policy that allows no enrollment.
 	RefuseEnroll string
+	// NoTokenList: the portal does not offer usertokenlist.
+	NoTokenList bool
+	// Skew is how far the portal's clock is ahead of this computer's.
+	Skew time.Duration
 
 	sessions map[string]string // cookie value -> state
 	used     map[string]bool   // codes used, per token
@@ -41,12 +45,14 @@ type Portal struct {
 	// Challenged counts sign-ins that chose the token first, like the portal's page.
 	Challenged int
 	Calls      []string
+	// Descriptions are what the enrollments named the tokens: serial -> description.
+	Descriptions map[string]string
 }
 
 // Start runs the fake over TLS; use Server.Client() for its certificate.
 func Start() *Portal {
 	p := &Portal{User: "ab123", Password: "pw", Code: "111111", sessions: map[string]string{},
-		used: map[string]bool{}, Tokens: map[string]string{}, Verified: map[string]bool{}}
+		used: map[string]bool{}, Tokens: map[string]string{}, Descriptions: map[string]string{}, Verified: map[string]bool{}}
 	p.Server = httptest.NewTLSServer(http.HandlerFunc(p.serve))
 	return p
 }
@@ -155,6 +161,7 @@ func (p *Portal) serve(w http.ResponseWriter, r *http.Request) {
 		secret := strings.TrimRight(base32.StdEncoding.EncodeToString(key), "=")
 		serial := "TOTP" + strings.ToUpper(hex.EncodeToString(key[:4]))
 		p.Tokens[serial] = "base32:" + secret
+		p.Descriptions[serial] = params["description"]
 		reply(w, true, map[string]any{"serial": serial,
 			"otpkey":    map[string]any{"value": "seed://" + hex.EncodeToString(key)},
 			"googleurl": map[string]any{"order": "0", "description": "OTPAuth Url", "value": "otpauth://totp/LinOTP:" + serial + "?secret=" + secret + "&issuer=LinOTP"}})
@@ -173,7 +180,7 @@ func (p *Portal) serve(w http.ResponseWriter, r *http.Request) {
 			reply(w, false, map[string]any{"message": "Please enter your otp", "replyMode": []string{"offline"}})
 			return
 		}
-		want, _ := totp.CodeAt(token, time.Now())
+		want, _ := totp.CodeAt(token, time.Now().Add(p.Skew))
 		replay := p.used[params["serial"]+"/"+otp]
 		p.used[params["serial"]+"/"+otp] = true
 		ok = otp == want && !replay
@@ -181,6 +188,17 @@ func (p *Portal) serve(w http.ResponseWriter, r *http.Request) {
 			p.Verified[params["serial"]] = true
 		}
 		reply(w, ok, nil)
+	case "usertokenlist":
+		if p.NoTokenList {
+			http.NotFound(w, r)
+			return
+		}
+		list := []any{}
+		for serial := range p.Tokens {
+			list = append(list, map[string]any{"LinOtp.TokenSerialnumber": serial, "LinOtp.TokenDesc": p.Descriptions[serial],
+				"LinOtp.TokenType": "TOTP", "LinOtp.Isactive": true})
+		}
+		reply(w, list, nil)
 	case "delete":
 		delete(p.Tokens, params["serial"])
 		p.Deleted = append(p.Deleted, params["serial"])

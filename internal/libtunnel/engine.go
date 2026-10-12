@@ -84,7 +84,7 @@ func (t *Tunnel) logf(level slog.Level, format string, args ...any) {
 }
 
 // options are the program's command line and stdin as library options. stdin holds the
-// lines tunnel.StdinBytes computes: the password, then Duo's "push".
+// lines tunnel.StdinBytes computes: the password, then Duo's "push" or a typed code.
 func (t *Tunnel) options(stdin []byte, totp string) octunnel.Options {
 	lines := bytes.Split(bytes.TrimSuffix(stdin, []byte("\n")), []byte("\n"))
 	o := octunnel.Options{
@@ -95,7 +95,8 @@ func (t *Tunnel) options(stdin []byte, totp string) octunnel.Options {
 	if len(lines) > 1 {
 		o.SecondPassword = string(lines[1])
 	}
-	if totp != "" && t.Cfg.MFA == "totp_field" {
+	// A typed code (tunnel.OncePrefix) is no secret: it answers the OTP form like the program's.
+	if _, once := tunnel.IsOnce(totp); totp != "" && t.Cfg.MFA == "totp_field" && !once {
 		o.TOTPSecret = totp
 	}
 	// libopenconnect reports the system it was built for (apple-ios on a phone); the profiles'

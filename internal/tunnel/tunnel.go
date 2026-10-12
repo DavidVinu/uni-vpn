@@ -4,6 +4,7 @@ package tunnel
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -92,6 +93,8 @@ type Tunnel struct {
 	classifier     *Classifier
 	tokenFile      string
 	once           bool // a typed code goes through openconnect's prompt (OncePrefix)
+	stdin          io.WriteCloser
+	heldCode       []byte // the typed code, written once the OTP form asks for it
 	port           int
 	cmd            *exec.Cmd
 	exited         chan struct{}
@@ -410,12 +413,26 @@ func (t *Tunnel) Start(password []byte, totp string) error {
 		t.RemoveTokenFile()
 		return err
 	}
+	// A typed code waits for the OTP form: after a refused password openconnect asks for the
+	// password again and would send the code as one (a second failed sign-in).
+	var held []byte
+	if once && t.Cfg.MFA != "totp_append" {
+		end := bytes.LastIndexByte(data[:len(data)-1], '\n') + 1 // the code is the last line
+		data, held = data[:end], data[end:]
+	}
 	t.mu.Lock()
 	t.cmd = cmd
+	if held != nil {
+		t.stdin, t.heldCode = stdin, held
+		// A server that words its OTP form differently (classify.go) gets the code anyway.
+		time.AfterFunc(otpFormWait, t.releaseCode)
+	}
 	t.mu.Unlock()
 	go t.readOutput(r, cmd)
 	_, _ = stdin.Write(data) // a broken pipe means openconnect is already gone, the reader sees it
-	_ = stdin.Close()
+	if held == nil {
+		_ = stdin.Close()
+	}
 	t.mu.Lock()
 	stopped := t.stoppedByUs
 	t.mu.Unlock()
@@ -500,6 +517,31 @@ func (t *Tunnel) handleLine(text string) {
 	if t.classifier.OTPGenerated && t.otpGeneratedAt.IsZero() {
 		t.otpGeneratedAt = time.Now()
 	}
+	if t.classifier.OTPGenerated || t.classification != nil {
+		t.releaseCodeLocked()
+	}
+}
+
+// otpFormWait is how long a typed code waits for the OTP form before it is sent anyway.
+const otpFormWait = 15 * time.Second
+
+func (t *Tunnel) releaseCode() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.releaseCodeLocked()
+}
+
+// releaseCodeLocked writes the held typed code and closes stdin. After a verdict (wrong
+// password) it only closes: openconnect's next password prompt then ends at EOF.
+func (t *Tunnel) releaseCodeLocked() {
+	if t.stdin == nil {
+		return
+	}
+	if t.classification == nil {
+		_, _ = t.stdin.Write(t.heldCode)
+	}
+	_ = t.stdin.Close()
+	t.stdin, t.heldCode = nil, nil
 }
 
 func exitCode(ps *os.ProcessState) int {

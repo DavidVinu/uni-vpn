@@ -192,6 +192,7 @@ input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
         <div class="spinner" id="a-busy" hidden></div>
         <p class="error" id="a-err" role="alert" hidden></p>
         <div class="actions"><button class="btn text" type="button" id="a-back" data-t="app.back"></button><button class="btn primary" type="submit" id="a-next" data-t="app.next"></button></div>
+        <button class="btn text" type="button" id="a-fix" data-t="main.repair" hidden></button>
         <button class="btn text" type="button" id="a-guide" data-t="setup.by_hand"></button>
       </form>
 
@@ -479,6 +480,9 @@ async function refresh() {
     show("main");  // set up meanwhile in another tab or with the command line
   }
   if (offeredKey) useOffered();
+  // A reload or the reopened app while the core still runs the short way: back to its code page,
+  // the main screen has nowhere to type the next code.
+  if (view === null && S.enroll && ["connecting", "code", "working"].includes(S.enroll.stage)) await resumeAuto();
   if (view === "setup") { autoProgress(); setupProgress(); return; }
   if (view === null) {
     if (location.hash === "#settings") openSettings(); else show("main");
@@ -510,9 +514,10 @@ async function loadUniversities() {
 const fold = (s) => String(s || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
   .replace(/ue/g, "u").replace(/oe/g, "o").replace(/ae/g, "a");
 
+// Every word somewhere ("Uni Heidelberg", "Uni Köln").
 function matches(query) {
-  const q = fold(query.trim());
-  return (UNIS || []).filter((u) => !q || [u.id, u.name, u.host, ...(u.aliases || [])].some((t) => fold(t).includes(q)));
+  const words = fold(query).split(/\s+/).filter(Boolean);
+  return (UNIS || []).filter((u) => words.every((w) => [u.id, u.name, u.host, ...(u.aliases || [])].some((t) => fold(t).includes(w))));
 }
 
 function mfa() { return uni && uni.id === "other" ? $("s-mfa").value : uni ? uni.mfa : "totp_field"; }
@@ -636,6 +641,7 @@ function renderAuto(error) {
     : busy ? t(stage === "working" ? "setup.auto_working" : "setup.waiting") : t("setup.auto_sub");
   $("a-field").hidden = $("a-next").hidden = busy;
   $("a-busy").hidden = !busy;
+  $("a-fix").hidden = busy || S.action !== "repair";
   if (error !== undefined) err("a-err", error);
   $("step2a").querySelector(".step").hidden = changingTotp;
   // A new question: an empty field, ready for the next code.
@@ -648,6 +654,8 @@ function autoProgress() {
   const e = S.enroll, settled = Date.now() - autoSentAt > 1500;
   if (settled && (!e || e.stage === "failed")) {
     autoRunning = false;
+    // A refused password: back to it like setupProgress, another code would not help.
+    if (e && S.error_kind === "password" && !changingTotp) { step("step1", "s-pw"); err("s1-err", tr(e.error, e.error_t)); return; }
     renderAuto(e ? tr(e.error, e.error_t) : "");
     $("a-code").focus();
     return;
@@ -670,7 +678,7 @@ $("step2a").onsubmit = async (e) => {
   renderAuto("");
   let r;
   try {
-    r = answer || changing ? await post("/api/totp/auto", {code})
+    r = answer || changingTotp ? await post("/api/totp/auto", {code})
       : await post("/api/setup", {user: $("s-user").value.trim(), password: $("s-pw").value, code,
                                   university: uni.id, profile: profileOverrides()});
   } catch (e) {
@@ -702,6 +710,12 @@ $("a-back").onclick = async () => {
   await stopAuto();
   err("a-err", "");
   if (changingTotp) endChange(); else step("step1");
+};
+$("a-fix").onclick = async () => {
+  $("a-fix").disabled = true;
+  await send("/api/repair");  // like the main screen's Repair button
+  $("a-fix").disabled = false;
+  refresh();
 };
 $("a-guide").onclick = async () => {
   if (submitting) return;
@@ -1010,6 +1024,7 @@ window.addEventListener("hashchange", () => {
   if (catchKey()) { useOffered(); return; }
   const target = location.hash.slice(1);
   if (!S || S.setup_needed || !["main", "settings"].includes(target)) return;
+  if (view === "setup" && autoRunning) return;  // the tray's "Open" during the short way: stay on it
   if (changing && !submitting) endChange();
   if (changing) return;
   if (target === "settings") openSettings(); else { show("main"); render(); }
@@ -1041,7 +1056,13 @@ async function startChange(first) {
   show("setup");
   step(changingTotp && autoOK() ? "step2a" : first);
 }
+async function resumeAuto() {
+  await startChange("step2");
+  autoRunning = setupSent = true;
+  autoSentAt = 0;
+}
 function endChange() {
+  stopAuto();  // the back arrow: the core must not go on with a code nobody wants any more
   changing = changingTotp = keyRead = setupDone = setupSent = false;
   clearInterval(codeTimer);
   $("s-pw").value = $("s-totp").value = "";
