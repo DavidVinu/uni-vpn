@@ -216,3 +216,36 @@ func TestInvalidUTF8IsAnError(t *testing.T) {
 		t.Fatal("no error")
 	}
 }
+
+// The status page and the browsers' PAC file read the list while the app or syncing saves it:
+// they must never see it empty, and the file keeps its mode.
+func TestReadersNeverSeeAHalfWrittenList(t *testing.T) {
+	path := tempPath(t)
+	list := []string{"example.org", "sogo.uni-heidelberg.de"}
+	if err := WriteDomains(path, list); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 500 {
+			WriteDomains(path, list)
+		}
+	}()
+	for running := true; running; {
+		select {
+		case <-done:
+			running = false
+		default:
+		}
+		if got := read(t, path, nil); !reflect.DeepEqual(got, list) {
+			t.Fatal(got)
+		}
+	}
+	if info, err := os.Stat(path); err != nil || (os.PathSeparator == '/' && info.Mode().Perm() != 0o640) {
+		t.Fatal(info.Mode(), err)
+	}
+}

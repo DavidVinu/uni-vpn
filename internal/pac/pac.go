@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -168,7 +169,42 @@ func WriteDomains(path string, domains []string) error {
 		// Python's write_text translates newlines in text mode.
 		text = strings.ReplaceAll(text, "\n", "\r\n")
 	}
-	return os.WriteFile(path, []byte(text), 0o666)
+	return replaceFile(path, text)
+}
+
+// replaceFile writes path in one step with its mode: the status page and the browsers read
+// the list while it is saved, and must never find it empty.
+func replaceFile(path, text string) error {
+	mode := fs.FileMode(0o600)
+	if st, err := os.Stat(path); err == nil {
+		mode = st.Mode().Perm()
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*")
+	if err != nil {
+		return err
+	}
+	_, err = tmp.WriteString(text)
+	if err == nil {
+		err = tmp.Sync()
+	}
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Chmod(tmp.Name(), mode)
+	}
+	if err == nil {
+		err = os.Rename(tmp.Name(), path)
+		// Windows refuses while someone reads the file (the status page, a virus scanner).
+		for try := 0; err != nil && runtime.GOOS == "windows" && try < 50; try++ {
+			time.Sleep(20 * time.Millisecond)
+			err = os.Rename(tmp.Name(), path)
+		}
+	}
+	if err != nil {
+		os.Remove(tmp.Name())
+	}
+	return err
 }
 
 func mkdirParents(dir string, mode os.FileMode) error {

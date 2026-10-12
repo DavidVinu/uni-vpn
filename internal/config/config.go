@@ -13,6 +13,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -358,13 +360,47 @@ func readText(path string) (string, error) {
 	return strings.ReplaceAll(text, "\r", "\n"), nil
 }
 
-// writeText is Path.write_text: text mode writes CRLF on Windows.
+// writeText is Path.write_text (text mode writes CRLF on Windows), but replaces the file in
+// one step with the same mode: a reader, or a crash halfway, never finds it empty.
 func writeText(path, text string) error {
 	if runtime.GOOS == "windows" {
 		text = strings.ReplaceAll(text, "\n", "\r\n")
 	}
-	return os.WriteFile(path, []byte(text), 0o666)
+	mode := fs.FileMode(0o600)
+	if st, err := os.Stat(path); err == nil {
+		mode = st.Mode().Perm()
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*")
+	if err != nil {
+		return err
+	}
+	_, err = tmp.WriteString(text)
+	if err == nil {
+		err = tmp.Sync()
+	}
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Chmod(tmp.Name(), mode)
+	}
+	if err == nil {
+		err = os.Rename(tmp.Name(), path)
+		// Windows refuses while someone reads the file (the status page, a virus scanner).
+		for try := 0; err != nil && runtime.GOOS == "windows" && try < 50; try++ {
+			time.Sleep(20 * time.Millisecond)
+			err = os.Rename(tmp.Name(), path)
+		}
+	}
+	if err != nil {
+		os.Remove(tmp.Name())
+	}
+	return err
 }
+
+// edits serializes the changes to config.toml: the app's settings, the assistant and syncing
+// run at the same time, and each one reads, changes and writes the whole file.
+var edits sync.Mutex
 
 // decode parses TOML like tomllib, returning the top-level keys and those of each table in
 // document order.
@@ -673,6 +709,8 @@ func WriteInitial(path, user, university string, overrides []Setting) error {
 	for _, s := range checked {
 		fmt.Fprintf(&lines, "%s = %s\n", s.Key, TOMLValue(s.Value))
 	}
+	edits.Lock()
+	defer edits.Unlock()
 	if err := mkdirParent(path); err != nil {
 		return err
 	}
@@ -716,6 +754,8 @@ func pyEqual(a, b any) bool {
 // SetValues sets top-level keys in an existing config.toml, keeping comments, order and
 // everything else.
 func SetValues(path string, values []Setting) error {
+	edits.Lock()
+	defer edits.Unlock()
 	text, err := readText(path)
 	if err != nil {
 		return err
@@ -761,6 +801,8 @@ var tableStart = regexp.MustCompile(`(?m)^[ \t]*\[`)
 // Used when the university changes: overrides that belonged to the old profile must not
 // stay behind.
 func RemoveKeys(path string, keys []string) error {
+	edits.Lock()
+	defer edits.Unlock()
 	text, err := readText(path)
 	if err != nil {
 		return err

@@ -5,8 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	unis "github.com/DavidVinu/uni-vpn/internal/universities"
@@ -478,5 +480,49 @@ func TestSetValuesWritesAndReplacesPorts(t *testing.T) {
 	}
 	if cfg.SocksPort != 2080 || cfg.HTTPPort != 2081 {
 		t.Fatal(cfg.SocksPort, cfg.HTTPPort)
+	}
+}
+
+// The app's switches, the assistant and syncing change config.toml at the same time. Each
+// change must stay, and nobody may find the file empty or half written: a reader would
+// write back a file without "user", and the next start shows the setup assistant.
+func TestConcurrentEditsKeepEverySetting(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := WriteInitial(path, "ab123", "heidelberg", nil); err != nil {
+		t.Fatal(err)
+	}
+	languages := []string{"de", "fr"}
+	for i := range 300 {
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); SetValues(path, []Setting{{"language", languages[i%2]}}) }()
+		go func() { defer wg.Done(); SetValues(path, []Setting{{"auto_update", i%2 == 0}}) }()
+		wg.Wait()
+		cfg := load(t, path)
+		if cfg.Language != languages[i%2] || cfg.AutoUpdate != (i%2 == 0) {
+			t.Fatalf("round %d: language %q, auto_update %v", i, cfg.Language, cfg.AutoUpdate)
+		}
+	}
+}
+
+func TestEditsKeepTheFileMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no Unix modes")
+	}
+	path := write(t, "user = \"ab1\"\nhost = \"vpn.example.edu\"\n")
+	if err := os.Chmod(path, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetValues(path, []Setting{{"language", "de"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemoveKeys(path, []string{"host"}); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o640 {
+		t.Fatal(info.Mode(), err)
+	}
+	if entries, _ := os.ReadDir(filepath.Dir(path)); len(entries) != 1 {
+		t.Fatal("left behind:", entries)
 	}
 }
