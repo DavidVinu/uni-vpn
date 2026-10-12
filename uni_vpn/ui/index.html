@@ -397,12 +397,14 @@ function show(id) {
 }
 
 function step(id, focusId) {
+  if (id === "step2a" && offeredKey) id = "step2";  // a key from a link: the guide's test step
   for (const s of ["step0", "step1", "step2a", "step2", "step3", "step4"]) $(s).hidden = s !== id;
   if (id === "step2a") renderAuto();
   if (id === "step2") {
     renderGuide();
     checkPortal();
     if (keyRead) useKey($("s-totp").value, true);  // the code shown must be the current one
+    if (offeredKey) { const key = offeredKey; offeredKey = ""; useKey(key); }
   }
   const focus = focusId ? $(focusId) : $(id).querySelector("input:not([hidden])") || $(id).querySelector("h2");
   if (focus) focus.focus();
@@ -476,6 +478,7 @@ async function refresh() {
   if (view === "setup" && !setupSent && !changing) {
     show("main");  // set up meanwhile in another tab or with the command line
   }
+  if (offeredKey) useOffered();
   if (view === "setup") { autoProgress(); setupProgress(); return; }
   if (view === null) {
     if (location.hash === "#settings") openSettings(); else show("main");
@@ -978,7 +981,32 @@ function openSettings() {
   if (S.sync && S.sync.on) send("/api/sync/refresh").then(() => refresh());
 }
 $("open-settings").onclick = openSettings;
+// An otpauth:// link the app was opened with (the MFA portal's "follow this link", see the
+// native shells): its key goes into the guide, which then shows the test code.
+let offeredKey = "";
+function catchKey() {
+  const m = /^#otpauth=(.*)$/.exec(location.hash);
+  if (!m) return false;
+  try { offeredKey = decodeURIComponent(m[1]); } catch (e) { offeredKey = ""; }
+  history.replaceState(null, "", location.pathname + location.search);
+  return true;
+}
+catchKey();
+async function useOffered() {
+  if (!offeredKey || !S || submitting) return;
+  if (view === "setup") {
+    // Before the second factor step the key waits for it (step()).
+    if ($("step2").hidden && $("step2a").hidden) return;
+    await stopAuto();
+    step("step2");
+    return;
+  }
+  if (S.setup_needed || view === "pair") return;
+  await startChange("step2");
+}
+
 window.addEventListener("hashchange", () => {
+  if (catchKey()) { useOffered(); return; }
   const target = location.hash.slice(1);
   if (!S || S.setup_needed || !["main", "settings"].includes(target)) return;
   if (changing && !submitting) endChange();

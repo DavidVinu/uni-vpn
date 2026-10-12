@@ -184,7 +184,8 @@ def info_plist(port: int) -> dict:
         "CFBundleShortVersionString": _version(), "CFBundleVersion": _version(),
         "LSMinimumSystemVersion": "11.0", "NSHighResolutionCapable": True, "LSApplicationCategoryType":
         "public.app-category.utilities", "UniVPNPort": str(port),
-        "CFBundleURLTypes": [{"CFBundleURLName": BUNDLE_ID, "CFBundleURLSchemes": [URL_SCHEME]}],
+        # otpauth: the MFA portal's "follow this link" hands the setup key to the assistant.
+        "CFBundleURLTypes": [{"CFBundleURLName": BUNDLE_ID, "CFBundleURLSchemes": [URL_SCHEME, "otpauth"]}],
         # The page is plain HTTP on the loopback address.
         "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True, "NSExceptionDomains": {
             "127.0.0.1": {"NSExceptionAllowsInsecureHTTPLoads": True}}},

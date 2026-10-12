@@ -40,7 +40,7 @@
   "setup.drop": "Drop the screenshot here",
   "setup.choose_picture": "Choose picture",
   "setup.qr_read": "QR code read",
-  "setup.drop_help": "You can also paste the line starting with otpauth://, or the letters after secret=.",
+  "setup.drop_help": "Or click the page's otpauth:// link: Uni VPN opens and takes the key. You can also paste the line starting with otpauth://, or the letters after secret=.",
   "setup.portal_away": "This page only opens on the university network or with the university's VPN.",
   "setup.waiting": "Testing the connection. This can take a minute.",
   "setup.auto_sub": "Type the code your authenticator app shows now.",

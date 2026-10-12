@@ -41,7 +41,7 @@
   "setup.drop": "把截图拖到这里",
   "setup.choose_picture": "选择图片",
   "setup.qr_read": "已读取二维码",
-  "setup.drop_help": "也可以粘贴以 otpauth:// 开头的行，或 secret= 后面的字母。",
+  "setup.drop_help": "或者点击页面上的 otpauth:// 链接：Uni VPN 会打开并读取密钥。也可以粘贴以 otpauth:// 开头的行，或 secret= 后面的字母。",
   "setup.portal_away": "此页面只能在校园网内或通过学校的 VPN 打开。",
   "setup.waiting": "正在测试连接，可能需要一分钟。",
   "setup.auto_sub": "输入你的身份验证器 App 现在显示的验证码。",

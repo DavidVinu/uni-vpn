@@ -41,7 +41,7 @@
   "setup.drop": "Déposez la capture ici",
   "setup.choose_picture": "Choisir une image",
   "setup.qr_read": "Code QR lu",
-  "setup.drop_help": "Vous pouvez aussi coller la ligne commençant par otpauth://, ou les lettres après secret=.",
+  "setup.drop_help": "Ou cliquez sur le lien otpauth:// de la page : Uni VPN s'ouvre et reprend la clé. Vous pouvez aussi coller la ligne commençant par otpauth://, ou les lettres après secret=.",
   "setup.portal_away": "Cette page ne s’ouvre que sur le réseau de l’université ou avec son VPN.",
   "setup.waiting": "Test de la connexion. Cela peut prendre une minute.",
   "setup.auto_sub": "Saisissez le code que votre application d'authentification affiche maintenant.",

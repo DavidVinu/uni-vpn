@@ -508,12 +508,41 @@ func (d *Desktop) windowsEntries(port int, created func(string)) bool {
 		}
 		created(path)
 	}
+	d.registerOTPAuth(port)
 	d.say("App entry in the start menu, icon in the notification area starts at login")
 	if exists(d.LoginPath()) {
 		// Back in the notification area right away, as the signed-in user (setup runs elevated).
 		d.Spawn([]string{"explorer.exe", d.LoginPath()})
 	}
 	return true
+}
+
+// OTPAuthKey makes the app open otpauth:// links: the MFA portal's "follow this link" then
+// hands the setup key to the assistant (Windows; macOS has it in Info.plist, Linux in the
+// desktop entry).
+const OTPAuthKey = `HKCU\Software\Classes\otpauth`
+
+// otpauthHandler is the program the system opens otpauth:// links with now, "" for none.
+func (d *Desktop) otpauthHandler() string {
+	r, err := d.Run(service.Cmd{Args: []string{"reg.exe", "query", OTPAuthKey + `\shell\open\command`, "/ve"},
+		Capture: true, NoWindow: true})
+	if err != nil || r.Code != 0 {
+		return ""
+	}
+	return r.Stdout
+}
+
+// registerOTPAuth takes otpauth:// links unless another program (a desktop authenticator)
+// already does.
+func (d *Desktop) registerOTPAuth(port int) {
+	exe := d.WindowsExe()
+	if handler := d.otpauthHandler(); handler != "" && !strings.Contains(handler, exe) {
+		return
+	}
+	command := fmt.Sprintf(`"%s" --port %d "%%1"`, exe, port)
+	d.quiet("reg.exe", "add", OTPAuthKey, "/ve", "/d", "URL:otpauth", "/f")
+	d.quiet("reg.exe", "add", OTPAuthKey, "/v", "URL Protocol", "/d", "", "/f")
+	d.quiet("reg.exe", "add", OTPAuthKey+`\shell\open\command`, "/ve", "/d", command, "/f")
 }
 
 // Linux ----------------------------------------------------------------------
@@ -556,12 +585,16 @@ func (d *Desktop) DesktopEntry(python string, port int, hidden bool) string {
 	command := fmt.Sprintf("%s %s --port %d", DesktopQuote(python), DesktopQuote(d.linuxScript()), port)
 	if hidden {
 		command += " --hidden"
+	} else {
+		command += " %u" // an otpauth:// link (MimeType), see OTPAuthKey
 	}
 	lines := []string{"[Desktop Entry]", "Type=Application", "Name=" + AppName, "Comment=University VPN for selected websites",
 		"Exec=" + command, "Icon=" + AppID, "StartupWMClass=" + AppID, "Categories=Network;",
 		"Terminal=false", "StartupNotify=true"}
 	if hidden {
 		lines = append(lines, "NoDisplay=true", "X-GNOME-Autostart-enabled=true")
+	} else {
+		lines = append(lines, "MimeType=x-scheme-handler/otpauth;")
 	}
 	return strings.Join(lines, "\n") + "\n"
 }
@@ -814,6 +847,9 @@ func Running(arg string) []Process {
 func (d *Desktop) Uninstall() {
 	d.stopRunning()
 	if d.windows() {
+		if strings.Contains(d.otpauthHandler(), d.WindowsExe()) {
+			d.quiet("reg.exe", "delete", OTPAuthKey, "/f")
+		}
 		os.RemoveAll(d.WindowsBuildDir())
 	}
 }
