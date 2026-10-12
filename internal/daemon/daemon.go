@@ -45,10 +45,12 @@ import (
 )
 
 // Version and Protocol are __version__ and PROTOCOL of uni_vpn/__init__.py (a test compares).
-const (
-	Version  = "0.1.0"
-	Protocol = 1
-)
+// The release build sets Version to 0.1.<CI run> with
+// -ldflags "-X github.com/DavidVinu/uni-vpn/internal/daemon.Version=<version>", the number the
+// installers carry, so Settings shows which release is installed.
+var Version = "0.1.0"
+
+const Protocol = 1
 
 // Commit is the commit the binary was built from, set by the release build with
 // -ldflags "-X github.com/DavidVinu/uni-vpn/internal/daemon.Commit=<sha>". Empty for a

@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Uni VPN</title>
+<meta name="description" content="Your university's websites from home, as if you were on campus.">
+<!-- Download page. Role models: Firefox and Zoom download pages (one button for the computer
+     you are on, every other file one click away below), Tailscale's for the plain layout.
+     Colors and controls are the app's own (uni_vpn/ui/index.html). Languages follow the app:
+     the browser's language, English otherwise. Files come from the GitHub release "latest",
+     which CI refreshes on every green push to main. -->
+<style>
+:root{
+  --bg:#f4f5f7;--card:#fff;--text:#1d1d1f;--muted:#6e6e73;--line:#e3e3e8;
+  --accent:#0b57d0;--accent-text:#fff;
+  --shadow:0 1px 3px rgba(0,0,0,.08),0 4px 16px rgba(0,0,0,.06);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){--bg:#141416;--card:#1f1f22;--text:#ececf0;--muted:#9a9aa3;--line:#33333a;
+    --accent:#8ab4f8;--accent-text:#0b1a33;--shadow:0 1px 3px rgba(0,0,0,.4);color-scheme:dark}
+}
+:root[data-theme="dark"]{--bg:#141416;--card:#1f1f22;--text:#ececf0;--muted:#9a9aa3;--line:#33333a;
+  --accent:#8ab4f8;--accent-text:#0b1a33;--shadow:0 1px 3px rgba(0,0,0,.4);color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,Ubuntu,sans-serif;
+  min-height:100vh;display:flex;flex-direction:column;align-items:center;padding-inline:16px;padding-block:48px 24px}
+main{width:100%;max-width:440px;display:flex;flex-direction:column;align-items:center;gap:28px;flex:1}
+.card{width:100%;background:var(--card);border-radius:16px;box-shadow:var(--shadow);padding:36px 24px 28px;
+  display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px}
+.logo{width:96px;height:96px}
+h1{font-size:28px;font-weight:600;margin:4px 0 0;text-wrap:balance}
+.sub{color:var(--muted);margin:0 0 16px;text-wrap:balance}
+.btn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;font:inherit;font-size:16px;font-weight:500;
+  border-radius:999px;padding:14px 22px;border:0;cursor:pointer;text-decoration:none;background:var(--accent);color:var(--accent-text)}
+.btn:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.btn svg{width:20px;height:20px;flex:none}
+.btns{width:100%;display:flex;flex-direction:column;gap:10px}
+.size{font-size:13px;color:var(--muted);margin:2px 0 0;display:flex;align-items:center;justify-content:center;gap:6px;min-height:28px}
+details.info{display:inline}
+details.info summary{list-style:none;cursor:pointer;color:var(--muted);display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%}
+details.info summary::-webkit-details-marker{display:none}
+details.info summary:hover{background:var(--line)}
+details.info[open] p{display:block}
+.tip{margin:6px 0 0;font-size:13px;color:var(--muted);text-align:left;background:var(--bg);border-radius:10px;padding:10px 12px}
+.others{width:100%}
+.others h2{font-size:13px;font-weight:500;color:var(--muted);margin:0 0 8px 4px}
+.list{background:var(--card);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}
+.list a{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 18px;color:var(--text);text-decoration:none;border-top:1px solid var(--line)}
+.list a:first-child{border-top:0}
+.list a:hover{background:var(--bg)}
+.list .file{color:var(--muted);font-size:13px;white-space:nowrap}
+footer{margin-top:40px;font-size:13px;color:var(--muted);display:flex;flex-wrap:wrap;gap:6px 18px;justify-content:center}
+footer a{color:inherit}
+@media (prefers-reduced-motion: no-preference){.btn{transition:filter .15s}.btn:hover{filter:brightness(1.08)}}
+</style>
+</head>
+<body>
+<main>
+  <section class="card">
+    <svg class="logo" viewBox="100 100 824 824" aria-hidden="true">
+      <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3b7bf0"/><stop offset="1" stop-color="#0b4fc4"/></linearGradient></defs>
+      <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#g)"/>
+      <path d="M512 232 L732 314 V500 C732 640 640 738 512 792 C384 738 292 640 292 500 V314 Z" fill="#fff"/>
+      <path d="M512 410 L646 470 L512 530 L378 470 Z" fill="#0b57d0"/>
+      <path d="M430 500 V572 C460 600 564 600 594 572 V500 L512 537 Z" fill="#0b57d0"/>
+    </svg>
+    <h1>Uni VPN</h1>
+    <p class="sub" data-t="tagline">Your university's websites from home, as if you were on campus.</p>
+    <div class="btns" id="main"></div>
+    <div class="size" id="note"></div>
+  </section>
+  <section class="others">
+    <h2 data-t="others">Other computers</h2>
+    <nav class="list" id="list"></nav>
+  </section>
+</main>
+<footer>
+  <a href="https://github.com/DavidVinu/uni-vpn" data-t="source">Source code</a>
+  <a href="impressum.html" data-t="imprint">Imprint</a>
+  <a href="privacy.html" data-t="privacy">Privacy</a>
+</footer>
+<script>
+const BASE = "https://github.com/DavidVinu/uni-vpn/releases/latest/download/";
+const T = {
+  en: {tagline: "Your university's websites from home, as if you were on campus.", download: "Download for {os}",
+    others: "Other computers", source: "Source code", imprint: "Imprint", privacy: "Privacy", phone: "For computers. Open this page on your Mac, Windows or Linux computer.",
+    mac: "If your Mac says the file cannot be opened: open System Settings, Privacy & Security, and click \"Open Anyway\".",
+    win: "If a blue box appears: click \"More info\", then \"Run anyway\".", arm: "ARM processor"},
+  de: {tagline: "Die Webseiten deiner Uni von zu Hause, als wärst du auf dem Campus.", download: "Für {os} herunterladen",
+    others: "Andere Computer", source: "Quellcode", imprint: "Impressum", privacy: "Datenschutz", phone: "Für Computer. Öffne diese Seite auf deinem Mac, Windows- oder Linux-Computer.",
+    mac: "Wenn dein Mac sagt, dass die Datei nicht geöffnet werden kann: Öffne die Systemeinstellungen, Datenschutz & Sicherheit, und klicke auf \"Dennoch öffnen\".",
+    win: "Wenn ein blaues Fenster erscheint: Klicke auf \"Weitere Informationen\", dann auf \"Trotzdem ausführen\".", arm: "ARM-Prozessor"},
+  fr: {tagline: "Les sites de votre université depuis chez vous, comme sur le campus.", download: "Télécharger pour {os}",
+    others: "Autres ordinateurs", source: "Code source", imprint: "Mentions légales", privacy: "Confidentialité", phone: "Pour ordinateurs. Ouvrez cette page sur votre Mac, PC Windows ou Linux.",
+    mac: "Si votre Mac indique que le fichier ne peut pas être ouvert : ouvrez Réglages Système, Confidentialité et sécurité, puis cliquez sur « Ouvrir quand même ».",
+    win: "Si une fenêtre bleue apparaît : cliquez sur « Informations complémentaires », puis sur « Exécuter quand même ».", arm: "Processeur ARM"},
+  es: {tagline: "Las webs de tu universidad desde casa, como si estuvieras en el campus.", download: "Descargar para {os}",
+    others: "Otros ordenadores", source: "Código fuente", imprint: "Aviso legal", privacy: "Privacidad", phone: "Para ordenadores. Abre esta página en tu Mac, PC con Windows o Linux.",
+    mac: "Si tu Mac dice que el archivo no se puede abrir: abre Ajustes del Sistema, Privacidad y seguridad, y haz clic en \"Abrir igualmente\".",
+    win: "Si aparece un recuadro azul: haz clic en \"Más información\" y luego en \"Ejecutar de todas formas\".", arm: "Procesador ARM"},
+  "zh-Hans": {tagline: "在家访问学校网站，就像在校园里一样。", download: "下载 {os} 版",
+    others: "其他电脑", source: "源代码", imprint: "网站信息", privacy: "隐私", phone: "适用于电脑。请在 Mac、Windows 或 Linux 电脑上打开此页面。",
+    mac: "如果 Mac 提示无法打开该文件：打开“系统设置”>“隐私与安全性”，然后点击“仍要打开”。",
+    win: "如果出现蓝色窗口：点击“更多信息”，然后点击“仍要运行”。", arm: "ARM 处理器"},
+  "zh-Hant": {tagline: "在家存取學校網站，就像在校園裡一樣。", download: "下載 {os} 版",
+    others: "其他電腦", source: "原始碼", imprint: "網站資訊", privacy: "隱私權", phone: "適用於電腦。請在 Mac、Windows 或 Linux 電腦上開啟此頁面。",
+    mac: "如果 Mac 提示無法打開該檔案：打開「系統設定」>「隱私權與安全性」，然後按一下「強制打開」。",
+    win: "如果出現藍色視窗：按一下「其他資訊」，然後按一下「仍要執行」。", arm: "ARM 處理器"},
+};
+function lang() {
+  for (const l of navigator.languages || [navigator.language || "en"]) {
+    const s = l.toLowerCase();
+    if (s.startsWith("zh")) return /hant|tw|hk|mo/.test(s) ? "zh-Hant" : "zh-Hans";
+    const p = s.split("-")[0];
+    if (T[p]) return p;
+  }
+  return "en";
+}
+const L = lang(), t = k => T[L][k] || T.en[k];
+document.documentElement.lang = L;
+document.querySelectorAll("[data-t]").forEach(e => e.textContent = t(e.dataset.t));
+
+const FILES = {
+  mac: [{os: "Mac", file: "uni-vpn.pkg"}],
+  windows: [{os: "Windows", file: "uni-vpn-setup.exe"}],
+  deb: [{os: "Ubuntu, Debian, Mint", file: "uni-vpn.deb"}, {os: "Ubuntu, Debian, Mint", file: "uni-vpn-arm64.deb", arm: true}],
+  rpm: [{os: "Fedora", file: "uni-vpn.rpm"}, {os: "Fedora", file: "uni-vpn-arm64.rpm", arm: true}],
+};
+const ALL = [...FILES.mac, ...FILES.windows, ...FILES.deb, ...FILES.rpm];
+const ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/></svg>';
+const INFO = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5m0-8h.01" stroke-linecap="round"/></svg>';
+
+function label(f) { return f.arm ? f.os + ", " + t("arm") : f.os; }
+function button(f) {
+  const a = document.createElement("a");
+  a.className = "btn"; a.href = BASE + f.file;
+  a.innerHTML = ICON + "<span></span>";
+  a.lastChild.textContent = t("download").replace("{os}", label(f));
+  return a;
+}
+function tip(key) {
+  const d = document.createElement("details");
+  d.className = "info";
+  d.innerHTML = "<summary>" + INFO + "</summary><p class='tip'></p>";
+  d.querySelector("summary").setAttribute("aria-label", "Info");
+  d.querySelector("p").textContent = t(key);
+  return d;
+}
+
+async function detect() {
+  const ua = navigator.userAgent, plat = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "";
+  if (/Android|iPhone|iPad|iPod/i.test(ua) || (/Mac/.test(plat) && navigator.maxTouchPoints > 1)) return {kind: "phone"};
+  if (/Win/i.test(plat) || /Windows/.test(ua)) return {kind: "windows"};
+  if (/Mac/i.test(plat) || /Mac OS X/.test(ua)) return {kind: "mac"};
+  if (/Linux|X11|CrOS/i.test(plat + ua)) {
+    let arm = /aarch64|arm/i.test(plat + ua);
+    try {
+      const h = await navigator.userAgentData.getHighEntropyValues(["architecture"]);
+      if (h.architecture) arm = h.architecture === "arm";
+    } catch (e) {}
+    return {kind: "linux", fedora: /Fedora/i.test(ua), arm};
+  }
+  return {kind: "unknown"};
+}
+
+detect().then(d => {
+  const main = document.getElementById("main"), note = document.getElementById("note");
+  let shown = [];
+  if (d.kind === "mac" || d.kind === "windows") shown = FILES[d.kind];
+  if (d.kind === "linux") {
+    const pick = list => list.filter(f => !!f.arm === d.arm);
+    shown = d.fedora ? [...pick(FILES.rpm), ...pick(FILES.deb)] : [...pick(FILES.deb), ...pick(FILES.rpm)];
+  }
+  shown.forEach(f => main.appendChild(button(f)));
+  if (d.kind === "mac") note.appendChild(tip("mac"));
+  if (d.kind === "windows") note.appendChild(tip("win"));
+  if (d.kind === "phone") { note.textContent = t("phone"); }
+  if (!shown.length && d.kind !== "phone") document.querySelector(".others h2").hidden = true;
+  const list = document.getElementById("list");
+  ALL.filter(f => !shown.includes(f)).forEach(f => {
+    const a = document.createElement("a");
+    a.href = BASE + f.file;
+    a.innerHTML = "<span></span><span class='file'></span>";
+    a.firstChild.textContent = label(f);
+    a.lastChild.textContent = f.file.split(".").pop();
+    list.appendChild(a);
+  });
+});
+</script>
+</body>
+</html>

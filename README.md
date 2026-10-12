@@ -220,7 +220,8 @@ username_suffix = "@student-net.ethz.ch"
 
 ### How it works
 
-A small Python daemon (standard library only) runs as a background service and offers the
+A small background service (the Go core, `bin/uni-vpn-core`; the terminal installer still runs
+the Python one in `uni_vpn/`) offers the
 VPN as a SOCKS5 proxy on `127.0.0.1:1080`. A PAC rule in the system proxy settings sends the
 listed domains there and everything else directly. The Uni VPN app shows the state, connects
 or disconnects by hand and holds the settings: a small window of its own around the page on

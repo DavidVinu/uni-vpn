@@ -14,7 +14,7 @@ for target in linux/amd64 linux/arm64 darwin/arm64 darwin/amd64 windows/amd64; d
   [ "$goos" = windows ] && exe=uni-vpn-core.exe
   rm -rf "$stage/bin" && mkdir -p "$stage/bin"
   CGO_ENABLED=0 GOOS=$goos GOARCH=$goarch go build -trimpath \
-    -ldflags "-s -w -X github.com/DavidVinu/uni-vpn/internal/daemon.Commit=$commit" -o "$stage/bin/$exe" ./cmd/uni-vpn
+    -ldflags "-s -w -X github.com/DavidVinu/uni-vpn/internal/daemon.Commit=$commit${UNI_VPN_VERSION:+ -X github.com/DavidVinu/uni-vpn/internal/daemon.Version=$UNI_VPN_VERSION}" -o "$stage/bin/$exe" ./cmd/uni-vpn
   rm -f "$out/uni-vpn-core-$goos-$goarch.zip"
   (cd "$stage" && zip -q -X "$out/uni-vpn-core-$goos-$goarch.zip" "bin/$exe")
 done

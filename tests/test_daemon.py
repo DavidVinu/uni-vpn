@@ -344,7 +344,11 @@ class FailureTests(DaemonHarness):
         with mock.patch.object(d, "_otp_wait", side_effect=lambda: next(waits, 0)):
             started = time.monotonic()
             await d.request_connect()
-            await wait_state(d, dm.State.connecting)
+            # "Connecting" comes first while the network check runs, then the wait message.
+            deadline = time.monotonic() + 6
+            while "one-time code" not in d.message and time.monotonic() < deadline:
+                await asyncio.sleep(0.01)
+            self.assertEqual(d.state, dm.State.connecting)
             self.assertIn("one-time code", d.message)
             await wait_state(d, dm.State.connected)
         self.assertGreaterEqual(time.monotonic() - started, 0.8)

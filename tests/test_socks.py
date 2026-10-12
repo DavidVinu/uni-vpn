@@ -95,9 +95,10 @@ class ResolveTests(unittest.IsolatedAsyncioTestCase):
 class ServerTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         loop = asyncio.get_running_loop()
-        self.dns_port = free_port()
+        # Port 0: a port free for TCP can still be one Windows refuses for UDP (WinError 10013).
         self.dns_transport, self.dns = await loop.create_datagram_endpoint(
-            lambda: FakeDns({"intra.example": "127.0.0.1"}), local_addr=("127.0.0.1", self.dns_port))
+            lambda: FakeDns({"intra.example": "127.0.0.1"}), local_addr=("127.0.0.1", 0))
+        self.dns_port = self.dns_transport.get_extra_info("sockname")[1]
 
         async def echo(reader, writer):
             while data := await reader.read(1024):
