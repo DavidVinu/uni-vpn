@@ -18,6 +18,9 @@ settings:
     # The simulator runs ad-hoc signed builds with their entitlements, no team needed.
     "CODE_SIGN_IDENTITY[sdk=iphonesimulator*]": "-"
     LOCALIZATION_PREFERS_STRING_CATALOGS: NO
+    # The one definition of the module UniVPNCore (the core's C functions) for every target;
+    # the xcframework carries only the code, which the app and the tunnel link.
+    SWIFT_INCLUDE_PATHS: $(SRCROOT)/Core
 
 targets:
   UniVPN:
@@ -26,6 +29,8 @@ targets:
     sources:
       - path: App
       - path: Shared
+      # The Control Center button's intent runs in the app's process (Control/SetVPN.swift).
+      - path: Control/SetVPN.swift
       - path: build/Resources
         buildPhase: resources
       - path: build/licenses
@@ -139,6 +144,3 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: de.davidvinu.univpn.tests
         GENERATE_INFOPLIST_FILE: YES
-        # The app's module imports UniVPNCore; the tests see its declarations here, the code
-        # once, in the app they run in.
-        SWIFT_INCLUDE_PATHS: $(SRCROOT)/Core

@@ -17,7 +17,7 @@ native_dir="${NATIVE_DIR:-$build/native}"
 work="$build/core"
 min=17.0
 rm -rf "$work" "$build/UniVPNCore.xcframework" "$build/licenses" "$build/Resources"
-mkdir -p "$work/headers" "$build/licenses"
+mkdir -p "$build/licenses"
 
 ldflags="-s -w -X github.com/DavidVinu/uni-vpn/internal/daemon.Commit=$commit"
 [ -z "${UNI_VPN_VERSION:-}" ] || ldflags="$ldflags -X github.com/DavidVinu/uni-vpn/internal/daemon.Version=$UNI_VPN_VERSION"
@@ -60,10 +60,12 @@ done
 mkdir -p "$work/iphonesimulator"
 lipo -create "$work/iphonesimulator-arm64/libunivpn.a" "$work/iphonesimulator-x86_64/libunivpn.a" \
   -output "$work/iphonesimulator/libunivpn.a"
-cp "$app/Core/UniVPNCore.h" "$app/Core/module.modulemap" "$work/headers/"
+# Code only: the module UniVPNCore is defined once, by app/ios/Core/module.modulemap
+# (SWIFT_INCLUDE_PATHS in project.yml). A second module map in the xcframework would land in the
+# build's include folder too and clash with it.
 xcodebuild -create-xcframework \
-  -library "$work/iphoneos-arm64/libunivpn.a" -headers "$work/headers" \
-  -library "$work/iphonesimulator/libunivpn.a" -headers "$work/headers" \
+  -library "$work/iphoneos-arm64/libunivpn.a" \
+  -library "$work/iphonesimulator/libunivpn.a" \
   -output "$build/UniVPNCore.xcframework"
 
 # Settings, Open source licenses shows these: Uni VPN, openconnect, OpenSSL and every Go module
