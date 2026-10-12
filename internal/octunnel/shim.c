@@ -18,27 +18,37 @@
 #include "shim.h"
 #include "_cgo_export.h"
 
+/* What openssl.c and gnutls.c print right before they ask validate_peer_cert. */
+#define VERIFY_FAILED "Server certificate verify failed"
+
 static void output(struct uni_vpn *u, const char *text)
 {
 	goOutput(u->handle, (char *)text);
 }
 
-static void voutputf(struct uni_vpn *u, const char *fmt, va_list args)
+static char *vformat(const char *fmt, va_list args)
 {
 	va_list copy;
-	char small[1024], *buf = small;
+	char *buf;
 	int n;
 
 	va_copy(copy, args);
-	n = vsnprintf(small, sizeof(small), fmt, args);
-	if (n >= (int)sizeof(small) && (buf = malloc(n + 1)) != NULL)
+	n = vsnprintf(NULL, 0, fmt, args);
+	buf = n < 0 ? NULL : malloc(n + 1);
+	if (buf)
 		vsnprintf(buf, n + 1, fmt, copy);
 	va_end(copy);
-	if (n < 0 || !buf)
-		return;
-	output(u, buf);
-	if (buf != small)
+	return buf;
+}
+
+static void voutputf(struct uni_vpn *u, const char *fmt, va_list args)
+{
+	char *buf = vformat(fmt, args);
+
+	if (buf) {
+		output(u, buf);
 		free(buf);
+	}
 }
 
 static void __attribute__ ((format(printf, 2, 3)))
@@ -54,12 +64,25 @@ outputf(struct uni_vpn *u, const char *fmt, ...)
 static void __attribute__ ((format(printf, 3, 4)))
 progress_cb(void *priv, int level, const char *fmt, ...)
 {
+	struct uni_vpn *u = priv;
 	va_list args;
+	char *buf;
 
 	(void)level; /* the library already dropped what is above the log level */
 	va_start(args, fmt);
-	voutputf(priv, fmt, args);
+	buf = vformat(fmt, args);
 	va_end(args);
+	if (!buf)
+		return;
+	/* The daemon reads any line with "certificate" as an untrusted server, so this one waits
+	 * for the trust store's verdict (validate_peer_cert_cb). */
+	if (u->trust && !strncmp(buf, VERIFY_FAILED, strlen(VERIFY_FAILED))) {
+		free(u->cert_line);
+		u->cert_line = buf;
+		return;
+	}
+	output(u, buf);
+	free(buf);
 }
 
 static void wipe(char **s)
@@ -226,14 +249,46 @@ static int auth_form_cb(void *priv, struct oc_auth_form *form)
 static int validate_peer_cert_cb(void *priv, const char *reason)
 {
 	struct uni_vpn *u = priv;
+	char *held = u->cert_line;
 
-#if defined(__APPLE__) && TARGET_OS_IPHONE
-	if (uni_vpn_trust(u->vpninfo, u->host) == 0)
+	u->cert_line = NULL;
+	/* The name of the server this connection reached, after any redirect. */
+	if (u->trust && u->trust(u->vpninfo, openconnect_get_dnsname(u->vpninfo)) == 0) {
+		free(held);
 		return 0;
-#endif
+	}
+	if (held) {
+		output(u, held);
+		free(held);
+	}
 	outputf(u, "\nCertificate from VPN server \"%s\" failed verification.\nReason: %s\n",
 		openconnect_get_hostname(u->vpninfo), reason);
 	return -EINVAL;
+}
+
+static char last_trust_host[256];
+
+static int trust_all(struct openconnect_info *vpninfo, const char *host)
+{
+	(void)vpninfo;
+	snprintf(last_trust_host, sizeof(last_trust_host), "%s", host ? host : "");
+	return 0;
+}
+
+static int trust_none(struct openconnect_info *vpninfo, const char *host)
+{
+	trust_all(vpninfo, host);
+	return -EINVAL;
+}
+
+void uni_vpn_test_trust(struct uni_vpn *u, int accept)
+{
+	u->trust = accept == 1 ? trust_all : trust_none;
+}
+
+const char *uni_vpn_last_trust_host(void)
+{
+	return last_trust_host;
 }
 
 static void reconnected_cb(void *priv)
@@ -249,8 +304,7 @@ static char *dup_or_null(const char *s)
 }
 
 struct uni_vpn *uni_vpn_new(uintptr_t handle, const char *useragent, const char *user,
-			    const char *authgroup, const char *password, const char *queued,
-			    const char *host)
+			    const char *authgroup, const char *password, const char *queued)
 {
 	struct uni_vpn *u = calloc(1, sizeof(*u));
 
@@ -262,7 +316,9 @@ struct uni_vpn *uni_vpn_new(uintptr_t handle, const char *useragent, const char 
 	/* --passwd-on-stdin reads the first line even when it is empty */
 	u->password = password ? strdup(password) : NULL;
 	u->queued = dup_or_null(queued);
-	u->host = strdup(host ? host : "");
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+	u->trust = uni_vpn_trust; /* OpenSSL there has no certificate file */
+#endif
 	u->vpninfo = openconnect_vpninfo_new(useragent, validate_peer_cert_cb, NULL, auth_form_cb,
 					     progress_cb, u);
 	if (!u->vpninfo) {
@@ -283,7 +339,7 @@ void uni_vpn_free(struct uni_vpn *u)
 	free(u->authgroup);
 	wipe(&u->password);
 	wipe(&u->queued);
-	free(u->host);
+	free(u->cert_line);
 	free(u);
 }
 

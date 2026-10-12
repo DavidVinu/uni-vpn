@@ -14,7 +14,6 @@ import "C"
 
 import (
 	"net/netip"
-	"net/url"
 	"runtime"
 	"runtime/cgo"
 	"strings"
@@ -36,6 +35,38 @@ type Session struct {
 	freed   bool
 	addr    netip.Addr
 	changed bool // the gateway gave another address after reconnecting
+	quit    string
+}
+
+// Trust stand-ins for the tests, which play the phone's trust store on Linux.
+const (
+	trustAccept = 1
+	trustReject = 2
+)
+
+var testTrust int
+
+// lastTrustHost is the name the last stand-in check was asked about.
+func lastTrustHost() string { return C.GoString(C.uni_vpn_last_trust_host()) }
+
+func newSession(o Options) *Session {
+	s := &Session{timeout: o.ReconnectTimeout, cmdFD: -1}
+	s.lines = &lineWriter{fn: func(line string) {
+		// The library names why it ends only in its goodbye to the gateway; main.c reads
+		// vpninfo->quit_reason, which the library does not export.
+		if reason, ok := strings.CutPrefix(line, "Send BYE packet: "); ok {
+			s.mu.Lock()
+			s.quit = reason
+			s.mu.Unlock()
+		}
+		if o.Line != nil {
+			o.Line(line)
+		}
+	}}
+	if s.timeout <= 0 {
+		s.timeout = 60
+	}
+	return s
 }
 
 //export goOutput
@@ -87,17 +118,6 @@ func cString(s string) *C.char {
 	return C.CString(s)
 }
 
-// hostName is the gateway's name from a host as the profiles write it (name[:port][/path]).
-func hostName(host string) string {
-	if !strings.Contains(host, "://") {
-		host = "https://" + host
-	}
-	if u, err := url.Parse(host); err == nil {
-		return u.Hostname()
-	}
-	return host
-}
-
 // exitCode maps a negative errno from the library to the program's exit code and line, like
 // the end of main.c.
 func (s *Session) exitCode(ret C.int) int {
@@ -118,17 +138,21 @@ func (s *Session) exitCode(ret C.int) int {
 		s.line("Unrecoverable I/O error; exiting.")
 		return 1
 	}
-	s.line("Unknown error; exiting.")
+	s.mu.Lock()
+	quit := s.quit
+	s.mu.Unlock()
+	if quit != "" {
+		s.line(quit + "; exiting")
+	} else {
+		s.line("Unknown error; exiting.")
+	}
 	return 1
 }
 
 // Connect logs in (obtains the cookie) and makes the CSTP connection. On failure the lines
 // tell why and the error is an *ExitError with the program's exit code.
 func Connect(o Options) (*Session, error) {
-	s := &Session{lines: &lineWriter{fn: o.Line}, timeout: o.ReconnectTimeout, cmdFD: -1}
-	if s.timeout <= 0 {
-		s.timeout = 60
-	}
+	s := newSession(o)
 	fail := func(code int, reason string) (*Session, error) {
 		s.Free()
 		return nil, &ExitError{Code: code, Reason: reason}
@@ -140,18 +164,27 @@ func Connect(o Options) (*Session, error) {
 	s.handle = cgo.NewHandle(s)
 
 	useragent, user, group := cString(o.UserAgent), cString(o.User), cString(o.AuthGroup)
-	host, second := C.CString(hostName(o.Host)), cBytes([]byte(o.SecondPassword))
-	password := cBytes(o.Password)
-	s.u = C.uni_vpn_new(C.uintptr_t(s.handle), useragent, user, group, password, second, host)
+	second, password := cBytes([]byte(o.SecondPassword)), cBytes(o.Password)
+	s.u = C.uni_vpn_new(C.uintptr_t(s.handle), useragent, user, group, password, second)
 	wipe(password, len(o.Password))
 	wipe(second, len(o.SecondPassword))
-	for _, p := range []*C.char{useragent, user, group, host} {
+	if s.u != nil && testTrust != 0 {
+		C.uni_vpn_test_trust(s.u, C.int(testTrust))
+	}
+	for _, p := range []*C.char{user, group} {
 		C.free(unsafe.Pointer(p))
 	}
 	if s.u == nil {
+		C.free(unsafe.Pointer(useragent))
 		return fail(1, "out of memory")
 	}
 	vpn := s.u.vpninfo
+	// Exactly the profile's user agent, as --useragent sets it; the one given to
+	// openconnect_vpninfo_new gets the library's version appended.
+	if useragent != nil {
+		C.openconnect_set_useragent(vpn, useragent)
+	}
+	C.free(unsafe.Pointer(useragent))
 
 	C.openconnect_set_loglevel(vpn, C.PRG_INFO)
 	proto := C.CString("anyconnect")

@@ -21,9 +21,17 @@ int uni_vpn_trust(struct openconnect_info *vpninfo, const char *host)
 	bool ok = false;
 	int i, n;
 
-	n = openconnect_get_peer_cert_chain(vpninfo, &chain);
-	if (n <= 0)
+	/* Without a name SecPolicyCreateSSL would accept a certificate for any server. */
+	if (!host || !*host)
 		return -EINVAL;
+	name = CFStringCreateWithCString(NULL, host, kCFStringEncodingUTF8);
+	if (!name)
+		return -EINVAL;
+	n = openconnect_get_peer_cert_chain(vpninfo, &chain);
+	if (n <= 0) {
+		CFRelease(name);
+		return -EINVAL;
+	}
 	certs = CFArrayCreateMutable(NULL, n, &kCFTypeArrayCallBacks);
 	for (i = 0; i < n; i++) {
 		CFDataRef der = CFDataCreate(NULL, chain[i].der_data, chain[i].der_len);
@@ -38,7 +46,6 @@ int uni_vpn_trust(struct openconnect_info *vpninfo, const char *host)
 	}
 	openconnect_free_peer_cert_chain(vpninfo, chain);
 
-	name = CFStringCreateWithCString(NULL, host, kCFStringEncodingUTF8);
 	policy = SecPolicyCreateSSL(true, name);
 	if (CFArrayGetCount(certs) > 0 &&
 	    SecTrustCreateWithCertificates(certs, policy, &trust) == errSecSuccess)
@@ -46,8 +53,7 @@ int uni_vpn_trust(struct openconnect_info *vpninfo, const char *host)
 	if (trust)
 		CFRelease(trust);
 	CFRelease(policy);
-	if (name)
-		CFRelease(name);
+	CFRelease(name);
 	CFRelease(certs);
 	return ok ? 0 : -EINVAL;
 }
