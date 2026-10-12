@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 210" font-family="system-ui,-apple-system,Segoe UI,Roboto,sans-serif">
+<style>.ring{animation:p 1.6s ease-in-out infinite;transform-box:fill-box;transform-origin:center}@keyframes p{0%,100%{opacity:1}50%{opacity:.35}}@media (prefers-reduced-motion:reduce){.ring{animation:none}}</style>
+<rect x="0.5" y="0.5" width="359" height="209" rx="10" fill="#f4f4f5" stroke="#d6d6db"/>
+<path d="M0.5 28V10.5a10 10 0 0 1 10-10h339a10 10 0 0 1 10 10V28z" fill="#e8e8ec"/>
+<circle cx="14" cy="14" r="4" fill="#ff5f57"/><circle cx="27" cy="14" r="4" fill="#febc2e"/><circle cx="40" cy="14" r="4" fill="#28c840"/>
+<rect x="62" y="6" width="236" height="16" rx="8" fill="#fff"/>
+<text x="180" y="17.5" font-size="9" fill="#6e6e73" text-anchor="middle">mfa.uni-heidelberg.de</text>
+<rect x="1" y="28" width="358" height="30" fill="#fff"/>
+<line x1="1" y1="58" x2="359" y2="58" stroke="#d6d6db"/>
+<circle cx="22" cy="43" r="10" fill="#c5122d"/><circle cx="22" cy="43" r="6" fill="none" stroke="#fff" stroke-opacity=".5"/>
+<text x="40" y="47" font-size="11" fill="#202124">MFA Token Self Service</text>
+<rect x="20" y="68" width="300" height="4" rx="2" fill="#f0a5a5"/>
+<rect x="20" y="77" width="280" height="4" rx="2" fill="#f0a5a5"/>
+<text x="20" y="98" font-size="10.5" fill="#202124">Richten Sie ihre erste Authentisierungsmethode ein</text>
+<rect x="20" y="110" width="320" height="78" rx="4" fill="#fff" stroke="#e3e3e8"/>
+<circle cx="38" cy="128" r="6" fill="none" stroke="#202124" stroke-width="2"/><path d="M38 122a6 6 0 0 1 0 12z" fill="#202124"/>
+<text x="54" y="131" font-size="11" fill="#202124">Soft-Token (zeitbasiert)</text>
+<text x="54" y="144" font-size="8" fill="#6e6e73">Zeitbasierter Software-Token (TOTP)</text>
+<text x="180.0" y="172.5" font-size="9" fill="#3b5f8a" text-anchor="middle" letter-spacing=".5">EINRICHTEN</text>
+<rect class="ring" x="146" y="156" width="68" height="26" rx="9" fill="none" stroke="#0b57d0" stroke-width="2.5"/>
+</svg>

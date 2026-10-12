@@ -11,11 +11,14 @@
       "mfa": "totp_field",
       "mfa_portal_url": "https://mfa.uni-heidelberg.de/",
       "mfa_steps": [
-        "Open the {portal}. It only opens on campus or with Cisco VPN.",
-        "Choose \"Soft-Token (zeitbasiert)\", then \"Einrichten\".",
-        "Click \"Tokendetails einblenden\" and copy the line starting with otpauth://.",
-        "Paste it below, then type the code shown here into the portal's \"Testen\" field."
+        "Open the {portal} and sign in with your Uni ID.",
+        "Click \"Einrichten\" under \"Soft-Token (zeitbasiert)\".",
+        "Type a name, for example Laptop, and click \"Weiter\".",
+        "Take a screenshot of the QR code ({shot}) and drop or paste it here.{secret}",
+        "Click \"Weiter\", then \"Testen\". Type this code and click \"Absenden\".{code}",
+        "Click \"Abschließen\" to finish."
       ],
+      "mfa_pictures": ["heidelberg-1.svg", "heidelberg-2.svg", "heidelberg-3.svg", "heidelberg-4.svg", "heidelberg-5.svg", "heidelberg-6.svg"],
       "default_domains": ["sogo.uni-heidelberg.de", "elearning-med.uni-heidelberg.de", "cip.dmed.uni-heidelberg.de", "heico.uni-heidelberg.de"],
       "aliases": ["Universitaet Heidelberg", "Ruprecht-Karls-Universitaet", "URZ"],
       "verified": true,

@@ -9,6 +9,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/draw"
+	"image/png"
 	"io"
 	"net"
 	"os"
@@ -25,6 +28,7 @@ import (
 	"github.com/DavidVinu/uni-vpn/internal/messages"
 	"github.com/DavidVinu/uni-vpn/internal/pac"
 	"github.com/DavidVinu/uni-vpn/internal/totp"
+	"rsc.io/qr"
 )
 
 // Port of tests/test_httpapi.py.
@@ -912,5 +916,120 @@ func TestAnswersAreByteForByteLikePython(t *testing.T) {
 		"Cache-Control: no-store", "Connection: close", "X-Content-Type-Options: nosniff", "X-Frame-Options: DENY"}
 	if !slices.Equal(lines, want) || !strings.HasPrefix(body, `{"ok": true, "state": "`) {
 		t.Fatalf("%q", data)
+	}
+}
+
+// qrPicture is a screenshot-like PNG with a QR code of text.
+func qrPicture(t *testing.T, text string) []byte {
+	t.Helper()
+	code, err := qr.Encode(text, qr.M)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := image.NewGray(image.Rect(0, 0, 640, 400))
+	draw.Draw(page, page.Bounds(), image.White, image.Point{}, draw.Src)
+	for i := 0; i < code.Size; i++ {
+		for j := 0; j < code.Size; j++ {
+			if code.Black(i, j) {
+				draw.Draw(page, image.Rect(80+i*4, 80+j*4, 84+i*4, 84+j*4), image.Black, image.Point{}, draw.Src)
+			}
+		}
+	}
+	var b bytes.Buffer
+	if err := png.Encode(&b, page); err != nil {
+		t.Fatal(err)
+	}
+	return b.Bytes()
+}
+
+func TestTOTPPictureReadsTheKeyWithoutStoring(t *testing.T) {
+	h := newHarness(t)
+	h.start(nil)
+	key := "otpauth://totp/LinOTP:bd346?secret=GEZDGNBVGY3TQOJQ&issuer=LinOTP"
+	hdrs := []header{{"X-Uni-VPN", "1"}, {"Content-Type", "image/png"}}
+	r := raw(t, h.cfg.HTTPPort, "POST", "/api/totp/qr", hdrs, qrPicture(t, key))
+	if r.status != 200 {
+		t.Fatal(r.status, string(r.body))
+	}
+	if data := r.json(t); data["ok"] != true || data["secret"] != key {
+		t.Fatal(data)
+	}
+	if len(h.storedTOTP) != 0 {
+		t.Fatal(h.storedTOTP)
+	}
+	for _, c := range []struct {
+		body []byte
+		key  string
+	}{
+		{qrPicture(t, "https://example.org/"), "totp.qr_not_key"},
+		{qrPicture(t, "otpauth://hotp/x?secret=GEZDGNBVGY3TQOJQ&counter=1"), "totp.only_totp"},
+		{[]byte("not a picture"), "totp.not_picture"},
+		{qrPicture(t, "")[:60], "totp.not_picture"},
+	} {
+		r := raw(t, h.cfg.HTTPPort, "POST", "/api/totp/qr", hdrs, c.body)
+		if r.status != 400 || r.json(t)["error_t"].(map[string]any)["key"] != c.key {
+			t.Fatal(c.key, r.status, string(r.body))
+		}
+	}
+}
+
+func TestTOTPPictureTakesScreenshotsButOtherRoutesStaySmall(t *testing.T) {
+	h := newHarness(t)
+	h.start(nil)
+	big := make([]byte, 1<<20) // a screenshot is larger than other requests may be
+	hdrs := []header{{"X-Uni-VPN", "1"}, {"Content-Type", "image/png"}}
+	if r := raw(t, h.cfg.HTTPPort, "POST", "/api/totp/qr", hdrs, big); r.status != 400 {
+		t.Fatal(r.status)
+	}
+	// The server answers from Content-Length alone, so these send no body.
+	length := header{"Content-Length", strconv.Itoa(len(big))}
+	if r := raw(t, h.cfg.HTTPPort, "POST", "/api/totp/check", append(hdrs, length), nil); r.status != 413 {
+		t.Fatal(r.status)
+	}
+	// Only the app may send a large body: without its header the old limit holds.
+	if r := raw(t, h.cfg.HTTPPort, "POST", "/api/totp/qr", []header{length}, nil); r.status != 413 {
+		t.Fatal(r.status)
+	}
+}
+
+func TestPortalCheckAsksOnlyForListedPortals(t *testing.T) {
+	h := newHarness(t)
+	d := h.start(nil)
+	var asked []string
+	d.HTTP().Reachable = func(_ context.Context, address string) bool {
+		asked = append(asked, address)
+		return false
+	}
+	r := h.post("/api/portal-check", `{"university": "heidelberg"}`)
+	if r.status != 200 || r.json(t)["reachable"] != false {
+		t.Fatal(r.status, string(r.body))
+	}
+	for _, body := range []string{`{"university": "ethz"}`, `{"university": "nope"}`, `{}`, `[]`} {
+		if r := h.post("/api/portal-check", body); r.status == 200 {
+			t.Fatal(body)
+		}
+	}
+	if !slices.Equal(asked, []string{"https://mfa.uni-heidelberg.de/"}) {
+		t.Fatal(asked)
+	}
+}
+
+func TestGuidePicturesAreServed(t *testing.T) {
+	h := newHarness(t)
+	h.start(nil)
+	r := h.http("GET", "/guides/heidelberg-4.svg", nil, "")
+	if r.status != 200 || r.headers["content-type"] != "image/svg+xml" || !bytes.HasPrefix(r.body, []byte("<svg")) {
+		t.Fatal(r.status, r.headers)
+	}
+	// The guide for universities without their own steps (index.html, GENERIC).
+	for n := 1; n <= 3; n++ {
+		if r := h.http("GET", fmt.Sprintf("/guides/generic-%d.svg", n), nil, ""); r.status != 200 {
+			t.Fatal(n, r.status)
+		}
+	}
+	for _, path := range []string{"/guides/nope.svg", "/guides/../index.html", "/guides/", "/guides/HEIDELBERG-4.SVG"} {
+		if r := h.http("GET", path, nil, ""); r.status != 404 {
+			t.Fatal(path, r.status)
+		}
 	}
 }
