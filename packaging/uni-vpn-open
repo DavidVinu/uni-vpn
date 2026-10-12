@@ -24,9 +24,30 @@ case "$(uname -s)" in
 esac
 core="$app/bin/uni-vpn-core"
 
+# The user's language, as the app picks it (internal/i18n): the first of macOS's preferred
+# languages, else the locale.
+language() {
+  if [ "$(uname -s)" = Darwin ]; then
+    defaults read -g AppleLanguages 2>/dev/null | sed -n '2s/[^A-Za-z_-]//gp'
+  else
+    lang=${LANGUAGE:-${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}}
+    echo "${lang%%:*}"
+  fi
+}
+
 fail() {
-  title="Uni VPN could not be set up."
-  detail=$(tail -n 1 "$log" 2>/dev/null)
+  case "$(language)" in
+    zh*Hans* | zh*hans*) title="无法设置 Uni VPN。" hint="请重启电脑，然后重新打开 Uni VPN。" ;;
+    zh*Hant* | zh*hant* | zh*TW* | zh*HK* | zh*MO* | zh*tw* | zh*hk* | zh*mo*)
+      title="無法設定 Uni VPN。" hint="請重新啟動電腦，然後重新開啟 Uni VPN。" ;;
+    zh*) title="无法设置 Uni VPN。" hint="请重启电脑，然后重新打开 Uni VPN。" ;;
+    de*) title="Uni VPN konnte nicht eingerichtet werden." hint="Starte den Computer neu und öffne Uni VPN dann noch einmal." ;;
+    fr*) title="Uni VPN n’a pas pu être configuré." hint="Redémarrez l’ordinateur, puis rouvrez Uni VPN." ;;
+    es*) title="No se pudo configurar Uni VPN." hint="Reinicia el ordenador y vuelve a abrir Uni VPN." ;;
+    *) title="Uni VPN could not be set up." hint="Restart the computer, then open Uni VPN again." ;;
+  esac
+  # The last line of the log, for whoever helps.
+  detail=$(printf '%s\n\n%s' "$hint" "$(tail -n 1 "$log" 2>/dev/null)")
   if [ "$(uname -s)" = Darwin ]; then
     osascript - "$title" "$detail" >/dev/null 2>&1 <<'APPLESCRIPT'
 on run argv
@@ -37,9 +58,9 @@ APPLESCRIPT
     zenity --error --title="Uni VPN" --text="$title" --secondary-text="$detail" 2>/dev/null ||
       zenity --error --title="Uni VPN" --text="$title\n\n$detail" 2>/dev/null
   elif command -v kdialog >/dev/null 2>&1; then
-    kdialog --title "Uni VPN" --detailedsorry "$title" "$detail"
+    kdialog --title "Uni VPN" --detailedsorry "$title $hint" "$detail"
   elif command -v notify-send >/dev/null 2>&1; then
-    notify-send "$title" "$detail"
+    notify-send "$title" "$hint"
   fi
   exit 1
 }
