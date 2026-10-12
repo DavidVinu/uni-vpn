@@ -48,14 +48,16 @@ Some universities ask for a one-time code from an app on your phone. So that Uni
 without asking you each time, your computer gets its own code generator, like a second phone. Your
 phone keeps working as before.
 
-The setup window shows the steps for your university. At Heidelberg:
+The setup window walks you through your university's security page, one picture per step. At
+Heidelberg:
 
 1. On the university network, or with the Cisco VPN connected, open https://mfa.uni-heidelberg.de
+   and sign in.
 2. Under "Soft-Token (zeitbasiert)" click "Einrichten", give it a name, then "Weiter".
-3. Below the QR code, click "Tokendetails einblenden" and copy the whole line that starts with
-   `otpauth://`.
-4. Paste it into the Uni VPN window. It shows a six-digit code: type that into the portal's
-   "Testen" step.
+3. Take a screenshot of the QR code and drop or paste it into the Uni VPN window. (Copying the
+   line that starts with `otpauth://` from "Tokendetails einblenden" works too.)
+4. Click "Weiter" and "Testen", type the six-digit code Uni VPN shows, then "Absenden" and
+   "Abschließen".
 
 With Duo, confirm the request on your phone. Without a second factor there is nothing to do.
 

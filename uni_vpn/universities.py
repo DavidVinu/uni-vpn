@@ -61,6 +61,7 @@ class Profile:
     totp_separator: str = ""
     mfa_portal_url: str = ""
     mfa_steps: tuple[str, ...] = ()
+    mfa_pictures: tuple[str, ...] = ()
     default_domains: tuple[str, ...] = ()
     aliases: tuple[str, ...] = ()
     verified: bool = False
@@ -69,7 +70,7 @@ class Profile:
     def public(self) -> dict:
         """What the setup assistant gets: everything except the notes for contributors."""
         data = {f.name: getattr(self, f.name) for f in fields(self) if f.name != "notes"}
-        for key in ("mfa_steps", "default_domains", "aliases"):
+        for key in ("mfa_steps", "mfa_pictures", "default_domains", "aliases"):
             data[key] = list(data[key])
         return data
 
@@ -141,7 +142,7 @@ def parse(data: dict) -> dict[str, Profile]:
                 raise ValueError(f"{uid}: '{key}' must be text")
         if not isinstance(values.get("verified", False), bool):
             raise ValueError(f"{uid}: 'verified' must be true or false")
-        for key in ("mfa_steps", "default_domains", "aliases"):
+        for key in ("mfa_steps", "mfa_pictures", "default_domains", "aliases"):
             items = values.get(key, [])
             if not isinstance(items, list) or not all(isinstance(i, str) for i in items):
                 raise ValueError(f"{uid}: '{key}' must be a list of text")
