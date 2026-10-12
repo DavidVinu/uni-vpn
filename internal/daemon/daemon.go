@@ -10,6 +10,7 @@ package daemon
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -167,6 +168,7 @@ type Daemon struct {
 	since         float64
 	lastError     *lastError
 	failures      int
+	totpRetried   bool // a rejected one-time code was tried again with the next one
 	explicit      bool
 	demandUntil   float64
 	lastActivity  float64
@@ -253,8 +255,14 @@ func New(cfg *config.Config, log *slog.Logger, opts Options) *Daemon {
 		}
 	}
 	if opts.Probe == nil {
-		host, timeout := cfg.Host, seconds(cfg.ProbeTimeout)
-		opts.Probe = func(ctx context.Context) bool { return DefaultProbe(ctx, host, timeout) }
+		// The gateway of the current account: the assistant can set up another university
+		// while the service runs (on the first run it starts with Heidelberg's defaults).
+		opts.Probe = func(ctx context.Context) bool {
+			d.mu.Lock()
+			host, timeout := d.cfg.Host, seconds(d.cfg.ProbeTimeout)
+			d.mu.Unlock()
+			return probe(ctx, host, timeout)
+		}
 	}
 	if opts.CiscoCheck == nil {
 		opts.CiscoCheck = platform.CiscoConnected
@@ -329,19 +337,30 @@ func (d *Daemon) keyringArgs() (string, time.Duration) {
 	return d.cfg.User, seconds(d.cfg.KeyringTimeout)
 }
 
-// DefaultProbe is a TLS handshake with host:443 using the system trust store. False behind a
-// captive portal or without network.
+// DefaultProbe is a TLS handshake with host (port 443 unless it names one, like
+// "vpn.uni-x.de:10443") using the system trust store. False behind a captive portal (which
+// often answers with its own certificate) or without network.
 func DefaultProbe(ctx context.Context, host string, timeout time.Duration) bool {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	dialer := &tls.Dialer{Config: &tls.Config{ServerName: host}}
-	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(host, "443"))
+	name, port := host, "443"
+	if h, p, err := net.SplitHostPort(host); err == nil {
+		name, port = h, p
+	}
+	dialer := &tls.Dialer{Config: &tls.Config{ServerName: name, RootCAs: probeRoots}}
+	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(name, port))
 	if err != nil {
 		return false
 	}
 	conn.Close()
 	return true
 }
+
+// probeRoots is nil, the system's trust store; tests trust their own gateway.
+var probeRoots *x509.CertPool
+
+// probe is DefaultProbe; tests replace it, there is no gateway in CI.
+var probe = DefaultProbe
 
 // BinDir holds the helper files of an installation (uni-vpn-ocproxy, uni-vpn-vpnc.js). The Go
 // core keeps using bin/ of the installation: next to its own executable, else bin/ next to the
@@ -662,7 +681,7 @@ func (d *Daemon) CompleteSetup(user, password, token, university string, overrid
 	}
 	// Secrets first: if the keyring refuses, no config.toml exists yet and the assistant
 	// stays the way in after a restart.
-	previousUser, previousUniversity := d.cfg.User, d.cfg.University
+	previousUser := d.cfg.User
 	// Settings, Account runs the assistant again: the tunnel of the old account goes.
 	teardown := !d.needsSetup && d.tun != nil
 	d.mu.Unlock()
@@ -700,16 +719,16 @@ func (d *Daemon) CompleteSetup(user, password, token, university string, overrid
 			d.logf(slog.LevelWarn, "Unreadable %s moved to %s", path, backup)
 		}
 		if exists(path) {
-			if university != previousUniversity {
-				var stale []string
-				for _, key := range unis.ProfileFields {
-					if !slices.ContainsFunc(checked, func(s config.Setting) bool { return s.Key == key }) {
-						stale = append(stale, key)
-					}
+			// The old account's profile fields go, also with the same university ("Not
+			// listed" with another gateway): they would come back at the next start.
+			var stale []string
+			for _, key := range unis.ProfileFields {
+				if !slices.ContainsFunc(checked, func(s config.Setting) bool { return s.Key == key }) {
+					stale = append(stale, key)
 				}
-				if err := config.RemoveKeys(path, stale); err != nil {
-					return err
-				}
+			}
+			if err := config.RemoveKeys(path, stale); err != nil {
+				return err
 			}
 			values := append([]config.Setting{{Key: "user", Value: user}, {Key: "university", Value: university}}, checked...)
 			return config.SetValues(path, values)
@@ -1099,8 +1118,13 @@ func (d *Daemon) requestConnectLocked() {
 	if d.configError != "" {
 		return
 	}
+	if d.forwarder.Addr() == nil {
+		// Another program holds the browsers' port: a tunnel would be of no use, and the
+		// ticker's retry would report the port over its state. port_in_use stays.
+		return
+	}
 	d.explicit = true
-	d.failures = 0
+	d.failures, d.totpRetried = 0, false
 	if d.state.final() || d.state.retry() {
 		d.set(Idle, messages.NotConnected)
 	}
@@ -1341,7 +1365,9 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 		d.connectCount++
 		// openconnect generates the code right after starting; record the window now, because
 		// the output reader can lag behind the port check (macOS CI).
-		d.lastOTPStep, d.hasOTPStep = int64(math.Floor(d.wall()/OTPStep)), true
+		step := int64(math.Floor(d.wall() / OTPStep))
+		freshCode := !d.hasOTPStep || step != d.lastOTPStep
+		d.lastOTPStep, d.hasOTPStep = step, true
 
 		var ready bool
 		d.unlocked(func() { ready = tun.WaitReady(seconds(cfg.ReadyTimeout)) })
@@ -1390,6 +1416,13 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 			}
 			d.tun = nil
 			if state == AuthFailed {
+				// Synced devices share the secret, and LinOTP takes each code only once: another
+				// device may have signed in with this window's code. Once more with the next one.
+				if _, once := tunnel.IsOnce(secret); message == messages.TOTPRejected && freshCode && !once && !d.totpRetried {
+					d.totpRetried = true
+					d.logf(slog.LevelInfo, "One-time code rejected, trying once more with the next one")
+					continue
+				}
 				d.final(state, message)
 				return
 			}
@@ -1403,7 +1436,7 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 			continue
 		}
 
-		d.failures = 0
+		d.failures, d.totpRetried = 0, false
 		d.logf(slog.LevelInfo, "Tunnel ready after %.1f s", elapsed(tun.StartedAt(), tun.ReadyAt()))
 		d.set(Connected, messages.Connected)
 		// The "connect now" request is fulfilled. From here on only real use counts, the idle

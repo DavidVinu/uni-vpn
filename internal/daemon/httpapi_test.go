@@ -688,6 +688,27 @@ func TestUnlistedUniversityWritesItsProfile(t *testing.T) {
 	waitState(t, d, Connected)
 }
 
+func TestSetupAgainWithTheSameUniversityDropsTheOldGroups(t *testing.T) {
+	// "Not listed" again, now for another gateway without groups: the old gateway's groups
+	// would come back at the next start.
+	h := newHarness(t)
+	h.totpErr = credentials.ErrTotpMissing
+	_, cfgPath := h.startSetup()
+	for _, profile := range []string{`{"host": "vpn.a.edu", "usergroup": "students", "authgroup": "staff", "mfa": "none"}`,
+		`{"host": "vpn.b.edu", "mfa": "none"}`} {
+		if status, data := h.postSetup(`{"user": "ab123", "password": "pw", "secret": "", "university": "other", "profile": ` + profile + `}`); status != 200 {
+			t.Fatal(status, data)
+		}
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Host != "vpn.b.edu" || cfg.Usergroup != "" || cfg.Authgroup != "" {
+		t.Fatal(cfg.Host, cfg.Usergroup, cfg.Authgroup)
+	}
+}
+
 func TestErrorsNameTheUniversityStep(t *testing.T) {
 	h := newHarness(t)
 	_, cfgPath := h.startSetup()
