@@ -218,6 +218,21 @@ func TestSwitchingOffWhileWaitingDiscardsTheUpdate(t *testing.T) {
 	}
 }
 
+// Shut down or logged out while the update waits for the tunnel: the unpacked files go.
+func TestStopWhileWaitingDiscardsTheUpdate(t *testing.T) {
+	h := newHarness(t)
+	fake := &fakeUpdater{commit: commitB}
+	d := h.start(withUpdater(fake), timing(50*time.Millisecond, time.Hour, 0), func(d *Daemon) { d.explicit = true })
+	if !waitFor(3*time.Second, func() bool { return fake.Pending() == commitB }) {
+		t.Fatal("no check")
+	}
+	d.Stop()
+	h.waitDone()
+	if _, applied, discarded := fake.counts(); applied != 0 || discarded != 1 || d.RestartRequested {
+		t.Fatal(applied, discarded, d.RestartRequested)
+	}
+}
+
 // The real schedule: 10 minutes after the start, then every 5 hours plus up to 30 minutes.
 func TestUpdateSchedule(t *testing.T) {
 	h := newHarness(t)

@@ -18,15 +18,30 @@ if [ -n "${3:-}" ]; then
   done
 fi
 stage=$(mktemp -d)
-trap 'rm -rf "$stage"' EXIT
+mac=$(mktemp -d)
+trap 'rm -rf "$stage" "$mac"' EXIT
 cd "$repo"
+# build GOOS GOARCH FILE
+build() {
+  CGO_ENABLED=0 GOOS=$1 GOARCH=$2 go build -trimpath \
+    -ldflags "-s -w -X github.com/DavidVinu/uni-vpn/internal/daemon.Commit=$commit${UNI_VPN_VERSION:+ -X github.com/DavidVinu/uni-vpn/internal/daemon.Version=$UNI_VPN_VERSION}" -o "$3" ./cmd/uni-vpn
+}
+# Both Mac zips have the core for both processors, as the installer does (stage-app.sh): a Mac
+# moved from Intel to Apple Silicon with Migration Assistant keeps the core it updated to, and
+# launchd does not start an Intel program without Rosetta.
+build darwin arm64 "$mac/arm64"
+build darwin amd64 "$mac/amd64"
+go run ./packaging/lipo "$mac/uni-vpn-core" "$mac/arm64" "$mac/amd64"
 for target in linux/amd64 linux/arm64 darwin/arm64 darwin/amd64 windows/amd64; do
   goos=${target%/*} goarch=${target#*/}
   exe=uni-vpn-core
   [ "$goos" = windows ] && exe=uni-vpn-core.exe
   rm -rf "${stage:?}"/* && mkdir -p "$stage/bin"
-  CGO_ENABLED=0 GOOS=$goos GOARCH=$goarch go build -trimpath \
-    -ldflags "-s -w -X github.com/DavidVinu/uni-vpn/internal/daemon.Commit=$commit${UNI_VPN_VERSION:+ -X github.com/DavidVinu/uni-vpn/internal/daemon.Version=$UNI_VPN_VERSION}" -o "$stage/bin/$exe" ./cmd/uni-vpn
+  if [ "$goos" = darwin ]; then
+    cp "$mac/uni-vpn-core" "$stage/bin/"
+  else
+    build "$goos" "$goarch" "$stage/bin/$exe"
+  fi
   case "$goos" in
     linux) mkdir -p "$stage/app/linux" && cp app/linux/uni-vpn-app.py "$stage/app/linux/" ;;
     *) if [ -n "$apps" ]; then cp -R "$apps/$goos/." "$stage/"; fi ;;
