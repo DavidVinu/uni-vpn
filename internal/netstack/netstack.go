@@ -13,8 +13,6 @@ import (
 	"os"
 	"strconv"
 	"sync"
-	"sync/atomic"
-	"time"
 
 	"gvisor.dev/gvisor/pkg/buffer"
 	"gvisor.dev/gvisor/pkg/tcpip"
@@ -40,9 +38,6 @@ const (
 	bufferMin     = 4 << 10
 	bufferDefault = 64 << 10
 	bufferMax     = 256 << 10
-	// fullWait: how many milliseconds a packet waits for room in a full queue before it is
-	// dropped (TCP then sends it again).
-	fullWait = 100
 )
 
 // Stack is one userspace network interface with a single address.
@@ -52,10 +47,6 @@ type Stack struct {
 	stack *stack.Stack
 	// prefix: 4 when each packet on the fd starts with its address family (Apple systems).
 	prefix int
-	// dropped counts packets the fd did not take.
-	dropped atomic.Uint64
-	// waits counts the pauses for a full queue.
-	waits atomic.Uint64
 
 	cancel context.CancelFunc
 	once   sync.Once
@@ -183,24 +174,8 @@ func (s *Stack) outbound(ctx context.Context) {
 			}
 			binary.BigEndian.PutUint32(buf, family)
 		}
-		s.write(ctx, buf[:s.prefix+n])
+		_, _ = s.file.Write(buf[:s.prefix+n])
 	}
-}
-
-// write sends one packet, waiting a little while openconnect's side of the queue is full.
-func (s *Stack) write(ctx context.Context, pkt []byte) {
-	for wait := 0; wait < fullWait; wait++ {
-		full, err := s.sendPacket(pkt)
-		if !full || ctx.Err() != nil {
-			if err != nil {
-				s.dropped.Add(1)
-			}
-			return
-		}
-		s.waits.Add(1)
-		time.Sleep(time.Millisecond)
-	}
-	s.dropped.Add(1)
 }
 
 func fullAddr(ap netip.AddrPort) (tcpip.FullAddress, tcpip.NetworkProtocolNumber) {

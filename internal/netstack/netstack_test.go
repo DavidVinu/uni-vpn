@@ -240,7 +240,11 @@ func TestBulkTransfer(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ln.Close()
-	const size = 8 << 20
+	// The race detector slows gVisor on macOS to a few hundred KB/s (8 MiB take 50 ms without).
+	size := 8 << 20
+	if raceEnabled {
+		size = 512 << 10
+	}
 	go func() {
 		c, err := ln.Accept()
 		if err != nil {
@@ -262,10 +266,10 @@ func TestBulkTransfer(t *testing.T) {
 	t.Logf("%d bytes in %v", n, time.Since(start))
 	for name, st := range map[string]*Stack{"client": client, "server": server} {
 		tcpStats := st.stack.Stats().TCP
-		t.Logf("%s: waits %d, dropped %d, retransmits %d, timeouts %d", name, st.waits.Load(),
-			st.dropped.Load(), tcpStats.Retransmits.Value(), tcpStats.Timeouts.Value())
+		t.Logf("%s: retransmits %d, timeouts %d", name, tcpStats.Retransmits.Value(),
+			tcpStats.Timeouts.Value())
 	}
-	if n != size || err != nil {
+	if n != int64(size) || err != nil {
 		t.Fatal(n, err)
 	}
 }
