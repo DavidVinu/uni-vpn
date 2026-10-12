@@ -2,5 +2,8 @@
 
 package netstack
 
-// queueFull: elsewhere a full socketpair makes the write wait (EAGAIN goes to the poller).
-func queueFull(error) bool { return false }
+// sendPacket writes one packet; a full socketpair makes the write wait in Go's poller.
+func (s *Stack) sendPacket(pkt []byte) (full bool, err error) {
+	_, err = s.file.Write(pkt)
+	return false, err
+}

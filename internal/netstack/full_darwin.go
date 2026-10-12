@@ -5,6 +5,24 @@ import (
 	"syscall"
 )
 
-// queueFull: Darwin answers a write to a full datagram socketpair with ENOBUFS at once instead
-// of making the writer wait, so the packet would be lost and TCP would stall on retransmits.
-func queueFull(err error) bool { return errors.Is(err, syscall.ENOBUFS) }
+// sendPacket writes one packet without Go's poller. On Darwin a datagram socketpair never
+// reports itself writable again once full (kqueue looks at the sender's own, always empty,
+// buffer), so a poller write could wait forever; a full queue also answers ENOBUFS instead of
+// EAGAIN. Both mean: try again in a moment.
+func (s *Stack) sendPacket(pkt []byte) (full bool, err error) {
+	raw, err := s.file.SyscallConn()
+	if err != nil {
+		return false, err
+	}
+	var werr error
+	if err := raw.Write(func(fd uintptr) bool {
+		_, werr = syscall.Write(int(fd), pkt)
+		return true
+	}); err != nil {
+		return false, err
+	}
+	if errors.Is(werr, syscall.EAGAIN) || errors.Is(werr, syscall.ENOBUFS) {
+		return true, werr
+	}
+	return false, werr
+}

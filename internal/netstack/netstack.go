@@ -13,6 +13,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gvisor.dev/gvisor/pkg/buffer"
@@ -51,6 +52,8 @@ type Stack struct {
 	stack *stack.Stack
 	// prefix: 4 when each packet on the fd starts with its address family (Apple systems).
 	prefix int
+	// dropped counts packets the fd did not take.
+	dropped atomic.Uint64
 
 	cancel context.CancelFunc
 	once   sync.Once
@@ -185,11 +188,16 @@ func (s *Stack) outbound(ctx context.Context) {
 // write sends one packet, waiting a little while openconnect's side of the queue is full.
 func (s *Stack) write(ctx context.Context, pkt []byte) {
 	for wait := 0; wait < fullWait; wait++ {
-		if _, err := s.file.Write(pkt); !queueFull(err) || ctx.Err() != nil {
+		full, err := s.sendPacket(pkt)
+		if !full || ctx.Err() != nil {
+			if err != nil {
+				s.dropped.Add(1)
+			}
 			return
 		}
 		time.Sleep(time.Millisecond)
 	}
+	s.dropped.Add(1)
 }
 
 func fullAddr(ap netip.AddrPort) (tcpip.FullAddress, tcpip.NetworkProtocolNumber) {
