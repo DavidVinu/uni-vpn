@@ -16,6 +16,9 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.util.Locale
 
+/** Stages of status.json "enroll" while the setup with one code runs (internal/daemon/enroll.go). */
+private val ENROLL_RUNNING = setOf("connecting", "code", "working")
+
 /** Where the app is. Setup is not a screen here: it shows whenever setup is needed or asked for. */
 sealed interface Screen {
     data object Home : Screen
@@ -35,6 +38,11 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     /** The core did not answer the last poll. */
     var unreachable by mutableStateOf(false)
         private set
+    /** Another app holds the core's port (Core.portTaken). */
+    var portTaken by mutableStateOf(false)
+        private set
+    /** Android turned the VPN down without asking: another app's VPN is always on, or a rule. */
+    var vpnRefused by mutableStateOf(false)
     var strings by mutableStateOf(Strings(null, "", emptyList()))
         private set
     private var locales: JSONObject? = null
@@ -56,14 +64,65 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     var setupSentAt by mutableLongStateOf(0L)
     var setupFailure by mutableStateOf<Result?>(null)
 
-    fun sendSetup(body: JSONObject) {
+    /** [withCode]: the body carries a code from the user's app instead of the setup key. */
+    fun sendSetup(body: JSONObject, withCode: Boolean = false) {
         setupBusy = true
         setupSentAt = 0
         viewModelScope.launch {
             val result = post("/api/setup", body, timeoutMs = 60_000)
             setupBusy = false
-            if (result.ok) setupSentAt = System.currentTimeMillis() else setupFailure = result
+            when {
+                !result.ok -> setupFailure = result
+                withCode -> enrolling("connecting")
+                else -> setupSentAt = System.currentTimeMillis()
+            }
         }
+    }
+
+    // The second factor with one code (index.html step2a): the core signs in with a code from
+    // the user's app and adds itself in the MFA portal. Kept here, like setup, for turning the
+    // phone.
+    /** When the last code went to the core; 0 while no setup with a code runs. */
+    var enrollSentAt by mutableLongStateOf(0L)
+    /** What that code started, until status.json catches up. */
+    var enrollPending by mutableStateOf("")
+        private set
+    var enrollError by mutableStateOf<String?>(null)
+    val enroll: JSONObject? get() = status?.optJSONObject("enroll")
+    private var enrollChecked = false
+
+    private fun enrolling(stage: String) {
+        enrollPending = stage
+        enrollSentAt = System.currentTimeMillis()
+    }
+
+    /** /api/totp/auto: the first code in Settings, or the next one the MFA portal asks for. */
+    fun sendEnrollCode(code: String) {
+        val answer = enrollSentAt > 0 && enroll?.optString("stage") == "code"
+        val connected = status?.optString("state") == "connected"
+        setupBusy = true
+        enrollError = null
+        viewModelScope.launch {
+            val result = post("/api/totp/auto", JSONObject().put("code", code))
+            setupBusy = false
+            if (result.ok) enrolling(if (answer || connected) "working" else "connecting") else enrollError = result.error
+        }
+    }
+
+    /** Leaving the page stops a setup with a code that still runs (index.html stopAuto). */
+    fun cancelEnroll() {
+        enrollError = null
+        if (enrollSentAt == 0L) return
+        enrollSentAt = 0
+        viewModelScope.launch { post("/api/totp/auto", JSONObject().put("cancel", true)) }
+    }
+
+    /** The app opened again while a setup with a code runs: its page again, like the desktop. */
+    private fun resumeEnroll(json: JSONObject) {
+        val stage = json.optJSONObject("enroll")?.optString("stage").orEmpty()
+        if (enrollSentAt > 0 || stage !in ENROLL_RUNNING || json.optBoolean("setup_needed")) return
+        enrolling(stage)
+        open(Screen.SecondFactor)
     }
 
     fun open(screen: Screen) {
@@ -94,6 +153,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
 
     suspend fun refresh() {
         val reply = withContext(Dispatchers.IO) { core.get("/status.json") }
+        portTaken = core.portTaken
         val json = reply.json
         if (!reply.ok || json == null) {
             unreachable = true
@@ -102,6 +162,10 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         unreachable = false
         status = json
         core.setupDone = !json.optBoolean("setup_needed", true)
+        if (!enrollChecked) {
+            enrollChecked = true
+            resumeEnroll(json)
+        }
         val setting = json.optString("language", "")
         val system = ConfigurationCompat.getLocales(getApplication<Application>().resources.configuration).let { list ->
             (0 until list.size()).mapNotNull { list[it] }

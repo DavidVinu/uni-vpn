@@ -48,7 +48,9 @@ fun TotpEntry(model: AppModel, secret: String, onSecret: (String) -> Unit, onVal
     var left by remember { mutableIntStateOf(0) }
     var checkError by remember { mutableStateOf<String?>(null) }
     var checks by remember { mutableIntStateOf(0) }
-    FilledTonalButton(onClick = { Scanner.scanQr(context) { value -> if (value != null) onSecret(value) } }, modifier = Modifier.fillMaxWidth()) {
+    FilledTonalButton(onClick = {
+        Scanner.scanQr(context, { checkError = model.t("phone.scan_failed") }) { value -> if (value != null) onSecret(value) }
+    }, modifier = Modifier.fillMaxWidth()) {
         Icon(Icons.Outlined.QrCodeScanner, contentDescription = null)
         Text("  " + model.t("phone.scan_qr"))
     }

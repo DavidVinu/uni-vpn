@@ -27,6 +27,10 @@ var ErrLocked = errors.New("uni-vpn daemon is already running")
 // released.
 var ErrRestart = errors.New("uni-vpn daemon asked for a restart")
 
+// ErrPortsTaken: another program holds the status or SOCKS port, and the caller asked for
+// both (daemon.Options.ReadyFile).
+var ErrPortsTaken = errors.New("uni-vpn daemon: another program holds its port")
+
 // LoggedError is a failure that is already in the log file.
 type LoggedError struct{ Err error }
 
@@ -153,6 +157,9 @@ func Run(ctx context.Context, o Options) error {
 	closeLog() // a restarted program opens the log file again
 	if d.RestartRequested {
 		return ErrRestart
+	}
+	if d.PortsTaken {
+		return ErrPortsTaken
 	}
 	return nil
 }

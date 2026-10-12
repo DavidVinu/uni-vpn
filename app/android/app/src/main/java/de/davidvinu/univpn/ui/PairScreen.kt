@@ -34,6 +34,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,27 +63,39 @@ import org.json.JSONObject
  * also scan the code a computer shows under "Use settings from another device".
  */
 @Composable
-fun PairScreen(model: AppModel, mode: String, @Suppress("UNUSED_PARAMETER") activity: MainActivity) {
+fun PairScreen(model: AppModel, mode: String, activity: MainActivity) {
     val status = model.status ?: return
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    var shown by remember { mutableStateOf<String?>(null) }
+    // Saved, so turning the phone keeps the code the other device may be typing.
+    var shown by rememberSaveable { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
-    var typing by remember { mutableStateOf(false) }
-    var typed by remember { mutableStateOf("") }
-    var done by remember { mutableStateOf(false) }
-    var attempt by remember { mutableIntStateOf(0) }
+    var typing by rememberSaveable { mutableStateOf(false) }
+    var typed by rememberSaveable { mutableStateOf("") }
+    var done by rememberSaveable { mutableStateOf(false) }
+    var attempt by rememberSaveable { mutableIntStateOf(0) }
+    // The attempt whose code shows.
+    var offered by rememberSaveable { mutableIntStateOf(-1) }
     var busy by remember { mutableStateOf(false) }
 
     LaunchedEffect(attempt) {
+        if (offered == attempt && shown != null) return@LaunchedEffect
         error = null
         shown = null
         val result = model.post("/api/sync/$mode", timeoutMs = 30_000)
-        if (result.ok) shown = result.json?.optJSONObject("pairing")?.optString("code") else error = result.error
+        if (result.ok) {
+            shown = result.json?.optJSONObject("pairing")?.optString("code")
+            offered = attempt
+        } else {
+            error = result.error
+        }
     }
     @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
     DisposableEffect(Unit) {
-        onDispose { GlobalScope.launch { model.core.post("/api/sync/cancel") } }
+        onDispose {
+            // Turning the phone builds the screen anew: the pairing goes on.
+            if (!activity.isChangingConfigurations) GlobalScope.launch { model.core.post("/api/sync/cancel") }
+        }
     }
     val pairing = status.optJSONObject("sync")?.optJSONObject("pairing")
     val pairingState = if (pairing != null && pairing.optString("code") == shown) pairing.optString("state") else ""

@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.system.OsConstants
 import android.util.Log
+import androidx.core.content.edit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -59,9 +60,15 @@ class UniVpnService : VpnService() {
         }
         running.value = true
         stopped = false
+        want(this, true)
         if (poll?.isActive == true) return
         poll = scope.launch {
-            core.ensureRunning()
+            // The rule names the core's port: Android gets it once our own core holds it, not
+            // while another app listens there (Core.ready).
+            while (!core.ready()) {
+                core.ensureRunning()
+                delay(250)
+            }
             applyRule(force = true)
             // Websites can change on another device (syncing): the rule follows.
             while (isActive) {
@@ -117,6 +124,7 @@ class UniVpnService : VpnService() {
             tun = fd
             pacVersion = version
         }
+        blocking.value = isLockdownEnabled
     }
 
     private fun notification(): Notification =
@@ -136,6 +144,8 @@ class UniVpnService : VpnService() {
         stopped = true
         poll?.cancel()
         running.value = false
+        blocking.value = false
+        want(this, false)
         scope.launch { core.post("/api/disconnect") }
         synchronized(tunLock) {
             tun?.close()
@@ -152,6 +162,7 @@ class UniVpnService : VpnService() {
     override fun onDestroy() {
         stopped = true
         running.value = false
+        blocking.value = false
         synchronized(tunLock) {
             tun?.close()
             tun = null
@@ -169,6 +180,19 @@ class UniVpnService : VpnService() {
 
         private val running = MutableStateFlow(false)
         val isOn: StateFlow<Boolean> = running
+
+        /**
+         * Android's "Block connections without VPN" is on for Uni VPN. This VPN carries nothing,
+         * so the other apps reach nothing: Home says so.
+         */
+        private val blocking = MutableStateFlow(false)
+        val lockdown: StateFlow<Boolean> = blocking
+
+        /** On as the user left it, so it comes back after a restart or an update (BootReceiver). */
+        fun wanted(context: Context) = context.getSharedPreferences("vpn", Context.MODE_PRIVATE).getBoolean("on", false)
+
+        private fun want(context: Context, on: Boolean) =
+            context.getSharedPreferences("vpn", Context.MODE_PRIVATE).edit { putBoolean("on", on) }
 
         /** Call only after VpnService.prepare returned null. */
         fun start(context: Context) {

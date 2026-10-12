@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="channel">连接</string>
+    <string name="port_in_use">另一个应用造成了干扰。Uni VPN 会继续尝试。如果问题持续，请重启手机。</string>
 </resources>

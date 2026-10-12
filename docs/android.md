@@ -25,7 +25,11 @@ the Go core does the work and the app only talks to its local API.
   with a new `?v=` in the rule's address so browsers reload it.
 - **Local API.** Every app on a phone can reach 127.0.0.1, so the core answers only requests
   with the app's token (`X-Uni-VPN-Token`, `UNI_VPN_API_TOKEN`). `proxy.pac` stays open for the
-  browsers.
+  browsers. Any app can also listen on the core's ports first and collect the token and the
+  password: with a token, the core ends (exit code 3) when it cannot have both ports, and
+  creates `api-ready` in its state folder once it has them. The app deletes that file before it
+  starts the core and sends requests, and hands Android the proxy rule, only while its own core
+  runs and the file exists; when the core ended for that, the app says another app is in the way.
 - **Known gap: the proxy port.** The SOCKS port (127.0.0.1:1080) is open to every app on the
   phone, as browsers cannot send a token. An installed app could reach the listed university
   websites through the user's tunnel. On a computer that is limited to the user's own programs;
@@ -51,7 +55,7 @@ the Go core does the work and the app only talks to its local API.
 | System prompt | Tailscale | Android's "connection request" right after setup |
 | Welcome, Add a device | WhatsApp, Signal linked devices | Scan the code the computer shows; the code under the QR code to type instead |
 | University | eduroam CAT | Search by name or city, "Not listed" for a VPN address |
-| Sign-in code | Google Authenticator | "Scan QR code" with the system scanner (no camera permission), or type the setup key; the live test code |
+| Sign-in code | Google Authenticator, Microsoft Authenticator | "Scan QR code" with the system scanner (no camera permission), or type the setup key; the live test code. Where the university's MFA portal allows it, one code from the user's app instead ("sign in to add your work account") |
 | Settings | Android Settings | Grouped list, the value under each title, info icon for hints |
 
 Texts come from `uni_vpn/locales/<lang>.json` (`/locales.json`); `phone.<key>` replaces a text

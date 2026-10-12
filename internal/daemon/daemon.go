@@ -141,6 +141,10 @@ type Options struct {
 	// PortalClient opens the MFA portal for the automatic second factor (enroll.go); nil
 	// means linotp.New.
 	PortalClient PortalClient
+	// ReadyFile, when set, is created once both ports are ours, and without either port the
+	// daemon ends (PortsTaken) instead of running without it. On a phone any app can listen
+	// on 127.0.0.1 first: the Android app talks to its core only while this file exists.
+	ReadyFile string
 }
 
 type lastError struct {
@@ -195,6 +199,9 @@ type Daemon struct {
 	// RestartRequested is set when the program files were replaced and the caller should
 	// start the new code. Read it after Run returned.
 	RestartRequested bool
+	// PortsTaken: another program held the status or SOCKS port and Options.ReadyFile asked
+	// for both. Read it after Run returned.
+	PortsTaken bool
 
 	// Like Chrome: check a while after the start, then every few hours. Tests change these
 	// and the clock (after) before Run.
@@ -953,6 +960,20 @@ func (d *Daemon) Run() {
 	d.http = server
 	d.mu.Unlock()
 	d.bindForwarder()
+	if ready := d.opts.ReadyFile; ready != "" {
+		if server == nil || d.forwarder.Addr() == nil {
+			d.PortsTaken = true
+			d.forwarder.Stop()
+			if server != nil {
+				server.Stop()
+			}
+			return
+		}
+		if err := os.WriteFile(ready, nil, 0o600); err != nil {
+			d.logf(slog.LevelError, "Could not write %s: %s", ready, err)
+		}
+		defer os.Remove(ready)
+	}
 	tickerDone := make(chan struct{})
 	go func() { d.ticker(); close(tickerDone) }()
 	updatesDone := make(chan struct{})
