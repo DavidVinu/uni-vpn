@@ -2,13 +2,16 @@ package de.davidvinu.univpn
 
 import android.app.Application
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.os.ConfigurationCompat
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.util.Locale
@@ -46,6 +49,22 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     var passwordDialog by mutableStateOf(false)
     /** Setup finished in this run and its last page ("All set") is still open. */
     var setupFinishing by mutableStateOf(false)
+    /** The setup request: kept here, not in the screen, so turning the phone does not lose it. */
+    var setupBusy by mutableStateOf(false)
+        private set
+    /** When setup was accepted and the first sign-in started; 0 while none is awaited. */
+    var setupSentAt by mutableLongStateOf(0L)
+    var setupFailure by mutableStateOf<Result?>(null)
+
+    fun sendSetup(body: JSONObject) {
+        setupBusy = true
+        setupSentAt = 0
+        viewModelScope.launch {
+            val result = post("/api/setup", body, timeoutMs = 60_000)
+            setupBusy = false
+            if (result.ok) setupSentAt = System.currentTimeMillis() else setupFailure = result
+        }
+    }
 
     fun open(screen: Screen) {
         stack.add(screen)

@@ -43,7 +43,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -125,7 +124,6 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
     var pairCode by rememberSaveable { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
-    var sentAt by remember { mutableLongStateOf(0L) }
 
     LaunchedEffect(Unit) {
         val list = model.get("/universities.json")?.optJSONArray("universities")
@@ -149,55 +147,53 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
     }
 
     fun submit() {
-        if (busy) return
-        busy = true
+        if (model.setupBusy) return
         model.setupFinishing = true
         go(CONNECTING)
-        scope.launch {
-            val profile = JSONObject()
-            if (isOther) {
-                val parts = host.trim().replace(Regex("^https?://", RegexOption.IGNORE_CASE), "").split("/", limit = 2)
-                profile.put("host", parts[0]).put("mfa", otherMfa)
-                if (parts.size > 1 && parts[1].isNotEmpty()) profile.put("usergroup", parts[1])
-                if (groups.size > 1 && group.isNotEmpty()) profile.put("authgroup", group)
-            }
-            val body = JSONObject().put("user", user.trim()).put("password", password)
-                .put("secret", if (needsTotp) secret.trim() else "").put("university", uniId).put("profile", profile)
-            val result = model.post("/api/setup", body, timeoutMs = 60_000)
-            busy = false
-            if (!result.ok) {
-                if (!model.changingAccount) model.setupFinishing = false
-                val field = result.json?.optString("field")
-                step = when {
-                    field in PROFILE_FIELDS -> UNIVERSITY
-                    field == "totp" && needsTotp -> SECOND_FACTOR
-                    else -> SIGN_IN
-                }
-                error = result.error
-                return@launch
-            }
-            sentAt = System.currentTimeMillis()
+        val profile = JSONObject()
+        if (isOther) {
+            val parts = host.trim().replace(Regex("^https?://", RegexOption.IGNORE_CASE), "").split("/", limit = 2)
+            profile.put("host", parts[0]).put("mfa", otherMfa)
+            if (parts.size > 1 && parts[1].isNotEmpty()) profile.put("usergroup", parts[1])
+            if (groups.size > 1 && group.isNotEmpty()) profile.put("authgroup", group)
         }
+        val body = JSONObject().put("user", user.trim()).put("password", password)
+            .put("secret", if (needsTotp) secret.trim() else "").put("university", uniId).put("profile", profile)
+        model.sendSetup(body)
+    }
+
+    // The answer lands in the model, so turning the phone meanwhile loses nothing.
+    LaunchedEffect(model.setupFailure) {
+        val result = model.setupFailure ?: return@LaunchedEffect
+        model.setupFailure = null
+        if (!model.changingAccount) model.setupFinishing = false
+        val field = result.json?.optString("field")
+        step = when {
+            field in PROFILE_FIELDS -> UNIVERSITY
+            field == "totp" && needsTotp -> SECOND_FACTOR
+            else -> SIGN_IN
+        }
+        error = result.error
     }
 
     // While connecting: the first sign-in tells whether everything was right (setupProgress).
-    if (step == CONNECTING && sentAt > 0) {
+    if (step == CONNECTING && model.setupSentAt > 0) {
         val state = status.optString("state")
-        val settled = System.currentTimeMillis() - sentAt > 1500
+        val settled = System.currentTimeMillis() - model.setupSentAt > 1500
         LaunchedEffect(state, settled, status.optBoolean("busy")) {
             when {
                 state == "connected" -> {
-                    sentAt = 0
+                    model.setupSentAt = 0
                     if (model.changingAccount) finishChange() else go(DONE)
                 }
                 state in setOf("auth_failed", "keyring") && settled -> {
-                    sentAt = 0
+                    model.setupSentAt = 0
                     val totp = status.optString("error_kind") == "totp"
                     step = if (totp && needsTotp) SECOND_FACTOR else SIGN_IN
                     error = model.strings.message(status.optString("message"), status.optJSONObject("message_t"))
                 }
                 state == "idle" && !status.optBoolean("busy") && settled -> {
-                    sentAt = System.currentTimeMillis()
+                    model.setupSentAt = System.currentTimeMillis()
                     model.post("/api/connect")
                 }
             }
@@ -212,7 +208,7 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
             SECOND_FACTOR -> { { go(SIGN_IN) } }
             CODE -> { { go(WELCOME) } }
             UNIVERSITY -> if (model.changingAccount) { { finishChange() } } else if (syncAvailable) { { go(WELCOME) } } else null
-            CONNECTING -> if (!busy) { { sentAt = 0; go(if (needsTotp) SECOND_FACTOR else SIGN_IN) } } else null
+            CONNECTING -> if (!model.setupBusy) { { model.setupSentAt = 0; go(if (needsTotp) SECOND_FACTOR else SIGN_IN) } } else null
             else -> null
         }
         if (step != WELCOME && step != DONE) {
@@ -336,6 +332,9 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
                             isOther && host.isBlank() -> error = model.t("setup.enter_address")
                             isOther && otherMfa.isEmpty() -> scope.launch {
                                 detect(model, host, "", { detecting = it }, { error = it }) { g, gs, m -> group = g; groups = gs; otherMfa = m }
+                                // Like the desktop page: whatever the check found, the choice
+                                // shows, so a gateway that does not answer can still be set up.
+                                if (otherMfa.isEmpty()) otherMfa = "totp_field"
                             }
                             else -> go(SIGN_IN)
                         }
@@ -399,8 +398,8 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
                     model.t("setup.waiting")
                 }
                 Text(text, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (stuck && sentAt > 0) {
-                    TextButton(onClick = { sentAt = 0; if (model.changingAccount) finishChange() else go(DONE) }) {
+                if (stuck && model.setupSentAt > 0) {
+                    TextButton(onClick = { model.setupSentAt = 0; if (model.changingAccount) finishChange() else go(DONE) }) {
                         Text(model.t("setup.finish"))
                     }
                 }
@@ -466,7 +465,7 @@ private suspend fun detect(
         error(model.t("setup.saml"))
         return
     }
-    found(d.optString("group"), groups, d.optJSONObject("suggestion")?.optString("mfa") ?: "none")
+    found(d.optString("group"), groups, d.optJSONObject("suggestion")?.optString("mfa")?.takeIf { it.isNotEmpty() } ?: "totp_field")
 }
 
 /** A university's own steps, translated where the catalog has them, else the general ones. */

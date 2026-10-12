@@ -33,6 +33,10 @@ class UniVpnService : VpnService() {
     private var tun: ParcelFileDescriptor? = null
     private var pacVersion: String? = null
     private var poll: Job? = null
+    /** Set by Stop, so a rule refresh that was already running does not bring the VPN back. */
+    @Volatile private var stopped = false
+    /** Guards swapping [tun] only, so Stop on the main thread never waits for the network. */
+    private val tunLock = Any()
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -54,6 +58,7 @@ class UniVpnService : VpnService() {
             startForeground(NOTIFICATION, notification())
         }
         running.value = true
+        stopped = false
         if (poll?.isActive == true) return
         poll = scope.launch {
             core.ensureRunning()
@@ -69,8 +74,12 @@ class UniVpnService : VpnService() {
     /** (Re)establishes the VPN when the website list changed, so browsers reload the rule. */
     @Synchronized
     private fun applyRule(force: Boolean) {
+        if (stopped) return
         val status = core.get("/status.json").json
-        val domains = status?.optJSONArray("domains")?.join(",") ?: pacVersion ?: ""
+        // Without an answer the list is unknown: keep the rule as it is (the first start still
+        // hands Android the address, which answers once the core listens).
+        if (status == null && !force) return
+        val domains = status?.optJSONArray("domains")?.join(",") ?: ""
         val version = Integer.toHexString(domains.hashCode())
         if (!force && version == pacVersion && tun != null) return
         val builder = Builder()
@@ -99,9 +108,15 @@ class UniVpnService : VpnService() {
             shutDown()
             return
         }
-        tun?.close()
-        tun = fd
-        pacVersion = version
+        synchronized(tunLock) {
+            if (stopped) {
+                fd.close()
+                return
+            }
+            tun?.close()
+            tun = fd
+            pacVersion = version
+        }
     }
 
     private fun notification(): Notification =
@@ -118,12 +133,15 @@ class UniVpnService : VpnService() {
     )
 
     private fun shutDown() {
+        stopped = true
         poll?.cancel()
         running.value = false
         scope.launch { core.post("/api/disconnect") }
-        tun?.close()
-        tun = null
-        pacVersion = null
+        synchronized(tunLock) {
+            tun?.close()
+            tun = null
+            pacVersion = null
+        }
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
         VpnTileService.update(this)
@@ -132,9 +150,12 @@ class UniVpnService : VpnService() {
     override fun onRevoke() = shutDown()
 
     override fun onDestroy() {
+        stopped = true
         running.value = false
-        tun?.close()
-        tun = null
+        synchronized(tunLock) {
+            tun?.close()
+            tun = null
+        }
         scope.cancel()
         VpnTileService.update(this)
         super.onDestroy()

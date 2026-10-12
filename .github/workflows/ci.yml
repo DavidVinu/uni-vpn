@@ -373,8 +373,6 @@ jobs:
   android:
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    permissions:
-      contents: write
     env:
       HAS_UPLOAD_KEY: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
     steps:
@@ -438,17 +436,6 @@ jobs:
           name: android-app
           path: out/*
           retention-days: 7
-      # Only a signed app goes to the release page; sideloading is not the way for users
-      # (docs/android.md), but it lets testers install the newest build.
-      - name: Add the signed app to the "latest" release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && env.HAS_UPLOAD_KEY == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          git fetch --quiet origin main
-          if [ "$(git rev-parse FETCH_HEAD)" != "$GITHUB_SHA" ]; then echo "main has moved on"; exit 0; fi
-          gh release upload latest out/uni-vpn.apk --clobber
-
   windows-openconnect:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -621,3 +608,28 @@ jobs:
           gh release upload latest core/uni-vpn-core-*.zip --clobber
           gh release upload latest core/core-manifest.json --clobber
           gh release edit latest --notes "Version $UNI_VPN_VERSION, $(date -u +%Y-%m-%d). Download the file for your computer and open it: uni-vpn.pkg (Mac), uni-vpn-setup.exe (Windows), uni-vpn.deb (Ubuntu, Debian, Mint) or uni-vpn.rpm (Fedora)."
+
+  # Only a signed app goes to the release page; sideloading is not the way for users
+  # (docs/android.md), but it lets testers install the newest build. After "publish", so the
+  # release exists and its tag is this commit.
+  publish-android:
+    needs: [publish, android]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency: publish-installers
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-app
+          path: out
+      - name: Add the signed app to the "latest" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ ! -f out/uni-vpn.apk ]; then echo "no upload key yet, nothing to publish"; exit 0; fi
+          git fetch --quiet origin main
+          if [ "$(git rev-parse FETCH_HEAD)" != "$GITHUB_SHA" ]; then echo "main has moved on, the newer run publishes"; exit 0; fi
+          gh release upload latest out/uni-vpn.apk --clobber

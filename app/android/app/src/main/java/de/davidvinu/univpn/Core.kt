@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import android.provider.Settings
 import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import android.util.Log
@@ -15,6 +16,7 @@ import java.net.URL
 import java.security.KeyStore
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
+import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -79,11 +81,13 @@ class Core(private val context: Context) {
         val native = context.applicationInfo.nativeLibraryDir
         val files = context.filesDir
         val state = File(files, "state").apply { mkdirs() }
+        val output = File(state, "core-output.log")
+        if (output.length() > 1_000_000) output.renameTo(File(state, "core-output.log.1"))
         val ca = writeCertificates()
         val builder = ProcessBuilder("$native/libunivpn.so", "daemon")
             .directory(files)
             .redirectErrorStream(true)
-            .redirectOutput(ProcessBuilder.Redirect.appendTo(File(state, "core-output.log")))
+            .redirectOutput(ProcessBuilder.Redirect.appendTo(output))
         builder.environment().apply {
             put("HOME", files.path)
             put("XDG_CONFIG_HOME", File(files, "config").path)
@@ -134,29 +138,37 @@ class Core(private val context: Context) {
      * the VPN can reconnect in a pocket.
      */
     private fun secretsKey(): String {
-        val keystoreKey = keystoreKey()
-        prefs.getString("wrapped", null)?.let { stored ->
+        val (keystoreKey, fresh) = keystoreKey()
+        val stored = prefs.getString("wrapped", null)
+        if (stored != null && !fresh) {
             try {
                 val raw = Base64.decode(stored, Base64.NO_WRAP)
                 val cipher = Cipher.getInstance("AES/GCM/NoPadding")
                 cipher.init(Cipher.DECRYPT_MODE, keystoreKey, GCMParameterSpec(128, raw, 0, 12))
                 return cipher.doFinal(raw, 12, raw.size - 12).toHex()
-            } catch (e: Exception) {
-                // The Keystore lost its key (restored phone): the core asks for the secrets again.
+            } catch (e: KeyPermanentlyInvalidatedException) {
+                Log.e(TAG, "secrets key gone, making a new one", e)
+            } catch (e: AEADBadTagException) {
                 Log.e(TAG, "secrets key unreadable, making a new one", e)
             }
+            // Anything else (the Keystore not ready yet, for example) throws: the core is not
+            // started and the next try reads the same key.
         }
+        // A new key cannot read the old secrets: drop them, so the core asks for them again
+        // instead of reporting a broken store.
+        File(File(context.filesDir, "config"), "uni-vpn/secrets.json").delete()
         val key = ByteArray(32).also { SecureRandom().nextBytes(it) }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, keystoreKey)
         val wrapped = cipher.iv + cipher.doFinal(key)
-        prefs.edit { putString("wrapped", Base64.encodeToString(wrapped, Base64.NO_WRAP)) }
+        prefs.edit(commit = true) { putString("wrapped", Base64.encodeToString(wrapped, Base64.NO_WRAP)) }
         return key.toHex()
     }
 
-    private fun keystoreKey(): SecretKey {
+    /** The Keystore key, and whether it was just made (so nothing wrapped before can be read). */
+    private fun keystoreKey(): Pair<SecretKey, Boolean> {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        (store.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
+        (store.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it to false }
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
         generator.init(
             KeyGenParameterSpec.Builder(KEY_ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
@@ -165,7 +177,7 @@ class Core(private val context: Context) {
                 .setKeySize(256)
                 .build(),
         )
-        return generator.generateKey()
+        return generator.generateKey() to true
     }
 
     // --- Local API -------------------------------------------------------------------------

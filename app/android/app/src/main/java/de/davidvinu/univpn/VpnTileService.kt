@@ -19,19 +19,30 @@ class VpnTileService : TileService() {
             UniVpnService.stop(this)
         } else if (VpnService.prepare(this) != null || !core.setupDone) {
             // The system prompt, or setup first: both need the app.
-            val intent = Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            if (Build.VERSION.SDK_INT >= 34) {
-                startActivityAndCollapse(PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE))
-            } else {
-                @Suppress("DEPRECATION")
-                @SuppressLint("StartActivityAndCollapseDeprecated") // the PendingIntent form needs Android 14
-                startActivityAndCollapse(intent)
-            }
+            openApp()
             return
         } else {
-            UniVpnService.start(this)
+            try {
+                UniVpnService.start(this)
+            } catch (_: IllegalStateException) {
+                // Android may refuse to start the service from the tile while the app is in the
+                // background: the app starts it instead.
+                openApp()
+                return
+            }
         }
         render(!UniVpnService.isOn.value)
+    }
+
+    private fun openApp() {
+        val intent = Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (Build.VERSION.SDK_INT >= 34) {
+            startActivityAndCollapse(PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE))
+        } else {
+            @Suppress("DEPRECATION")
+            @SuppressLint("StartActivityAndCollapseDeprecated") // the PendingIntent form needs Android 14
+            startActivityAndCollapse(intent)
+        }
     }
 
     private fun render(on: Boolean = UniVpnService.isOn.value) {

@@ -26,6 +26,12 @@ the Go core does the work and the app only talks to its local API.
 - **Local API.** Every app on a phone can reach 127.0.0.1, so the core answers only requests
   with the app's token (`X-Uni-VPN-Token`, `UNI_VPN_API_TOKEN`). `proxy.pac` stays open for the
   browsers.
+- **Known gap: the proxy port.** The SOCKS port (127.0.0.1:1080) is open to every app on the
+  phone, as browsers cannot send a token. An installed app could reach the listed university
+  websites through the user's tunnel. On a computer that is limited to the user's own programs;
+  on a phone each app is its own user. Closing it needs the core to ask who owns each connection
+  (`ConnectivityManager.getConnectionOwnerUid`, which only the VPN app may call) and to allow
+  browsers only; not done yet.
 - **Secrets.** The core keeps the password and the setup key in `secrets.json`, each sealed with
   XChaCha20-Poly1305 (`internal/credentials/filecred.go`). The key comes from the app
   (`UNI_VPN_SECRETS_KEY`), stored wrapped by an AES key in the Android Keystore. Not tied to
