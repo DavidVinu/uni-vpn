@@ -62,7 +62,7 @@ func ParseDomainList(text string) (domains []string, errs []i18n.Text) {
 		if line == "" {
 			continue
 		}
-		line = strings.TrimPrefix(line, "*.")
+		line = strings.TrimPrefix(NormalizeHost(hostOf(line)), "*.")
 		if !validHost(line) {
 			errs = append(errs, i18n.T("domains.not_hostname", "line", i+1, "text", strings.TrimFunc(raw, pyIsSpace)))
 			continue
@@ -73,6 +73,26 @@ func ParseDomainList(text string) (domains []string, errs []i18n.Text) {
 		}
 	}
 	return domains, errs
+}
+
+// hostOf is the host of an address copied from the browser's address bar
+// ("https://user@sogo.uni-heidelberg.de:443/SOGo/?x"); anything else stays as it is.
+func hostOf(value string) string {
+	_, rest, scheme := strings.Cut(value, "://")
+	if scheme {
+		value = rest
+	}
+	if end := strings.IndexAny(value, "/?"); end >= 0 {
+		value = value[:end]
+	}
+	if scheme {
+		// Only behind a scheme: "name@uni.de" alone is a mail address, not a website.
+		value = value[strings.LastIndex(value, "@")+1:]
+	}
+	if host, port, ok := strings.Cut(value, ":"); ok && port != "" && strings.Trim(port, "0123456789") == "" {
+		value = host
+	}
+	return value
 }
 
 // Matches reports whether host is one of domains or a subdomain of one.

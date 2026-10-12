@@ -100,14 +100,7 @@ func realpath(p string) string {
 }
 
 func programFiles() []string {
-	var out []string
-	seen := map[string]bool{}
-	for _, name := range []string{"ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"} {
-		if v := os.Getenv(name); v != "" && !seen[v] {
-			seen[v] = true
-			out = append(out, v)
-		}
-	}
+	out := systemProgramFiles()
 	if len(out) == 0 {
 		out = []string{`C:\Program Files`, `C:\Program Files (x86)`}
 	}

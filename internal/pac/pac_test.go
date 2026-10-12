@@ -27,16 +27,33 @@ func TestDefaultsRouteHeicoLogin(t *testing.T) {
 }
 
 func TestParseNormalizesAndReportsErrorsWithLineNumbers(t *testing.T) {
-	text := "Sogo.Uni-Heidelberg.DE\n# comment\n\n*.example.org  # wildcard\nsogo.uni-heidelberg.de\nnot valid\nhttp://x.y\n"
+	text := "Sogo.Uni-Heidelberg.DE\n# comment\n\n*.example.org  # wildcard\nsogo.uni-heidelberg.de\nnot valid\nhttp://\n"
 	domains, errs := ParseDomainList(text)
 	if !reflect.DeepEqual(domains, []string{"sogo.uni-heidelberg.de", "example.org"}) {
 		t.Fatal(domains)
 	}
-	if len(errs) != 2 || errs[1].String() != `Line 7: "http://x.y" is not a website` {
+	if len(errs) != 2 || errs[1].String() != `Line 7: "http://" is not a website` {
 		t.Fatal(errs)
 	}
 	if errs[0].String() != `Line 6: "not valid" is not a website` || errs[0].JSON()[1].Value.(pyjson.Object)[0].Value != 6 {
 		t.Fatal(errs[0])
+	}
+}
+
+func TestParseTakesTheHostOfAPastedAddress(t *testing.T) {
+	// Copied from the address bar: scheme, sign-in name, port, path, query and anchor go.
+	text := "https://sogo.uni-heidelberg.de/SOGo/\nHTTP://Moodle.Uni-X.de\nheico.uni-heidelberg.de:443/\n" +
+		"https://user:pw@lsf.uni-x.de:8443/qisserver?state=user#top\nwww.uni-y.de/a/b?c=d\n"
+	domains, errs := ParseDomainList(text)
+	want := []string{"sogo.uni-heidelberg.de", "moodle.uni-x.de", "heico.uni-heidelberg.de", "lsf.uni-x.de", "www.uni-y.de"}
+	if !reflect.DeepEqual(domains, want) || len(errs) != 0 {
+		t.Fatal(domains, errs)
+	}
+	// Still not websites: no host, a mail address, a port that is no number, one word.
+	for _, line := range []string{"https://", "name@uni-x.de", "uni-x.de:abc", "https://intranet/", "ftp://x y.de"} {
+		if domains, errs := ParseDomainList(line); len(domains) != 0 || len(errs) != 1 {
+			t.Fatal(line, domains, errs)
+		}
 	}
 }
 
