@@ -79,6 +79,70 @@ func TestTCPBothWays(t *testing.T) {
 	}
 }
 
+// On Apple systems openconnect puts the address family in front of each packet on its tun
+// fd (TUN_HAS_AF_PREFIX), in network byte order, and expects it on what it reads.
+func TestAddressFamilyPrefixOut(t *testing.T) {
+	a, b := pair(t)
+	defer b.Close()
+	s, err := start(a, netip.MustParseAddr("10.0.0.2"), nil, 1400, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if c, err := s.DialContext(ctx, "tcp", "10.0.0.1:80"); err == nil {
+			c.Close()
+		}
+	}()
+	b.SetReadDeadline(time.Now().Add(5 * time.Second))
+	buf := make([]byte, 2000)
+	n, err := b.Read(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n < 24 || string(buf[:4]) != "\x00\x00\x00\x02" || buf[4]>>4 != 4 || int(buf[6])<<8|int(buf[7]) != n-4 {
+		t.Fatalf("% x", buf[:min(n, 24)])
+	}
+}
+
+func TestAddressFamilyPrefixBothWays(t *testing.T) {
+	a, b := pair(t)
+	client, err := start(a, netip.MustParseAddr("10.0.0.2"), nil, 1400, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	server, err := start(b, netip.MustParseAddr("10.0.0.1"), nil, 1400, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	ln, err := server.listenTCP(8080)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		if c, err := ln.Accept(); err == nil {
+			c.Write([]byte("hi"))
+			c.Close()
+		}
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, err := client.DialContext(ctx, "tcp", "10.0.0.1:8080")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.SetDeadline(time.Now().Add(5 * time.Second))
+	if got, err := io.ReadAll(c); err != nil || string(got) != "hi" {
+		t.Fatalf("%q %v", got, err)
+	}
+}
+
 // The SOCKS server asks the VPN's DNS servers over UDP through the stack.
 func TestUDP(t *testing.T) {
 	a, b := pair(t)

@@ -6,6 +6,7 @@ package netstack
 
 import (
 	"context"
+	"encoding/binary"
 	"net"
 	"net/netip"
 	"os"
@@ -23,6 +24,8 @@ type Stack struct {
 	file *os.File
 	dev  tun.Device
 	net  *wgnetstack.Net
+	// prefix: 4 when each packet on the fd starts with its address family (Apple systems).
+	prefix int
 
 	once sync.Once
 	wg   sync.WaitGroup
@@ -33,12 +36,20 @@ type Stack struct {
 // (os.NewFile after syscall.SetNonblock) so Close can interrupt a pending read. The stack
 // owns f from now on.
 func New(f *os.File, addr netip.Addr, dns []netip.Addr, mtu int) (*Stack, error) {
+	return start(f, addr, dns, mtu, afPrefix)
+}
+
+// start is New with or without the address family in front of each packet.
+func start(f *os.File, addr netip.Addr, dns []netip.Addr, mtu int, prefix bool) (*Stack, error) {
 	dev, n, err := wgnetstack.CreateNetTUN([]netip.Addr{addr}, dns, mtu)
 	if err != nil {
 		f.Close()
 		return nil, err
 	}
 	s := &Stack{file: f, dev: dev, net: n}
+	if prefix {
+		s.prefix = 4
+	}
 	s.wg.Add(2)
 	go s.inbound()
 	go s.outbound()
@@ -54,8 +65,8 @@ func (s *Stack) inbound() {
 		if err != nil {
 			return
 		}
-		if n > 0 {
-			_, _ = s.dev.Write([][]byte{buf[:n]}, 0)
+		if n > s.prefix {
+			_, _ = s.dev.Write([][]byte{buf[:n]}, s.prefix)
 		}
 	}
 }
@@ -67,12 +78,20 @@ func (s *Stack) outbound() {
 	bufs := [][]byte{make([]byte, maxPacket)}
 	sizes := []int{0}
 	for {
-		n, err := s.dev.Read(bufs, sizes, 0)
+		n, err := s.dev.Read(bufs, sizes, s.prefix)
 		if err != nil {
 			return
 		}
-		if n > 0 {
-			_, _ = s.file.Write(bufs[0][:sizes[0]])
+		if n > 0 && sizes[0] > 0 {
+			pkt := bufs[0][:s.prefix+sizes[0]]
+			if s.prefix > 0 {
+				family := uint32(afInet)
+				if pkt[s.prefix]>>4 == 6 {
+					family = afInet6
+				}
+				binary.BigEndian.PutUint32(pkt, family)
+			}
+			_, _ = s.file.Write(pkt)
 		}
 	}
 }
