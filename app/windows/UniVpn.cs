@@ -28,9 +28,14 @@ static class Program
     // Taken at the start: an update moves the running file aside and puts the new one here.
     public static readonly string ExePath = Application.ExecutablePath;
 
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool SetProcessDPIAware();
+
     [STAThread]
     static void Main(string[] args)
     {
+        // Sharp window and icon at 125 % and 150 % scaling instead of a stretched 96 dpi picture.
+        try { SetProcessDPIAware(); } catch (Exception) { }
         int after;
         if (int.TryParse(Options.Value(args, "--after") ?? "", out after))
         {
@@ -81,10 +86,23 @@ static class Options
     {
         // An otpauth:// link (the MFA portal's "follow this link"): the assistant reads its key.
         foreach (string arg in args)
-            if (arg.StartsWith("otpauth:", StringComparison.OrdinalIgnoreCase)) return "#otpauth=" + Uri.EscapeDataString(arg);
+            if (arg.StartsWith("otpauth:", StringComparison.OrdinalIgnoreCase)) return "#otpauth=" + Escape(arg);
         string page = Value(args, "--page");
         if (page != null) return page;
         return Array.IndexOf(args, "--hidden") >= 0 ? null : "";
+    }
+
+    // Percent-encodes everything but letters and digits (Uri.EscapeDataString keeps ' ( ) on
+    // the .NET Framework's compatibility setting).
+    static string Escape(string text)
+    {
+        StringBuilder result = new StringBuilder();
+        foreach (byte b in Encoding.UTF8.GetBytes(text))
+        {
+            if ((b >= '0' && b <= '9') || (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z')) result.Append((char)b);
+            else result.Append('%').Append(b.ToString("X2"));
+        }
+        return result.ToString();
     }
 }
 
@@ -390,17 +408,20 @@ class MainWindow : Form
     readonly string baseUrl;
     readonly WebView2 view = new WebView2();
     bool ready;
+    bool loaded;
     bool quitting;
     string pending;
+    string target;
 
     public MainWindow(string baseUrl)
     {
         this.baseUrl = baseUrl;
         Text = "Uni VPN";
         Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
-        AutoScaleDimensions = new SizeF(96F, 96F);
-        AutoScaleMode = AutoScaleMode.Dpi;
-        ClientSize = new Size(420, 660);
+        AutoScaleMode = AutoScaleMode.None;
+        float scale;
+        using (Graphics g = Graphics.FromHwnd(IntPtr.Zero)) scale = g.DpiX / 96F;
+        ClientSize = new Size((int)(420 * scale), (int)(660 * scale));
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
@@ -429,7 +450,8 @@ class MainWindow : Form
             return;
         }
         CoreWebView2Settings settings = view.CoreWebView2.Settings;
-        settings.AreDefaultContextMenusEnabled = false;
+        // On: Cut, Copy and Paste in text fields; the page blocks the menu everywhere else.
+        settings.AreDefaultContextMenusEnabled = true;
         settings.AreDevToolsEnabled = false;
         settings.IsStatusBarEnabled = false;
         settings.IsZoomControlEnabled = false;
@@ -447,12 +469,16 @@ class MainWindow : Form
             if (e.Uri.StartsWith("http://") || e.Uri.StartsWith("https://")) Process.Start(e.Uri);
         };
         // The service is still starting (sign-in) or restarting (update): try again shortly.
+        // A link opened in the browser instead (NavigationStarting) leaves the page as it is.
         view.CoreWebView2.NavigationCompleted += delegate(object sender, CoreWebView2NavigationCompletedEventArgs e)
         {
+            if (!e.IsSuccess && e.WebErrorStatus == CoreWebView2WebErrorStatus.OperationCanceled) return;
+            loaded = e.IsSuccess;
             if (e.IsSuccess || quitting) return;
             System.Windows.Forms.Timer retry = new System.Windows.Forms.Timer();
             retry.Interval = 2000;
-            retry.Tick += delegate { retry.Dispose(); if (Visible) view.CoreWebView2.Navigate(baseUrl + "?app=1"); };
+            // Hidden, it stops; opening the window again loads the page (ShowPage, !loaded).
+            retry.Tick += delegate { retry.Dispose(); if (Visible && !loaded && !quitting) view.CoreWebView2.Navigate(target); };
             retry.Start();
         };
         ready = true;
@@ -469,12 +495,15 @@ class MainWindow : Form
     {
         if (!ready) { pending = page; return; }
         string current = view.Source == null ? "" : view.Source.ToString();
-        if (current.StartsWith(baseUrl) && (page == "" || page.StartsWith("#")))
+        if (loaded && current.StartsWith(baseUrl) && (page == "" || page.StartsWith("#")))
         {
-            if (page != "") view.CoreWebView2.ExecuteScriptAsync("location.hash = '" + page + "'");
+            if (page != "") view.CoreWebView2.ExecuteScriptAsync("location.hash = " + new JavaScriptSerializer().Serialize(page));
             return;
         }
-        view.CoreWebView2.Navigate(baseUrl + "?app=1" + page);
+        // A failed page loads again as the page it was (not "?app=1" alone).
+        if (!loaded && target != null && page == "") { view.CoreWebView2.Navigate(target); return; }
+        target = baseUrl + "?app=1" + page;
+        view.CoreWebView2.Navigate(target);
     }
 
     public void Open(string page)

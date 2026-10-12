@@ -256,7 +256,8 @@ class App(Gtk.Application):
             settings.set_enable_developer_extras(False)
             settings.set_user_agent_with_application_details("UniVPN", "")
             self.view.connect("decide-policy", self.on_policy)
-            self.view.connect("context-menu", lambda *_: True)
+            # No browser menu, except Cut/Copy/Paste in text fields (the page blocks it elsewhere).
+            self.view.connect("context-menu", lambda _view, _menu, *rest: not rest[-1].context_is_editable())
             self.view.connect("load-failed", self.on_failed)
             self.window.add(self.view)
             self.window.connect("delete-event", self.on_close)
