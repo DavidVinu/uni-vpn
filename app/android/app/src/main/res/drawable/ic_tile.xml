@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The shield with the cap cut out: tile, notification and themed icon. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="560" android:viewportHeight="560">
+    <group android:translateX="-232" android:translateY="-232">
+        <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd"
+            android:pathData="M512,232 L732,314 V500 C732,640 640,738 512,792 C384,738 292,640 292,500 V314 Z M512,410 L378,470 L512,530 L646,470 Z M430,500 V572 C460,600 564,600 594,572 V500 L512,537 Z" />
+    </group>
+</vector>

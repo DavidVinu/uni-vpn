@@ -1,0 +1,7 @@
+.gradle/
+build/
+local.properties
+*.jks
+# Built by packaging/android/build-apk.sh: the Go core, openconnect and ocproxy.
+app/src/main/jniLibs/
+app/src/main/assets/licenses/

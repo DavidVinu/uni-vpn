@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- app/icon.svg without its rounded square, in the adaptive icon's safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <group android:scaleX="0.1" android:scaleY="0.1" android:translateX="2.8" android:translateY="2.8">
+        <path android:fillColor="#FFFFFF"
+            android:pathData="M512,232 L732,314 V500 C732,640 640,738 512,792 C384,738 292,640 292,500 V314 Z" />
+        <path android:fillColor="#0B57D0" android:pathData="M512,410 L646,470 L512,530 L378,470 Z" />
+        <path android:fillColor="#0B57D0"
+            android:pathData="M430,500 V572 C460,600 564,600 594,572 V500 L512,537 Z" />
+        <path android:strokeColor="#0B57D0" android:strokeWidth="12" android:strokeLineCap="round"
+            android:pathData="M630,478 V560" />
+    </group>
+</vector>

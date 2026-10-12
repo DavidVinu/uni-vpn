@@ -70,6 +70,17 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(used - set(source), set())
         self.assertGreater(len(used), 60)
 
+    def test_every_key_the_android_app_uses_exists(self):
+        source = i18n.catalog("en")
+        android = Path(i18n.__file__).parent.parent / "app" / "android" / "app" / "src" / "main"
+        code = "\n".join(p.read_text(encoding="utf-8") for p in android.rglob("*.kt"))
+        used = set(re.findall(r'\bt\("([a-z_.]+[a-z])"', code))
+        used |= {"look." + state for state in ("connected", "connecting", "disconnecting", "idle", "offline", "blocked",
+                                               "auth_failed", "keyring", "error")}
+        used |= {f"setup.mfa.{m}" for m in ("none", "totp_field", "totp_append", "duo_push")}
+        self.assertEqual(used - set(source), set())
+        self.assertGreater(len(used), 50)
+
     def test_languages_are_named_in_their_own_language(self):
         self.assertEqual(dict(i18n.LANGUAGES)["de"], "Deutsch")
         self.assertEqual(i18n.CODES[0], "en")

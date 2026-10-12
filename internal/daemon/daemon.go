@@ -133,6 +133,8 @@ type Options struct {
 	SyncRelay     string
 	SyncStore     devsync.Store
 	SyncStatePath string
+	// APIToken: every request but the PAC file's must carry it (httpapi.Server.Token).
+	APIToken string
 	// AppPolled: the native app asked for the status on httpPort (httpapi.Server.AppPolled).
 	AppPolled func(httpPort int, restartsItself bool)
 }
@@ -238,6 +240,10 @@ func New(cfg *config.Config, log *slog.Logger, opts Options) *Daemon {
 	}
 	if opts.ProxyRefresh == nil {
 		opts.ProxyRefresh = sysproxy.Refresh
+		if platform.IsAndroid {
+			// The app's VPN carries the PAC address and notices new websites in status.json.
+			opts.ProxyRefresh = func(int) {}
+		}
 	}
 	if opts.Probe == nil {
 		host, timeout := cfg.Host, seconds(cfg.ProbeTimeout)
@@ -448,6 +454,8 @@ func platformName() string {
 		return "windows"
 	case platform.IsMacOS:
 		return "macos"
+	case platform.IsAndroid:
+		return "android"
 	}
 	return "linux"
 }
@@ -875,6 +883,7 @@ func (d *Daemon) Run() {
 	httpPort := d.cfg.HTTPPort
 	d.mu.Unlock()
 	server := httpapi.New(d, "127.0.0.1", httpPort, d.log)
+	server.Token = d.opts.APIToken
 	if d.opts.AppPolled != nil {
 		server.AppPolled = func(restartsItself bool) { d.opts.AppPolled(httpPort, restartsItself) }
 	}

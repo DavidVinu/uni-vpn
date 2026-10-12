@@ -219,6 +219,32 @@ func TestForeignHostHeaderIsForbidden(t *testing.T) {
 	}
 }
 
+func TestAPITokenGuardsAllButThePAC(t *testing.T) {
+	// Android: other apps reach 127.0.0.1 too, only ours knows the token.
+	h := newHarness(t)
+	d := h.start(func(o *Options) { o.APIToken = "t0ken" })
+	for _, path := range []string{"/", "/status.json", "/locales.json"} {
+		if r := h.http("GET", path, nil, ""); r.status != 403 {
+			t.Fatal(path, r.status)
+		}
+		if r := h.http("GET", path, []header{{"X-Uni-VPN-Token", "wrong"}}, ""); r.status != 403 {
+			t.Fatal(path, r.status)
+		}
+		if r := h.http("GET", path, []header{{"X-Uni-VPN-Token", "t0ken"}}, ""); r.status != 200 {
+			t.Fatal(path, r.status)
+		}
+	}
+	if r := h.http("POST", "/api/connect", []header{{"X-Uni-VPN", "1"}}, ""); r.status != 403 {
+		t.Fatal(r.status)
+	}
+	if s, _ := d.snapshot(); s != Idle {
+		t.Fatal(s)
+	}
+	if r := h.http("GET", "/proxy.pac", nil, ""); r.status != 200 {
+		t.Fatal(r.status)
+	}
+}
+
 func TestResponsesDenyFraming(t *testing.T) {
 	h := newHarness(t)
 	h.start(nil)
