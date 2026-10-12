@@ -17,7 +17,25 @@ const App = "uni-vpn"
 var (
 	IsMacOS   = runtime.GOOS == "darwin"
 	IsWindows = runtime.GOOS == "windows"
+	IsAndroid = runtime.GOOS == "android"
 )
+
+// NativeDirEnv names the variable with the Android app's native library folder. Android only
+// lets an app run programs from there, so the app ships openconnect and ocproxy as
+// libopenconnect.so and libocproxy.so (app/android).
+const NativeDirEnv = "UNI_VPN_NATIVE_DIR"
+
+// CAFileEnv names the variable with the certificate file the Android app writes from the
+// phone's trusted certificates; openconnect cannot read Android's own certificate folder.
+const CAFileEnv = "UNI_VPN_CAFILE"
+
+// AndroidCAFile is that file, "" elsewhere or when the app did not write it.
+func AndroidCAFile() string {
+	if p := os.Getenv(CAFileEnv); IsAndroid && p != "" && isFile(p) {
+		return p
+	}
+	return ""
+}
 
 const Security = "/usr/bin/security"
 
@@ -213,6 +231,15 @@ func FindBinary(name, override string) string {
 			return c
 		}
 	}
+	if IsAndroid {
+		// Nothing else on a phone can run: the app's own copies or none.
+		if dir := os.Getenv(NativeDirEnv); dir != "" {
+			if c := filepath.Join(dir, "lib"+name+".so"); executable(c) {
+				return c
+			}
+		}
+		return ""
+	}
 	if !IsWindows {
 		if found, err := exec.LookPath(name); err == nil {
 			return found
@@ -240,11 +267,15 @@ func TunnelHelpers() []string {
 	return []string{"ocproxy"}
 }
 
-func CiscoInstalled() bool { return executable(CiscoVPN()) }
+func CiscoInstalled() bool { return !IsAndroid && executable(CiscoVPN()) }
 
 // CiscoConnected reports whether the Cisco client holds the VPN. On Linux it always creates
 // cscotun0 when connected; "vpn state" takes 2.2 s and would delay every connect.
 func CiscoConnected() bool {
+	if IsAndroid {
+		// Android runs one VPN at a time: starting ours ends Cisco's.
+		return false
+	}
 	if !IsWindows {
 		if _, err := os.Stat("/sys/class/net/cscotun0"); err == nil {
 			return true

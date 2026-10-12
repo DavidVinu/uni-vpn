@@ -1,0 +1,520 @@
+package de.davidvinu.univpn.ui
+
+import android.content.Intent
+import androidx.core.net.toUri
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.colorResource
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.outlined.QrCodeScanner
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import de.davidvinu.univpn.AppModel
+import de.davidvinu.univpn.MainActivity
+import de.davidvinu.univpn.R
+import de.davidvinu.univpn.Scanner
+import kotlinx.coroutines.launch
+import org.json.JSONObject
+import java.text.Normalizer
+
+private const val WELCOME = -1
+private const val CODE = -2
+private const val UNIVERSITY = 0
+private const val SIGN_IN = 1
+private const val SECOND_FACTOR = 2
+private const val CONNECTING = 3
+private const val DONE = 4
+
+private val TOTP_MODES = setOf("totp_field", "totp_append")
+private val USER_RE = Regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(@[A-Za-z0-9][A-Za-z0-9.-]{0,252})?$")
+private val PROFILE_FIELDS = setOf("university", "host", "usergroup", "authgroup", "mfa")
+
+/** One university of /universities.json. */
+private class University(val json: JSONObject) {
+    val id: String = json.optString("id")
+    val name: String = json.optString("name")
+    val country: String = json.optString("country")
+    val mfa: String = json.optString("mfa")
+    val portal: String = json.optString("mfa_portal_url")
+    val steps: List<String> = json.optJSONArray("mfa_steps")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
+    val search: List<String> = listOf(id, name, json.optString("host")) +
+        (json.optJSONArray("aliases")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList())
+}
+
+/** Like the status page's search: no accents, umlaut spellings folded. */
+private fun fold(s: String) = Normalizer.normalize(s, Normalizer.Form.NFKD).replace(Regex("\\p{Mn}+"), "").lowercase()
+    .replace("ue", "u").replace("oe", "o").replace("ae", "a")
+
+/**
+ * The setup assistant of the desktop app, on a phone. Role models: WhatsApp and Signal (a phone
+ * joins by scanning the QR code another device shows), eduroam CAT (find your institution),
+ * Google Authenticator (scan the setup key), Tailscale (the system's VPN prompt at the end).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SetupFlow(model: AppModel, activity: MainActivity) {
+    val status = model.status ?: return
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val syncAvailable = status.optJSONObject("sync")?.optBoolean("available") == true
+    var step by rememberSaveable {
+        mutableIntStateOf(if (model.setupFinishing) DONE else if (model.changingAccount || !syncAvailable) UNIVERSITY else WELCOME)
+    }
+    var universities by remember { mutableStateOf<List<University>>(emptyList()) }
+    var uniId by rememberSaveable { mutableStateOf(if (model.changingAccount) status.optString("university") else "") }
+    var query by rememberSaveable { mutableStateOf("") }
+    var host by rememberSaveable { mutableStateOf("") }
+    var groups by remember { mutableStateOf<List<String>>(emptyList()) }
+    var group by rememberSaveable { mutableStateOf("") }
+    var otherMfa by rememberSaveable { mutableStateOf("") }
+    var detecting by remember { mutableStateOf(false) }
+    var user by rememberSaveable { mutableStateOf(if (model.changingAccount) status.optString("user") else "") }
+    var password by rememberSaveable { mutableStateOf("") }
+    var secret by rememberSaveable { mutableStateOf("") }
+    var secretValid by remember { mutableStateOf(false) }
+    var pairCode by rememberSaveable { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        val list = model.get("/universities.json")?.optJSONArray("universities")
+        universities = list?.let { a -> (0 until a.length()).map { University(a.getJSONObject(it)) } } ?: emptyList()
+    }
+    val uni = universities.firstOrNull { it.id == uniId }
+    val isOther = uniId == "other"
+    val mfa = if (isOther) otherMfa else uni?.mfa ?: "totp_field"
+    val needsTotp = mfa in TOTP_MODES
+    val total = if (needsTotp) 4 else 3
+
+    fun go(next: Int) {
+        error = null
+        step = next
+    }
+
+    fun finishChange() {
+        model.changingAccount = false
+        model.setupFinishing = false
+        model.home()
+    }
+
+    fun submit() {
+        if (model.setupBusy) return
+        model.setupFinishing = true
+        go(CONNECTING)
+        val profile = JSONObject()
+        if (isOther) {
+            val parts = host.trim().replace(Regex("^https?://", RegexOption.IGNORE_CASE), "").split("/", limit = 2)
+            profile.put("host", parts[0]).put("mfa", otherMfa)
+            if (parts.size > 1 && parts[1].isNotEmpty()) profile.put("usergroup", parts[1])
+            if (groups.size > 1 && group.isNotEmpty()) profile.put("authgroup", group)
+        }
+        val body = JSONObject().put("user", user.trim()).put("password", password)
+            .put("secret", if (needsTotp) secret.trim() else "").put("university", uniId).put("profile", profile)
+        model.sendSetup(body)
+    }
+
+    // The answer lands in the model, so turning the phone meanwhile loses nothing.
+    LaunchedEffect(model.setupFailure) {
+        val result = model.setupFailure ?: return@LaunchedEffect
+        model.setupFailure = null
+        if (!model.changingAccount) model.setupFinishing = false
+        val field = result.json?.optString("field")
+        step = when {
+            field in PROFILE_FIELDS -> UNIVERSITY
+            field == "totp" && needsTotp -> SECOND_FACTOR
+            else -> SIGN_IN
+        }
+        error = result.error
+    }
+
+    // While connecting: the first sign-in tells whether everything was right (setupProgress).
+    if (step == CONNECTING && model.setupSentAt > 0) {
+        val state = status.optString("state")
+        val settled = System.currentTimeMillis() - model.setupSentAt > 1500
+        LaunchedEffect(state, settled, status.optBoolean("busy")) {
+            when {
+                state == "connected" -> {
+                    model.setupSentAt = 0
+                    if (model.changingAccount) finishChange() else go(DONE)
+                }
+                state in setOf("auth_failed", "keyring") && settled -> {
+                    model.setupSentAt = 0
+                    val totp = status.optString("error_kind") == "totp"
+                    step = if (totp && needsTotp) SECOND_FACTOR else SIGN_IN
+                    error = model.strings.message(status.optString("message"), status.optJSONObject("message_t"))
+                }
+                state == "idle" && !status.optBoolean("busy") && settled -> {
+                    model.setupSentAt = System.currentTimeMillis()
+                    model.post("/api/connect")
+                }
+            }
+        }
+    }
+
+    Column(
+        Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState()),
+    ) {
+        val back: (() -> Unit)? = when (step) {
+            SIGN_IN -> { { go(UNIVERSITY) } }
+            SECOND_FACTOR -> { { go(SIGN_IN) } }
+            CODE -> { { go(WELCOME) } }
+            UNIVERSITY -> if (model.changingAccount) { { finishChange() } } else if (syncAvailable) { { go(WELCOME) } } else null
+            CONNECTING -> if (!model.setupBusy) { { model.setupSentAt = 0; go(if (needsTotp) SECOND_FACTOR else SIGN_IN) } } else null
+            else -> null
+        }
+        if (step != WELCOME && step != DONE) {
+            Bar(model, if (step >= 0 && step < DONE) model.t("setup.step", "n" to step + 1, "total" to total) else "", onBack = back)
+        }
+        when (step) {
+            WELCOME -> Column(
+                Modifier.fillMaxWidth().padding(24.dp).padding(top = 96.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Image(
+                    painterResource(R.drawable.ic_launcher_foreground),
+                    contentDescription = null,
+                    modifier = Modifier.size(112.dp).clip(RoundedCornerShape(28.dp)).background(colorResource(R.color.icon_background)),
+                )
+                Text("Uni VPN", style = MaterialTheme.typography.headlineMedium)
+                Spacer(Modifier.height(48.dp))
+                Button(onClick = {
+                    Scanner.scanQr(context) { value ->
+                        val code = value?.removePrefix("UNIVPN:")
+                        if (code != null && value.startsWith("UNIVPN:")) {
+                            pairCode = code
+                            go(CODE)
+                        }
+                    }
+                }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Outlined.QrCodeScanner, contentDescription = null)
+                    Text("  " + model.t("phone.scan_code"))
+                }
+                Info(model, model.t("phone.scan_code_help"))
+                TextButton(onClick = { go(CODE) }) { Text(model.t("sync.enter")) }
+                TextButton(onClick = { go(UNIVERSITY) }) { Text(model.t("phone.setup_here")) }
+            }
+
+            CODE -> Page {
+                Text(model.t("sync.use_other"), style = MaterialTheme.typography.headlineSmall)
+                OutlinedTextField(
+                    value = pairCode,
+                    onValueChange = { pairCode = it.uppercase() },
+                    label = { Text(model.t("sync.code")) },
+                    placeholder = { Text("XXXX-XXXX-XXXX") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters, autoCorrectEnabled = false),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                ErrorText(error)
+                if (busy) CircularProgressIndicator()
+                // Scanned codes go on by themselves.
+                LaunchedEffect(Unit) {
+                    if (pairCode.length >= 12 && !busy) enterCode(model, pairCode, { busy = it }, { error = it }) { model.setupFinishing = true; go(DONE) }
+                }
+                Actions {
+                    Button(enabled = !busy && pairCode.isNotBlank(), onClick = {
+                        scope.launch { enterCode(model, pairCode, { busy = it }, { error = it }) { model.setupFinishing = true; go(DONE) } }
+                    }) { Text(model.t("app.next")) }
+                }
+            }
+
+            UNIVERSITY -> Page {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(model.t("app.university"), style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
+                    Info(model, model.t("setup.find_help"))
+                }
+                OutlinedTextField(
+                    value = if (uni != null && query.isEmpty()) uni.name else if (isOther && query.isEmpty()) model.t("setup.not_listed") else query,
+                    onValueChange = { query = it; uniId = "" },
+                    label = { Text(model.t("setup.find")) },
+                    placeholder = { Text(model.t("setup.find_placeholder")) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (uniId.isEmpty()) {
+                    val q = fold(query.trim())
+                    val found = universities.filter { u -> q.isEmpty() || u.search.any { fold(it).contains(q) } }.take(8)
+                    Column {
+                        for (u in found) {
+                            ListItem(
+                                headlineContent = { Text(u.name) },
+                                trailingContent = { Text(u.country, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                                modifier = Modifier.clickable { uniId = u.id; query = ""; error = if (u.mfa == "saml") model.t("setup.saml") else null },
+                            )
+                        }
+                        ListItem(
+                            headlineContent = { Text(model.t("setup.not_listed"), color = MaterialTheme.colorScheme.primary) },
+                            modifier = Modifier.clickable { uniId = "other"; query = ""; error = null },
+                        )
+                    }
+                }
+                if (isOther) {
+                    OutlinedTextField(
+                        value = host,
+                        onValueChange = { host = it; otherMfa = ""; groups = emptyList() },
+                        label = { Text(model.t("setup.vpn_address")) },
+                        placeholder = { Text("vpn.example.edu") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    if (groups.size > 1) {
+                        Choice(model.t("setup.group"), groups.map { it to it }, group) { picked ->
+                            group = picked
+                            scope.launch { detect(model, host, picked, { detecting = it }, { error = it }) { g, gs, m -> group = g; groups = gs; otherMfa = m } }
+                        }
+                    }
+                    if (otherMfa.isNotEmpty()) {
+                        Choice(
+                            model.t("app.second_factor"),
+                            listOf("none", "totp_field", "totp_append", "duo_push").map { it to model.t("setup.mfa.$it") },
+                            otherMfa,
+                        ) { otherMfa = it }
+                    }
+                }
+                ErrorText(error)
+                Actions {
+                    if (detecting) CircularProgressIndicator()
+                    Button(enabled = !detecting, onClick = {
+                        when {
+                            uniId.isEmpty() -> error = model.t("setup.choose")
+                            uni?.mfa == "saml" -> error = model.t("setup.saml")
+                            isOther && host.isBlank() -> error = model.t("setup.enter_address")
+                            isOther && otherMfa.isEmpty() -> scope.launch {
+                                detect(model, host, "", { detecting = it }, { error = it }) { g, gs, m -> group = g; groups = gs; otherMfa = m }
+                                // Like the desktop page: whatever the check found, the choice
+                                // shows, so a gateway that does not answer can still be set up.
+                                if (otherMfa.isEmpty()) otherMfa = "totp_field"
+                            }
+                            else -> go(SIGN_IN)
+                        }
+                    }) { Text(model.t("app.next")) }
+                }
+            }
+
+            SIGN_IN -> Page {
+                Text(model.t("setup.sign_in"), style = MaterialTheme.typography.headlineSmall)
+                OutlinedTextField(
+                    value = user,
+                    onValueChange = { user = it },
+                    label = { Text(model.t("app.username")) },
+                    placeholder = { Text("ab123") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, autoCorrectEnabled = false),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                PasswordField(model, password) { password = it }
+                ErrorText(error)
+                Actions {
+                    Button(onClick = {
+                        when {
+                            !USER_RE.matches(user.trim()) -> error = model.t("setup.enter_user")
+                            password.isEmpty() -> error = model.t("setup.enter_password")
+                            needsTotp -> go(SECOND_FACTOR)
+                            else -> submit()
+                        }
+                    }) { Text(model.t("app.next")) }
+                }
+            }
+
+            SECOND_FACTOR -> Page {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(model.t("app.second_factor"), style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
+                    Info(model, mfaSteps(model, uni).joinToString("\n") + "\n\n" + model.t("setup.totp_help"))
+                }
+                if (uni?.portal?.isNotEmpty() == true) {
+                    TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, uni.portal.toUri())) }) {
+                        Text(model.t("setup.mfa_portal"))
+                    }
+                }
+                TotpEntry(model, secret, { secret = it }, { secretValid = it }, error)
+                Actions {
+                    Button(enabled = secretValid, onClick = { submit() }) { Text(model.t("app.next")) }
+                }
+            }
+
+            CONNECTING -> Column(
+                Modifier.fillMaxWidth().padding(24.dp).padding(top = 64.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                CircularProgressIndicator()
+                Text(model.t("look.connecting"), style = MaterialTheme.typography.headlineSmall)
+                val state = status.optString("state")
+                val stuck = state in setOf("offline", "blocked", "error")
+                val text = if (stuck || status.optString("message_id") == "waiting_for_code") {
+                    model.strings.message(status.optString("message"), status.optJSONObject("message_t"))
+                } else {
+                    model.t("setup.waiting")
+                }
+                Text(text, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (stuck && model.setupSentAt > 0) {
+                    TextButton(onClick = { model.setupSentAt = 0; if (model.changingAccount) finishChange() else go(DONE) }) {
+                        Text(model.t("setup.finish"))
+                    }
+                }
+            }
+
+            DONE -> Column(
+                Modifier.fillMaxWidth().padding(24.dp).padding(top = 96.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = Ok, modifier = Modifier.size(72.dp))
+                Text(model.t("setup.all_set"), style = MaterialTheme.typography.headlineMedium)
+                val hasDomains = (status.optJSONArray("domains")?.length() ?: 0) > 0
+                Text(
+                    model.t(if (hasDomains) "setup.all_set_sub" else "setup.all_set_no_domains"),
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(24.dp))
+                // Tailscale: the system's VPN prompt follows the sign-in.
+                Button(onClick = {
+                    activity.turnOn()
+                    model.setupFinishing = false
+                    model.changingAccount = false
+                    model.home()
+                }, modifier = Modifier.fillMaxWidth()) { Text(model.t("app.done")) }
+            }
+        }
+    }
+}
+
+private suspend fun enterCode(model: AppModel, code: String, busy: (Boolean) -> Unit, error: (String?) -> Unit, done: () -> Unit) {
+    busy(true)
+    error(null)
+    val result = model.post("/api/sync/enter", JSONObject().put("code", code), timeoutMs = 60_000)
+    busy(false)
+    if (result.ok) done() else error(result.error)
+}
+
+private suspend fun detect(
+    model: AppModel,
+    host: String,
+    group: String,
+    busy: (Boolean) -> Unit,
+    error: (String?) -> Unit,
+    found: (group: String, groups: List<String>, mfa: String) -> Unit,
+) {
+    busy(true)
+    error(null)
+    val result = model.post("/api/detect", JSONObject().put("host", host.trim()).put("group", group), timeoutMs = 30_000)
+    busy(false)
+    val d = result.json
+    if (!result.ok || d == null) {
+        error(result.error)
+        return
+    }
+    if (d.has("error") && !d.isNull("error")) {
+        error(model.strings.message(d.optString("error"), d.optJSONObject("error_t")))
+        return
+    }
+    val groups = d.optJSONArray("groups")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
+    if (d.optBoolean("saml")) {
+        error(model.t("setup.saml"))
+        return
+    }
+    found(d.optString("group"), groups, d.optJSONObject("suggestion")?.optString("mfa")?.takeIf { it.isNotEmpty() } ?: "totp_field")
+}
+
+/** A university's own steps, translated where the catalog has them, else the general ones. */
+private fun mfaSteps(model: AppModel, uni: University?): List<String> {
+    val portal = model.t("setup.mfa_portal")
+    if (uni == null || uni.steps.isEmpty()) return (1..3).map { "$it. " + model.t("setup.generic_step.$it", "portal" to portal) }
+    return uni.steps.mapIndexed { i, text ->
+        val key = "uni.${uni.id}.mfa.${i + 1}"
+        val translated = model.t(key).takeIf { it != key } ?: text
+        "${i + 1}. " + translated.replace("{portal}", portal)
+    }
+}
+
+@Composable
+fun PasswordField(model: AppModel, value: String, onChange: (String) -> Unit) {
+    var shown by rememberSaveable { mutableStateOf(false) }
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        label = { Text(model.t("app.password")) },
+        singleLine = true,
+        visualTransformation = if (shown) VisualTransformation.None else PasswordVisualTransformation(),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+        trailingIcon = {
+            IconButton(onClick = { shown = !shown }) {
+                Icon(if (shown) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, contentDescription = model.t("app.show_password"))
+            }
+        },
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+/** A drop-down field (Material's exposed drop-down menu). */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun Choice(label: String, options: List<Pair<String, String>>, selected: String, onPick: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(expanded = open, onExpandedChange = { open = it }) {
+        OutlinedTextField(
+            value = options.firstOrNull { it.first == selected }?.second ?: "",
+            onValueChange = {},
+            readOnly = true,
+            label = { Text(label) },
+            modifier = Modifier.fillMaxWidth().menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
+        )
+        ExposedDropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            for ((value, text) in options) {
+                DropdownMenuItem(text = { Text(text) }, onClick = { open = false; onPick(value) })
+            }
+        }
+    }
+}

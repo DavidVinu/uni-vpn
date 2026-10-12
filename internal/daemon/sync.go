@@ -53,6 +53,10 @@ func (keyringSync) Delete() error {
 }
 
 func deviceName() string {
+	// Android's host name is "localhost"; the app passes the phone's name.
+	if name := os.Getenv("UNI_VPN_DEVICE_NAME"); name != "" {
+		return name
+	}
 	name, err := os.Hostname()
 	if err != nil || name == "" {
 		return platformName()

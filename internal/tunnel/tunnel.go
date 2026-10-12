@@ -131,6 +131,10 @@ func (t *Tunnel) AuthArgs() []string {
 	}
 	if cfg.OS != "" {
 		args = append(args, "--os="+cfg.OS)
+	} else if platform.IsAndroid {
+		// openconnect built for Android says "android"; the profiles' user agents name a
+		// desktop, and gateways that check both should see what a Linux computer sends.
+		args = append(args, "--os=linux-64")
 	}
 	if cfg.NoExternalAuth {
 		args = append(args, "--no-external-auth")
@@ -164,8 +168,11 @@ func (t *Tunnel) Command(port int) []string {
 		"--script-tun",
 		// openconnect runs the value via /bin/sh -c, so the path may contain spaces.
 		// "exec" so that dash does not leave an sh running next to ocproxy.
-		fmt.Sprintf("--script=exec %s %d", ShellQuote(t.Wrapper), port),
+		"--script="+t.script(port),
 	)
+	if ca := platform.AndroidCAFile(); ca != "" {
+		cmd = append(cmd, "--cafile="+ca)
+	}
 	// The openconnect from the .pkg was built against Homebrew's certificate file, which a Mac
 	// without Homebrew does not have.
 	if platform.IsMacOS && platform.IsBundled(t.OpenConnect) {
@@ -175,6 +182,16 @@ func (t *Tunnel) Command(port int) []string {
 	}
 	cmd = append(cmd, t.TokenArgs()...)
 	return append(cmd, t.Cfg.Host)
+}
+
+// script is the --script value. Android has no file for a wrapper script that it would run (only
+// the app's native library folder may hold programs), so there openconnect starts ocproxy itself
+// with the arguments bin/uni-vpn-ocproxy passes.
+func (t *Tunnel) script(port int) string {
+	if platform.IsAndroid {
+		return fmt.Sprintf("exec %s -D 127.0.0.1:%d -k 30", ShellQuote(t.OCProxy), port)
+	}
+	return fmt.Sprintf("exec %s %d", ShellQuote(t.Wrapper), port)
 }
 
 var shellUnsafe = regexp.MustCompile(`[^\w@%+=:,./-]`)
@@ -553,7 +570,11 @@ var runCommand = func(argv []string) (int, error) {
 func (t *Tunnel) killWrapper() {
 	// Pattern without a leading hyphen and after "--", otherwise pkill reads it as an option.
 	port := t.Port()
-	pattern := fmt.Sprintf("ocproxy -D 127.0.0.1:%d ", port)
+	name := "ocproxy"
+	if platform.IsAndroid {
+		name = filepath.Base(t.OCProxy) // libocproxy.so
+	}
+	pattern := fmt.Sprintf("%s -D 127.0.0.1:%d ", name, port)
 	t.logf(slog.LevelWarn, "ocproxy still holds port %d, running pkill", port)
 	code, err := runCommand([]string{"pkill", "-9", "-U", strconv.Itoa(os.Getuid()), "-f", "--", pattern})
 	if err != nil {

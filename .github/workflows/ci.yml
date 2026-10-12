@@ -385,6 +385,74 @@ jobs:
             out/uni-vpn-arm64.rpm
           retention-days: 7
 
+  # The Android app (app/android, docs/android.md): the Go core and openconnect for phones,
+  # the APK, and the phone tests on an emulator against Heidelberg's real gateway.
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      HAS_UPLOAD_KEY: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Android NDK and SDK parts
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;28.2.13676358" "platforms;android-36" "build-tools;36.0.0" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+          sudo apt-get install -y -qq autoconf automake libtool pkg-config > /dev/null
+      # openconnect, ocproxy and their libraries take minutes; they change only with the script.
+      - uses: actions/cache@v4
+        with:
+          path: app/android/build/native
+          key: android-native-${{ hashFiles('packaging/android/build-native.sh') }}
+      - name: Upload key
+        if: env.HAS_UPLOAD_KEY == 'true'
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/upload.jks"
+          echo "ANDROID_KEYSTORE=$RUNNER_TEMP/upload.jks" >> "$GITHUB_ENV"
+      - name: Build the app
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          packaging/android/build-apk.sh "$GITHUB_SHA" assembleRelease bundleRelease assembleDebug assembleDebugAndroidTest lintDebug testDebugUnitTest
+          mkdir out
+          outputs=app/android/app/build/outputs
+          cp $outputs/apk/debug/app-debug.apk out/uni-vpn-debug.apk
+          if [ "$HAS_UPLOAD_KEY" = true ]; then
+            cp $outputs/apk/release/app-release.apk out/uni-vpn.apk
+            cp $outputs/bundle/release/app-release.aab out/uni-vpn.aab
+          else
+            cp $outputs/apk/release/app-release-unsigned.apk out/uni-vpn-unsigned.apk
+          fi
+          ls -l out
+      - name: Enable KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Phone tests on an emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: packaging/android/emulator-test.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-app
+          path: out/*
+          retention-days: 7
   windows-openconnect:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -565,3 +633,28 @@ jobs:
           gh release upload latest core/uni-vpn-core-*.zip --clobber
           gh release upload latest core/core-manifest.json --clobber
           gh release edit latest --notes "Version $UNI_VPN_VERSION, $(date -u +%Y-%m-%d). Download the file for your computer and open it: uni-vpn.pkg (Mac), uni-vpn-setup.exe (Windows), uni-vpn.deb (Ubuntu, Debian, Mint) or uni-vpn.rpm (Fedora)."
+
+  # Only a signed app goes to the release page; sideloading is not the way for users
+  # (docs/android.md), but it lets testers install the newest build. After "publish", so the
+  # release exists and its tag is this commit.
+  publish-android:
+    needs: [publish, android]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency: publish-installers
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-app
+          path: out
+      - name: Add the signed app to the "latest" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ ! -f out/uni-vpn.apk ]; then echo "no upload key yet, nothing to publish"; exit 0; fi
+          git fetch --quiet origin main
+          if [ "$(git rev-parse FETCH_HEAD)" != "$GITHUB_SHA" ]; then echo "main has moved on, the newer run publishes"; exit 0; fi
+          gh release upload latest out/uni-vpn.apk --clobber

@@ -159,6 +159,8 @@ func (u *Updater) Pending() string {
 // Disabled says why this copy never updates itself, "" when it does.
 func (u *Updater) Disabled() string {
 	switch {
+	case runtime.GOOS == "android":
+		return "the app store updates the Android app"
 	case !ValidCommit(u.Commit):
 		return "this copy was built without a version number"
 	case u.rootErr != "":

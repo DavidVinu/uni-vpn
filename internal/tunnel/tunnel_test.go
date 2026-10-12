@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DavidVinu/uni-vpn/internal/platform"
 	"github.com/DavidVinu/uni-vpn/internal/tunnel/fakeoc"
 )
 
@@ -56,6 +58,24 @@ func TestHeidelbergCommandIsUnchanged(t *testing.T) {
 		"--reconnect-timeout=60", "--script-tun", "--script=exec " + wrapper + " 4321", "vpn-ac.uni-heidelberg.de"}
 	if got := makeProfile(t, nil).Command(4321); !slices.Equal(got, want) {
 		t.Fatalf("%q", got)
+	}
+}
+
+func TestAndroidCommand(t *testing.T) {
+	// No wrapper script on a phone: openconnect starts the app's ocproxy, and uses the
+	// certificates file the app wrote.
+	platform.IsAndroid = true
+	defer func() { platform.IsAndroid = false }()
+	ca := filepath.Join(t.TempDir(), "ca.pem")
+	os.WriteFile(ca, []byte("x"), 0o600)
+	t.Setenv(platform.CAFileEnv, ca)
+	tn := New(heidelberg(), "/data/app/x/lib/arm64/libopenconnect.so", "", nil, "/data/app/x/lib/arm64/libocproxy.so", t.TempDir())
+	cmd := tn.Command(4321)
+	if !slices.Contains(cmd, "--script=exec /data/app/x/lib/arm64/libocproxy.so -D 127.0.0.1:4321 -k 30") {
+		t.Fatalf("%q", cmd)
+	}
+	if !slices.Contains(cmd, "--os=linux-64") || !slices.Contains(cmd, "--cafile="+ca) || cmd[len(cmd)-1] != "vpn-ac.uni-heidelberg.de" {
+		t.Fatalf("%q", cmd)
 	}
 }
 
