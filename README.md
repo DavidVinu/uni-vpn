@@ -59,6 +59,17 @@ The setup window shows the steps for your university. At Heidelberg:
 
 With Duo, confirm the request on your phone. Without a second factor there is nothing to do.
 
+## More than one computer
+
+Set up Uni VPN once and your other computers take over everything, including the second factor.
+On the computer that already works, open Settings and click **Add a device**. On the new one, click
+**Use settings from another device** in the setup window. Scan the QR code with either one, or click
+**Enter a code instead** and type the code.
+
+Changes you make later reach your other computers by themselves. To take a computer out, click
+**Remove** next to it in Settings. Your settings travel encrypted; only your own computers can read
+them.
+
 ## When something does not work
 
 | What you see | What to do |
