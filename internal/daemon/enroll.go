@@ -296,7 +296,8 @@ func (d *Daemon) portalSignIn(ctx context.Context, job *enrollJob, client *linot
 	for tries := 0; ; tries++ {
 		needsCode, err := client.Login(ctx, user, password)
 		if errors.Is(err, linotp.ErrPassword) {
-			return failWith(messageText(messages.AuthRejected), err.Error())
+			// The VPN took the same password: the portal wants something else (another realm).
+			return failWith(textOf("enroll.failed"), err.Error())
 		}
 		if err != nil {
 			return err

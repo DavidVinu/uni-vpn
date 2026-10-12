@@ -45,6 +45,7 @@ type Client struct {
 	base    *url.URL
 	http    *http.Client
 	session string
+	tokens  []string // the active tokens the sign-in may ask a code of
 }
 
 // New is a client for the portal at base (https://mfa.example.edu/...; only the scheme and
@@ -156,11 +157,34 @@ func (c *Client) Login(ctx context.Context, user, password string) (needsCode bo
 	if c.session == "" {
 		return false, ErrPassword
 	}
+	var detail struct {
+		TokenList []struct {
+			Serial string `json:"LinOtp.TokenSerialnumber"`
+			Active *bool  `json:"LinOtp.Isactive"`
+		} `json:"tokenList"`
+	}
+	json.Unmarshal(r.Detail, &detail)
+	c.tokens = nil
+	for _, token := range detail.TokenList {
+		if token.Serial != "" && (token.Active == nil || *token.Active) {
+			c.tokens = append(c.tokens, token.Serial)
+		}
+	}
 	return true, nil
 }
 
 // Code finishes the sign-in with a one-time code from any of the user's code generators.
 func (c *Client) Code(ctx context.Context, otp string) error {
+	// With one token, choose it like the portal's own page does: its challenge checks the
+	// code alone, without the token's PIN. With several, the code is checked against all.
+	if len(c.tokens) == 1 {
+		if _, err := c.call(ctx, "login", map[string]any{"serial": c.tokens[0]}); err != nil {
+			var refused *RefusedError
+			if !errors.As(err, &refused) {
+				return err
+			}
+		}
+	}
 	r, err := c.call(ctx, "login", map[string]any{"otp": otp})
 	if err != nil {
 		return err

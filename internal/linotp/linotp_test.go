@@ -30,8 +30,8 @@ func TestEnrollLikeThePortalsOwnPages(t *testing.T) {
 	if err != nil || !needs {
 		t.Fatal(needs, err)
 	}
-	if err := c.Code(ctx, "111111"); err != nil {
-		t.Fatal(err)
+	if err := c.Code(ctx, "111111"); err != nil || p.Challenged != 1 {
+		t.Fatal(err, p.Challenged)
 	}
 	serial, url, err := c.Enroll(ctx, "Uni VPN")
 	if err != nil {

@@ -38,7 +38,9 @@ type Portal struct {
 	Verified map[string]bool
 	Deleted  []string
 	LoggedIn int
-	Calls    []string
+	// Challenged counts sign-ins that chose the token first, like the portal's page.
+	Challenged int
+	Calls      []string
 }
 
 // Start runs the fake over TLS; use Server.Client() for its certificate.
@@ -203,8 +205,17 @@ func (p *Portal) login(w http.ResponseWriter, params map[string]string, state, c
 		}
 		p.setState(w, cookie, "credentials_verified")
 		reply(w, false, map[string]any{"message": "credential verified - additional authentication parameter required",
-			"tokenList": []any{map[string]any{"LinOtp.TokenSerialnumber": "TOTP0001", "LinOtp.TokenType": "TOTP"}}})
-	case state == "credentials_verified" && params["otp"] != "":
+			"tokenList": []any{map[string]any{"LinOtp.TokenSerialnumber": "TOTP0001", "LinOtp.TokenType": "TOTP",
+				"LinOtp.Isactive": true}}})
+	case state == "credentials_verified" && params["serial"] != "":
+		if params["serial"] != "TOTP0001" {
+			reply(w, false, nil)
+			return
+		}
+		p.Challenged++
+		p.setState(w, cookie, "challenge_triggered")
+		reply(w, false, map[string]any{"transactionId": "1234", "message": "Please enter your otp", "linotp_tokentype": "totp"})
+	case (state == "credentials_verified" || state == "challenge_triggered") && params["otp"] != "":
 		ok := params["otp"] == p.Code && !p.used["existing/"+params["otp"]]
 		p.used["existing/"+params["otp"]] = true
 		if !ok {
