@@ -137,6 +137,9 @@ type Options struct {
 	APIToken string
 	// AppPolled: the native app asked for the status on httpPort (httpapi.Server.AppPolled).
 	AppPolled func(httpPort int, restartsItself bool)
+	// PortalClient opens the MFA portal for the automatic second factor (enroll.go); nil
+	// means linotp.New.
+	PortalClient PortalClient
 }
 
 type lastError struct {
@@ -182,6 +185,10 @@ type Daemon struct {
 	loopDone      chan struct{}
 	repairProc    Process
 	http          *httpapi.Server
+	// The automatic second factor (enroll.go): its run, and the code from the user's app the
+	// next connect signs in with instead of the stored secret.
+	enrollJob *enrollJob
+	onceCode  string
 
 	// RestartRequested is set when the program files were replaced and the caller should
 	// start the new code. Read it after Run returned.
@@ -543,6 +550,8 @@ func (d *Daemon) Status() (pyjson.Object, error) {
 		"elevated", elevated,
 		// Syncing with other devices, see sync.go.
 		"sync", d.syncStatus(),
+		// The automatic second factor, see enroll.go.
+		"enroll", d.enrollStatus(),
 	), nil
 }
 
@@ -635,6 +644,12 @@ func (d *Daemon) CompleteSetup(user, password, token, university string, overrid
 	if profile.NeedsTOTP() && token == "" {
 		return unis.TextError("totp", i18n.T("totp.empty"))
 	}
+	// A code from the user's app instead of a secret: uni-vpn adds its own (enroll.go).
+	code, once := tunnel.IsOnce(token)
+	once = once && profile.NeedsTOTP()
+	if listed, _ := unis.Get(university); once && (listed.MFAEnroll != "linotp" || profile.MFAPortalURL == "") {
+		return unis.TextError("totp", i18n.T("enroll.not_here"))
+	}
 	d.mu.Lock()
 	path := d.configPath
 	if path == "" {
@@ -665,7 +680,7 @@ func (d *Daemon) CompleteSetup(user, password, token, university string, overrid
 		if err := d.opts.PasswordSetter(password); err != nil {
 			return err
 		}
-		if profile.NeedsTOTP() {
+		if profile.NeedsTOTP() && !once {
 			if err := d.opts.TOTPSetter(token); err != nil {
 				return err
 			}
@@ -719,6 +734,9 @@ func (d *Daemon) CompleteSetup(user, password, token, university string, overrid
 	d.logf(slog.LevelInfo, "Setup completed for %s (%s)", user, profile.UniversityName)
 	d.needsSetup = false
 	d.configError = ""
+	if once {
+		d.startEnrollLocked(code, profile.MFAPortalURL)
+	}
 	d.mu.Unlock()
 	d.secretsChanged()
 	d.syncChanged(true)
@@ -1194,7 +1212,7 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 			}
 			continue
 		}
-		if wait := d.otpWaitAt(d.wall()); wait > 0 {
+		if wait := d.otpWaitAt(d.wall()); wait > 0 && d.onceCode == "" {
 			d.set(Connecting, messages.WaitingForCode)
 			d.sleep(ctx, wait)
 			if ctx.Err() != nil {
@@ -1224,7 +1242,10 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 			return
 		}
 		secret := ""
-		if cfg.NeedsTOTP() {
+		if cfg.NeedsTOTP() && d.onceCode != "" {
+			// A code the user typed from their app (enroll.go): it signs in once.
+			secret, d.onceCode = tunnel.OncePrefix+d.onceCode, ""
+		} else if cfg.NeedsTOTP() {
 			var raw []byte
 			d.unlocked(func() { raw, err = d.opts.TOTPGetter(ctx) })
 			if ctx.Err() != nil {

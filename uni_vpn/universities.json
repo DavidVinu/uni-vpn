@@ -10,6 +10,7 @@
       "no_external_auth": false,
       "mfa": "totp_field",
       "mfa_portal_url": "https://mfa.uni-heidelberg.de/",
+      "mfa_enroll": "linotp",
       "mfa_steps": [
         "Open the {portal} and sign in with your Uni ID.",
         "Click \"Einrichten\" under \"Soft-Token (zeitbasiert)\".",
