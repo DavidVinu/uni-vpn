@@ -10,7 +10,9 @@
      assistant (one step per card, primary action bottom right, Back bottom left), Google
      Authenticator for the check code with its countdown ring, iOS/macOS Settings for the
      grouped settings list, Mullvad VPN and Spotify for the language (follows the system, can be
-     changed in Settings, every language in its own name). -->
+     changed in Settings, every language in its own name), Signal and WhatsApp linked devices
+     with Brave Sync for syncing (a device list with Remove, "Add a device" shows a QR code with
+     a code to type under it, the new device scans or types it). -->
 <style>
 :root{
   --bg:#f4f5f7;--card:#fff;--text:#1d1d1f;--muted:#6e6e73;--line:#e3e3e8;--field:#fff;
@@ -111,6 +113,14 @@ input.switch:before{content:"";position:absolute;top:3px;left:3px;width:20px;hei
 input.switch:checked{background:var(--ok)}
 input.switch:checked:before{transform:translateX(18px)}
 input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
+.qr{width:200px;height:200px;margin:4px auto 16px;border-radius:12px;overflow:hidden;background:#fff}
+.qr svg{width:100%;height:100%;display:block;stroke:none}
+.pair-code{font:600 22px/1.2 ui-monospace,"SF Mono",Consolas,monospace;letter-spacing:.08em;margin:0 0 6px}
+#pair-entry input{text-transform:uppercase;font-family:ui-monospace,"SF Mono",Consolas,monospace;letter-spacing:.08em;text-align:center}
+.list .item .remove{color:var(--bad);padding:4px 0 4px 12px}
+.list button.item.add{color:var(--accent)}
+.list button.item.add .val:after{display:none}
+#s-use-other{display:block;margin:16px auto 0}
 .offline{background:var(--bad);color:var(--on-color);border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:14px}
 </style>
 </head>
@@ -141,6 +151,7 @@ input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
         </div>
         <p class="error" id="s0-err" role="alert" hidden></p>
         <div class="actions"><span></span><button class="btn primary" type="submit" data-t="app.next"></button></div>
+        <button class="btn text" type="button" id="s-use-other" data-t="sync.use_other" hidden></button>
       </form>
 
       <form id="step1" autocomplete="on" hidden>
@@ -228,6 +239,10 @@ input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
         <form id="domform"><textarea id="domains" rows="5" spellcheck="false" data-t-label="settings.domains"></textarea>
         <button class="btn primary" type="submit" data-t="app.save"></button><span class="saved" id="dommsg" role="status"></span></form></div></details>
     </div>
+    <div id="devices-group" hidden>
+      <p class="group" data-t="settings.devices"></p>
+      <div class="list" id="devices"></div>
+    </div>
     <p class="group" data-t="settings.general"></p>
     <div class="list">
       <label class="item"><span data-t="settings.language"></span><select id="language"></select></label>
@@ -237,6 +252,31 @@ input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
       <details><summary><span data-t="settings.log"></span></summary><div class="body"><pre id="log"></pre></div></details>
       <label class="item"><span data-t="settings.auto_update"></span><input type="checkbox" class="switch" id="auto-update" role="switch"></label>
       <div class="item"><span data-t="settings.version"></span><span class="small" id="v-ver"></span></div>
+    </div>
+  </section>
+
+  <!-- Linking another device: role models Signal "Link new device" and WhatsApp Web -->
+  <section id="pair" hidden>
+    <div class="bar"><button class="icon-btn" id="close-pair" data-t-label="app.back"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button><h1 id="pair-title"></h1><span style="width:40px"></span></div>
+    <div class="card center">
+      <div id="pair-show">
+        <div class="qr" id="pair-qr"></div>
+        <p class="pair-code" id="pair-code"></p>
+        <p class="sub" id="pair-sub"></p>
+        <button class="btn text" type="button" id="pair-new" data-t="sync.new_code" hidden></button>
+        <button class="btn text" type="button" id="pair-type" data-t="sync.enter"></button>
+      </div>
+      <form id="pair-entry" hidden autocomplete="off">
+        <label class="field"><span data-t="sync.code"></span>
+          <input id="pair-input" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX-XXXX" maxlength="40"></label>
+        <div class="actions"><span></span><button class="btn primary" type="submit" data-t="app.next"></button></div>
+      </form>
+      <div id="pair-done" hidden>
+        <div class="badge ok"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
+        <h2 tabindex="-1" data-t="sync.done"></h2>
+        <div class="actions" style="justify-content:center"><button class="btn primary" type="button" id="pair-ok" data-t="app.done"></button></div>
+      </div>
+      <p class="error" id="pair-err" role="alert" hidden></p>
     </div>
   </section>
 </div>
@@ -315,7 +355,7 @@ function applyLanguage(code) {
 }
 
 function show(id) {
-  for (const s of ["setup", "main", "settings"]) $(s).hidden = s !== id;
+  for (const s of ["setup", "main", "settings", "pair"]) $(s).hidden = s !== id;
   view = id;
   // The app's menu opens #main or #settings; cleared so that the next request is a change again.
   if (location.hash) history.replaceState(null, "", location.pathname + location.search);
@@ -368,6 +408,7 @@ function render() {
   const log = (S.log_tail || []).join("\n");
   if ($("log").textContent !== log) $("log").textContent = log;
   if (!domainsShown) { $("domains").value = (S.domains || []).join("\n"); domainsShown = true; }
+  renderDevices();
 }
 
 // Connected, or a connect loop still trying (offline, blocked, error): the button stops it.
@@ -386,6 +427,8 @@ async function refresh() {
     refreshing = false;
   }
   if (!languageSaving) applyLanguage(S.language);
+  $("s-use-other").hidden = !(S.sync && S.sync.available) || changing;
+  if (view === "pair") { renderPair(); return; }
   if (S.setup_needed && !setupDone) {
     if (view !== "setup") { show("setup"); await loadUniversities(); step(uni ? "step1" : "step0", uni && $("s-user").value ? "s-pw" : null); }
     return;
@@ -678,7 +721,13 @@ $("fix").onclick = async () => {
   d.open = true;
   d.querySelector("input").focus();
 };
-function openSettings() { domainsShown = false; show("settings"); render(); }
+function openSettings() {
+  domainsShown = false;
+  show("settings");
+  render();
+  // Like Chrome sync: opening Settings picks up changes from the other devices.
+  if (S.sync && S.sync.on) send("/api/sync/refresh").then(() => refresh());
+}
 $("open-settings").onclick = openSettings;
 window.addEventListener("hashchange", () => {
   const target = location.hash.slice(1);
@@ -771,6 +820,102 @@ $("domform").onsubmit = async (e) => {
   const r = await send("/api/domains", {text: $("domains").value});
   if (r.ok) $("domains").value = r.data.domains.join("\n");
   saved("dommsg", r, t(S && S.pac_refresh === "manual" ? "app.saved_restart" : "app.saved"));
+  refresh();
+};
+
+// --- devices ---------------------------------------------------------------
+function renderDevices() {
+  const sync = S.sync;
+  $("devices-group").hidden = !(sync && sync.available);
+  if ($("devices-group").hidden) return;
+  const rows = (sync.on ? sync.devices : []).map((d) => {
+    const row = document.createElement("div"), name = document.createElement("span"), val = document.createElement("span");
+    row.className = "item";
+    name.textContent = d.name;
+    val.className = "val";
+    if (d.this) { const me = document.createElement("span"); me.className = "small"; me.textContent = t("sync.this"); val.append(me); }
+    const remove = document.createElement("button");
+    Object.assign(remove, {type: "button", className: "btn text remove", textContent: t("sync.remove")});
+    remove.onclick = async () => {
+      remove.disabled = true;
+      const r = await send("/api/sync/remove", {device: d.id});
+      if (!r.ok) { remove.disabled = false; remove.textContent = errText(r); }
+      refresh();
+    };
+    val.append(remove);
+    row.append(name, val);
+    return row;
+  });
+  const add = document.createElement("button");
+  Object.assign(add, {type: "button", className: "item add", textContent: t("sync.add")});
+  add.onclick = () => startPair("offer", "settings");
+  const key = JSON.stringify([sync.on, sync.devices, lang]);
+  if ($("devices").dataset.key !== key) { $("devices").replaceChildren(...rows, add); $("devices").dataset.key = key; }
+}
+
+// --- linking a device: one shows a code, the other scans or types it -----------------------
+let pairFrom = "settings", pairShown = null;
+
+function pairPart(id) { for (const p of ["pair-show", "pair-entry", "pair-done"]) $(p).hidden = p !== id; }
+
+async function startPair(mode, from) {
+  pairFrom = from;
+  pairShown = null;
+  err("pair-err", "");
+  $("pair-title").textContent = t(mode === "offer" ? "sync.add" : "sync.use_other");
+  $("pair-sub").textContent = t(mode === "offer" ? "sync.show_offer" : "sync.show_request");
+  $("pair-qr").replaceChildren();
+  $("pair-code").textContent = "\u00a0";
+  $("pair-new").hidden = true;
+  $("pair-new").dataset.mode = mode;
+  $("pair-input").value = "";
+  pairPart("pair-show");
+  show("pair");
+  const r = await send("/api/sync/" + mode);
+  if (view !== "pair") { if (r.ok) send("/api/sync/cancel"); return; }  // closed meanwhile
+  if (!r.ok) { err("pair-err", errText(r)); $("pair-new").hidden = false; return; }
+  showPairing(r.data.pairing);
+}
+
+function showPairing(p) {
+  pairShown = p.code;
+  // The service draws the QR code itself; nothing loads from elsewhere.
+  $("pair-qr").innerHTML = p.qr;
+  $("pair-code").textContent = p.code;
+}
+
+function renderPair() {
+  const p = S.sync && S.sync.pairing;
+  if (!p || p.code !== pairShown || $("pair-show").hidden) return;
+  if (p.state === "done") { pairPart("pair-done"); $("pair-done").querySelector("h2").focus(); pairShown = null; }
+  else if (p.state === "expired" || p.state === "failed") {
+    err("pair-err", t(p.state === "expired" ? "sync.expired" : "sync.offline"));
+    $("pair-new").hidden = false;
+  }
+}
+
+function closePair() {
+  pairShown = null;
+  send("/api/sync/cancel");
+  if (pairFrom === "setup" && S && S.setup_needed) { show("setup"); step("step0"); } else openSettings();
+}
+
+// Pressing it must not blur the university search: the closing list would move it away.
+$("s-use-other").onmousedown = (e) => e.preventDefault();
+$("s-use-other").onclick = () => startPair("request", "setup");
+$("close-pair").onclick = closePair;
+$("pair-ok").onclick = () => { if (S && !S.setup_needed) { show("main"); render(); } else closePair(); };
+$("pair-new").onclick = () => startPair($("pair-new").dataset.mode, pairFrom);
+$("pair-type").onclick = () => { pairShown = null; send("/api/sync/cancel"); err("pair-err", ""); pairPart("pair-entry"); $("pair-input").focus(); };
+$("pair-entry").onsubmit = async (e) => {
+  e.preventDefault();
+  const button = $("pair-entry").querySelector("[type=submit]");
+  button.disabled = true;
+  const r = await send("/api/sync/enter", {code: $("pair-input").value});
+  button.disabled = false;
+  if (!r.ok) { err("pair-err", errText(r)); return; }
+  err("pair-err", "");
+  pairPart("pair-done");
   refresh();
 };
 

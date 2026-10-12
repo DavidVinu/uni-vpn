@@ -1,0 +1,42 @@
+# Deploys the sync relay (relay/, docs/sync.md) to Cloudflare. Needs the repository secrets
+# CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID; without them it only says so.
+name: Relay
+on:
+  push:
+    branches: [main]
+    paths: ["relay/**", ".github/workflows/relay.yml"]
+  workflow_dispatch:
+concurrency: relay-deploy
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Tests
+        run: node --test relay/worker.test.mjs
+      - name: Deploy
+        if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != ''
+        working-directory: relay
+        run: |
+          set -euo pipefail
+          wrangler="npx --yes wrangler@4"
+          id=$($wrangler d1 list --json | jq -r '.[] | select(.name == "uni-vpn-sync") | .uuid')
+          if [ -z "$id" ]; then
+            $wrangler d1 create uni-vpn-sync
+            id=$($wrangler d1 list --json | jq -r '.[] | select(.name == "uni-vpn-sync") | .uuid')
+          fi
+          sed -i "s/REPLACED_BY_THE_DEPLOY_WORKFLOW/$id/" wrangler.toml
+          $wrangler d1 execute uni-vpn-sync --remote --file schema.sql
+          $wrangler deploy | tee deploy.log
+          url=$(grep -o 'https://[^ ]*workers.dev' deploy.log | head -1)
+          echo "Relay: $url" >> "$GITHUB_STEP_SUMMARY"
+      - name: No credentials
+        if: env.CLOUDFLARE_API_TOKEN == '' || env.CLOUDFLARE_ACCOUNT_ID == ''
+        run: echo "CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID is not set, nothing deployed" >> "$GITHUB_STEP_SUMMARY"

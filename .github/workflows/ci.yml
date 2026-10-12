@@ -121,6 +121,26 @@ jobs:
           go build -ldflags "-X github.com/DavidVinu/uni-vpn/internal/daemon.Commit=$GITHUB_SHA" -o "$exe" ./cmd/uni-vpn
           python tests/handover_e2e.py "$exe" "$GITHUB_SHA"
 
+  # The sync relay (relay/): its own tests, then the Go client's tests against it.
+  relay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Relay tests
+        run: node --test relay/worker.test.mjs
+      - name: Go client against the relay
+        run: |
+          node relay/serve.mjs > "$RUNNER_TEMP/relay-url" &
+          for _ in $(seq 50); do [ -s "$RUNNER_TEMP/relay-url" ] && break; sleep 0.1; done
+          UNI_VPN_TEST_RELAY=$(cat "$RUNNER_TEMP/relay-url") go test -count=1 ./internal/devsync/
+
   # The Go core for the updaters (docs/go-switch.md), published with the installers.
   core-files:
     needs: go

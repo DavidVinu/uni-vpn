@@ -80,6 +80,16 @@ type Daemon interface {
 	CompleteSetup(user, password, token, university string, overrides []config.Setting) error
 }
 
+// Syncer is a daemon that syncs with the user's other devices (internal/devsync).
+type Syncer interface {
+	// Sync runs /api/sync/<action>; ErrNotFound for an unknown action, a *ValueError for
+	// a problem the app explains.
+	Sync(action string, data pyjson.Object) (pyjson.Object, error)
+}
+
+// ErrNotFound: no such route.
+var ErrNotFound = errors.New("not found")
+
 // DetectFunc probes a gateway; tests replace it, there is no gateway in CI.
 type DetectFunc func(ctx context.Context, host, usergroup, group string) (detect.Detection, error)
 
@@ -435,9 +445,40 @@ func (s *Server) route(method, path, query string, hdrs headers, body []byte) (i
 	case "/api/setup":
 		return s.setup(body)
 	default:
+		if action, ok := strings.CutPrefix(path, "/api/sync/"); ok {
+			return s.sync(action, body)
+		}
 		return text(404, "not found")
 	}
 	return jsonReply(200, pyjson.O("ok", true, "state", d.StateName()))
+}
+
+func (s *Server) sync(action string, body []byte) (int, string, []byte, error) {
+	syncer, ok := s.daemon.(Syncer)
+	if !ok {
+		return text(404, "not found")
+	}
+	data := pyjson.O()
+	if len(bytes.TrimSpace(body)) > 0 {
+		value, utf8OK, err := loads(body)
+		obj, isObj := value.(pyjson.Object)
+		if !utf8OK || err != nil || !isObj {
+			return text(400, "expected a JSON object")
+		}
+		data = obj
+	}
+	result, err := syncer.Sync(action, data)
+	if errors.Is(err, ErrNotFound) {
+		return text(404, "not found")
+	}
+	if err != nil {
+		var ve *ValueError
+		if errors.As(err, &ve) {
+			return problem(400, ve)
+		}
+		return problem(500, err)
+	}
+	return jsonReply(200, append(pyjson.O("ok", true), result...))
 }
 
 func (s *Server) password(body []byte) (int, string, []byte, error) {

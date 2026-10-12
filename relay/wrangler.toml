@@ -1,0 +1,13 @@
+# The sync relay. Deployed by .github/workflows/relay.yml (docs/sync.md, Relay).
+name = "uni-vpn-sync"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "uni-vpn-sync"
+database_id = "REPLACED_BY_THE_DEPLOY_WORKFLOW"
+
+[triggers]
+crons = ["17 3 * * *"]

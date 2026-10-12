@@ -28,7 +28,12 @@ type Kind string
 const (
 	KindPassword Kind = "password"
 	KindTOTP     Kind = "totp"
+	// KindSync is this device's sync keys (internal/devsync), stored under SyncUser.
+	KindSync Kind = "sync"
 )
+
+// SyncUser is the account name of the KindSync entry: one per device, not per university ID.
+const SyncUser = "device"
 
 const (
 	Service = "uni-vpn"
@@ -36,8 +41,8 @@ const (
 )
 
 var (
-	Services = map[Kind]string{KindPassword: Service, KindTOTP: "uni-vpn-totp"}
-	Labels   = map[Kind]string{KindPassword: Label, KindTOTP: "Uni VPN (second factor)"}
+	Services = map[Kind]string{KindPassword: Service, KindTOTP: "uni-vpn-totp", KindSync: "uni-vpn-sync"}
+	Labels   = map[Kind]string{KindPassword: Label, KindTOTP: "Uni VPN (second factor)", KindSync: "Uni VPN (syncing)"}
 )
 
 // CommandTimeout bounds store and delete: a keyring dialog nobody sees (service without
