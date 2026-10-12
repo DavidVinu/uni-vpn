@@ -757,7 +757,8 @@ jobs:
           retention-days: 7
 
   publish:
-    needs: [promote, macos-pkg, linux-packages, windows-installer, core-files]
+    # relay tests what "go" cannot: the sync client against the real relay code.
+    needs: [promote, macos-pkg, linux-packages, windows-installer, core-files, relay]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:

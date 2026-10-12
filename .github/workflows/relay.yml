@@ -19,8 +19,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
       - name: Tests
         run: node --test relay/worker.test.mjs
+      # The apps sync through what is deployed here, so their Go client must work with it: the
+      # check of the "relay" job in ci.yml, which this deploy does not wait for.
+      - name: Go client against the relay
+        run: |
+          node relay/serve.mjs > "$RUNNER_TEMP/relay-url" &
+          for _ in $(seq 50); do [ -s "$RUNNER_TEMP/relay-url" ] && break; sleep 0.1; done
+          UNI_VPN_TEST_RELAY=$(cat "$RUNNER_TEMP/relay-url") go test -count=1 ./internal/devsync/
       - name: Deploy
         if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != ''
         working-directory: relay
