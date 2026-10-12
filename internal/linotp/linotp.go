@@ -235,6 +235,25 @@ func (c *Client) Verify(ctx context.Context, serial, otp string) (tested bool, e
 	return true, nil
 }
 
+// Token is one of the user's tokens in the portal's list.
+type Token struct {
+	Serial      string `json:"LinOtp.TokenSerialnumber"`
+	Description string `json:"LinOtp.TokenDesc"`
+}
+
+// Tokens lists the user's tokens, like the portal's own token list.
+func (c *Client) Tokens(ctx context.Context) ([]Token, error) {
+	r, err := c.call(ctx, "usertokenlist", nil)
+	if err != nil {
+		return nil, err
+	}
+	var tokens []Token
+	if err := json.Unmarshal(r.Result.Value, &tokens); err != nil {
+		return nil, fmt.Errorf("linotp: usertokenlist: unexpected answer")
+	}
+	return tokens, nil
+}
+
 // Delete removes a token again, after a failed setup.
 func (c *Client) Delete(ctx context.Context, serial string) error {
 	_, err := c.call(ctx, "delete", map[string]any{"serial": serial})

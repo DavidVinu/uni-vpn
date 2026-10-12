@@ -97,7 +97,7 @@ body.app #setup .bar:has(#cancel-change[hidden]){display:none}
 .list .body .btn{margin-top:10px}
 .group{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:0 0 6px 16px}
 pre{font-size:12px;background:var(--bg);border-radius:10px;padding:10px;max-height:260px;overflow:auto;white-space:pre-wrap;margin:0}
-.saved{color:var(--ok);font-size:13px;margin-left:10px}
+.saved{color:var(--ok);font-size:13px;margin-left:10px;white-space:pre-line}
 .saved.bad{color:var(--bad)}
 .step{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:0 0 8px}
 .shot{display:block;width:100%;height:auto;aspect-ratio:360/210;border-radius:10px;margin:14px 0 14px}
@@ -192,6 +192,7 @@ input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
         <div class="spinner" id="a-busy" hidden></div>
         <p class="error" id="a-err" role="alert" hidden></p>
         <div class="actions"><button class="btn text" type="button" id="a-back" data-t="app.back"></button><button class="btn primary" type="submit" id="a-next" data-t="app.next"></button></div>
+        <button class="btn text" type="button" id="a-fix" data-t="main.repair" hidden></button>
         <button class="btn text" type="button" id="a-guide" data-t="setup.by_hand"></button>
       </form>
 
@@ -479,6 +480,9 @@ async function refresh() {
     show("main");  // set up meanwhile in another tab or with the command line
   }
   if (offeredKey) useOffered();
+  // A reload or the reopened app while the core still runs the short way: back to its code page,
+  // the main screen has nowhere to type the next code.
+  if (view === null && S.enroll && ["connecting", "code", "working"].includes(S.enroll.stage)) await resumeAuto();
   if (view === "setup") { autoProgress(); setupProgress(); return; }
   if (view === null) {
     if (location.hash === "#settings") openSettings(); else show("main");
@@ -510,9 +514,10 @@ async function loadUniversities() {
 const fold = (s) => String(s || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
   .replace(/ue/g, "u").replace(/oe/g, "o").replace(/ae/g, "a");
 
+// Every word somewhere ("Uni Heidelberg", "Uni Köln").
 function matches(query) {
-  const q = fold(query.trim());
-  return (UNIS || []).filter((u) => !q || [u.id, u.name, u.host, ...(u.aliases || [])].some((t) => fold(t).includes(q)));
+  const words = fold(query).split(/\s+/).filter(Boolean);
+  return (UNIS || []).filter((u) => words.every((w) => [u.id, u.name, u.host, ...(u.aliases || [])].some((t) => fold(t).includes(w))));
 }
 
 function mfa() { return uni && uni.id === "other" ? $("s-mfa").value : uni ? uni.mfa : "totp_field"; }
@@ -636,6 +641,7 @@ function renderAuto(error) {
     : busy ? t(stage === "working" ? "setup.auto_working" : "setup.waiting") : t("setup.auto_sub");
   $("a-field").hidden = $("a-next").hidden = busy;
   $("a-busy").hidden = !busy;
+  $("a-fix").hidden = busy || S.action !== "repair";
   if (error !== undefined) err("a-err", error);
   $("step2a").querySelector(".step").hidden = changingTotp;
   // A new question: an empty field, ready for the next code.
@@ -648,6 +654,8 @@ function autoProgress() {
   const e = S.enroll, settled = Date.now() - autoSentAt > 1500;
   if (settled && (!e || e.stage === "failed")) {
     autoRunning = false;
+    // A refused password: back to it like setupProgress, another code would not help.
+    if (e && S.error_kind === "password" && !changingTotp) { step("step1", "s-pw"); err("s1-err", tr(e.error, e.error_t)); return; }
     renderAuto(e ? tr(e.error, e.error_t) : "");
     $("a-code").focus();
     return;
@@ -670,7 +678,7 @@ $("step2a").onsubmit = async (e) => {
   renderAuto("");
   let r;
   try {
-    r = answer || changing ? await post("/api/totp/auto", {code})
+    r = answer || changingTotp ? await post("/api/totp/auto", {code})
       : await post("/api/setup", {user: $("s-user").value.trim(), password: $("s-pw").value, code,
                                   university: uni.id, profile: profileOverrides()});
   } catch (e) {
@@ -702,6 +710,12 @@ $("a-back").onclick = async () => {
   await stopAuto();
   err("a-err", "");
   if (changingTotp) endChange(); else step("step1");
+};
+$("a-fix").onclick = async () => {
+  $("a-fix").disabled = true;
+  await send("/api/repair");  // like the main screen's Repair button
+  $("a-fix").disabled = false;
+  refresh();
 };
 $("a-guide").onclick = async () => {
   if (submitting) return;
@@ -977,8 +991,9 @@ function openSettings() {
   domainsShown = false;
   show("settings");
   render();
-  // Like Chrome sync: opening Settings picks up changes from the other devices.
-  if (S.sync && S.sync.on) send("/api/sync/refresh").then(() => refresh());
+  // Like Chrome sync: opening Settings picks up changes from the other devices (and finds the
+  // sync keys when the keyring did not answer before).
+  if (S.sync && S.sync.available) send("/api/sync/refresh").then(() => refresh());
 }
 $("open-settings").onclick = openSettings;
 // An otpauth:// link the app was opened with (the MFA portal's "follow this link", see the
@@ -1009,6 +1024,7 @@ window.addEventListener("hashchange", () => {
   if (catchKey()) { useOffered(); return; }
   const target = location.hash.slice(1);
   if (!S || S.setup_needed || !["main", "settings"].includes(target)) return;
+  if (view === "setup" && autoRunning) return;  // the tray's "Open" during the short way: stay on it
   if (changing && !submitting) endChange();
   if (changing) return;
   if (target === "settings") openSettings(); else { show("main"); render(); }
@@ -1040,7 +1056,13 @@ async function startChange(first) {
   show("setup");
   step(changingTotp && autoOK() ? "step2a" : first);
 }
+async function resumeAuto() {
+  await startChange("step2");
+  autoRunning = setupSent = true;
+  autoSentAt = 0;
+}
 function endChange() {
+  stopAuto();  // the back arrow: the core must not go on with a code nobody wants any more
   changing = changingTotp = keyRead = setupDone = setupSent = false;
   clearInterval(codeTimer);
   $("s-pw").value = $("s-totp").value = "";
@@ -1066,6 +1088,7 @@ function saved(id, r, okText) {
 
 $("pwform").onsubmit = async (e) => {
   e.preventDefault();
+  if (!$("pw").value) { saved("pwmsg", {ok: false, data: null, text: t("setup.enter_password")}); return; }
   const r = await send("/api/password", {password: $("pw").value});
   saved("pwmsg", r, t("app.saved"));
   if (r.ok) $("pw").value = "";
@@ -1164,9 +1187,10 @@ function showPairing(p) {
 function renderPair() {
   const p = S.sync && S.sync.pairing;
   if (!p || p.code !== pairShown || $("pair-show").hidden) return;
-  if (p.state === "done") { pairPart("pair-done"); $("pair-done").querySelector("h2").focus(); pairShown = null; }
+  // error: linked, but some settings could not be used here; or why it failed.
+  if (p.state === "done") { pairPart("pair-done"); err("pair-err", tr("", p.error)); $("pair-done").querySelector("h2").focus(); pairShown = null; }
   else if (p.state === "expired" || p.state === "failed") {
-    err("pair-err", t(p.state === "expired" ? "sync.expired" : "sync.offline"));
+    err("pair-err", p.error ? tr("", p.error) : t(p.state === "expired" ? "sync.expired" : "sync.offline"));
     $("pair-new").hidden = false;
   }
 }

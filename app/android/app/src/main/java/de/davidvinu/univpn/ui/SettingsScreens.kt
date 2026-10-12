@@ -1,5 +1,6 @@
 package de.davidvinu.univpn.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,7 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -203,21 +205,63 @@ fun WebsitesScreen(model: AppModel) {
 
 @Composable
 fun SecondFactorScreen(model: AppModel, @Suppress("UNUSED_PARAMETER") activity: MainActivity) {
+    val status = model.status ?: return
     val scope = rememberCoroutineScope()
     var secret by rememberSaveable { mutableStateOf("") }
     var valid by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    // One code from the user's app where the core can add itself in the MFA portal, as on the
+    // desktop; null while the list loads.
+    var auto by remember { mutableStateOf<Boolean?>(if (model.enrollSentAt > 0) true else null) }
+    var byHand by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (auto != null) return@LaunchedEffect
+        val list = model.get("/universities.json")?.optJSONArray("universities")
+        val uni = list?.let { a -> (0 until a.length()).map { a.getJSONObject(it) } }
+            ?.firstOrNull { it.optString("id") == status.optString("university") }
+        auto = uni != null && uni.optString("mfa_enroll") == "linotp" && uni.optString("mfa_portal_url").isNotEmpty()
+    }
+    val autoPage = auto == true && !byHand
+
+    fun leave() {
+        if (auto == true && byHand) {
+            byHand = false
+            error = null
+        } else {
+            model.cancelEnroll()
+            model.back()
+        }
+    }
+    BackHandler { leave() }
     Column(Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState())) {
-        Bar(model, model.t("app.second_factor")) { Info(model, model.t("setup.totp_help")) }
+        Bar(model, model.t("app.second_factor"), onBack = { leave() }) {
+            Info(model, model.t(if (autoPage) "setup.auto_help" else "setup.totp_help"))
+        }
         Page {
-            TotpEntry(model, secret, { secret = it }, { valid = it }, error)
-            Actions {
-                Button(enabled = valid, onClick = {
-                    scope.launch {
-                        val result = model.post("/api/totp", JSONObject().put("secret", secret.trim()))
-                        if (result.ok) model.back() else error = result.error
+            when {
+                auto == null -> CircularProgressIndicator()
+                autoPage -> AutoSecondFactor(
+                    model,
+                    model.enrollError,
+                    onFirstCode = { model.sendEnrollCode(it) },
+                    onByHand = {
+                        model.cancelEnroll()
+                        byHand = true
+                    },
+                    onDone = { model.back() },
+                    onFailed = { model.enrollError = it },
+                )
+                else -> {
+                    TotpEntry(model, secret, { secret = it }, { valid = it }, error)
+                    Actions {
+                        Button(enabled = valid, onClick = {
+                            scope.launch {
+                                val result = model.post("/api/totp", JSONObject().put("secret", secret.trim()))
+                                if (result.ok) model.back() else error = result.error
+                            }
+                        }) { Text(model.t("app.save")) }
                     }
-                }) { Text(model.t("app.save")) }
+                }
             }
         }
     }
@@ -289,7 +333,7 @@ fun LicensesScreen(model: AppModel) {
 
 /** Scans the code another device shows ("Use settings from another device" on a computer). */
 fun scanPairing(context: android.content.Context, model: AppModel, scope: kotlinx.coroutines.CoroutineScope, onError: (String?) -> Unit, onDone: () -> Unit) {
-    Scanner.scanQr(context) { value ->
+    Scanner.scanQr(context, { onError(model.t("phone.scan_failed")) }) { value ->
         if (value == null || !value.startsWith("UNIVPN:")) return@scanQr
         scope.launch {
             val result = model.post("/api/sync/enter", JSONObject().put("code", value.removePrefix("UNIVPN:")), 60_000)

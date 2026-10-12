@@ -112,9 +112,9 @@ const T = {
 };
 function lang() {
   for (const l of navigator.languages || [navigator.language || "en"]) {
-    const s = l.toLowerCase();
-    if (s.startsWith("zh")) return /hant|tw|hk|mo/.test(s) ? "zh-Hant" : "zh-Hans";
-    const p = s.split("-")[0];
+    const [p, ...rest] = l.toLowerCase().split("-");
+    // Same rule as the app (uni_vpn/ui/index.html systemLanguage).
+    if (p === "zh") return !rest.includes("hans") && rest.some(r => ["hant", "tw", "hk", "mo"].includes(r)) ? "zh-Hant" : "zh-Hans";
     if (T[p]) return p;
   }
   return "en";

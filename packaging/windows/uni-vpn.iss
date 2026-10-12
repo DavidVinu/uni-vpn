@@ -1,8 +1,9 @@
-; One-click Windows installer (role model: Signal and Zoom: no pages, one administrator
+﻿; One-click Windows installer (role model: Signal and Zoom: no pages, one administrator
 ; prompt, progress bar, the app opens at the end). Built by .github/workflows/ci.yml:
 ;   iscc /DAppVersion=0.1.42 /DSourceDir=stage /DOutputDir=out packaging\windows\uni-vpn.iss
 ; The Go core (bin\uni-vpn-core.exe), OpenConnect and the app window go to Program Files; then
 ; "uni-vpn-core.exe setup" sets uni-vpn up for the signed-in user. No Python.
+; Saved as UTF-8 with a byte order mark: [CustomMessages] has the texts in every language.
 
 #ifndef AppVersion
   #define AppVersion "0.1.0"
@@ -50,6 +51,30 @@ Name: "ja"; MessagesFile: "compiler:Languages\Japanese.isl"
 #ifexist AddBackslash(CompilerPath) + "Languages\ChineseSimplified.isl"
 Name: "zh"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 #endif
+#ifexist AddBackslash(CompilerPath) + "Languages\ChineseTraditional.isl"
+Name: "zhtw"; MessagesFile: "compiler:Languages\ChineseTraditional.isl"
+#endif
+
+[CustomMessages]
+; In plain words, like the app's own texts (uni_vpn/locales).
+OtherAccount=Uni VPN has to be installed from the account that will use it. Sign in to Windows with an account that is allowed to install apps, then open the installer again.
+SetupFailed=Uni VPN could not be set up. Restart the computer, then open the installer again.
+de.OtherAccount=Uni VPN muss mit dem Konto installiert werden, das es benutzt. Melde dich bei Windows mit einem Konto an, das Apps installieren darf, und öffne das Installationsprogramm dann noch einmal.
+de.SetupFailed=Uni VPN konnte nicht eingerichtet werden. Starte den Computer neu und öffne das Installationsprogramm dann noch einmal.
+fr.OtherAccount=Uni VPN doit être installé depuis le compte qui va l’utiliser. Connectez-vous à Windows avec un compte autorisé à installer des applications, puis rouvrez le programme d’installation.
+fr.SetupFailed=Uni VPN n’a pas pu être configuré. Redémarrez l’ordinateur, puis rouvrez le programme d’installation.
+es.OtherAccount=Uni VPN debe instalarse desde la cuenta que lo va a usar. Inicia sesión en Windows con una cuenta que pueda instalar aplicaciones y vuelve a abrir el instalador.
+es.SetupFailed=No se pudo configurar Uni VPN. Reinicia el ordenador y vuelve a abrir el instalador.
+ja.OtherAccount=Uni VPN は、使うアカウントからインストールする必要があります。アプリをインストールできるアカウントで Windows にサインインしてから、もう一度インストーラーを開いてください。
+ja.SetupFailed=Uni VPN を設定できませんでした。コンピューターを再起動してから、もう一度インストーラーを開いてください。
+#ifexist AddBackslash(CompilerPath) + "Languages\ChineseSimplified.isl"
+zh.OtherAccount=Uni VPN 必须从要使用它的账户安装。请用可以安装应用的账户登录 Windows，然后重新打开安装程序。
+zh.SetupFailed=无法设置 Uni VPN。请重启电脑，然后重新打开安装程序。
+#endif
+#ifexist AddBackslash(CompilerPath) + "Languages\ChineseTraditional.isl"
+zhtw.OtherAccount=Uni VPN 必須從要使用它的帳戶安裝。請用可以安裝應用程式的帳戶登入 Windows，然後重新開啟安裝程式。
+zhtw.SetupFailed=無法設定 Uni VPN。請重新啟動電腦，然後重新開啟安裝程式。
+#endif
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
@@ -74,20 +99,19 @@ Filename: "{app}\bin\uni-vpn-core.exe"; Parameters: "uninstall --yes"; Flags: ru
 Type: filesandordirs; Name: "{app}"
 
 [Code]
-function OriginalUser(): String;
+function SameAccount(): Boolean;
 var
   ResultCode: Integer;
-  Name: AnsiString;
-  NameFile: String;
 begin
   { With a standard account, Windows asks for an administrator's password and this runs as that
-    administrator, but uni-vpn has to be set up for the account that will use it. }
-  Result := GetUserNameString();
-  NameFile := ExpandConstant('{tmp}\user.txt');
-  if ExecAsOriginalUser(ExpandConstant('{cmd}'), '/c echo %USERNAME%>"' + NameFile + '"', '', SW_HIDE,
-                        ewWaitUntilTerminated, ResultCode) and LoadStringFromFile(NameFile, Name) then
-    if Trim(String(Name)) <> '' then
-      Result := Trim(String(Name));
+    administrator, but uni-vpn has to be set up for the account that will use it. cmd of the
+    signed-in account compares the names itself: a name it writes to a file comes back here in
+    another code page, and a name with an umlaut or accent would never match. Exit code 1 means
+    another account; anything else (cmd did not run) lets the setup go ahead, as before. }
+  Result := True;
+  if ExecAsOriginalUser(ExpandConstant('{cmd}'), '/c if /i "%USERNAME%"=="' + GetUserNameString() + '" (exit 0) else (exit 1)',
+                        '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    Result := ResultCode <> 1;
 end;
 
 function StatusUrl(): String;
@@ -126,7 +150,7 @@ end;
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
-  LogDir, LogFile, SignedIn, Reason: String;
+  LogDir, LogFile: String;
   Log: AnsiString;
   Start: Integer;
 begin
@@ -140,13 +164,10 @@ begin
   LogFile := LogDir + '\install.log';
   { Setup registers the service and the proxy setting for the account it runs as, like
     install.ps1 -ForUser did. }
-  SignedIn := OriginalUser();
-  if CompareText(SignedIn, GetUserNameString()) <> 0 then
+  if not SameAccount() then
   begin
-    Reason := 'Uni VPN was installed with the account ' + GetUserNameString() + ', but it has to be set up for ' +
-               SignedIn + '.' + #13#10 + 'Sign in to Windows with an account that can install apps and open the installer again.';
-    SaveStringToFile(LogFile, Reason + #13#10, False);
-    SuppressibleMsgBox(SetupMessage(msgErrorTitle) + #13#10#13#10 + Reason, mbError, MB_OK, IDOK);
+    SaveStringToFile(LogFile, 'Installed with the account ' + GetUserNameString() + ', not the one signed in to Windows.' + #13#10, False);
+    SuppressibleMsgBox(SetupMessage(msgErrorTitle) + #13#10#13#10 + CustomMessage('OtherAccount'), mbError, MB_OK, IDOK);
     Exit;
   end;
   { "< nul": nobody can answer a question here. cmd /S /C drops the outer quotes. }
@@ -159,8 +180,8 @@ begin
     Start := Length(Log) - 600;
     if Start < 1 then
       Start := 1;
-    SuppressibleMsgBox(SetupMessage(msgErrorTitle) + #13#10#13#10 + Copy(String(Log), Start, 600),
-                       mbError, MB_OK, IDOK);
+    SuppressibleMsgBox(SetupMessage(msgErrorTitle) + #13#10#13#10 + CustomMessage('SetupFailed') + #13#10#13#10 +
+                       Copy(String(Log), Start, 600), mbError, MB_OK, IDOK);
     Exit;
   end;
   ShellExecAsOriginalUser('open', StatusUrl(), '', '', SW_SHOWNORMAL, ewNoWait, ResultCode);

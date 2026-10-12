@@ -13,11 +13,13 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/DavidVinu/uni-vpn/internal/atomicfile"
 	"github.com/DavidVinu/uni-vpn/internal/i18n"
 	"github.com/DavidVinu/uni-vpn/internal/platform"
 	unis "github.com/DavidVinu/uni-vpn/internal/universities"
@@ -347,7 +349,7 @@ func check(key string, value any, k kind, text, table string) error {
 
 // readText is Path.read_text(encoding="utf-8"): universal newlines.
 func readText(path string) (string, error) {
-	data, err := os.ReadFile(path)
+	data, err := atomicfile.Read(path)
 	if err != nil {
 		return "", err
 	}
@@ -358,13 +360,18 @@ func readText(path string) (string, error) {
 	return strings.ReplaceAll(text, "\r", "\n"), nil
 }
 
-// writeText is Path.write_text: text mode writes CRLF on Windows.
+// writeText is Path.write_text (text mode writes CRLF on Windows), but replaces the file in
+// one step with the same mode: a reader, or a crash halfway, never finds it empty.
 func writeText(path, text string) error {
 	if runtime.GOOS == "windows" {
 		text = strings.ReplaceAll(text, "\n", "\r\n")
 	}
-	return os.WriteFile(path, []byte(text), 0o666)
+	return atomicfile.Write(path, []byte(text))
 }
+
+// edits serializes the changes to config.toml: the app's settings, the assistant and syncing
+// run at the same time, and each one reads, changes and writes the whole file.
+var edits sync.Mutex
 
 // decode parses TOML like tomllib, returning the top-level keys and those of each table in
 // document order.
@@ -673,6 +680,8 @@ func WriteInitial(path, user, university string, overrides []Setting) error {
 	for _, s := range checked {
 		fmt.Fprintf(&lines, "%s = %s\n", s.Key, TOMLValue(s.Value))
 	}
+	edits.Lock()
+	defer edits.Unlock()
 	if err := mkdirParent(path); err != nil {
 		return err
 	}
@@ -716,6 +725,8 @@ func pyEqual(a, b any) bool {
 // SetValues sets top-level keys in an existing config.toml, keeping comments, order and
 // everything else.
 func SetValues(path string, values []Setting) error {
+	edits.Lock()
+	defer edits.Unlock()
 	text, err := readText(path)
 	if err != nil {
 		return err
@@ -761,6 +772,8 @@ var tableStart = regexp.MustCompile(`(?m)^[ \t]*\[`)
 // Used when the university changes: overrides that belonged to the old profile must not
 // stay behind.
 func RemoveKeys(path string, keys []string) error {
+	edits.Lock()
+	defer edits.Unlock()
 	text, err := readText(path)
 	if err != nil {
 		return err

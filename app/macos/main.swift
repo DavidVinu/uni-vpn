@@ -69,6 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     var program: String?
     var seen: String?
     var restarting = false
+    var setupStarted = false
 
     func applicationDidFinishLaunching(_ note: Notification) {
         // Started by the copy it replaces after an update: that one quits first.
@@ -341,6 +342,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         lastStart = Date()
         let domain = "gui/\(getuid())"
         let plist = NSHomeDirectory() + "/Library/LaunchAgents/de.davidvinu.uni-vpn.plist"
+        if setUpIfMissing(plist) { return }
         for args in [["bootstrap", domain, plist], ["kickstart", domain + "/de.davidvinu.uni-vpn"]] {
             let task = Process()
             task.executableURL = URL(fileURLWithPath: "/bin/launchctl")
@@ -350,6 +352,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
             try? task.run()
             task.waitUntilExit()
         }
+    }
+
+    // Not set up for this user: the installer only sets up whoever is signed in at the time
+    // (not nobody, not another account on this Mac). The package's uni-vpn-open does it, once
+    // per launch; it shows its own message if it fails.
+    func setUpIfMissing(_ plist: String) -> Bool {
+        let files = FileManager.default
+        let core = NSHomeDirectory() + "/Library/Application Support/uni-vpn/app/bin/uni-vpn-core"
+        guard !files.fileExists(atPath: plist) || !files.isExecutableFile(atPath: core) else { return false }
+        if setupStarted { return true }
+        // The updated app next to the core has no uni-vpn-open; the installed one does.
+        let opener = [Bundle.main.bundlePath, "/Applications/Uni VPN.app"]
+            .map { $0 + "/Contents/Resources/uni-vpn-open" }
+            .first { files.isExecutableFile(atPath: $0) }
+        guard let path = opener else { return false }
+        setupStarted = true
+        DispatchQueue.global().async {
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: path)
+            task.standardOutput = FileHandle.nullDevice
+            task.standardError = FileHandle.nullDevice
+            try? task.run()
+            task.waitUntilExit()
+        }
+        return true
     }
 
     @objc func toggle() {

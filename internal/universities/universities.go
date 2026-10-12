@@ -463,7 +463,8 @@ func PublicList() []PublicProfile {
 	return out
 }
 
-// Search returns the profiles whose id, name, alias or host contains the text; an exact id wins.
+// Search returns the profiles that have every word of the text in their id, name, alias or host
+// ("Uni Heidelberg"); an exact id wins.
 func Search(text string) []Profile {
 	query := Fold(strip(text))
 	if query == "" {
@@ -475,11 +476,13 @@ func Search(text string) []Profile {
 	}
 	var out []Profile
 	for _, p := range sortedByName() {
-		for _, t := range append([]string{p.ID, p.Name, p.Host}, p.Aliases...) {
-			if strings.Contains(Fold(t), query) {
-				out = append(out, p)
-				break
-			}
+		fields := append([]string{p.ID, p.Name, p.Host}, p.Aliases...)
+		found := true
+		for _, w := range strings.FieldsFunc(query, isSpace) {
+			found = found && slices.ContainsFunc(fields, func(t string) bool { return strings.Contains(Fold(t), w) })
+		}
+		if found {
+			out = append(out, p)
 		}
 	}
 	return out

@@ -10,6 +10,7 @@ package daemon
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -140,6 +141,10 @@ type Options struct {
 	// PortalClient opens the MFA portal for the automatic second factor (enroll.go); nil
 	// means linotp.New.
 	PortalClient PortalClient
+	// ReadyFile, when set, is created once both ports are ours, and without either port the
+	// daemon ends (PortsTaken) instead of running without it. On a phone any app can listen
+	// on 127.0.0.1 first: the Android app talks to its core only while this file exists.
+	ReadyFile string
 }
 
 type lastError struct {
@@ -167,6 +172,7 @@ type Daemon struct {
 	since         float64
 	lastError     *lastError
 	failures      int
+	totpRetried   bool // a rejected one-time code was tried again with the next one
 	explicit      bool
 	demandUntil   float64
 	lastActivity  float64
@@ -193,6 +199,9 @@ type Daemon struct {
 	// RestartRequested is set when the program files were replaced and the caller should
 	// start the new code. Read it after Run returned.
 	RestartRequested bool
+	// PortsTaken: another program held the status or SOCKS port and Options.ReadyFile asked
+	// for both. Read it after Run returned.
+	PortsTaken bool
 
 	// Like Chrome: check a while after the start, then every few hours. Tests change these
 	// and the clock (after) before Run.
@@ -253,8 +262,14 @@ func New(cfg *config.Config, log *slog.Logger, opts Options) *Daemon {
 		}
 	}
 	if opts.Probe == nil {
-		host, timeout := cfg.Host, seconds(cfg.ProbeTimeout)
-		opts.Probe = func(ctx context.Context) bool { return DefaultProbe(ctx, host, timeout) }
+		// The gateway of the current account: the assistant can set up another university
+		// while the service runs (on the first run it starts with Heidelberg's defaults).
+		opts.Probe = func(ctx context.Context) bool {
+			d.mu.Lock()
+			host, timeout := d.cfg.Host, seconds(d.cfg.ProbeTimeout)
+			d.mu.Unlock()
+			return probe(ctx, host, timeout)
+		}
 	}
 	if opts.CiscoCheck == nil {
 		opts.CiscoCheck = platform.CiscoConnected
@@ -329,19 +344,30 @@ func (d *Daemon) keyringArgs() (string, time.Duration) {
 	return d.cfg.User, seconds(d.cfg.KeyringTimeout)
 }
 
-// DefaultProbe is a TLS handshake with host:443 using the system trust store. False behind a
-// captive portal or without network.
+// DefaultProbe is a TLS handshake with host (port 443 unless it names one, like
+// "vpn.uni-x.de:10443") using the system trust store. False behind a captive portal (which
+// often answers with its own certificate) or without network.
 func DefaultProbe(ctx context.Context, host string, timeout time.Duration) bool {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	dialer := &tls.Dialer{Config: &tls.Config{ServerName: host}}
-	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(host, "443"))
+	name, port := host, "443"
+	if h, p, err := net.SplitHostPort(host); err == nil {
+		name, port = h, p
+	}
+	dialer := &tls.Dialer{Config: &tls.Config{ServerName: name, RootCAs: probeRoots}}
+	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(name, port))
 	if err != nil {
 		return false
 	}
 	conn.Close()
 	return true
 }
+
+// probeRoots is nil, the system's trust store; tests trust their own gateway.
+var probeRoots *x509.CertPool
+
+// probe is DefaultProbe; tests replace it, there is no gateway in CI.
+var probe = DefaultProbe
 
 // BinDir holds the helper files of an installation (uni-vpn-ocproxy, uni-vpn-vpnc.js). The Go
 // core keeps using bin/ of the installation: next to its own executable, else bin/ next to the
@@ -631,6 +657,11 @@ func (d *Daemon) watchRepair(process Process) {
 // secrets, then a test connection. token "" means none. The error is a *unis.FieldError
 // naming the step to change, a *httpapi.ValueError, or any other failure.
 func (d *Daemon) CompleteSetup(user, password, token, university string, overrides []config.Setting) error {
+	return d.completeSetup(user, password, token, university, overrides, false)
+}
+
+// completeSetup: synced is an account from another device (syncLocal.Apply).
+func (d *Daemon) completeSetup(user, password, token, university string, overrides []config.Setting, synced bool) error {
 	user = httpapi.PyStrip(user)
 	if !config.ValidUser(user) {
 		return unis.TextError("user", i18n.T("setup.invalid_user"))
@@ -662,9 +693,12 @@ func (d *Daemon) CompleteSetup(user, password, token, university string, overrid
 	}
 	// Secrets first: if the keyring refuses, no config.toml exists yet and the assistant
 	// stays the way in after a restart.
-	previousUser, previousUniversity := d.cfg.User, d.cfg.University
-	// Settings, Account runs the assistant again: the tunnel of the old account goes.
-	teardown := !d.needsSetup && d.tun != nil
+	previousUser := d.cfg.User
+	// Settings, Account runs the assistant again: the tunnel of the old account goes. An account
+	// from another device leaves a set-up device as it is unless account or gateway changed.
+	quiet := synced && !d.needsSetup && d.configError == ""
+	teardown := !d.needsSetup && d.tun != nil &&
+		(!quiet || user != d.cfg.User || university != d.cfg.University || profile.Host != d.cfg.Host)
 	d.mu.Unlock()
 	if teardown {
 		d.RequestDisconnect()
@@ -683,11 +717,11 @@ func (d *Daemon) CompleteSetup(user, password, token, university string, overrid
 	d.mu.Unlock()
 	err = func() error {
 		if err := d.opts.PasswordSetter(password); err != nil {
-			return err
+			return d.keyringFailed(err)
 		}
 		if profile.NeedsTOTP() && !once {
 			if err := d.opts.TOTPSetter(token); err != nil {
-				return err
+				return d.keyringFailed(err)
 			}
 		}
 		broken := configError != "" && exists(path)
@@ -700,16 +734,16 @@ func (d *Daemon) CompleteSetup(user, password, token, university string, overrid
 			d.logf(slog.LevelWarn, "Unreadable %s moved to %s", path, backup)
 		}
 		if exists(path) {
-			if university != previousUniversity {
-				var stale []string
-				for _, key := range unis.ProfileFields {
-					if !slices.ContainsFunc(checked, func(s config.Setting) bool { return s.Key == key }) {
-						stale = append(stale, key)
-					}
+			// The old account's profile fields go, also with the same university ("Not
+			// listed" with another gateway): they would come back at the next start.
+			var stale []string
+			for _, key := range unis.ProfileFields {
+				if !slices.ContainsFunc(checked, func(s config.Setting) bool { return s.Key == key }) {
+					stale = append(stale, key)
 				}
-				if err := config.RemoveKeys(path, stale); err != nil {
-					return err
-				}
+			}
+			if err := config.RemoveKeys(path, stale); err != nil {
+				return err
 			}
 			values := append([]config.Setting{{Key: "user", Value: user}, {Key: "university", Value: university}}, checked...)
 			return config.SetValues(path, values)
@@ -731,6 +765,10 @@ func (d *Daemon) CompleteSetup(user, password, token, university string, overrid
 		if errors.As(err, &ce) {
 			return &httpapi.ValueError{Msg: ce.Error()}
 		}
+		var text i18n.Text
+		if errors.As(err, &text) {
+			return text
+		}
 		return errors.New(pyErr(err))
 	}
 	d.mu.Lock()
@@ -743,7 +781,11 @@ func (d *Daemon) CompleteSetup(user, password, token, university string, overrid
 		d.startEnrollLocked(code, profile.MFAPortalURL)
 	}
 	d.mu.Unlock()
-	d.secretsChanged()
+	if quiet {
+		d.secretsSynced(teardown)
+	} else {
+		d.secretsChanged()
+	}
 	d.syncChanged(true)
 	return nil
 }
@@ -918,6 +960,20 @@ func (d *Daemon) Run() {
 	d.http = server
 	d.mu.Unlock()
 	d.bindForwarder()
+	if ready := d.opts.ReadyFile; ready != "" {
+		if server == nil || d.forwarder.Addr() == nil {
+			d.PortsTaken = true
+			d.forwarder.Stop()
+			if server != nil {
+				server.Stop()
+			}
+			return
+		}
+		if err := os.WriteFile(ready, nil, 0o600); err != nil {
+			d.logf(slog.LevelError, "Could not write %s: %s", ready, err)
+		}
+		defer os.Remove(ready)
+	}
 	tickerDone := make(chan struct{})
 	go func() { d.ticker(); close(tickerDone) }()
 	updatesDone := make(chan struct{})
@@ -1095,8 +1151,13 @@ func (d *Daemon) requestConnectLocked() {
 	if d.configError != "" {
 		return
 	}
+	if d.forwarder.Addr() == nil {
+		// Another program holds the browsers' port: a tunnel would be of no use, and the
+		// ticker's retry would report the port over its state. port_in_use stays.
+		return
+	}
 	d.explicit = true
-	d.failures = 0
+	d.failures, d.totpRetried = 0, false
 	if d.state.final() || d.state.retry() {
 		d.set(Idle, messages.NotConnected)
 	}
@@ -1133,10 +1194,21 @@ func (d *Daemon) RequestDisconnect() {
 	d.mu.Unlock()
 }
 
+// keyringFailed: a keyring that did not save shows the keyring message in the user's
+// language; the keyring's own words go to the log.
+func (d *Daemon) keyringFailed(err error) error {
+	var ke *credentials.KeyringError
+	if !errors.As(err, &ke) {
+		return err
+	}
+	d.logf(slog.LevelWarn, "%s", ke.Msg)
+	return i18n.T(messages.KeyPrefix + messages.KeyringLocked.ID)
+}
+
 // SetPassword stores a new password and connects with it.
 func (d *Daemon) SetPassword(password string) error {
 	if err := d.opts.PasswordSetter(password); err != nil {
-		return err
+		return d.keyringFailed(err)
 	}
 	d.logf(slog.LevelInfo, "Password stored in the keyring")
 	d.secretsChanged()
@@ -1147,7 +1219,7 @@ func (d *Daemon) SetPassword(password string) error {
 // SetTOTP stores a new TOTP secret and connects with it.
 func (d *Daemon) SetTOTP(token string) error {
 	if err := d.opts.TOTPSetter(token); err != nil {
-		return err
+		return d.keyringFailed(err)
 	}
 	d.logf(slog.LevelInfo, "TOTP secret stored in the keyring")
 	d.NoteCodeShown() // the page shows the new check code
@@ -1326,7 +1398,9 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 		d.connectCount++
 		// openconnect generates the code right after starting; record the window now, because
 		// the output reader can lag behind the port check (macOS CI).
-		d.lastOTPStep, d.hasOTPStep = int64(math.Floor(d.wall()/OTPStep)), true
+		step := int64(math.Floor(d.wall() / OTPStep))
+		freshCode := !d.hasOTPStep || step != d.lastOTPStep
+		d.lastOTPStep, d.hasOTPStep = step, true
 
 		var ready bool
 		d.unlocked(func() { ready = tun.WaitReady(seconds(cfg.ReadyTimeout)) })
@@ -1375,10 +1449,22 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 			}
 			d.tun = nil
 			if state == AuthFailed {
+				// Synced devices share the secret, and LinOTP takes each code only once: another
+				// device may have signed in with this window's code. Once more with the next one.
+				if _, once := tunnel.IsOnce(secret); message == messages.TOTPRejected && freshCode && !once && !d.totpRetried {
+					d.totpRetried = true
+					d.logf(slog.LevelInfo, "One-time code rejected, trying once more with the next one")
+					continue
+				}
 				d.final(state, message)
 				return
 			}
 			d.set(Error, message)
+			if _, once := tunnel.IsOnce(secret); once {
+				// The typed code is used up and a retry would take the keyring's secret (none on
+				// a first setup): the setup ends with "try again with a new code" (enroll.go).
+				break
+			}
 			if !d.backoff(ctx) {
 				if ctx.Err() != nil {
 					return
@@ -1388,7 +1474,7 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 			continue
 		}
 
-		d.failures = 0
+		d.failures, d.totpRetried = 0, false
 		d.logf(slog.LevelInfo, "Tunnel ready after %.1f s", elapsed(tun.StartedAt(), tun.ReadyAt()))
 		d.set(Connected, messages.Connected)
 		// The "connect now" request is fulfilled. From here on only real use counts, the idle

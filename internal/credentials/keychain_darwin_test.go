@@ -109,6 +109,13 @@ func TestKeychainRoundtripSpecialCharacters(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustGet(t, GetPassword, user, "second")
+	// security prints the first as it is although it looks like hex, the second as hex.
+	for _, pw := range []string{"20041998", "päss wörd"} {
+		if err := StorePassword(user, pw); err != nil {
+			t.Fatal(err)
+		}
+		mustGet(t, GetPassword, user, pw)
+	}
 	mustDelete(t, DeletePassword, user)
 	if _, err := GetPassword(context.Background(), user, 10*time.Second); !errors.Is(err, ErrPasswordMissing) {
 		t.Fatalf("got %v", err)

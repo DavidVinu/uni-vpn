@@ -18,6 +18,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/DavidVinu/uni-vpn/internal/atomicfile"
 	"github.com/DavidVinu/uni-vpn/internal/i18n"
 	"github.com/DavidVinu/uni-vpn/internal/platform"
 )
@@ -62,7 +63,7 @@ func ParseDomainList(text string) (domains []string, errs []i18n.Text) {
 		if line == "" {
 			continue
 		}
-		line = strings.TrimPrefix(line, "*.")
+		line = strings.TrimPrefix(NormalizeHost(hostOf(line)), "*.")
 		if !validHost(line) {
 			errs = append(errs, i18n.T("domains.not_hostname", "line", i+1, "text", strings.TrimFunc(raw, pyIsSpace)))
 			continue
@@ -73,6 +74,26 @@ func ParseDomainList(text string) (domains []string, errs []i18n.Text) {
 		}
 	}
 	return domains, errs
+}
+
+// hostOf is the host of an address copied from the browser's address bar
+// ("https://user@sogo.uni-heidelberg.de:443/SOGo/?x"); anything else stays as it is.
+func hostOf(value string) string {
+	_, rest, scheme := strings.Cut(value, "://")
+	if scheme {
+		value = rest
+	}
+	if end := strings.IndexAny(value, "/?"); end >= 0 {
+		value = value[:end]
+	}
+	if scheme {
+		// Only behind a scheme: "name@uni.de" alone is a mail address, not a website.
+		value = value[strings.LastIndex(value, "@")+1:]
+	}
+	if host, port, ok := strings.Cut(value, ":"); ok && port != "" && strings.Trim(port, "0123456789") == "" {
+		value = host
+	}
+	return value
 }
 
 // Matches reports whether host is one of domains or a subdomain of one.
@@ -117,7 +138,7 @@ func DomainsPath() string {
 // defaults apply (a copy). Python's read_domains(path) without defaults is
 // ReadDomains(path, DefaultDomains); an empty defaults slice means no domains.
 func ReadDomains(path string, defaults []string) ([]string, error) {
-	data, err := os.ReadFile(path)
+	data, err := atomicfile.Read(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return append([]string{}, defaults...), nil
 	}
@@ -148,7 +169,8 @@ func WriteDomains(path string, domains []string) error {
 		// Python's write_text translates newlines in text mode.
 		text = strings.ReplaceAll(text, "\n", "\r\n")
 	}
-	return os.WriteFile(path, []byte(text), 0o666)
+	// In one step: the status page and the browsers read the list while it is saved.
+	return atomicfile.Write(path, []byte(text))
 }
 
 func mkdirParents(dir string, mode os.FileMode) error {

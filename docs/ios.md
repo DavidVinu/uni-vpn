@@ -22,8 +22,10 @@ thin SwiftUI shell around the core.
   extension runs the core while the VPN is on, and the app runs it itself while the VPN is off
   and the app is on screen, so setup and settings work without a VPN. Both use the same folders
   in the App Group container and hand over through the core's lock file there: the app stops its
-  core before it starts the VPN and when it leaves the screen, the extension waits up to 10 s for
-  the lock. Both listen on 127.0.0.1:1080 and 1081; the app talks to whichever runs.
+  core before it starts the VPN and when it leaves the screen (during a sign-in the user waits
+  for, a Duo push or the one-code second factor, only when iOS's background time runs out), the
+  extension waits up to 10 s for the lock. Both listen on 127.0.0.1:1080 and 1081; the app talks
+  to whichever runs.
 - **Only university websites.** The extension tunnels nothing: one unused address and route
   (TEST-NET-1, 192.0.2.1 and 192.0.2.2), no DNS settings, and the core's proxy rule
   (`NEProxySettings`, `http://127.0.0.1:1081/proxy.pac?v=<hash of the websites>`). Safari and
@@ -56,7 +58,7 @@ thin SwiftUI shell around the core.
 | Control Center button | Tailscale iOS | One tap on or off (iOS 18); the tap's intent runs in the app's process, which may change the VPN configuration; before setup the app is the way in |
 | Welcome, Add a device | WhatsApp, Signal linked devices | Scan the code the computer shows; the code under the QR code to type instead |
 | University | eduroam CAT | Search by name or city, "Not listed" for a VPN address |
-| Sign-in code | Google Authenticator | "Scan QR code" with VisionKit's scanner (one camera prompt), or type the setup key; the live test code |
+| Sign-in code | Google Authenticator, Microsoft Authenticator | Where the university allows it, one code from the user's app and the core adds itself in the MFA portal (as on the desktop); else "Scan QR code" with VisionKit's scanner (one camera prompt), or type the setup key; the live test code |
 | Settings | iOS Settings | Grouped list, the value on the right, info button for hints |
 
 Texts come from `uni_vpn/locales/<lang>.json` (`/locales.json`); `phone.<key>` replaces a text
@@ -131,5 +133,6 @@ and sends it to TestFlight from main.
 Everything that needs a phone and a signed build: the extension starting and taking over the
 core, Safari and other browsers following the proxy rule, connect on demand after a restart and
 a network change, the Control Center button, the camera scanner, a full sign-in with a real
-account and a second factor, Duo push, and the memory limit of the extension. The simulator
-tests cover the core, libopenconnect and the gateway, the API token and the secrets.
+account and a second factor, the one-code second factor, Duo push, and the memory limit of the
+extension. The simulator tests cover the core, libopenconnect and the gateway, the API token and
+the secrets.

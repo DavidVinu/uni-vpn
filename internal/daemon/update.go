@@ -29,6 +29,17 @@ func (d *Daemon) idleForUpdateLocked() bool {
 		d.state != Connecting && d.state != Connected && d.state != Disconnecting
 }
 
+// stopping reports whether Stop was called. ctx of autoUpdate is cancelled a moment later, by
+// another goroutine, so ctx.Err() may still be nil.
+func (d *Daemon) stopping() bool {
+	select {
+	case <-d.stop:
+		return true
+	default:
+		return false
+	}
+}
+
 // check runs Updater.Check; an update problem must never stop the service.
 func (d *Daemon) check(ctx context.Context) (commit string, err error, crashed bool) {
 	defer func() {
@@ -71,7 +82,7 @@ func (d *Daemon) autoUpdate() {
 			continue
 		}
 		commit, err, crashed := d.check(ctx)
-		if ctx.Err() != nil {
+		if d.stopping() {
 			// Stopped while checking.
 			d.opts.Updater.Discard()
 			return
@@ -88,7 +99,9 @@ func (d *Daemon) autoUpdate() {
 		}
 		d.logf(slog.LevelInfo, "Update %s ready, installing once the tunnel is idle", short(commit))
 		if !d.installWhenIdle(commit) {
-			if ctx.Err() != nil {
+			if d.stopping() {
+				// Logout or shutdown while the tunnel was in use: the unpacked files must not
+				// stay next to the installation.
 				d.opts.Updater.Discard()
 				return
 			}

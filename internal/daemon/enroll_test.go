@@ -4,11 +4,15 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"net"
+	"net/http"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/DavidVinu/uni-vpn/internal/credentials"
 	"github.com/DavidVinu/uni-vpn/internal/linotp"
 	"github.com/DavidVinu/uni-vpn/internal/linotp/fakelinotp"
 	"github.com/DavidVinu/uni-vpn/internal/pyjson"
@@ -158,6 +162,163 @@ func TestEnrollRemovesATokenThatFailsItsTest(t *testing.T) {
 	defer p.Unlock()
 	if len(p.Tokens) != 0 || len(p.Deleted) != 1 {
 		t.Fatal(p.Tokens, p.Deleted)
+	}
+}
+
+// The portal adds the token, but its answer never arrives (the tunnel drops, a timeout): the
+// token does not stay behind in the user's account.
+func TestEnrollRemovesATokenWhoseAnswerGotLost(t *testing.T) {
+	_, p, d := enrollHarness(t)
+	p.Lock()
+	p.Code = ""
+	p.Unlock()
+	d.RequestConnect()
+	waitState(t, d, Connected)
+	d.mu.Lock()
+	d.opts.PortalClient = func(string, func(context.Context, string, string) (net.Conn, error)) (*linotp.Client, error) {
+		c, err := linotp.New(p.URL, nil)
+		c.SetHTTPClient(&http.Client{Transport: loseEnrollAnswer{p.Client().Transport}})
+		return c, err
+	}
+	d.mu.Unlock()
+	d.Enroll("111111", false)
+	waitEnroll(t, d, EnrollFailed)
+	p.Lock()
+	defer p.Unlock()
+	if len(p.Tokens) != 0 || len(p.Deleted) != 1 {
+		t.Fatal(p.Tokens, p.Deleted)
+	}
+}
+
+type loseEnrollAnswer struct{ http.RoundTripper }
+
+func (l loseEnrollAnswer) RoundTrip(r *http.Request) (*http.Response, error) {
+	res, err := l.RoundTripper.RoundTrip(r)
+	if err == nil && strings.HasSuffix(r.URL.Path, "/enroll") {
+		res.Body.Close()
+		return nil, errors.New("connection reset by peer")
+	}
+	return res, err
+}
+
+// A new setup on this computer replaces the code generator it added before, by its serial, also
+// without the portal's token list. Other tokens stay, also one with the same name (another
+// phone: they are all "localhost").
+func TestEnrollAgainReplacesThisComputersEarlierToken(t *testing.T) {
+	h, p, d := enrollHarness(t)
+	p.Lock()
+	p.Code = ""
+	p.Tokens["TOTPPHONE"], p.Descriptions["TOTPPHONE"] = "base32:GEZDGNBVGY3TQOJQ", "Phone"
+	p.Tokens["TOTPTWIN"], p.Descriptions["TOTPTWIN"] = "base32:GEZDGNBVGY3TQOJQ", description()
+	p.Unlock()
+	d.RequestConnect()
+	waitState(t, d, Connected)
+	d.Enroll("111111", false)
+	waitEnroll(t, d, EnrollDone)
+	p.Lock()
+	var first string
+	for serial := range p.Tokens {
+		if serial != "TOTPPHONE" && serial != "TOTPTWIN" {
+			first = serial
+		}
+	}
+	p.Unlock()
+	d.Enroll("111111", false)
+	waitEnroll(t, d, EnrollDone)
+	h.mu.Lock()
+	stored := h.storedTOTP[len(h.storedTOTP)-1]
+	h.mu.Unlock()
+	p.Lock()
+	if len(p.Tokens) != 3 || p.Tokens["TOTPPHONE"] == "" || p.Tokens["TOTPTWIN"] == "" || !slices.Equal(p.Deleted, []string{first}) {
+		t.Fatal(p.Tokens, p.Deleted, first)
+	}
+	var second string
+	for serial, secret := range p.Tokens {
+		if serial != "TOTPPHONE" && serial != "TOTPTWIN" {
+			second = serial
+			if secret != stored {
+				t.Fatal(serial, secret, stored)
+			}
+		}
+	}
+	p.NoTokenList = true
+	p.Unlock()
+	d.Enroll("111111", false)
+	waitEnroll(t, d, EnrollDone)
+	p.Lock()
+	defer p.Unlock()
+	if len(p.Tokens) != 3 || !slices.Equal(p.Deleted, []string{first, second}) {
+		t.Fatal(p.Tokens, p.Deleted)
+	}
+}
+
+// The computer's clock is off: the new token fails its test, and the text says why.
+func TestEnrollWithAWrongClockSaysSo(t *testing.T) {
+	_, p, d := enrollHarness(t)
+	p.Lock()
+	p.Code, p.Skew = "", 5*time.Minute
+	p.Unlock()
+	d.RequestConnect()
+	waitState(t, d, Connected)
+	d.Enroll("111111", false)
+	if key := waitEnroll(t, d, EnrollFailed); key != "enroll.clock" {
+		t.Fatal(key)
+	}
+	p.Lock()
+	defer p.Unlock()
+	if len(p.Tokens) != 0 {
+		t.Fatal(p.Tokens)
+	}
+}
+
+// A broken install (openconnect missing) stops the connect loop in "error": the setup ends at
+// once with the reason, which the page offers Repair for, instead of after enrollTimeout.
+func TestEnrollEndsWhenTheConnectLoopGivesUp(t *testing.T) {
+	_, _, d := enrollHarness(t)
+	d.mu.Lock()
+	d.opts.TunnelFactory = func() (Tunnel, error) { return nil, &notFoundError{"openconnect not found"} }
+	d.mu.Unlock()
+	d.Enroll("123456", false)
+	if key := waitEnroll(t, d, EnrollFailed); key != "msg.program_missing" {
+		t.Fatal(key)
+	}
+}
+
+// The attempt with the typed code fails for a reason that is retried (too slow): the code is
+// used up and nothing is stored yet, so the setup asks for a new code instead of the retry
+// ending in "no setup key saved".
+func TestEnrollEndsWhenTheAttemptWithTheCodeFails(t *testing.T) {
+	h, _, d := enrollHarness(t)
+	h.mu.Lock()
+	h.totp, h.totpErr = nil, credentials.ErrTotpMissing
+	h.mu.Unlock()
+	d.mu.Lock()
+	d.cfg.ReadyTimeout = 1
+	d.mu.Unlock()
+	t.Setenv("FAKE_MODE", "never_ready")
+	d.Enroll("123456", false)
+	if key := waitEnroll(t, d, EnrollFailed); key != "enroll.failed" {
+		t.Fatal(key)
+	}
+	if s, m := d.snapshot(); s != Idle {
+		t.Fatal(s, m)
+	}
+	if got := h.pwLines(); !slices.Equal(got, []string{"pw"}) {
+		t.Fatal(got)
+	}
+}
+
+// A wrong password with the typed code: one refused sign-in, the code does not go in as a
+// second password.
+func TestEnrollWithAWrongPassword(t *testing.T) {
+	h, _, d := enrollHarness(t)
+	t.Setenv("FAKE_MODE", "auth_fail")
+	d.Enroll("123456", false)
+	if key := waitEnroll(t, d, EnrollFailed); key != "msg.password_rejected" {
+		t.Fatal(key)
+	}
+	if got := h.pwLines(); !slices.Equal(got, []string{"pw"}) {
+		t.Fatal(got)
 	}
 }
 

@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="channel">Verbindung</string>
+    <string name="port_in_use">Eine andere App ist im Weg. Uni VPN versucht es weiter. Bleibt es so, starte das Handy neu.</string>
 </resources>

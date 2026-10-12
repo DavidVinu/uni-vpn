@@ -6,7 +6,9 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -200,6 +202,9 @@ func (d *Daemon) waitConnected(ctx context.Context) error {
 			return failWith(messageText(d.message), d.message.Text)
 		case d.state == Idle && !d.loopRunning && d.onceCode == "":
 			return failWith(textOf("enroll.failed"), "stopped before connecting")
+		case d.state == Error && !d.loopRunning && d.onceCode == "":
+			// Given up for good (openconnect missing, not elevated): the reason and its Repair.
+			return failWith(messageText(d.message), d.message.Text)
 		}
 		changed := d.changed
 		d.mu.Unlock()
@@ -271,8 +276,30 @@ func (d *Daemon) enroll(ctx context.Context, job *enrollJob, portal string) erro
 		client.Logout(logout)
 	}()
 	d.enrollStage(job, EnrollWorking, nil)
+	// The list before, to find a token whose answer gets lost. Best effort: the setup works
+	// without the portal's token list.
+	earlier, listErr := ownTokens(ctx, client)
+	if listErr != nil {
+		d.logf(slog.LevelInfo, "No token list from the MFA portal: %s", listErr)
+	}
 	serial, address, err := client.Enroll(ctx, description())
 	if err != nil {
+		// The portal may have added the token although its answer got lost.
+		var lost []string
+		if serial != "" {
+			lost = append(lost, serial)
+		}
+		if listErr == nil {
+			cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			now, _ := ownTokens(cleanup, client)
+			cancel()
+			for _, s := range now {
+				if !slices.Contains(earlier, s) && s != serial {
+					lost = append(lost, s)
+				}
+			}
+		}
+		d.removeTokens(client, lost)
 		var refused *linotp.RefusedError
 		if errors.As(err, &refused) {
 			return failWith(textOf("enroll.refused"), err.Error())
@@ -280,14 +307,54 @@ func (d *Daemon) enroll(ctx context.Context, job *enrollJob, portal string) erro
 		return err
 	}
 	if err := d.keepToken(ctx, client, serial, address); err != nil {
-		cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if derr := client.Delete(cleanup, serial); derr != nil {
-			d.logf(slog.LevelWarn, "Could not remove the unused code generator %s: %s", serial, derr)
-		}
+		d.removeTokens(client, []string{serial})
 		return err
 	}
+	d.replaceOwnToken(client, serial)
 	return nil
+}
+
+// replaceOwnToken notes serial as this device's code generator and removes the one it added at
+// its last setup, now unused: only that one, by its serial. The name is no proof, phones are all
+// "localhost" and another computer of the user may have the same name.
+func (d *Daemon) replaceOwnToken(client *linotp.Client, serial string) {
+	path := filepath.Join(d.opts.TokenDir, ownTokenFile)
+	data, _ := os.ReadFile(path)
+	if err := os.WriteFile(path, []byte(serial+"\n"), 0o600); err != nil {
+		d.logf(slog.LevelWarn, "Could not note the code generator %s: %s", serial, err)
+	}
+	if old := strings.TrimSpace(string(data)); old != "" && old != serial {
+		d.removeTokens(client, []string{old})
+	}
+}
+
+// ownTokenFile, in the state folder, holds the serial of the code generator this device added.
+const ownTokenFile = "mfa-token-serial"
+
+// ownTokens are the serials of the code generators with this computer's name in the portal.
+func ownTokens(ctx context.Context, client *linotp.Client) ([]string, error) {
+	tokens, err := client.Tokens(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var own []string
+	for _, t := range tokens {
+		if t.Description == description() {
+			own = append(own, t.Serial)
+		}
+	}
+	return own, nil
+}
+
+// removeTokens deletes code generators nobody uses; one that stays only clutters the list.
+func (d *Daemon) removeTokens(client *linotp.Client, serials []string) {
+	cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for _, serial := range serials {
+		if err := client.Delete(cleanup, serial); err != nil {
+			d.logf(slog.LevelWarn, "Could not remove the unused code generator %s: %s", serial, err)
+		}
+	}
 }
 
 // portalSignIn: password, then a code from the user's app when the portal asks for one. The
@@ -341,6 +408,10 @@ func (d *Daemon) keepToken(ctx context.Context, client *linotp.Client, serial, a
 		return err
 	}
 	if _, err := client.Verify(ctx, serial, code); err != nil {
+		if errors.Is(err, linotp.ErrCode) {
+			// The portal has the same key and a fresh token no used codes: only the clocks differ.
+			return failWith(textOf("enroll.clock"), err.Error())
+		}
 		return err
 	}
 	// SetTOTP notes this code window as used: the next sign-in waits for a new code.

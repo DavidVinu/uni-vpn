@@ -101,11 +101,11 @@ zertifiziert.</p>
 die Websites, die Sie in der App eintragen (zum Beispiel Uni-Mail oder
 Moodle), laufen über die Universität. Alles andere geht wie bisher
 direkt ins Internet.</p>
-<p>Ich betreibe keinen Server für die App. Die App sendet mir keine
-Daten. Es gibt keine Nutzungsstatistik, keine Fehlerberichte und kein
-Benutzerkonto bei mir. Für die Daten in der App bin ich daher nicht
-verantwortlich im Sinne der DSGVO. Trotzdem erkläre ich hier, was die
-App tut.</p>
+<p>Die App sendet mir keine Daten, außer Sie gleichen Ihre Geräte
+ab (unten, Nummer 4). Es gibt keine Nutzungsstatistik, keine
+Fehlerberichte und kein Benutzerkonto bei mir. Für die übrigen Daten in
+der App bin ich daher nicht verantwortlich im Sinne der DSGVO. Trotzdem
+erkläre ich hier, was die App tut.</p>
 <h3 id="was-auf-ihrem-computer-gespeichert-wird">Was auf Ihrem Computer
 gespeichert wird</h3>
 <ul>
@@ -125,8 +125,9 @@ Computer nur, wenn Sie sie selbst weitergeben, zum Beispiel in einer
 Fehlermeldung auf GitHub.</li>
 </ul>
 <p>Beim Deinstallieren bleiben die Einträge im Passwortspeicher
-erhalten. Sie können sie dort jederzeit selbst löschen ("uni-vpn" und
-"uni-vpn-totp"), ebenso die Einstellungs- und die Logdatei.</p>
+erhalten. Sie können sie dort jederzeit selbst löschen ("uni-vpn",
+"uni-vpn-totp" und "uni-vpn-sync"), ebenso die Einstellungs- und die
+Logdatei.</p>
 <h3 id="mit-wem-die-app-verbindung-aufnimmt">Mit wem die App Verbindung
 aufnimmt</h3>
 <ol type="1">
@@ -145,6 +146,23 @@ eine neue Version gibt, und lädt sie gegebenenfalls von dort herunter.
 GitHub sieht dabei Ihre IP-Adresse, die Uhrzeit und die Kennung
 "uni-vpn". Sonst wird nichts gesendet. Sie können das in der App
 ausschalten: Zahnrad, "Automatische Updates".</li>
+<li><strong>Abgleich zwischen Ihren Geräten</strong> (nur wenn Sie in
+der App "Gerät hinzufügen" oder "Einstellungen von einem anderen Gerät
+übernehmen" nutzen). Ihre Geräte tauschen ihre Einstellungen über einen
+kleinen Dienst aus, den ich bei Cloudflare betreibe (Cloudflare Workers
+und D1, Anbieter wie oben unter 3.). Die Einstellungen, auch Passwort
+und TOTP-Geheimnis, werden auf Ihrem Gerät verschlüsselt, bevor sie es
+verlassen. Den Schlüssel haben nur Ihre Geräte; ich und Cloudflare
+können die Daten nicht lesen. Gespeichert werden zufällige Kennungen und
+die verschlüsselten Daten. Cloudflare sieht dabei Ihre IP-Adresse. Die
+App fragt beim Start, etwa alle 30 Minuten und beim Öffnen der
+Einstellungen nach Änderungen. Ein Code zum Verbinden zweier Geräte
+wird nach spätestens 10 Minuten gelöscht, die Daten Ihrer Geräte 400
+Tage nach der letzten Nutzung. Zweck: Ihre Einstellungen auf Ihre
+anderen Geräte bringen. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO,
+weil Sie die Funktion selbst nutzen. Wenn Sie in den Einstellungen alle
+Geräte entfernen, werden die Daten nicht mehr gelesen und dann
+gelöscht.</li>
 <li><strong>Nur bei Installation über die Terminal-Skripte</strong>
 (nicht beim normalen Download): Die Skripte laden zusätzlich Software
 von GitHub, python.org, Homebrew, nuget.org (Microsoft) oder aus den
@@ -235,10 +253,10 @@ certified under the EU-US Data Privacy Framework.</p>
 websites you list in the app (for example university mail or Moodle) go
 through the university. Everything else goes directly to the internet as
 before.</p>
-<p>I run no server for the app. The app sends no data to me. There are
-no usage statistics, no crash reports and no account with me. I am
-therefore not the controller under the GDPR for the data in the app.
-Still, here is what the app does.</p>
+<p>The app sends no data to me, unless you sync your devices (below,
+number 4). There are no usage statistics, no crash reports and no
+account with me. I am therefore not the controller under the GDPR for
+the other data in the app. Still, here is what the app does.</p>
 <h3 id="what-is-stored-on-your-computer">What is stored on your
 computer</h3>
 <ul>
@@ -256,8 +274,8 @@ overwritten. It only leaves your computer if you share it yourself, for
 example in a bug report on GitHub.</li>
 </ul>
 <p>Uninstalling keeps the password store entries. You can delete them
-there yourself at any time ("uni-vpn" and "uni-vpn-totp"), as well as
-the settings and log files.</p>
+there yourself at any time ("uni-vpn", "uni-vpn-totp" and
+"uni-vpn-sync"), as well as the settings and log files.</p>
 <h3 id="who-the-app-connects-to">Who the app connects to</h3>
 <ol type="1">
 <li><strong>Your university's VPN server.</strong> When signing in, the
@@ -274,6 +292,21 @@ about 10 minutes after start) the app asks GitHub whether there is a new
 version and, if so, downloads it from there. GitHub sees your IP
 address, the time and the identifier "uni-vpn". Nothing else is sent.
 You can turn this off in the app: gear icon, "Automatic updates".</li>
+<li><strong>Syncing between your devices</strong> (only if you use "Add
+a device" or "Use settings from another device" in the app). Your
+devices exchange their settings through a small service I run at
+Cloudflare (Cloudflare Workers and D1, provider as in section 3). The
+settings, including the password and TOTP secret, are encrypted on your
+device before they leave it. Only your devices have the key; neither I
+nor Cloudflare can read the data. Random identifiers and the encrypted
+data are stored. Cloudflare sees your IP address. The app asks for
+changes when it starts, about every 30 minutes and when Settings is
+opened. A code for linking two devices is deleted after 10 minutes at
+the latest, your devices' data 400 days after it was last used.
+Purpose: bringing your settings to your other devices. The legal basis
+is Art. 6(1)(b) GDPR, because you use the feature yourself. If you
+remove all devices in Settings, the data is no longer read and is then
+deleted.</li>
 <li><strong>Only when installing with the terminal scripts</strong> (not
 with the normal download): the scripts also download software from
 GitHub, python.org, Homebrew, nuget.org (Microsoft) or your Linux

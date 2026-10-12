@@ -4,12 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/DavidVinu/uni-vpn/internal/daemon"
 )
 
 func freePort(t *testing.T) int {
@@ -23,11 +27,17 @@ func freePort(t *testing.T) int {
 
 // home is a fresh config and state folder with a config.toml on free ports.
 func home(t *testing.T) (httpPort int) {
+	httpPort, _ = homePorts(t)
+	return httpPort
+}
+
+// homePorts is home, with the SOCKS port too.
+func homePorts(t *testing.T) (httpPort, socksPort int) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "config"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(dir, "state"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
-	httpPort, socksPort := freePort(t), freePort(t)
+	httpPort, socksPort = freePort(t), freePort(t)
 	for socksPort == httpPort {
 		socksPort = freePort(t)
 	}
@@ -39,7 +49,7 @@ func home(t *testing.T) (httpPort int) {
 	if err := os.WriteFile(filepath.Join(cfg, "config.toml"), []byte(toml), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return httpPort
+	return httpPort, socksPort
 }
 
 type core struct {
@@ -136,5 +146,62 @@ func TestLockWaitTakesOver(t *testing.T) {
 	second.stop(t)
 	if err := <-c.done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The Android app's core: the ready file says both ports are its own (another app could
+// listen on 127.0.0.1 first), and it goes when the core ends.
+func TestReadyFileWhileThePortsAreOurs(t *testing.T) {
+	port := home(t)
+	ready := filepath.Join(t.TempDir(), "api-ready")
+	c := start(t, Options{APIToken: "t0ken", Extend: func(_ *slog.Logger, o *daemon.Options) { o.ReadyFile = ready }})
+	if _, err := os.Stat(ready); err != nil {
+		t.Fatal(err)
+	}
+	if got := status(t, port, "t0ken"); got != 200 {
+		t.Fatal(got)
+	}
+	c.stop(t)
+	if _, err := os.Stat(ready); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal("ready file left behind", err)
+	}
+}
+
+// Without its status or SOCKS port the phone's core ends instead of running without it:
+// whoever holds the port would get the app's token and password, or the browsers' traffic.
+func TestPortHeldByAnotherProgramEndsThePhoneCore(t *testing.T) {
+	for _, which := range []string{"status", "socks"} {
+		t.Run(which, func(t *testing.T) {
+			httpPort, socksPort := homePorts(t)
+			held := map[string]int{"status": httpPort, "socks": socksPort}[which]
+			ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", held))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer ln.Close()
+			ready := filepath.Join(t.TempDir(), "api-ready")
+			done := make(chan error, 1)
+			go func() {
+				done <- Run(context.Background(), Options{APIToken: "t0ken",
+					Extend: func(_ *slog.Logger, o *daemon.Options) { o.ReadyFile = ready }})
+			}()
+			select {
+			case err := <-done:
+				if !errors.Is(err, ErrPortsTaken) {
+					t.Fatal(err)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("the core kept running without its port")
+			}
+			if _, err := os.Stat(ready); !errors.Is(err, fs.ErrNotExist) {
+				t.Fatal("ready file without the port", err)
+			}
+			// The other port is free again for the next try.
+			other := map[string]int{"status": socksPort, "socks": httpPort}[which]
+			if conn, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", other)); err == nil {
+				conn.Close()
+				t.Fatal("port still open", other)
+			}
+		})
 	}
 }

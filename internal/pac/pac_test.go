@@ -27,16 +27,33 @@ func TestDefaultsRouteHeicoLogin(t *testing.T) {
 }
 
 func TestParseNormalizesAndReportsErrorsWithLineNumbers(t *testing.T) {
-	text := "Sogo.Uni-Heidelberg.DE\n# comment\n\n*.example.org  # wildcard\nsogo.uni-heidelberg.de\nnot valid\nhttp://x.y\n"
+	text := "Sogo.Uni-Heidelberg.DE\n# comment\n\n*.example.org  # wildcard\nsogo.uni-heidelberg.de\nnot valid\nhttp://\n"
 	domains, errs := ParseDomainList(text)
 	if !reflect.DeepEqual(domains, []string{"sogo.uni-heidelberg.de", "example.org"}) {
 		t.Fatal(domains)
 	}
-	if len(errs) != 2 || errs[1].String() != `Line 7: "http://x.y" is not a website` {
+	if len(errs) != 2 || errs[1].String() != `Line 7: "http://" is not a website` {
 		t.Fatal(errs)
 	}
 	if errs[0].String() != `Line 6: "not valid" is not a website` || errs[0].JSON()[1].Value.(pyjson.Object)[0].Value != 6 {
 		t.Fatal(errs[0])
+	}
+}
+
+func TestParseTakesTheHostOfAPastedAddress(t *testing.T) {
+	// Copied from the address bar: scheme, sign-in name, port, path, query and anchor go.
+	text := "https://sogo.uni-heidelberg.de/SOGo/\nHTTP://Moodle.Uni-X.de\nheico.uni-heidelberg.de:443/\n" +
+		"https://user:pw@lsf.uni-x.de:8443/qisserver?state=user#top\nwww.uni-y.de/a/b?c=d\n"
+	domains, errs := ParseDomainList(text)
+	want := []string{"sogo.uni-heidelberg.de", "moodle.uni-x.de", "heico.uni-heidelberg.de", "lsf.uni-x.de", "www.uni-y.de"}
+	if !reflect.DeepEqual(domains, want) || len(errs) != 0 {
+		t.Fatal(domains, errs)
+	}
+	// Still not websites: no host, a mail address, a port that is no number, one word.
+	for _, line := range []string{"https://", "name@uni-x.de", "uni-x.de:abc", "https://intranet/", "ftp://x y.de"} {
+		if domains, errs := ParseDomainList(line); len(domains) != 0 || len(errs) != 1 {
+			t.Fatal(line, domains, errs)
+		}
 	}
 }
 
@@ -197,5 +214,38 @@ func TestInvalidUTF8IsAnError(t *testing.T) {
 	os.WriteFile(path, []byte("\xff\n"), 0o600)
 	if _, err := ReadDomains(path, DefaultDomains); err == nil {
 		t.Fatal("no error")
+	}
+}
+
+// The status page and the browsers' PAC file read the list while the app or syncing saves it:
+// they must never see it empty, and the file keeps its mode.
+func TestReadersNeverSeeAHalfWrittenList(t *testing.T) {
+	path := tempPath(t)
+	list := []string{"example.org", "sogo.uni-heidelberg.de"}
+	if err := WriteDomains(path, list); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 500 {
+			WriteDomains(path, list)
+		}
+	}()
+	for running := true; running; {
+		select {
+		case <-done:
+			running = false
+		default:
+		}
+		if got := read(t, path, nil); !reflect.DeepEqual(got, list) {
+			t.Fatal(got)
+		}
+	}
+	if info, err := os.Stat(path); err != nil || (os.PathSeparator == '/' && info.Mode().Perm() != 0o640) {
+		t.Fatal(info.Mode(), err)
 	}
 }

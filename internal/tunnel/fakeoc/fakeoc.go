@@ -4,10 +4,12 @@
 //
 // Environment variables:
 //
-//	FAKE_MODE           ok (default) | auth_fail | input_required | totp_rejected | never_ready | ignore_sigterm | exit_after_ready
+//	FAKE_MODE           ok (default) | auth_fail | input_required | totp_rejected | totp_replayed | never_ready |
+//	                    ignore_sigterm | exit_after_ready | clientcert_auth_fail | gateway_503 | cstp_503
 //	FAKE_DELAY          seconds until the port listens (default 0.2)
 //	FAKE_EXIT_AFTER     with exit_after_ready: seconds after becoming ready (default 0.5)
-//	FAKE_PASSWORD_FILE  file every line read from stdin is appended to (password, "push" for Duo)
+//	FAKE_PASSWORD_FILE  file every line read from stdin is appended to (password, "push" for Duo,
+//	                    a typed code); without --non-inter a refused password is asked for again
 //	FAKE_ARGS_FILE      file the command line is appended to, one JSON list per start
 //	FAKE_TOKEN_FILE     file the contents of --token-secret=@file are appended to
 //	                    (read shortly before becoming ready, like openconnect when generating the code)
@@ -15,11 +17,13 @@
 package fakeoc
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"os/signal"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -127,16 +131,6 @@ func jsonList(items []string) string {
 	return b.String()
 }
 
-// splitLines splits like Python's str.splitlines on text read with universal newlines.
-func splitLines(text string) []string {
-	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
-	text = strings.TrimSuffix(text, "\n")
-	if text == "" {
-		return nil
-	}
-	return strings.Split(text, "\n")
-}
-
 func openconnect(args []string) int {
 	port := 0
 	tokenPath := ""
@@ -153,6 +147,14 @@ func openconnect(args []string) int {
 	mode := os.Getenv("FAKE_MODE")
 	if mode == "" {
 		mode = "ok"
+	}
+	if mode == "totp_replayed" {
+		// Another device of the account used this window's code (LinOTP takes each code once):
+		// only the first start is rejected. FAKE_ARGS_FILE counts the starts.
+		mode = "ok"
+		if data, _ := os.ReadFile(os.Getenv("FAKE_ARGS_FILE")); len(data) == 0 {
+			mode = "totp_rejected"
+		}
 	}
 	// Before the password is recorded: a test that has seen the password line knows the
 	// signals are handled (with -race the binary takes a while to get here).
@@ -176,15 +178,24 @@ func openconnect(args []string) int {
 	if f := os.Getenv("FAKE_ARGS_FILE"); f != "" {
 		appendFile(f, jsonList(args)+"\n")
 	}
-	// uni-vpn closes stdin after writing, so this ends; Duo sends a second line.
-	raw, _ := io.ReadAll(os.Stdin)
-	lines := splitLines(string(raw))
-	if f := os.Getenv("FAKE_PASSWORD_FILE"); f != "" {
-		var b strings.Builder
-		for _, l := range lines {
-			b.WriteString(l + "\n")
+	// Like openconnect's prompts: line by line. Without --non-inter it waits for the next line
+	// (Duo's "push", a typed code) and reads until uni-vpn closes stdin.
+	stdin := bufio.NewReader(os.Stdin)
+	next := func() bool {
+		line, err := stdin.ReadString('\n')
+		if line == "" && err != nil {
+			return false
 		}
-		appendFile(f, b.String())
+		if f := os.Getenv("FAKE_PASSWORD_FILE"); f != "" {
+			appendFile(f, strings.TrimRight(line, "\r\n")+"\n")
+		}
+		return true
+	}
+	interactive := !slices.Contains(args, "--non-inter")
+	next()
+	if !interactive {
+		for next() {
+		}
 	}
 	log("POST https://fake.example/")
 	delay := seconds("FAKE_DELAY", "0.2")
@@ -196,11 +207,46 @@ func openconnect(args []string) int {
 		time.Sleep(delay)
 		log("Bitte geben Sie ihren Benutzernamen und ihr Passwort ein.")
 		log("Login failed.")
+		for interactive && next() {
+			log("Bitte geben Sie ihren Benutzernamen und ihr Passwort ein.")
+			log("Login failed.")
+		}
 		log("Bitte geben Sie ihren Benutzernamen und ihr Passwort ein.")
 		log("Password:")
 		log("***")
 		log("User input required in non-interactive mode")
 		log("Failed to complete authentication")
+		return 1
+	case "clientcert_auth_fail":
+		// An ASA that asks for an optional client certificate (auth.c, PRG_INFO), then the
+		// wrong-password sequence measured on 2026-09-08.
+		log("Connected to HTTPS on fake.example with ciphersuite (TLS1.3)-(ECDHE-SECP256R1)-(AES-256-GCM)")
+		log("Server requested SSL client certificate; none was configured")
+		log("POST https://fake.example/")
+		log("XML POST enabled")
+		time.Sleep(delay)
+		log("Please enter your username and password.")
+		log("Login failed.")
+		log("Please enter your username and password.")
+		log("User input required in non-interactive mode")
+		log("Failed to complete authentication")
+		return 1
+	case "gateway_503":
+		// Real openconnect 9.21 when the gateway answers the login POST with an HTTP error
+		// (http.c "Unexpected %d result from server", main.c "Failed to complete authentication").
+		log("Connected to 192.0.2.1:443")
+		log("SSL negotiation with fake.example")
+		log("Connected to HTTPS on fake.example with ciphersuite (TLS1.3)-(ECDHE-SECP256R1)-(AES-256-GCM)")
+		log("Unexpected 503 result from server")
+		log("Failed to complete authentication")
+		return 1
+	case "cstp_503":
+		// Login accepted, then the tunnel CONNECT is refused (cstp.c), main.c exits 1.
+		log("Bitte geben Sie ihren Benutzernamen und ihr Passwort ein.")
+		log("POST https://fake.example/")
+		log("Got inappropriate HTTP CONNECT response: HTTP/1.1 503 Service Unavailable")
+		log("Creating SSL connection failed")
+		log("Unknown error; exiting.")
 		return 1
 	case "input_required":
 		log("User input required in non-interactive mode")
@@ -211,8 +257,14 @@ func openconnect(args []string) int {
 		// the server sends no second OTP form but starts over.
 		log("Bitte geben Sie ihren Benutzernamen und ihr Passwort ein.")
 		log("Bitte zweiten Faktor eingeben (OTP) / Please enter second factor (OTP).")
-		log("Generating OATH TOTP token code")
+		if tokenPath != "" || !interactive || !next() {
+			log("Generating OATH TOTP token code")
+		}
 		log("Login failed.")
+		for interactive && next() {
+			log("Bitte geben Sie ihren Benutzernamen und ihr Passwort ein.")
+			log("Login failed.")
+		}
 		log("Bitte geben Sie ihren Benutzernamen und ihr Passwort ein.")
 		log("Password:")
 		log("***")
@@ -235,6 +287,11 @@ func openconnect(args []string) int {
 		// Like the real openconnect when logging in with --token-mode=totp (measured 2026-09-08).
 		log("Bitte zweiten Faktor eingeben (OTP) / Please enter second factor (OTP).")
 		log("Generating OATH TOTP token code")
+	} else if interactive {
+		// The second prompt: the OTP form for a typed code, Duo's "push".
+		log("Bitte zweiten Faktor eingeben (OTP) / Please enter second factor (OTP).")
+		for next() {
+		}
 	}
 	if out := os.Getenv("FAKE_TOKEN_FILE"); tokenPath != "" && out != "" {
 		// openconnect reads the file only when generating the code, i.e. after starting.

@@ -271,6 +271,42 @@ func TestAuthFail(t *testing.T) {
 	}
 }
 
+func TestTypedCodeWaitsForTheOTPForm(t *testing.T) {
+	// Without --non-inter openconnect asks again after a refused password; the typed code must
+	// not go in as a second password, and a wrong code still counts as a wrong code.
+	for _, c := range []struct {
+		mode, lines string
+		verdict     Verdict
+	}{
+		{"auth_fail", "x\n", Verdict{"auth_failed", PasswordRejected}},
+		{"totp_rejected", "x\n123456\n", Verdict{"auth_failed", TOTPRejected}},
+	} {
+		f := newFlow(t)
+		t.Setenv("FAKE_MODE", c.mode)
+		tn := f.make()
+		f.start(tn, "x", OncePrefix+"123456")
+		if tn.WaitReady(3 * time.Second) {
+			t.Fatal(c.mode, "ready")
+		}
+		if v, _ := tn.Classification(); v != c.verdict {
+			t.Fatal(c.mode, v)
+		}
+		if data, _ := os.ReadFile(f.pwfile); string(data) != c.lines {
+			t.Fatalf("%s: %q", c.mode, data)
+		}
+	}
+	f := newFlow(t)
+	tn := f.make()
+	f.start(tn, "x", OncePrefix+"123456")
+	if !tn.WaitReady(3 * time.Second) {
+		t.Fatal("not ready")
+	}
+	tn.Stop(2 * time.Second)
+	if data, _ := os.ReadFile(f.pwfile); string(data) != "x\n123456\n" {
+		t.Fatalf("%q", data)
+	}
+}
+
 func TestInputRequiredMessage(t *testing.T) {
 	f := newFlow(t)
 	t.Setenv("FAKE_MODE", "input_required")

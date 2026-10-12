@@ -380,6 +380,35 @@ func TestDiscardRemovesTheStagedFiles(t *testing.T) {
 	}
 }
 
+// The service ended before it installed or discarded the update (switched off, task ended):
+// the next start removes the unpacked folder, and nothing else next to the installation.
+func TestStartRemovesUpdatesThatWereNeverInstalled(t *testing.T) {
+	f := newFixture(t, makeZip(t, coreZip...))
+	if _, err := f.u.Check(context.Background()); err != nil || len(f.leftovers()) != 1 {
+		t.Fatal(err, f.leftovers())
+	}
+	write(t, filepath.Join(filepath.Dir(f.root), "outside"), "not ours")
+	next := &Updater{Root: f.root, Commit: commitB, Files: osFS{}}
+	next.RemoveOld()
+	if len(f.leftovers()) != 0 {
+		t.Fatal("left behind:", f.leftovers())
+	}
+	if read(t, filepath.Join(filepath.Dir(f.root), "outside")) != "not ours" ||
+		read(t, filepath.Join(f.root, "bin", "uni-vpn-core")) != "old core" {
+		t.Fatal("removed something else")
+	}
+	// A copy outside an installation leaves the folder next to it alone.
+	f.u.Discard()
+	if _, err := f.u.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	stray := &Updater{Root: f.root, Commit: commitB, Files: osFS{}, rootErr: "not an installation"}
+	stray.RemoveOld()
+	if len(f.leftovers()) != 1 {
+		t.Fatal(f.leftovers())
+	}
+}
+
 // winFS behaves like Windows for the files in busy: they cannot be replaced or deleted, only
 // renamed (and stay busy under the new name).
 type winFS struct{ busy map[string]bool }

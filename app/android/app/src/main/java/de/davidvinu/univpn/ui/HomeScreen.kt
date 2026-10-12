@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -32,6 +33,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import de.davidvinu.univpn.AppModel
 import de.davidvinu.univpn.MainActivity
 import de.davidvinu.univpn.Screen
+import de.davidvinu.univpn.UniVpnService
 import kotlinx.coroutines.launch
 
 /** Message ids whose state name says it all (as on the status page). */
@@ -58,6 +62,7 @@ private val FIX = mapOf("password" to "main.update_password", "totp" to "main.up
 fun HomeScreen(model: AppModel, vpnOn: Boolean, activity: MainActivity) {
     val status = model.status ?: return
     val scope = rememberCoroutineScope()
+    val lockdown by UniVpnService.lockdown.collectAsState()
     val state = status.optString("state")
     val domains = status.optJSONArray("domains")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
     Column(Modifier.fillMaxSize()) {
@@ -129,6 +134,14 @@ fun HomeScreen(model: AppModel, vpnOn: Boolean, activity: MainActivity) {
                             }
                         }
                     }
+                    if (vpnOn && lockdown) {
+                        Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 12.dp)) {
+                            Text(model.t("phone.lockdown"), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+                            TextButton(onClick = { activity.openVpnSettings() }, modifier = Modifier.align(Alignment.End)) {
+                                Text(model.t("phone.vpn_settings"))
+                            }
+                        }
+                    }
                 }
             }
             item { Section(model.t("settings.through")) }
@@ -146,6 +159,19 @@ fun HomeScreen(model: AppModel, vpnOn: Boolean, activity: MainActivity) {
                 )
             }
         }
+    }
+    if (model.vpnRefused) {
+        AlertDialog(
+            onDismissRequest = { model.vpnRefused = false },
+            text = { Text(model.t("phone.vpn_refused")) },
+            dismissButton = { TextButton(onClick = { model.vpnRefused = false }) { Text(model.t("app.back")) } },
+            confirmButton = {
+                TextButton(onClick = {
+                    model.vpnRefused = false
+                    activity.openVpnSettings()
+                }) { Text(model.t("phone.vpn_settings")) }
+            },
+        )
     }
 }
 

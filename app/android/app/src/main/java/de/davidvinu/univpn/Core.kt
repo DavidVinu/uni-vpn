@@ -43,14 +43,28 @@ class Core(private val context: Context) {
     private var process: Process? = null
     private var started = 0L
 
+    /** Exists while the core this app started holds its ports (daemon.Options.ReadyFile). */
+    private val readyFile = File(context.filesDir, "state/uni-vpn/api-ready")
+
+    /**
+     * Another app held the core's port, so the core ended (EXIT_PORTS_TAKEN): the app says so
+     * instead of waiting for an answer that cannot come.
+     */
+    @Volatile var portTaken = false
+        private set
+
     /** Starts the core unless it runs. Cheap to call often. */
     fun ensureRunning() {
         synchronized(lock) {
-            if (process?.isAlive == true) return
+            val last = process
+            if (last?.isAlive == true) return
+            if (last != null) portTaken = last.exitValue() == EXIT_PORTS_TAKEN
             // A core that just exited (for example because another one holds the lock) is not
             // restarted in a tight loop.
             if (System.currentTimeMillis() - started < 1000) return
             started = System.currentTimeMillis()
+            // Only the core started now may say it holds the ports.
+            readyFile.delete()
             process = try {
                 start()
             } catch (e: Exception) {
@@ -186,8 +200,22 @@ class Core(private val context: Context) {
         val ok get() = status in 200..299
     }
 
+    /**
+     * The core this app started runs and holds its ports. Any app can listen on 127.0.0.1 first,
+     * and requests carry the token and the password: they go only to our own core.
+     */
+    fun ready(): Boolean {
+        val ours = synchronized(lock) { process?.isAlive == true } && readyFile.exists()
+        if (ours) portTaken = false
+        return ours
+    }
+
     /** One request to the core; status 0 when it is not reachable. Call off the main thread. */
     fun call(method: String, path: String, body: JSONObject? = null, timeoutMs: Int = 10_000): Reply {
+        if (!ready()) {
+            ensureRunning()
+            return Reply(0, null, "the core is not ready")
+        }
         return try {
             val conn = URL("http://127.0.0.1:$port$path").openConnection() as HttpURLConnection
             conn.requestMethod = method
@@ -220,6 +248,8 @@ class Core(private val context: Context) {
     companion object {
         private const val TAG = "uni-vpn"
         private const val KEY_ALIAS = "uni-vpn-secrets"
+        /** The core's exit code when another app holds its port (cmd/uni-vpn exitPortsTaken). */
+        private const val EXIT_PORTS_TAKEN = 3
 
         private fun randomHex(bytes: Int) = ByteArray(bytes).also { SecureRandom().nextBytes(it) }.toHex()
         private fun ByteArray.toHex() = joinToString("") { "%02x".format(it) }

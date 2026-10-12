@@ -158,3 +158,42 @@ func TestClassifierKeepsFirstVerdict(t *testing.T) {
 		t.Fatal(v)
 	}
 }
+
+func TestGatewayTroubleIsNotASignInFailure(t *testing.T) {
+	// Real openconnect 9.12: the gateway refused the connection, answered the login with 503,
+	// or refused the tunnel after the login. "Failed to complete authentication" or exit code
+	// 1 follow, but the password was never rejected: try again instead of asking for it.
+	for _, lines := range [][]string{
+		{"POST https://vpn.example.edu/", "Failed to connect to vpn.example.edu:443: Connection refused",
+			"Failed to connect to host vpn.example.edu", "Failed to open HTTPS connection to vpn.example.edu",
+			"Failed to complete authentication"},
+		{"Connected to HTTPS on vpn.example.edu with ciphersuite (TLS1.3)", "Got HTTP response: HTTP/1.1 503 Service Unavailable",
+			"Unexpected 503 result from server", "Failed to complete authentication"},
+		{"Got inappropriate HTTP CONNECT response: HTTP/1.1 503 Service Unavailable", "Creating SSL connection failed"},
+	} {
+		c := NewClassifier("totp_field")
+		for _, line := range lines {
+			c.Feed(line)
+		}
+		if v, _ := c.Verdict(); v != (Verdict{StateError, messages.ConnectFailed.Text}) {
+			t.Fatal(lines, v)
+		}
+	}
+}
+
+func TestOnlyTheServersOwnCertificateIsUntrusted(t *testing.T) {
+	// Gateways that also take device certificates ask for one before the login form.
+	seq := NewClassifier("")
+	if _, ok := seq.Feed("Server requested SSL client certificate; none was configured"); ok {
+		t.Fatal("a normal step taken for a certificate problem")
+	}
+	if v, _ := seq.Feed("Login failed."); v.State != "auth_failed" || action(v) != "password" {
+		t.Fatal(v)
+	}
+	for _, line := range []string{"Server certificate verify failed: signer not found",
+		`Certificate from VPN server "vpn.example.edu" failed verification.`} {
+		if v := mustClassify(t, line); v != (Verdict{StateError, messages.ServerUntrusted.Text}) {
+			t.Fatal(line, v)
+		}
+	}
+}

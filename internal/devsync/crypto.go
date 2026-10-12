@@ -171,11 +171,13 @@ type pairing struct {
 	key  []byte
 }
 
-// scrypt makes each guess at a 60-bit code expensive; the code is the only secret.
+// scrypt makes each guess at a 60-bit code expensive; the code is the only secret. r=1, p=8
+// needs 4 MiB at a time where r=8, p=1 needed 32 MiB for the same work: an iPhone pairs in
+// its tunnel extension, which may use about 50 MB in all.
 var scryptN = 1 << 15
 
 func pairingFor(code string) pairing {
-	s, err := scrypt.Key([]byte(code), []byte("uni-vpn pairing"), scryptN, 8, 1, 32)
+	s, err := scrypt.Key([]byte(code), []byte("uni-vpn pairing"), scryptN, 1, 8, 32)
 	if err != nil {
 		panic(err)
 	}

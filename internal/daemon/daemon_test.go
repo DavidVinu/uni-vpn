@@ -6,19 +6,25 @@ package daemon
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
+	"fmt"
 	"math"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/DavidVinu/uni-vpn/internal/config"
 	"github.com/DavidVinu/uni-vpn/internal/credentials"
+	"github.com/DavidVinu/uni-vpn/internal/i18n"
 	"github.com/DavidVinu/uni-vpn/internal/messages"
 	"github.com/DavidVinu/uni-vpn/internal/pyjson"
 	"github.com/DavidVinu/uni-vpn/internal/tunnel"
@@ -219,6 +225,39 @@ func TestInputRequiredMessage(t *testing.T) {
 	}
 }
 
+func TestGatewayTroubleIsRetriedNotTakenForAWrongPassword(t *testing.T) {
+	// The gateway answered 503 (busy, maintenance), before or after the login: the password was
+	// never checked, so no "check your password" that stops all further attempts.
+	for _, mode := range []string{"gateway_503", "cstp_503"} {
+		t.Run(mode, func(t *testing.T) {
+			h := newHarness(t)
+			t.Setenv("FAKE_MODE", mode)
+			d := h.start(nil)
+			d.RequestConnect()
+			if !waitFor(4*time.Second, func() bool { return len(h.pwLines()) >= 2 }) {
+				s, m := d.snapshot()
+				t.Fatal(s, m, h.pwLines())
+			}
+			if s, _ := d.snapshot(); s == AuthFailed || d.lastErrorMessage() != messages.ConnectFailed.Text {
+				t.Fatal(s, d.lastErrorMessage())
+			}
+		})
+	}
+}
+
+func TestAClientCertificateRequestIsNoCertificateProblem(t *testing.T) {
+	// Gateways that also take device certificates ask for one first; a wrong password after
+	// that is still a wrong password, not an untrusted server.
+	h := newHarness(t)
+	t.Setenv("FAKE_MODE", "clientcert_auth_fail")
+	d := h.start(nil)
+	d.RequestConnect()
+	waitState(t, d, AuthFailed)
+	if _, m := d.snapshot(); m != messages.PasswordRejected {
+		t.Fatal(m)
+	}
+}
+
 func (d *Daemon) lastErrorMessage() string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -330,8 +369,36 @@ func TestRejectedTOTPIsFinalAuthFailure(t *testing.T) {
 		t.Fatal(m)
 	}
 	time.Sleep(500 * time.Millisecond)
-	if len(h.pwLines()) != 1 {
-		t.Fatal("no automatic second attempt", h.pwLines())
+	if len(h.pwLines()) != 2 {
+		t.Fatal("one more try with the next code, then no automatic attempt", h.pwLines())
+	}
+}
+
+func TestTOTPUsedByAnotherDeviceIsTriedOnceMoreWithTheNextCode(t *testing.T) {
+	// Synced devices share the secret: another one signed in with this window's code a moment
+	// before, and LinOTP takes each code only once. The next window's code gets through.
+	h := newHarness(t)
+	t.Setenv("FAKE_MODE", "totp_replayed")
+	t.Setenv("FAKE_ARGS_FILE", filepath.Join(t.TempDir(), "args"))
+	d := h.start(nil, func(d *Daemon) {
+		waits := []float64{0, 0.8} // the first code is unused here, the second waits for its window
+		d.otpWait = func(float64) float64 {
+			if len(waits) == 0 {
+				return 0
+			}
+			w := waits[0]
+			waits = waits[1:]
+			return w
+		}
+	})
+	started := time.Now()
+	d.RequestConnect()
+	if !waitFor(4*time.Second, func() bool { _, m := d.snapshot(); return m == messages.WaitingForCode }) {
+		t.Fatal(d.snapshot())
+	}
+	waitState(t, d, Connected)
+	if time.Since(started) < 800*time.Millisecond || len(h.pwLines()) != 2 {
+		t.Fatal(time.Since(started), h.pwLines())
 	}
 }
 
@@ -636,6 +703,73 @@ func TestOfflineThenOnline(t *testing.T) {
 	waitState(t, d, Connected)
 }
 
+func TestProbeAsksTheGatewayOfTheCurrentAccount(t *testing.T) {
+	// The service started with Heidelberg's defaults, then the assistant set up another one.
+	var mu sync.Mutex
+	var asked []string
+	t.Cleanup(func() { probe = DefaultProbe }) // after the daemon stopped (cleanups run last first)
+	probe = func(_ context.Context, host string, _ time.Duration) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		asked = append(asked, host)
+		return true
+	}
+	h := newHarness(t)
+	h.cfg.User = ""
+	d := h.start(func(o *Options) {
+		o.ConfigError, o.ConfigPath, o.NeedsSetup = "missing", filepath.Join(t.TempDir(), "config.toml"), true
+		o.Probe = nil
+	})
+	if err := d.CompleteSetup("ab123", "pw", "", "other",
+		[]config.Setting{{Key: "host", Value: "vpn.example.edu"}, {Key: "mfa", Value: "none"}}); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, d, Connected)
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Equal(asked, []string{"vpn.example.edu"}) {
+		t.Fatal(asked)
+	}
+}
+
+func TestDefaultProbe(t *testing.T) {
+	// A "Not listed" gateway on its own port.
+	gateway := httptest.NewTLSServer(http.NotFoundHandler())
+	defer gateway.Close()
+	if DefaultProbe(context.Background(), gateway.Listener.Addr().String(), 3*time.Second) {
+		t.Fatal("a certificate nobody trusts (a captive portal's) counts as online")
+	}
+	probeRoots = x509.NewCertPool()
+	probeRoots.AddCert(gateway.Certificate())
+	defer func() { probeRoots = nil }()
+	if !DefaultProbe(context.Background(), gateway.Listener.Addr().String(), 3*time.Second) {
+		t.Fatal(gateway.Listener.Addr())
+	}
+	// No TLS at all (a captive portal), or nothing there: offline.
+	plain, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for {
+			c, err := plain.Accept()
+			if err != nil {
+				return
+			}
+			c.Write([]byte("HTTP/1.1 302 Found\r\nLocation: http://portal.example/\r\n\r\n"))
+			c.Close()
+		}
+	}()
+	host := plain.Addr().String()
+	if DefaultProbe(context.Background(), host, 3*time.Second) {
+		t.Fatal(host)
+	}
+	plain.Close()
+	if DefaultProbe(context.Background(), host, 3*time.Second) {
+		t.Fatal(host)
+	}
+}
+
 func TestMissingOpenconnectBinary(t *testing.T) {
 	h := newHarness(t)
 	h.cfg.OpenConnect = "/nonexistent/openconnect"
@@ -682,6 +816,28 @@ func TestPortInUseIsRetriedUntilItIsFree(t *testing.T) {
 	if _, m := d.snapshot(); m != messages.NotConnected || d.forwarder.Addr() == nil {
 		t.Fatal(m)
 	}
+	echo(t, h.client(), "hello")
+}
+
+func TestConnectWhileThePortIsTakenStartsNoTunnel(t *testing.T) {
+	// Another proxy holds the browsers' port and the user presses Connect anyway: a tunnel
+	// nobody can reach, and port_in_use would turn into "not connected" while it runs.
+	h := newHarness(t)
+	blocker, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(h.cfg.SocksPort))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := h.start(nil)
+	d.RequestConnect()
+	time.Sleep(500 * time.Millisecond)
+	if s, m := d.snapshot(); s != Error || m != messages.PortInUse || h.pwLines() != nil || d.tunnelNow() != nil {
+		blocker.Close()
+		t.Fatal(s, m, h.pwLines())
+	}
+	blocker.Close()
+	waitState(t, d, Idle)
+	d.RequestConnect()
+	waitState(t, d, Connected)
 	echo(t, h.client(), "hello")
 }
 
@@ -1056,5 +1212,21 @@ func TestVersionAndProtocolMatchThePythonPackage(t *testing.T) {
 	}
 	if !strings.Contains(text, "PROTOCOL = "+strconv.Itoa(Protocol)+"\n") {
 		t.Fatal("PROTOCOL differs from", Protocol)
+	}
+}
+
+// A keyring that does not save shows the keyring message in the user's language, not the
+// keyring tool's English.
+func TestSavingIntoABrokenKeyringIsTranslated(t *testing.T) {
+	h := newHarness(t)
+	broken := func(string) error { return &credentials.KeyringError{Msg: "Uni VPN could not be saved: 5"} }
+	d := h.start(func(o *Options) { o.PasswordSetter, o.TOTPSetter = broken, broken })
+	for name, err := range map[string]error{"password": d.SetPassword("pw"), "totp": d.SetTOTP("JBSWY3DPEHPK3PXP")} {
+		if key, _ := i18n.Of(err).(pyjson.Object); key == nil || fmt.Sprint(key) != fmt.Sprint(i18n.T("msg.keyring_locked").JSON()) {
+			t.Errorf("%s: %v %v", name, err, i18n.Of(err))
+		}
+	}
+	if !strings.Contains(h.logs.String(), "could not be saved: 5") {
+		t.Error("keyring's own words not logged")
 	}
 }

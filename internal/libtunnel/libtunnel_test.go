@@ -203,6 +203,7 @@ func TestLoginOptions(t *testing.T) {
 		otpCounted bool
 	}{
 		{"totp_field", "base32:JBSWY3DP", "pw", "", "base32:JBSWY3DP", false},
+		{"totp_field", tunnel.OncePrefix + "123456", "pw", "123456", "", false},
 		{"totp_append", "base32:JBSWY3DP", "pw,123456", "", "", true},
 		{"duo_push", "", "pw", "push", "", false},
 		{"none", "", "pw", "", "", false},

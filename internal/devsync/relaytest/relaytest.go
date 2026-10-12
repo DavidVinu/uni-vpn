@@ -17,8 +17,9 @@ import (
 
 // The limits of relay/worker.js.
 const (
-	maxPairBlob  = 8 * 1024
-	maxGroupBlob = 256 * 1024
+	maxPairBlob     = 8 * 1024
+	maxGroupBlob    = 256 * 1024
+	maxNewGroupBlob = 64 * 1024
 )
 
 // Relay is the server's state; Groups counts what tests look at.
@@ -105,11 +106,12 @@ func (f *Relay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("ETag", `"`+strconv.FormatInt(g.version, 10)+`"`)
 			w.Write(g.body)
 		case "PUT":
-			if len(body) == 0 || len(body) > maxGroupBlob {
+			create := r.Header.Get("If-None-Match") == "*"
+			if len(body) == 0 || len(body) > maxGroupBlob || create && len(body) > maxNewGroupBlob {
 				http.Error(w, "too large", 413)
 				return
 			}
-			if r.Header.Get("If-None-Match") == "*" {
+			if create {
 				if g != nil {
 					http.Error(w, "exists", 412)
 					return

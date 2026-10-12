@@ -58,6 +58,25 @@ test("group versions, tokens and limits", async () => {
   assert.equal((await call(env, "GET", `/v1/group/${id}`, {headers: auth})).status, 404);
 });
 
+test("a new group starts small and goes soon unless a device uses it", async () => {
+  const env = {DB: d1()};
+  const auth = {Authorization: `Bearer ${token}`};
+  const create = {...auth, "If-None-Match": "*"};
+  const [unused, read] = ["1".repeat(32), "2".repeat(32)];
+  assert.equal((await call(env, "PUT", `/v1/group/${id}`, {body: "x".repeat(64 * 1024 + 1), headers: create})).status, 413);
+  assert.equal((await call(env, "PUT", `/v1/group/${id}`, {body: "one", headers: create})).status, 200);
+  const big = await call(env, "PUT", `/v1/group/${id}`, {body: "x".repeat(200 * 1024), headers: {...auth, "If-Match": '"1"'}});
+  assert.equal(big.status, 200, "later writes may grow");
+  await call(env, "PUT", `/v1/group/${unused}`, {body: "spam", headers: create});
+  await call(env, "PUT", `/v1/group/${read}`, {body: "doc", headers: create});
+  await call(env, "GET", `/v1/group/${read}`, {headers: auth, now: 1000 + 30 * 60 * 1000});
+  const later = 1000 + 8 * 24 * 60 * 60 * 1000;
+  await cleanup(env, later);
+  assert.equal((await call(env, "GET", `/v1/group/${unused}`, {headers: auth, now: later})).status, 404);
+  assert.equal((await call(env, "GET", `/v1/group/${read}`, {headers: auth, now: later})).status, 200);
+  assert.equal((await call(env, "GET", `/v1/group/${id}`, {headers: auth, now: later})).status, 200);
+});
+
 test("unknown paths", async () => {
   const env = {DB: d1()};
   for (const path of ["/", "/v1/pair/xyz", `/v1/other/${id}`, `/v2/pair/${id}`, `/v1/pair/${id}/x`]) {

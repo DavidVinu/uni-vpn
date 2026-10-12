@@ -27,6 +27,10 @@ import (
 // apiTokenEnv: when set, the local API answers only requests that carry this token.
 const apiTokenEnv = "UNI_VPN_API_TOKEN"
 
+// exitPortsTaken: the Android app's core found its port held by another app; the app says so
+// (Core.kt) instead of waiting for it.
+const exitPortsTaken = 3
+
 const usage = "usage: uni-vpn [--config CONFIG] [--version] {daemon,update,setup,uninstall,app} ..."
 
 func main() {
@@ -114,6 +118,11 @@ func cmdDaemon(configArg string) int {
 			}
 			windows := &appWindows{restart: app.RestartApp, log: log}
 			o.Updater, o.AppPolled = u, windows.polled
+			if apiToken != "" {
+				// On a phone any app can listen on 127.0.0.1 before the core does: the app
+				// talks to its core only while the ready file exists (docs/android.md).
+				o.ReadyFile = platform.ReadyFile()
+			}
 		}})
 	var logged *coremain.LoggedError
 	switch {
@@ -124,6 +133,9 @@ func cmdDaemon(configArg string) int {
 	case errors.Is(err, coremain.ErrLocked):
 		fmt.Fprintln(os.Stderr, err)
 		return 0
+	case errors.Is(err, coremain.ErrPortsTaken):
+		fmt.Fprintln(os.Stderr, err)
+		return exitPortsTaken
 	case errors.As(err, &logged):
 		return 1
 	}

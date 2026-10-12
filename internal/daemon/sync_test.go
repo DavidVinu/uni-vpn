@@ -4,6 +4,8 @@ package daemon
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -13,8 +15,10 @@ import (
 	"time"
 
 	"github.com/DavidVinu/uni-vpn/internal/config"
+	"github.com/DavidVinu/uni-vpn/internal/devsync"
 	"github.com/DavidVinu/uni-vpn/internal/devsync/relaytest"
 	"github.com/DavidVinu/uni-vpn/internal/httpapi"
+	"github.com/DavidVinu/uni-vpn/internal/messages"
 	"github.com/DavidVinu/uni-vpn/internal/pyjson"
 )
 
@@ -143,5 +147,140 @@ func TestSyncHiddenWithoutRelay(t *testing.T) {
 	s := statusValue(t, d, "sync").(pyjson.Object)
 	if available, _ := s.Get("available"); available != false {
 		t.Fatal(s)
+	}
+}
+
+// syncedPair is a set-up laptop and a desktop it has set up with a code.
+func syncedPair(t *testing.T, overrides []config.Setting) (laptop *Daemon, laptopH *harness, desktop *Daemon, desktopH *harness) {
+	t.Helper()
+	_, url := relaytest.Start(t)
+	laptopH = newHarness(t)
+	laptopH.cfg.User = "ab123"
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := config.WriteInitial(path, "ab123", "heidelberg", overrides); err != nil {
+		t.Fatal(err)
+	}
+	laptop = laptopH.start(syncOptions(url, dir, func(o *Options) { o.ConfigPath = path }))
+	desktopH = newHarness(t)
+	desktopDir := t.TempDir()
+	desktop = desktopH.start(syncOptions(url, desktopDir, func(o *Options) {
+		o.NeedsSetup, o.ConfigPath = true, filepath.Join(desktopDir, "config.toml")
+	}))
+	offer, err := laptop.Sync("offer", pyjson.O())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pairing, _ := offer.Get("pairing")
+	code, _ := pairing.(pyjson.Object).Get("code")
+	if _, err := desktop.Sync("enter", pyjson.O("code", code)); err != nil {
+		t.Fatal(err)
+	}
+	if !waitFor(5*time.Second, func() bool { laptop.sync.Sync(context.Background()); return len(syncDevices(t, laptop)) == 2 }) {
+		t.Fatal("the laptop does not see the desktop")
+	}
+	return laptop, laptopH, desktop, desktopH
+}
+
+// A password changed on one device is for the others' next connection: an idle one does not
+// connect by itself (with Duo, every device would send a push).
+func TestSyncedPasswordDoesNotConnect(t *testing.T) {
+	ctx := context.Background()
+	laptop, laptopH, desktop, desktopH := syncedPair(t, nil)
+	waitState(t, laptop, Idle)
+	waitState(t, desktop, Idle, 10*time.Second)
+	desktopH.mu.Lock()
+	desktopH.password = []byte("new-password")
+	desktopH.mu.Unlock()
+	if err := desktop.SetPassword("new-password"); err != nil {
+		t.Fatal(err)
+	}
+	if err := desktop.sync.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := laptop.sync.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	laptopH.mu.Lock()
+	stored := slices.Clone(laptopH.stored)
+	laptopH.mu.Unlock()
+	if !slices.Equal(stored, []string{"new-password"}) {
+		t.Fatalf("laptop stored %v", stored)
+	}
+	if waitFor(time.Second, func() bool { s, _ := laptop.snapshot(); return s != Idle }) {
+		t.Fatalf("the laptop connected by itself:\n%s", laptopH.logs.String())
+	}
+	// One that failed with the old password tries again with the new one.
+	laptop.forceSet(AuthFailed, messages.PasswordRejected)
+	before := len(laptopH.logs.String())
+	desktopH.mu.Lock()
+	desktopH.password = []byte("newer-password")
+	desktopH.mu.Unlock()
+	if err := desktop.SetPassword("newer-password"); err != nil {
+		t.Fatal(err)
+	}
+	if err := desktop.sync.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := laptop.sync.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !waitFor(5*time.Second, func() bool { return strings.Contains(laptopH.logs.String()[before:], "-> connecting") }) {
+		t.Fatalf("the laptop did not try the new password:\n%s", laptopH.logs.String())
+	}
+}
+
+// Two devices with the same overrides in another order in config.toml: each would send its
+// order to the other as a change, for ever, every time taking the tunnel down.
+func TestSyncedOverridesTakeTheGroupsOrder(t *testing.T) {
+	ctx := context.Background()
+	laptop, laptopH, desktop, desktopH := syncedPair(t, []config.Setting{{Key: "authgroup", Value: "staff"}})
+	taken := func() int {
+		return strings.Count(laptopH.logs.String()+desktopH.logs.String(), "Synced from other devices: account")
+	}
+	paired := taken()
+	// On the laptop, Settings: another university, then back with one more override.
+	pw, totp := "pw-s3cret", "base32:GEZDGNBVGY3TQOJQ"
+	if err := laptop.CompleteSetup("ab123", pw, totp, "bremen", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := laptop.CompleteSetup("ab123", pw, totp, "heidelberg",
+		[]config.Setting{{Key: "usergroup", Value: "x"}, {Key: "authgroup", Value: "staff"}}); err != nil {
+		t.Fatal(err)
+	}
+	for range 4 {
+		for _, d := range []*Daemon{laptop, desktop} {
+			if err := d.sync.Sync(ctx); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	applied := taken() - paired
+	laptopOrder, _ := config.Overrides(laptop.configPath)
+	desktopOrder, _ := config.Overrides(desktop.configPath)
+	if applied != 1 || !slices.Equal(laptopOrder, desktopOrder) {
+		t.Fatalf("account taken over %d times; laptop %v, desktop %v", applied, laptopOrder, desktopOrder)
+	}
+}
+
+func TestSyncErrorsForTheApp(t *testing.T) {
+	notUsed := &devsync.ApplyError{Keys: []string{"language"}, Err: errors.New("unknown language 'it'")}
+	for _, c := range []struct {
+		err  error
+		want string
+	}{
+		{notUsed, "sync.not_used"},
+		{fmt.Errorf("%w: %w", devsync.ErrOffline, errors.New("dial tcp")), "sync.offline"},
+		{devsync.ErrCodeUnknown, "sync.code_unknown"},
+	} {
+		var ve *httpapi.ValueError
+		if !errors.As(syncError(c.err), &ve) || ve.Text == nil || ve.Text.Key != c.want {
+			t.Errorf("%v: %#v", c.err, syncError(c.err))
+		}
+	}
+	// "Use settings from another device": linked, but the account could not be used here.
+	p := pairingJSON(&devsync.Pairing{Mode: "request", State: "done", Error: notUsed}).(pyjson.Object)
+	if text, _ := p.Get("error"); text == nil || !strings.Contains(fmt.Sprint(text), "sync.not_used") {
+		t.Fatalf("pairing %v", p)
 	}
 }

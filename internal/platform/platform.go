@@ -100,14 +100,7 @@ func realpath(p string) string {
 }
 
 func programFiles() []string {
-	var out []string
-	seen := map[string]bool{}
-	for _, name := range []string{"ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"} {
-		if v := os.Getenv(name); v != "" && !seen[v] {
-			seen[v] = true
-			out = append(out, v)
-		}
-	}
+	out := systemProgramFiles()
 	if len(out) == 0 {
 		out = []string{`C:\Program Files`, `C:\Program Files (x86)`}
 	}
@@ -188,6 +181,9 @@ func StateDir() string {
 
 func LogFile() string  { return filepath.Join(StateDir(), "daemon.log") }
 func LockFile() string { return filepath.Join(ConfigDir(), "daemon.lock") }
+
+// ReadyFile exists while the Android app's core serves its ports (app/android Core.kt).
+func ReadyFile() string { return filepath.Join(StateDir(), "api-ready") }
 
 // AdminOnly reports whether path lies inside Program Files, which only administrators can
 // change. The elevated Windows service must not run programs any user process could replace.

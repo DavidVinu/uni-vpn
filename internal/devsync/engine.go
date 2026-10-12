@@ -85,6 +85,7 @@ type savedHash struct {
 type state struct {
 	Version int64                `json:"version"`
 	Adopt   bool                 `json:"adopt,omitempty"` // just joined: take everything from the group
+	Keyed   bool                 `json:"keyed,omitempty"` // Hashes are keyedHash, not hash (older versions)
 	Hashes  map[string]savedHash `json:"hashes"`
 }
 
@@ -116,6 +117,7 @@ type Engine struct {
 	pending       pending
 	pendingGen    int
 	pendingLoaded bool
+	applying      bool // Local.Apply runs: the settings it changes are not this device's own
 	devices       []DeviceInfo
 	lastAttempt   time.Time
 	lastError     error
@@ -191,6 +193,18 @@ func (e *Engine) loadKeys(ctx context.Context) (*keys, error) {
 	return k, nil
 }
 
+// recheck reads the keyring again when it gave no keys before: one that did not answer at
+// start (locked, its prompt dismissed) must not keep syncing off until a restart, nor let
+// "Add a device" replace the keys it holds with a new group.
+func (e *Engine) recheck(ctx context.Context) (*keys, error) {
+	e.mu.Lock()
+	if e.keys == nil {
+		e.loaded = false
+	}
+	e.mu.Unlock()
+	return e.loadKeys(ctx)
+}
+
 func (e *Engine) saveKeys(k *keys) error {
 	if err := e.opts.Store.Save(base64.StdEncoding.EncodeToString(mustJSON(k))); err != nil {
 		return err
@@ -221,11 +235,15 @@ func (k *keys) private() *ecdh.PrivateKey {
 
 func (k *keys) group() group { return group{root: k.Root} }
 
+// stateKey keys the hashes in sync.json. It comes from the device's own key, which stays when
+// the group moves to a new root after a removal.
+func (k *keys) stateKey() []byte { return derive(k.Priv, "state hash", 32) }
+
 func (e *Engine) loadState() state {
-	st := state{Hashes: map[string]savedHash{}}
+	var st state
 	data, err := os.ReadFile(e.opts.StatePath)
-	if err == nil && json.Unmarshal(data, &st) != nil {
-		st = state{Hashes: map[string]savedHash{}}
+	if err != nil || json.Unmarshal(data, &st) != nil {
+		st = state{Keyed: true} // nothing to carry over
 	}
 	if st.Hashes == nil {
 		st.Hashes = map[string]savedHash{}
@@ -299,11 +317,14 @@ func (e *Engine) store(ctx context.Context, g group, version int64, doc Doc, fin
 // --- Syncing ------------------------------------------------------------------------
 
 // pending is a local change not yet in the group, kept in a file so a restart does not lose
-// it: when it happened (it competes with other devices' changes by that time), and whether
-// password or second factor changed (only then is the keyring read).
+// it: when each value changed (it competes with other devices' changes by that time), and
+// whether password or second factor changed (only then is the keyring read).
 type pending struct {
 	Secrets bool  `json:"secrets,omitempty"`
-	At      int64 `json:"at,omitempty"`
+	At      int64 `json:"at,omitempty"` // the last change, for a value Changes does not know
+	// Changes is the keyedHash and time of each changed value. Password and second factor
+	// share one time and have no hash: Notify does not read the keyring.
+	Changes map[string]savedHash `json:"changes,omitempty"`
 }
 
 func (e *Engine) pendingPath() string { return e.opts.StatePath + ".pending" }
@@ -326,13 +347,65 @@ func (e *Engine) Notify(secrets bool) {
 		return
 	}
 	e.mu.Lock()
-	e.loadPendingLocked()
-	e.pending.Secrets = e.pending.Secrets || secrets
-	e.pending.At = e.nowMS()
-	e.pendingGen++
-	p := e.pending
+	k, applying := e.keys, e.applying
 	e.mu.Unlock()
-	if err := writeFile(e.pendingPath(), mustJSON(p)); err != nil {
+	if applying {
+		e.Wake() // a setting from another device being taken over, not a change made here
+		return
+	}
+	now := e.nowMS()
+	// Which values changed, each with its own time: an edit made offline keeps the time it was
+	// made when another one follows before the device is back online.
+	var snap map[string]json.RawMessage
+	st := state{Hashes: map[string]savedHash{}}
+	if k != nil && e.opts.Local.SetupDone() {
+		snap, _ = e.opts.Local.Snapshot(context.Background(), false)
+		st = e.loadState()
+	}
+	e.mu.Lock()
+	e.loadPendingLocked()
+	p := &e.pending
+	p.Secrets = p.Secrets || secrets
+	p.At = now
+	note := func(key, h string) {
+		if p.Changes == nil {
+			p.Changes = map[string]savedHash{}
+		}
+		p.Changes[key] = savedHash{H: h, T: now}
+	}
+	last := func(key string) string {
+		if c, ok := p.Changes[key]; ok {
+			return c.H
+		}
+		if old, ok := st.Hashes[key]; ok && st.Keyed {
+			return old.H
+		}
+		return ""
+	}
+	if snap != nil {
+		sk := k.stateKey()
+		for key, v := range snap {
+			if h := keyedHash(sk, v); !isSecret(key) && last(key) != h {
+				note(key, h)
+			}
+		}
+		removed := keyedHash(sk, jsonFalse)
+		for _, known := range []map[string]savedHash{st.Hashes, maps.Clone(p.Changes)} {
+			for key := range known {
+				if _, ok := snap[key]; !ok && strings.HasPrefix(key, DomainPrefix) && last(key) != removed {
+					note(key, removed)
+				}
+			}
+		}
+	}
+	if secrets {
+		note(KeyPassword, "")
+		note(KeyTOTP, "")
+	}
+	e.pendingGen++
+	data := mustJSON(*p)
+	e.mu.Unlock()
+	if err := writeFile(e.pendingPath(), data); err != nil {
 		e.logf(slog.LevelWarn, "Could not note a settings change for syncing: %s", err)
 	}
 	e.Wake()
@@ -360,6 +433,9 @@ func (e *Engine) Wake() {
 // Refresh syncs now unless that happened in the last minute; the app calls it when Settings
 // opens, like Chrome sync.
 func (e *Engine) Refresh(ctx context.Context) error {
+	if _, err := e.recheck(ctx); err != nil {
+		return err
+	}
 	e.mu.Lock()
 	recent := !e.lastAttempt.IsZero() && e.opts.Now().Sub(e.lastAttempt) < time.Minute
 	err := e.lastError
@@ -408,6 +484,12 @@ func (e *ApplyError) Error() string {
 
 func (e *ApplyError) Unwrap() error { return e.Err }
 
+// partly: err only names settings this device could not take over; the round went through.
+func partly(err error) bool {
+	var ae *ApplyError
+	return errors.As(err, &ae)
+}
+
 // Sync brings this device and its group in step once. Without a group it does nothing.
 func (e *Engine) Sync(ctx context.Context) error {
 	if e.relay == nil {
@@ -452,8 +534,10 @@ func (e *Engine) syncLocked(ctx context.Context) error {
 		e.mu.Lock()
 		e.loadPendingLocked()
 		p, gen := e.pending, e.pendingGen
+		p.Changes = maps.Clone(p.Changes)
 		e.mu.Unlock()
-		done, err := e.step(ctx, k, remote, version, st, p.Secrets || version == 0, p.At)
+		// A sync.json from before keyed hashes is carried over by comparing values, secrets too.
+		done, err := e.step(ctx, k, remote, version, st, p.Secrets || version == 0 || !st.Keyed, p)
 		if done {
 			e.donePending(gen)
 		}
@@ -465,16 +549,42 @@ func (e *Engine) syncLocked(ctx context.Context) error {
 }
 
 // step is one round: stamp local changes, merge, apply what came in, write back. done is
-// false when another device wrote in between and the round has to start over. changedAt is
-// when the pending local change happened, 0 for now.
-func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, st state, withSecrets bool, changedAt int64) (bool, error) {
+// false when another device wrote in between and the round has to start over. p is what this
+// device changed and when.
+func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, st state, withSecrets bool, p pending) (bool, error) {
 	snap, err := e.opts.Local.Snapshot(ctx, withSecrets)
 	if err != nil {
 		return false, err
 	}
 	me, now := k.Device, e.nowMS()
-	if changedAt == 0 || changedAt > now {
-		changedAt = now
+	sk := k.stateKey()
+	h := func(v json.RawMessage) string { return keyedHash(sk, v) }
+	if !st.Keyed {
+		// sync.json of an older version: a value that still has the hash it was synced with is
+		// unchanged here, any other one changed here. So an update sends nothing stale as new.
+		for key, old := range st.Hashes {
+			v, ok := snap[key]
+			if !ok && strings.HasPrefix(key, DomainPrefix) {
+				v, ok = jsonFalse, true
+			}
+			plain := old.H
+			old.H = ""
+			if ok && hash(v) == plain {
+				old.H = h(v)
+			}
+			st.Hashes[key] = old
+		}
+	}
+	// when: the time of this device's change of key, by which it competes with the others'.
+	when := func(key, hv string) int64 {
+		t := p.At
+		if c, ok := p.Changes[key]; ok && (c.H == hv || c.H == "") {
+			t = c.T
+		}
+		if t == 0 || t > now {
+			t = now
+		}
+		return t
 	}
 	snap[DevicePrefix+me] = mustJSON(Device{Name: e.opts.Name, Platform: e.opts.Platform,
 		Pub: k.private().PublicKey().Bytes()})
@@ -490,37 +600,40 @@ func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, s
 	if r, ok := remote.Entries[own]; !ok || hash(r.V) != hash(snap[own]) {
 		stamp(own, snap[own], now)
 	}
-	if !st.Adopt { // joining takes the group's settings
+	// Joining takes the group's settings. A device without its setup (config.toml missing or
+	// unreadable) has none to offer: its empty snapshot would remove every website.
+	if !st.Adopt && e.opts.Local.SetupDone() {
 		for key, v := range snap {
-			h := hash(v)
+			hv := h(v)
 			old, known := st.Hashes[key]
 			r, inRemote := remote.Entries[key]
 			switch {
 			case key == own:
-			case known && old.H == h: // unchanged here
-			case inRemote && hash(r.V) == h: // already the same
+			case known && old.H == hv: // unchanged here
+			case inRemote && h(r.V) == hv: // already the same
 			case !known && inRemote: // never synced here: the group's value is applied below
 			default:
-				stamp(key, v, changedAt)
+				stamp(key, v, when(key, hv))
 			}
 		}
+		removed := h(jsonFalse)
 		for key, old := range st.Hashes {
-			if _, present := snap[key]; present || old.H == hash(jsonFalse) || !strings.HasPrefix(key, DomainPrefix) {
+			if _, present := snap[key]; present || old.H == removed || !strings.HasPrefix(key, DomainPrefix) {
 				continue
 			}
-			stamp(key, jsonFalse, changedAt) // removed here
+			stamp(key, jsonFalse, when(key, removed)) // removed here
 		}
 	}
 	// What the group has that this device does not.
 	local := func(key string) (string, bool) {
 		if v, ok := snap[key]; ok {
-			return hash(v), true
+			return h(v), true
 		}
 		if old, ok := st.Hashes[key]; ok && isSecret(key) && !withSecrets {
 			return old.H, true
 		}
 		if strings.HasPrefix(key, DomainPrefix) {
-			return hash(jsonFalse), true
+			return h(jsonFalse), true
 		}
 		return "", false
 	}
@@ -529,13 +642,19 @@ func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, s
 		if strings.HasPrefix(key, DevicePrefix) {
 			continue
 		}
-		if h, ok := local(key); !ok || h != hash(ent.V) {
+		if lh, ok := local(key); !ok || lh != h(ent.V) {
 			incoming = append(incoming, key)
 		}
 	}
 	var failed map[string]error
 	if len(incoming) > 0 {
+		e.mu.Lock()
+		e.applying = true
+		e.mu.Unlock()
 		failed = e.opts.Local.Apply(ctx, merged, incoming)
+		e.mu.Lock()
+		e.applying = false
+		e.mu.Unlock()
 		var applied []string
 		for _, key := range incoming {
 			if failed[key] == nil {
@@ -556,18 +675,18 @@ func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, s
 		}
 		version = next
 	}
-	saved := state{Version: version, Hashes: map[string]savedHash{}}
+	saved := state{Version: version, Keyed: true, Hashes: map[string]savedHash{}}
 	for key, ent := range merged {
-		h := hash(ent.V)
+		hv := h(ent.V)
 		if failed[key] != nil {
 			// Not taken over: what this device has counts as seen, so it is not sent back as a
 			// change of its own; a newer value from the group is tried again.
 			var ok bool
-			if h, ok = local(key); !ok {
+			if hv, ok = local(key); !ok {
 				continue
 			}
 		}
-		saved.Hashes[key] = savedHash{H: h, T: ent.T, D: ent.D}
+		saved.Hashes[key] = savedHash{H: hv, T: ent.T, D: ent.D}
 	}
 	if err := e.saveState(saved); err != nil {
 		return false, err
@@ -659,8 +778,8 @@ func (e *Engine) Remove(ctx context.Context, device string) error {
 	if e.relay == nil {
 		return ErrUnavailable
 	}
-	if err := e.Sync(ctx); err != nil {
-		return err
+	if err := e.Sync(ctx); err != nil && !partly(err) {
+		return offline(err)
 	}
 	e.run.Lock()
 	defer e.run.Unlock()
@@ -672,7 +791,7 @@ func (e *Engine) Remove(ctx context.Context, device string) error {
 		old := k.group()
 		remote, version, err := e.fetch(ctx, old)
 		if err != nil {
-			return err
+			return offline(err)
 		}
 		if remote.Moved != nil {
 			if err := e.follow(remote.Moved, k); err != nil {
@@ -705,12 +824,12 @@ func (e *Engine) Remove(ctx context.Context, device string) error {
 		}
 		entries[DevicePrefix+device] = gone
 		if _, err := e.store(ctx, next, 0, Doc{Format: Format, Entries: entries}, false); err != nil {
-			return err
+			return offline(err)
 		}
 		if _, err := e.store(ctx, old, version, Doc{Format: Format, Moved: &Moved{Keys: sealed}}, true); errors.Is(err, errConflict) {
 			continue
 		} else if err != nil {
-			return err
+			return offline(err)
 		}
 		if device == k.Device {
 			e.logf(slog.LevelInfo, "Syncing turned off on this device")

@@ -289,9 +289,9 @@ func (k *Keyring) GetSecret(ctx context.Context, user string, kind Kind, timeout
 }
 
 // KeychainText undoes the hex output of `security -w`: it prints a secret as hex when it
-// holds anything but printable ASCII, for example "ä". A password that merely looks like
-// hex decodes to printable ASCII, which security would have printed as it is, so that
-// case keeps the original.
+// holds anything but printable ASCII, for example "ä". StoreSecret only stores UTF-8 text
+// without line breaks, so only hex that decodes to UTF-8 with a non-ASCII letter is taken
+// for that; a password like "12345678" or "cafe" is printed as it is and stays so.
 func KeychainText(out []byte) []byte {
 	// Python's `$` also matches before one final newline; bytes.fromhex skips it.
 	digits := bytes.TrimSuffix(out, []byte("\n"))
@@ -307,10 +307,8 @@ func KeychainText(out []byte) []byte {
 	if _, err := hex.Decode(decoded, digits); err != nil {
 		return out
 	}
-	for _, b := range decoded {
-		if b < 0x20 || b >= 0x7f {
-			return decoded
-		}
+	if utf8.Valid(decoded) && bytes.ContainsFunc(decoded, func(r rune) bool { return r >= utf8.RuneSelf }) {
+		return decoded
 	}
 	return out
 }

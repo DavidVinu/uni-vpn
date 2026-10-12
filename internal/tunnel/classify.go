@@ -65,8 +65,18 @@ var Markers = []Marker{
 	{"Cisco Secure Desktop", StateAuthFailed, HostScanRequired},
 	{"SAML", StateAuthFailed, SAMLRequired},
 	{"external browser", StateAuthFailed, SAMLRequired},
+	// Gateway or network trouble: openconnect prints these before its closing
+	// "Failed to complete authentication"; the password was never checked.
+	{"result from server", StateError, messages.ConnectFailed.Text}, // "Unexpected 503 result from server"
+	{"Failed to open HTTPS connection", StateError, messages.ConnectFailed.Text},
+	{"Failed to connect to host", StateError, messages.ConnectFailed.Text},
+	{"Got inappropriate HTTP CONNECT response", StateError, messages.ConnectFailed.Text},
+	{"Creating SSL connection failed", StateError, messages.ConnectFailed.Text},
 	{"Failed to complete authentication", StateAuthFailed, AuthRejected},
-	{"certificate", StateError, messages.ServerUntrusted.Text},
+	// Only the server's own certificate: "Server requested SSL client certificate; none was
+	// configured" is a normal step on gateways that also accept device certificates.
+	{"Server certificate verify failed", StateError, messages.ServerUntrusted.Text},
+	{"failed verification", StateError, messages.ServerUntrusted.Text},
 }
 
 // ClassifyLine returns the verdict of the first marker found in line.

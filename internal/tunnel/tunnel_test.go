@@ -103,6 +103,25 @@ func TestGroupNamesWithSpacesStayOneArgument(t *testing.T) {
 	}
 }
 
+func TestHeldCodeGoesOutWithoutAKnownOTPForm(t *testing.T) {
+	// A server that words its OTP form differently still gets the typed code (after otpFormWait).
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	tn := New(Config{Host: "vpn.example", LoginName: "u", MFA: "totp_field"}, "openconnect", wrapper, nil, "", t.TempDir())
+	tn.stdin, tn.heldCode = w, []byte("123456\n")
+	tn.handleLine("Please enter your code")
+	if tn.stdin == nil {
+		t.Fatal("released early")
+	}
+	tn.releaseCode()
+	if data, _ := io.ReadAll(r); string(data) != "123456\n" {
+		t.Fatalf("%q", data)
+	}
+}
+
 func TestDuoPushDropsNonInter(t *testing.T) {
 	if slices.Contains(makeProfile(t, func(c *Config) { c.MFA = "duo_push" }).Command(1), "--non-inter") {
 		t.Fatal()

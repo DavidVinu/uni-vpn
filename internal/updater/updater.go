@@ -534,7 +534,9 @@ func oldNames(path string) []string {
 	return names
 }
 
-// RemoveOld deletes the files an earlier update moved out of the way. Call it at start.
+// RemoveOld deletes the files an earlier update moved out of the way, and the folders of
+// updates that were unpacked but never installed (the computer was switched off, or Windows
+// ended the task). Call it at start.
 func (u *Updater) RemoveOld() {
 	if u.Root == "" {
 		return
@@ -544,6 +546,15 @@ func (u *Updater) RemoveOld() {
 			if st, err := os.Lstat(old); err == nil && st.Mode().IsRegular() {
 				_ = u.Files.Remove(old)
 			}
+		}
+	}
+	if u.rootErr != "" {
+		return // not an installation: the folder next to it is none of ours
+	}
+	folders, _ := filepath.Glob(filepath.Join(filepath.Dir(u.Root), stagePrefix+"*"))
+	for _, folder := range folders {
+		if st, err := os.Lstat(folder); err == nil && st.IsDir() {
+			os.RemoveAll(folder)
 		}
 	}
 }

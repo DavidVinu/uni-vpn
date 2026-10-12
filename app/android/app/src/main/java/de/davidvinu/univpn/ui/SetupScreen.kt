@@ -1,6 +1,7 @@
 package de.davidvinu.univpn.ui
 
 import android.content.Intent
+import androidx.activity.compose.BackHandler
 import androidx.core.net.toUri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -85,6 +86,8 @@ private class University(val json: JSONObject) {
     val country: String = json.optString("country")
     val mfa: String = json.optString("mfa")
     val portal: String = json.optString("mfa_portal_url")
+    /** The core can add itself in the MFA portal with one code from the user's app (enroll.go). */
+    val enroll: Boolean = json.optString("mfa_enroll") == "linotp" && portal.isNotEmpty()
     val steps: List<String> = json.optJSONArray("mfa_steps")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
     val search: List<String> = listOf(id, name, json.optString("host")) +
         (json.optJSONArray("aliases")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList())
@@ -113,7 +116,7 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
     var uniId by rememberSaveable { mutableStateOf(if (model.changingAccount) status.optString("university") else "") }
     var query by rememberSaveable { mutableStateOf("") }
     var host by rememberSaveable { mutableStateOf("") }
-    var groups by remember { mutableStateOf<List<String>>(emptyList()) }
+    var groups by rememberSaveable { mutableStateOf<List<String>>(emptyList()) }
     var group by rememberSaveable { mutableStateOf("") }
     var otherMfa by rememberSaveable { mutableStateOf("") }
     var detecting by remember { mutableStateOf(false) }
@@ -121,6 +124,8 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
     var password by rememberSaveable { mutableStateOf("") }
     var secret by rememberSaveable { mutableStateOf("") }
     var secretValid by remember { mutableStateOf(false) }
+    // "Set it up by hand instead" on the page for one code.
+    var byHand by rememberSaveable { mutableStateOf(false) }
     var pairCode by rememberSaveable { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
@@ -134,6 +139,7 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
     val mfa = if (isOther) otherMfa else uni?.mfa ?: "totp_field"
     val needsTotp = mfa in TOTP_MODES
     val total = if (needsTotp) 4 else 3
+    val auto = needsTotp && uni?.enroll == true
 
     fun go(next: Int) {
         error = null
@@ -146,10 +152,8 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
         model.home()
     }
 
-    fun submit() {
-        if (model.setupBusy) return
-        model.setupFinishing = true
-        go(CONNECTING)
+    // The account for /api/setup, without the second factor.
+    fun account(): JSONObject {
         val profile = JSONObject()
         if (isOther) {
             val parts = host.trim().replace(Regex("^https?://", RegexOption.IGNORE_CASE), "").split("/", limit = 2)
@@ -157,9 +161,23 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
             if (parts.size > 1 && parts[1].isNotEmpty()) profile.put("usergroup", parts[1])
             if (groups.size > 1 && group.isNotEmpty()) profile.put("authgroup", group)
         }
-        val body = JSONObject().put("user", user.trim()).put("password", password)
-            .put("secret", if (needsTotp) secret.trim() else "").put("university", uniId).put("profile", profile)
-        model.sendSetup(body)
+        return JSONObject().put("user", user.trim()).put("password", password).put("university", uniId).put("profile", profile)
+    }
+
+    fun submit() {
+        if (model.setupBusy) return
+        model.setupFinishing = true
+        go(CONNECTING)
+        model.sendSetup(account().put("secret", if (needsTotp) secret.trim() else ""))
+    }
+
+    // The first code from the user's app goes with the account, also when changing it.
+    fun submitCode(code: String) {
+        if (model.setupBusy) return
+        model.setupFinishing = true
+        error = null
+        model.enrollError = null
+        model.sendSetup(account().put("code", code), withCode = true)
     }
 
     // The answer lands in the model, so turning the phone meanwhile loses nothing.
@@ -205,14 +223,23 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
     ) {
         val back: (() -> Unit)? = when (step) {
             SIGN_IN -> { { go(UNIVERSITY) } }
-            SECOND_FACTOR -> { { go(SIGN_IN) } }
+            SECOND_FACTOR -> when {
+                auto && byHand -> { { byHand = false; go(SECOND_FACTOR) } }
+                auto && model.setupBusy -> null
+                auto -> { { model.cancelEnroll(); go(SIGN_IN) } }
+                else -> { { go(SIGN_IN) } }
+            }
             CODE -> { { go(WELCOME) } }
             UNIVERSITY -> if (model.changingAccount) { { finishChange() } } else if (syncAvailable) { { go(WELCOME) } } else null
             CONNECTING -> if (!model.setupBusy) { { model.setupSentAt = 0; go(if (needsTotp) SECOND_FACTOR else SIGN_IN) } } else null
             else -> null
         }
+        // Android's back button goes where the arrow goes, not out of the app.
+        BackHandler(enabled = back != null) { back?.invoke() }
         if (step != WELCOME && step != DONE) {
-            Bar(model, if (step >= 0 && step < DONE) model.t("setup.step", "n" to step + 1, "total" to total) else "", onBack = back)
+            // Without a second factor its step is skipped: connecting is the last one.
+            val n = if (step == CONNECTING && !needsTotp) total else step + 1
+            Bar(model, if (step >= 0 && step < DONE) model.t("setup.step", "n" to n, "total" to total) else "", onBack = back)
         }
         when (step) {
             WELCOME -> Column(
@@ -228,7 +255,7 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
                 Text("Uni VPN", style = MaterialTheme.typography.headlineMedium)
                 Spacer(Modifier.height(48.dp))
                 Button(onClick = {
-                    Scanner.scanQr(context) { value ->
+                    Scanner.scanQr(context, { error = model.t("phone.scan_failed") }) { value ->
                         val code = value?.removePrefix("UNIVPN:")
                         if (code != null && value.startsWith("UNIVPN:")) {
                             pairCode = code
@@ -239,6 +266,7 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
                     Icon(Icons.Outlined.QrCodeScanner, contentDescription = null)
                     Text("  " + model.t("phone.scan_code"))
                 }
+                ErrorText(error)
                 Info(model, model.t("phone.scan_code_help"))
                 TextButton(onClick = { go(CODE) }) { Text(model.t("sync.enter")) }
                 TextButton(onClick = { go(UNIVERSITY) }) { Text(model.t("phone.setup_here")) }
@@ -360,14 +388,42 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
                         when {
                             !USER_RE.matches(user.trim()) -> error = model.t("setup.enter_user")
                             password.isEmpty() -> error = model.t("setup.enter_password")
-                            needsTotp -> go(SECOND_FACTOR)
+                            needsTotp -> {
+                                byHand = false
+                                go(SECOND_FACTOR)
+                            }
                             else -> submit()
                         }
                     }) { Text(model.t("app.next")) }
                 }
             }
 
-            SECOND_FACTOR -> Page {
+            SECOND_FACTOR -> if (auto && !byHand) Page {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(model.t("app.second_factor"), style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
+                    Info(model, model.t("setup.auto_help"))
+                }
+                AutoSecondFactor(
+                    model,
+                    error ?: model.enrollError,
+                    onFirstCode = { submitCode(it) },
+                    onByHand = {
+                        model.cancelEnroll()
+                        byHand = true
+                        go(SECOND_FACTOR)
+                    },
+                    onDone = { if (model.changingAccount) finishChange() else go(DONE) },
+                    onFailed = { text ->
+                        // The VPN refused the password: back to it, as after any sign-in.
+                        if (model.status?.optString("error_kind") == "password") {
+                            go(SIGN_IN)
+                            error = text
+                        } else {
+                            model.enrollError = text
+                        }
+                    },
+                )
+            } else Page {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(model.t("app.second_factor"), style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
                     Info(model, mfaSteps(model, uni).joinToString("\n") + "\n\n" + model.t("setup.totp_help"))

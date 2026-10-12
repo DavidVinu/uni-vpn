@@ -2,20 +2,31 @@ package de.davidvinu.univpn.ui
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import de.davidvinu.univpn.AppModel
 import de.davidvinu.univpn.MainActivity
+import de.davidvinu.univpn.R
 import de.davidvinu.univpn.Screen
 
 @Composable
 fun App(model: AppModel, vpnOn: Boolean, activity: MainActivity) {
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
         when {
+            // Instead of a spinner that never ends. The core's texts need the core: this one
+            // comes with the app.
+            model.portTaken -> Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                Text(stringResource(R.string.port_in_use), textAlign = TextAlign.Center)
+            }
             model.status == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
