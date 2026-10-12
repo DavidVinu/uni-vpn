@@ -24,6 +24,10 @@ func pair(t *testing.T) (*os.File, *os.File) {
 		t.Fatal(err)
 	}
 	for _, fd := range fds {
+		// As internal/libtunnel sizes them: Darwin's default queue holds two packets and
+		// drops the rest with ENOBUFS.
+		_ = syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_SNDBUF, 256<<10)
+		_ = syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_RCVBUF, 256<<10)
 		if err := syscall.SetNonblock(fd, true); err != nil {
 			t.Fatal(err)
 		}
