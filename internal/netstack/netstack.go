@@ -13,6 +13,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"time"
 
 	"gvisor.dev/gvisor/pkg/buffer"
 	"gvisor.dev/gvisor/pkg/tcpip"
@@ -38,6 +39,9 @@ const (
 	bufferMin     = 4 << 10
 	bufferDefault = 64 << 10
 	bufferMax     = 256 << 10
+	// fullWait: how many milliseconds a packet waits for room in a full queue before it is
+	// dropped (TCP then sends it again).
+	fullWait = 100
 )
 
 // Stack is one userspace network interface with a single address.
@@ -174,7 +178,17 @@ func (s *Stack) outbound(ctx context.Context) {
 			}
 			binary.BigEndian.PutUint32(buf, family)
 		}
-		_, _ = s.file.Write(buf[:s.prefix+n])
+		s.write(ctx, buf[:s.prefix+n])
+	}
+}
+
+// write sends one packet, waiting a little while openconnect's side of the queue is full.
+func (s *Stack) write(ctx context.Context, pkt []byte) {
+	for wait := 0; wait < fullWait; wait++ {
+		if _, err := s.file.Write(pkt); !queueFull(err) || ctx.Err() != nil {
+			return
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
