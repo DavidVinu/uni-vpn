@@ -205,10 +205,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
 
     func applicationShouldTerminateAfterLastWindowClosed(_ app: NSApplication) -> Bool { false }
 
-    // uni-vpn://settings, uni-vpn://open?user=ab123 (from "uni-vpn app" and the installer).
+    // uni-vpn://settings, uni-vpn://open?user=ab123 (from "uni-vpn app" and the installer), and
+    // otpauth:// links (the MFA portal's "follow this link"), whose key the assistant reads.
     func application(_ app: NSApplication, open urls: [URL]) {
-        for url in urls where url.scheme == "uni-vpn" {
-            let page = url.host == "settings" ? "#settings" : (url.query.map { "&" + $0 } ?? "")
+        for url in urls {
+            let page: String
+            switch url.scheme?.lowercased() {
+            case "uni-vpn":
+                page = url.host == "settings" ? "#settings" : (url.query.map { "&" + $0 } ?? "")
+            case "otpauth":
+                page = "#otpauth=" + (url.absoluteString.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")
+            default:
+                continue
+            }
             if launched { show(page) } else { pending = page }
         }
     }

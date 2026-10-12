@@ -178,6 +178,23 @@ input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
         <div class="actions"><button class="btn text" type="button" data-back="step0" data-t="app.back"></button><button class="btn primary" type="submit" data-t="app.next"></button></div>
       </form>
 
+      <!-- Second factor, the short way: one code from the user's authenticator app, then the core
+           adds its own code generator in the MFA portal. Role model: Microsoft Authenticator's
+           "sign in to add your work account". The picture guide stays one click away. -->
+      <form id="step2a" hidden>
+        <p class="step"></p>
+        <h2 data-t="app.second_factor"></h2>
+        <p class="sub" id="a-text" aria-live="polite"></p>
+        <div class="field" id="a-field"><span class="row-title"><label for="a-code" data-t="setup.code"></label>
+          <span class="info"><button type="button" data-t-label="app.help"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></button>
+            <span class="pop" data-t="setup.auto_help" hidden></span></span></span>
+          <input id="a-code" inputmode="numeric" autocomplete="one-time-code" maxlength="9" spellcheck="false" placeholder="123456"></div>
+        <div class="spinner" id="a-busy" hidden></div>
+        <p class="error" id="a-err" role="alert" hidden></p>
+        <div class="actions"><button class="btn text" type="button" id="a-back" data-t="app.back"></button><button class="btn primary" type="submit" id="a-next" data-t="app.next"></button></div>
+        <button class="btn text" type="button" id="a-guide" data-t="setup.by_hand"></button>
+      </form>
+
       <!-- Second factor: a picture guide through the university's MFA portal, one step at a time.
            Role models: Microsoft's "Keep your account secure" wizard (a picture per step, Next and
            Back), 1Password and Bitwarden (add a code from a picture of its QR code). -->
@@ -380,11 +397,14 @@ function show(id) {
 }
 
 function step(id, focusId) {
-  for (const s of ["step0", "step1", "step2", "step3", "step4"]) $(s).hidden = s !== id;
+  if (id === "step2a" && offeredKey) id = "step2";  // a key from a link: the guide's test step
+  for (const s of ["step0", "step1", "step2a", "step2", "step3", "step4"]) $(s).hidden = s !== id;
+  if (id === "step2a") renderAuto();
   if (id === "step2") {
     renderGuide();
     checkPortal();
     if (keyRead) useKey($("s-totp").value, true);  // the code shown must be the current one
+    if (offeredKey) { const key = offeredKey; offeredKey = ""; useKey(key); }
   }
   const focus = focusId ? $(focusId) : $(id).querySelector("input:not([hidden])") || $(id).querySelector("h2");
   if (focus) focus.focus();
@@ -458,7 +478,8 @@ async function refresh() {
   if (view === "setup" && !setupSent && !changing) {
     show("main");  // set up meanwhile in another tab or with the command line
   }
-  if (view === "setup") { setupProgress(); return; }
+  if (offeredKey) useOffered();
+  if (view === "setup") { autoProgress(); setupProgress(); return; }
   if (view === null) {
     if (location.hash === "#settings") openSettings(); else show("main");
   }
@@ -500,6 +521,7 @@ function needsTotp() { return TOTP_MODES.includes(mfa()); }
 function numberSteps() {
   const ids = ["step0", "step1", ...(needsTotp() ? ["step2"] : []), "step3"];
   ids.forEach((id, i) => { $(id).querySelector(".step").textContent = t("setup.step", {n: i + 1, total: ids.length}); });
+  $("step2a").querySelector(".step").textContent = $("step2").querySelector(".step").textContent;
 }
 
 function closeList() { $("s-uni-list").hidden = true; $("s-uni").setAttribute("aria-expanded", "false"); active = -1; }
@@ -595,7 +617,98 @@ $("step1").onsubmit = (e) => {
   if (!$("s-pw").value) { err("s1-err", t("setup.enter_password")); return; }
   err("s1-err", "");
   if (!keyRead) slide = 0;
-  if (needsTotp()) step("step2"); else submitSetup();
+  if (needsTotp()) step(autoOK() ? "step2a" : "step2"); else submitSetup();
+};
+
+// --- second factor, the short way --------------------------------------------------------
+// A code from the user's app; the core signs in with it and adds its own code generator in the
+// MFA portal (status.json "enroll"). Only the Go core does this, the Python one has no "enroll".
+let autoRunning = false, autoSending = false, autoSentAt = 0, autoStage = "", autoPending = "";
+function autoOK() { return !!uni && uni.mfa_enroll === "linotp" && !!S && "enroll" in S; }
+
+function renderAuto(error) {
+  const e = autoRunning && S && S.enroll;
+  // Until the status catches up with the request just sent, what the request started.
+  const stage = autoRunning && Date.now() - autoSentAt < 1500 ? autoPending : e ? e.stage : "";
+  const busy = autoSending || stage === "connecting" || stage === "working";
+  const stuck = stage === "connecting" && ["offline", "blocked", "error"].includes(S.state);
+  $("a-text").textContent = stage === "code" ? tr(e.error, e.error_t) : stuck ? tr(S.message, S.message_t)
+    : busy ? t(stage === "working" ? "setup.auto_working" : "setup.waiting") : t("setup.auto_sub");
+  $("a-field").hidden = $("a-next").hidden = busy;
+  $("a-busy").hidden = !busy;
+  if (error !== undefined) err("a-err", error);
+  $("step2a").querySelector(".step").hidden = changingTotp;
+  // A new question: an empty field, ready for the next code.
+  if (stage !== autoStage && stage === "code") { $("a-code").value = ""; $("a-code").focus(); }
+  autoStage = stage;
+}
+
+function autoProgress() {
+  if (!autoRunning || $("step2a").hidden) return;
+  const e = S.enroll, settled = Date.now() - autoSentAt > 1500;
+  if (settled && (!e || e.stage === "failed")) {
+    autoRunning = false;
+    renderAuto(e ? tr(e.error, e.error_t) : "");
+    $("a-code").focus();
+    return;
+  }
+  if (settled && e.stage === "done") {
+    autoRunning = false;
+    if (changing) endChange(); else finish();
+    return;
+  }
+  renderAuto();
+}
+
+$("step2a").onsubmit = async (e) => {
+  e.preventDefault();
+  if (submitting) return;
+  const code = $("a-code").value.replace(/\s/g, "");
+  if (!/^[0-9]{6,8}$/.test(code)) { err("a-err", t("enroll.enter_code")); return; }
+  const answer = autoRunning && S.enroll && S.enroll.stage === "code";
+  submitting = autoSending = true;
+  renderAuto("");
+  let r;
+  try {
+    r = answer || changing ? await post("/api/totp/auto", {code})
+      : await post("/api/setup", {user: $("s-user").value.trim(), password: $("s-pw").value, code,
+                                  university: uni.id, profile: profileOverrides()});
+  } catch (e) {
+    r = {ok: false, data: null, text: t("msg.not_running")};
+  } finally {
+    submitting = autoSending = false;
+  }
+  if (!r.ok) {
+    const field = r.data && r.data.field, text = errText(r);
+    if (PROFILE_FIELDS.includes(field)) { step("step0"); err("s0-err", text); return; }
+    if (field === "user" || field === "password") { step("step1", field === "password" ? "s-pw" : "s-user"); err("s1-err", text); return; }
+    renderAuto(text);
+    return;
+  }
+  setupSent = autoRunning = true;
+  autoSentAt = Date.now();
+  autoPending = answer || (changing && S.state === "connected") ? "working" : "connecting";
+  $("a-code").value = "";
+  renderAuto();
+};
+
+async function stopAuto() {
+  if (!autoRunning) return;
+  autoRunning = false;
+  await send("/api/totp/auto", {cancel: true});
+}
+$("a-back").onclick = async () => {
+  if (submitting) return;
+  await stopAuto();
+  err("a-err", "");
+  if (changingTotp) endChange(); else step("step1");
+};
+$("a-guide").onclick = async () => {
+  if (submitting) return;
+  await stopAuto();
+  err("a-err", "");
+  slide = 0;
+  step("step2");
 };
 
 // --- second factor: the picture guide ---------------------------------------------------
@@ -658,7 +771,7 @@ async function checkPortal() {
 $("g-back").onclick = () => {
   if (submitting) return;
   if (slide > 0) { slide--; renderGuide(); return; }
-  if (changingTotp) endChange(); else { setupDone = false; step("step1"); }
+  if (autoOK()) step("step2a"); else if (changingTotp) endChange(); else { setupDone = false; step("step1"); }
 };
 
 $("step2").onsubmit = async (e) => {
@@ -831,7 +944,7 @@ function setupProgress() {
 }
 
 for (const b of document.querySelectorAll("[data-back]")) b.onclick = () => { if (!submitting) { setupDone = false; step(b.dataset.back); } };
-$("s3-back").onclick = () => { if (!submitting) { setupDone = false; step(needsTotp() ? "step2" : "step1"); } };
+$("s3-back").onclick = () => { if (!submitting) { setupDone = false; step(needsTotp() ? autoOK() ? "step2a" : "step2" : "step1"); } };
 // Without default domains nothing goes through the university yet: say where to add them.
 function finish() {
   $("s4-msg").textContent = t((S.domains || []).length ? "setup.all_set_sub" : "setup.all_set_no_domains");
@@ -868,7 +981,32 @@ function openSettings() {
   if (S.sync && S.sync.on) send("/api/sync/refresh").then(() => refresh());
 }
 $("open-settings").onclick = openSettings;
+// An otpauth:// link the app was opened with (the MFA portal's "follow this link", see the
+// native shells): its key goes into the guide, which then shows the test code.
+let offeredKey = "";
+function catchKey() {
+  const m = /^#otpauth=(.*)$/.exec(location.hash);
+  if (!m) return false;
+  try { offeredKey = decodeURIComponent(m[1]); } catch (e) { offeredKey = ""; }
+  history.replaceState(null, "", location.pathname + location.search);
+  return true;
+}
+catchKey();
+async function useOffered() {
+  if (!offeredKey || !S || submitting) return;
+  if (view === "setup") {
+    // Before the second factor step the key waits for it (step()).
+    if ($("step2").hidden && $("step2a").hidden) return;
+    await stopAuto();
+    step("step2");
+    return;
+  }
+  if (S.setup_needed || view === "pair") return;
+  await startChange("step2");
+}
+
 window.addEventListener("hashchange", () => {
+  if (catchKey()) { useOffered(); return; }
   const target = location.hash.slice(1);
   if (!S || S.setup_needed || !["main", "settings"].includes(target)) return;
   if (changing && !submitting) endChange();
@@ -897,8 +1035,10 @@ async function startChange(first) {
   for (const id of ["s0-err", "s1-err", "s2-err"]) err(id, "");
   $("cancel-change").hidden = false;
   changingTotp = first === "step2";
+  autoRunning = false;
+  err("a-err", "");
   show("setup");
-  step(first);
+  step(changingTotp && autoOK() ? "step2a" : first);
 }
 function endChange() {
   changing = changingTotp = keyRead = setupDone = setupSent = false;

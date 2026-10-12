@@ -118,6 +118,8 @@ func TestStdinPerMode(t *testing.T) {
 		{"duo_push", "", "", "pw\npush\n"},
 		{"totp_append", "", token, "pw123456\n"},
 		{"totp_append", ",", token, "pw,123456\n"},
+		{"totp_field", "", OncePrefix + "654321", "pw\n654321\n"},
+		{"totp_append", ",", OncePrefix + "654321", "pw,654321\n"},
 	} {
 		tn := makeProfile(t, func(cfg *Config) { cfg.MFA, cfg.TOTPSeparator = c.mfa, c.sep })
 		got, err := tn.StdinBytes([]byte("pw"), c.totp)
@@ -306,5 +308,33 @@ func TestTOTPAppendWithAMalformedSecretIsATOTPSecretError(t *testing.T) {
 	}
 	if _, err := makeProfile(t, func(c *Config) { c.MFA = "totp_append" }).StdinBytes([]byte("pw"), ""); !errors.As(err, &se) {
 		t.Fatal(err)
+	}
+}
+
+// A typed code goes into the OTP form through the prompt: no --non-inter, no secret file.
+func TestTypedCodeUsesThePrompt(t *testing.T) {
+	tn := makeProfile(t, func(cfg *Config) { cfg.MFA = "totp_field" })
+	if !slices.Contains(tn.AuthArgs(), "--non-inter") {
+		t.Fatal(tn.AuthArgs())
+	}
+	tn.mu.Lock()
+	tn.once = true
+	tn.mu.Unlock()
+	if slices.Contains(tn.AuthArgs(), "--non-inter") || tn.TokenArgs() != nil {
+		t.Fatal(tn.AuthArgs(), tn.TokenArgs())
+	}
+	if code, ok := IsOnce(OncePrefix + "012345"); !ok || code != "012345" {
+		t.Fatal(code)
+	}
+	if _, ok := IsOnce("base32:GEZDGNBVGY3TQOJQ"); ok {
+		t.Fatal("a secret is no typed code")
+	}
+}
+
+func TestOTPFormMeansThePasswordWasAccepted(t *testing.T) {
+	c := NewClassifier("totp_field")
+	c.Feed("Bitte zweiten Faktor eingeben (OTP) / Please enter second factor (OTP).")
+	if v, _ := c.Feed("Login failed."); v.Message != TOTPRejected {
+		t.Fatal(v)
 	}
 }

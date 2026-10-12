@@ -88,6 +88,10 @@ def wait_for(pid, seconds=10.0):
 
 def page_from(args):
     """What to show: --page, nothing with --hidden, otherwise the window as it is."""
+    # An otpauth:// link (the MFA portal's "follow this link"): the assistant reads its key.
+    for arg in args[1:]:
+        if arg.lower().startswith("otpauth:"):
+            return "#otpauth=" + urllib.parse.quote(arg, safe="")
     page = option(args, "--page")
     if page is not None:
         return page

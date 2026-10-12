@@ -430,3 +430,21 @@ func TestSetRoute(t *testing.T) {
 		t.Fatal(src, dns)
 	}
 }
+
+func TestDialGoesThroughTheProxyByName(t *testing.T) {
+	e := setup(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, err := Dial(ctx, "127.0.0.1:"+strconv.Itoa(e.server.Port), net.JoinHostPort("intra.example", strconv.Itoa(e.echoPort)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.Write([]byte("hi"))
+	if got := readN(t, c, 2); string(got) != "hi" {
+		t.Fatal(got)
+	}
+	if _, err := Dial(ctx, "127.0.0.1:"+strconv.Itoa(e.server.Port), "unknown.example:443"); err == nil {
+		t.Fatal("an unknown name must fail")
+	}
+}

@@ -67,6 +67,16 @@ type Hooks struct {
 	KillWrapper   func()
 }
 
+// OncePrefix marks a code the user typed from their phone app instead of a TOTP secret
+// ("code:123456"). It signs in once, for example to reach the MFA portal before this computer
+// has its own code generator.
+const OncePrefix = "code:"
+
+// IsOnce reports whether totp is a typed code (OncePrefix) and returns the code.
+func IsOnce(totp string) (string, bool) {
+	return strings.CutPrefix(totp, OncePrefix)
+}
+
 // Tunnel is one openconnect run. It is used once: Start, WaitReady, Stop.
 type Tunnel struct {
 	Cfg         Config
@@ -81,6 +91,7 @@ type Tunnel struct {
 	mu             sync.Mutex
 	classifier     *Classifier
 	tokenFile      string
+	once           bool // a typed code goes through openconnect's prompt (OncePrefix)
 	port           int
 	cmd            *exec.Cmd
 	exited         chan struct{}
@@ -120,7 +131,11 @@ func (t *Tunnel) AuthArgs() []string {
 	args := []string{"--protocol=anyconnect", "--useragent=" + cfg.UserAgent, "--user=" + cfg.LoginName, "--passwd-on-stdin"}
 	// With Duo the second password ("push") comes through openconnect's prompt, which
 	// --non-inter refuses. stdin is closed after it, so a further prompt ends at EOF.
-	if cfg.MFA != "duo_push" {
+	// A typed one-time code takes the same way into the OTP form.
+	t.mu.Lock()
+	once := t.once
+	t.mu.Unlock()
+	if cfg.MFA != "duo_push" && !once {
 		args = append(args, "--non-inter")
 	}
 	if cfg.AuthGroup != "" {
@@ -299,6 +314,16 @@ func (t *Tunnel) passwordBytes(password []byte) ([]byte, error) {
 
 // StdinBytes is what openconnect reads on stdin, by the profile's second factor.
 func (t *Tunnel) StdinBytes(password []byte, totp string) ([]byte, error) {
+	if code, once := IsOnce(totp); once {
+		pw, err := t.passwordBytes(password)
+		if err != nil {
+			return nil, err
+		}
+		if t.Cfg.MFA == "totp_append" {
+			return append(append(append(append([]byte{}, pw...), t.Cfg.TOTPSeparator...), code...), '\n'), nil
+		}
+		return append(append(append([]byte{}, pw...), '\n'), code+"\n"...), nil
+	}
 	switch t.Cfg.MFA {
 	case "totp_append":
 		if totp == "" {
@@ -349,7 +374,11 @@ func (t *Tunnel) Start(password []byte, totp string) error {
 	t.startedAt = time.Now()
 	t.mu.Unlock()
 	env := t.env(port)
-	if totp != "" && t.Cfg.MFA == "totp_field" {
+	_, once := IsOnce(totp)
+	t.mu.Lock()
+	t.once = once
+	t.mu.Unlock()
+	if totp != "" && t.Cfg.MFA == "totp_field" && !once {
 		if err := t.writeTokenFile(totp); err != nil {
 			return err
 		}

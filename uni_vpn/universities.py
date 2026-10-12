@@ -64,6 +64,9 @@ class Profile:
     mfa_portal_url: str = ""
     mfa_steps: tuple[str, ...] = ()
     mfa_pictures: tuple[str, ...] = ()
+    # The kind of MFA portal uni-vpn adds its own code generator to by itself ("linotp", Go core
+    # only), "" if only the guide works.
+    mfa_enroll: str = ""
     default_domains: tuple[str, ...] = ()
     aliases: tuple[str, ...] = ()
     verified: bool = False
@@ -76,6 +79,8 @@ class Profile:
             data[key] = list(data[key])
         return data
 
+
+ENROLL_KINDS = ("", "linotp")
 
 OTHER = Profile(id=OTHER_ID, name="Other university")
 
@@ -142,6 +147,8 @@ def parse(data: dict) -> dict[str, Profile]:
         for key in ("country", "notes"):
             if not isinstance(values.get(key, ""), str):
                 raise ValueError(f"{uid}: '{key}' must be text")
+        if values.get("mfa_enroll", "") not in ENROLL_KINDS:
+            raise ValueError(f"{uid}: 'mfa_enroll' must be 'linotp' or empty")
         if not isinstance(values.get("verified", False), bool):
             raise ValueError(f"{uid}: 'verified' must be true or false")
         for key in ("mfa_steps", "mfa_pictures", "default_domains", "aliases"):
