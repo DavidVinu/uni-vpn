@@ -11,6 +11,9 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"gvisor.dev/gvisor/pkg/tcpip"
+	"gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
 )
 
 // pair returns both ends of a packet socketpair, like the one the in-process tunnel hands
@@ -200,5 +203,57 @@ func TestCloseEndsWhenPeerIsGone(t *testing.T) {
 	case <-done:
 	case <-time.After(3 * time.Second):
 		t.Fatal("Close hangs")
+	}
+}
+
+// A phone's packet tunnel has a few dozen megabytes in all, so each connection's buffers stay
+// small (gVisor's own defaults are 1 MiB per connection, up to 4 MiB).
+func TestSmallTCPBuffers(t *testing.T) {
+	a, _ := pair(t)
+	s := newStack(t, a, "10.0.0.2")
+	var recv tcpip.TCPReceiveBufferSizeRangeOption
+	var send tcpip.TCPSendBufferSizeRangeOption
+	if err := s.stack.TransportProtocolOption(tcp.ProtocolNumber, &recv); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.stack.TransportProtocolOption(tcp.ProtocolNumber, &send); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range [][3]int{{recv.Min, recv.Default, recv.Max}, {send.Min, send.Default, send.Max}} {
+		if r[1] != 64<<10 || r[2] != 256<<10 || r[0] > r[1] {
+			t.Fatal(recv, send)
+		}
+	}
+}
+
+// Small buffers still carry a download much larger than themselves.
+func TestBulkTransfer(t *testing.T) {
+	a, b := pair(t)
+	client := newStack(t, a, "10.0.0.2")
+	server := newStack(t, b, "10.0.0.1")
+	ln, err := server.listenTCP(8080)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	const size = 8 << 20
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		c.Write(make([]byte, size))
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, err := client.DialContext(ctx, "tcp", "10.0.0.1:8080")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.SetDeadline(time.Now().Add(20 * time.Second))
+	if n, err := io.Copy(io.Discard, c); n != size || err != nil {
+		t.Fatal(n, err)
 	}
 }
