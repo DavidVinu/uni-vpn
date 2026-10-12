@@ -11,8 +11,12 @@ import (
 )
 
 // Spawn starts a program in a session of its own, with no terminal attached.
-func Spawn(args []string) bool {
+func Spawn(args []string) bool { return SpawnEnv(args, nil) }
+
+// SpawnEnv is Spawn with the environment env (nil: this program's).
+func SpawnEnv(args, env []string) bool {
 	cmd := exec.Command(args[0], args[1:]...) // stdin, stdout and stderr stay nil: /dev/null
+	cmd.Env = env
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		return false

@@ -23,15 +23,33 @@ switches back. Go setup registers the service with `bin/uni-vpn-core daemon` dir
 
 ## Release files
 
-CI builds (`packaging/build-core.sh`), on every push, one zip per platform holding the binary:
+CI builds (`packaging/build-core.sh`), on every push, one zip per platform holding the binary
+and the app window:
 
-    uni-vpn-core-linux-amd64.zip     bin/uni-vpn-core
-    uni-vpn-core-linux-arm64.zip     bin/uni-vpn-core
-    uni-vpn-core-darwin-arm64.zip    bin/uni-vpn-core
-    uni-vpn-core-darwin-amd64.zip    bin/uni-vpn-core
-    uni-vpn-core-windows-amd64.zip   bin/uni-vpn-core.exe
+    uni-vpn-core-linux-amd64.zip     bin/uni-vpn-core, app/linux/uni-vpn-app.py
+    uni-vpn-core-linux-arm64.zip     bin/uni-vpn-core, app/linux/uni-vpn-app.py
+    uni-vpn-core-darwin-arm64.zip    bin/uni-vpn-core, desktop/Uni VPN.app (both processors)
+    uni-vpn-core-darwin-amd64.zip    bin/uni-vpn-core, desktop/Uni VPN.app (both processors)
+    uni-vpn-core-windows-amd64.zip   bin/uni-vpn-core.exe, desktop/ (Uni VPN.exe, WebView2)
 
-The app windows and openconnect come with the installers and are not part of these updates.
+openconnect comes with the installers and is not part of these updates.
+
+## The app window after an update
+
+On Linux and Windows the update replaces the app window's files where the app entries point.
+On macOS /Applications belongs to root, so the update puts the app next to the core
+(`<root>/desktop/Uni VPN.app`); from then on the login item and `uni-vpn app` start that one
+(`internal/desktop`), and the copy in /Applications stays the Launchpad entry.
+
+The app windows restart themselves: when their program file changed (the same new file in two
+status polls in a row) and their window is closed, they start the new version without a window
+(`--hidden --after <pid>`, the new one waits for the old one to quit) and quit; on macOS also
+when the copy in /Applications sees the updated one. They say so with `shell=1` in their status
+request (`status.json?menu=...&shell=1`). An app window of an earlier version, which asks
+without it, is switched by the service: once the updates have installed the app, it ends it and
+starts the new one without a window (`desktop.RestartApp`; on Linux in the desktop session of the
+old one, read from /proc). The service tries that once, and again only after an app window that
+restarts itself has asked.
 
 Next to them, `core-manifest.json`:
 

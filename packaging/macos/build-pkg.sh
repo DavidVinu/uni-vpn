@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Builds uni-vpn.pkg from the per-processor folders of build-runtime.sh and the Go core.
 # Needs Go and Python 3 (only here, for the Info.plist; the Macs it installs on need neither).
-# Usage: packaging/macos/build-pkg.sh RUNTIME-DIR VERSION OUT.pkg
+# Usage: packaging/macos/build-pkg.sh RUNTIME-DIR VERSION OUT.pkg [APP-DIR]
+# APP-DIR: also the app window alone, as the updates install it next to the core:
+# APP-DIR/desktop/Uni VPN.app (packaging/build-core.sh).
 # Signs and notarizes when MACOS_APP_IDENTITY, MACOS_INSTALLER_IDENTITY and
 # MACOS_NOTARY_PROFILE are set (see .github/workflows/ci.yml); unsigned otherwise.
 set -euo pipefail
@@ -46,6 +48,15 @@ for size in 16 32 128 256 512; do
 done
 iconutil -c icns "$iconset" -o "$resources/AppIcon.icns"
 plutil -lint "$app/Contents/Info.plist"
+alone=""
+if [ -n "${4:-}" ]; then
+  alone="$(mkdir -p "$4/desktop" && cd "$4/desktop" && pwd)/Uni VPN.app"
+  rm -rf "$alone"
+  mkdir -p "$alone/Contents/MacOS" "$alone/Contents/Resources"
+  cp "$app/Contents/MacOS/Uni VPN" "$alone/Contents/MacOS/"
+  cp "$app/Contents/Info.plist" "$alone/Contents/"
+  cp "$resources/AppIcon.icns" "$alone/Contents/Resources/"
+fi
 
 if [ -n "${MACOS_APP_IDENTITY:-}" ]; then
   # Inside out: libraries and programs first, the bundle last.
@@ -55,6 +66,7 @@ if [ -n "${MACOS_APP_IDENTITY:-}" ]; then
       codesign --force --timestamp --options runtime -s "$MACOS_APP_IDENTITY" "$f"
     done
   codesign --force --timestamp --options runtime -s "$MACOS_APP_IDENTITY" "$app"
+  if [ -n "$alone" ]; then codesign --force --timestamp --options runtime -s "$MACOS_APP_IDENTITY" "$alone"; fi
 fi
 
 # Installed where it was built for, also when someone moved an older copy elsewhere.

@@ -3,12 +3,14 @@ package desktop
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DavidVinu/uni-vpn/internal/service"
 )
@@ -182,7 +184,7 @@ func TestMacOSRegistersTheReadyApp(t *testing.T) {
 				!h.ran("launchctl", "bootstrap", "gui/501", login) || !h.ran("pkill", "-x", AppName) {
 				t.Fatal(h.commands)
 			}
-			if got := h.d.AppCommand(1081, "&user=ab123"); !reflect.DeepEqual(got, []string{"open", "uni-vpn://open?user=ab123"}) {
+			if got := h.d.AppCommand(1081, "&user=ab123"); !reflect.DeepEqual(got, []string{"open", "-a", app, "uni-vpn://open?user=ab123"}) {
 				t.Fatal(got)
 			}
 			if tc.name == "from the package" {
@@ -209,12 +211,139 @@ func TestPagesBecomeAppURLs(t *testing.T) {
 	if h.d.AppCommand(1081, "") != nil {
 		t.Fatal("app without a binary")
 	}
-	touch(t, filepath.Join(h.home, "Applications", "Uni VPN.app", "Contents", "MacOS", AppName), "")
+	app := filepath.Join(h.home, "Applications", "Uni VPN.app")
+	touch(t, filepath.Join(app, "Contents", "MacOS", AppName), "")
 	for page, want := range map[string]string{"": "uni-vpn://open", "#settings": "uni-vpn://settings",
 		"&user=ab123": "uni-vpn://open?user=ab123"} {
-		if got := h.d.AppCommand(1081, page); !reflect.DeepEqual(got, []string{"open", want}) {
+		if got := h.d.AppCommand(1081, page); !reflect.DeepEqual(got, []string{"open", "-a", app, want}) {
 			t.Fatal(page, got)
 		}
+	}
+}
+
+// The updates put a newer app next to the core: it runs from then on, the one in
+// /Applications (root's) stays as the Launchpad entry.
+func TestMacOSPrefersTheUpdatedApp(t *testing.T) {
+	h := newHarness(t, "darwin")
+	touch(t, filepath.Join(h.d.PackageDir, "app", "bin", "uni-vpn-core"), "")
+	touch(t, filepath.Join(h.home, "Applications", "Uni VPN.app", "Contents", "MacOS", AppName), "")
+	updated := filepath.Join(h.d.Root, "desktop", "Uni VPN.app")
+	touch(t, filepath.Join(updated, "Contents", "MacOS", AppName), "")
+	if h.d.UpdatedMacApp() != "" {
+		t.Fatal("an app the updates did not list")
+	}
+	touch(t, filepath.Join(h.d.Root, ".core-files"), "bin/uni-vpn-core\ndesktop/Uni VPN.app/Contents/MacOS/Uni VPN\n")
+	if h.d.UpdatedMacApp() != updated {
+		t.Fatal(h.d.UpdatedMacApp())
+	}
+	if !h.install(false) || read(filepath.Join(h.home, "Library", "LaunchAgents", LoginLabel+".plist")) !=
+		LoginPlist(filepath.Join(updated, "Contents", "MacOS", AppName)) {
+		t.Fatal(h.out.String())
+	}
+	if got := h.d.AppCommand(1081, "#settings"); !reflect.DeepEqual(got, []string{"open", "-a", updated, "uni-vpn://settings"}) {
+		t.Fatal(got)
+	}
+	if h.d.AppPath() != filepath.Join(h.home, "Applications", "Uni VPN.app") {
+		t.Fatal(h.d.AppPath())
+	}
+}
+
+func TestMacOSLoginItemMovesToTheUpdatedApp(t *testing.T) {
+	h := newHarness(t, "darwin")
+	login := h.d.LoginPath()
+	h.d.UseUpdatedApp()
+	if _, err := os.Stat(login); err == nil {
+		t.Fatal("login item without an app")
+	}
+	touch(t, login, LoginPlist("/Applications/Uni VPN.app/Contents/MacOS/Uni VPN"))
+	h.d.UseUpdatedApp()
+	if read(login) != LoginPlist("/Applications/Uni VPN.app/Contents/MacOS/Uni VPN") {
+		t.Fatal("changed without an updated app")
+	}
+	touch(t, filepath.Join(h.d.Root, filepath.FromSlash(UpdatedAppFile("darwin"))), "")
+	touch(t, filepath.Join(h.d.Root, ".core-files"), UpdatedAppFile("darwin")+"\n")
+	h.d.UseUpdatedApp()
+	if read(login) != LoginPlist(filepath.Join(h.d.Root, filepath.FromSlash(UpdatedAppFile("darwin")))) ||
+		h.ran("launchctl", "bootout", "gui/501", login) {
+		t.Fatal(read(login), h.commands)
+	}
+}
+
+func TestRestartAppNeedsAnUpdatedApp(t *testing.T) {
+	for _, goos := range []string{"darwin", "windows", "linux"} {
+		h := newHarness(t, goos)
+		h.d.Running = func(string) []Process { t.Fatal("looked for the shell"); return nil }
+		touch(t, filepath.Join(h.d.Root, filepath.FromSlash(UpdatedAppFile(goos))), "installed by an installer")
+		touch(t, h.d.LoginPath(), "")
+		if h.d.RestartApp(1081) || len(h.commands) != 0 || len(h.spawns) != 0 {
+			t.Fatal(goos, h.commands, h.spawns)
+		}
+	}
+}
+
+func TestRestartAppMacOS(t *testing.T) {
+	h := newHarness(t, "darwin")
+	touch(t, filepath.Join(h.d.Root, filepath.FromSlash(UpdatedAppFile("darwin"))), "")
+	touch(t, filepath.Join(h.d.Root, ".core-files"), UpdatedAppFile("darwin")+"\n")
+	login := filepath.Join(h.home, "Library", "LaunchAgents", LoginLabel+".plist")
+	if !h.d.RestartApp(1081) || read(login) != LoginPlist(filepath.Join(h.d.Root, filepath.FromSlash(UpdatedAppFile("darwin")))) {
+		t.Fatal(read(login))
+	}
+	if !h.ran("pkill", "-x", AppName) || !h.ran("launchctl", "bootstrap", "gui/501", login) {
+		t.Fatal(h.commands)
+	}
+}
+
+func TestRestartAppWindows(t *testing.T) {
+	h := newHarness(t, "windows")
+	touch(t, filepath.Join(h.d.Root, "desktop", "Uni VPN.exe"), "")
+	touch(t, filepath.Join(h.d.Root, ".core-files"), "bin/uni-vpn-core.exe\ndesktop/Uni VPN.exe\n")
+	if h.d.RestartApp(1081) {
+		t.Fatal("restarted without the login item")
+	}
+	touch(t, h.d.LoginPath(), "")
+	if !h.d.RestartApp(1081) || !h.ran("taskkill", "/F", "/IM", "Uni VPN.exe") ||
+		!reflect.DeepEqual(h.spawns, [][]string{{"explorer.exe", h.d.LoginPath()}}) {
+		t.Fatal(h.commands, h.spawns)
+	}
+}
+
+func TestRestartAppLinuxUsesTheDesktopOfTheRunningShell(t *testing.T) {
+	h := newHarness(t, "linux")
+	script := filepath.Join(h.d.Root, "app", "linux", "uni-vpn-app.py")
+	touch(t, script, "")
+	touch(t, filepath.Join(h.d.Root, ".core-files"), "bin/uni-vpn-core\napp/linux/uni-vpn-app.py\n")
+	env := []string{"HOME=/home/a", "WAYLAND_DISPLAY=wayland-0"}
+	running := []Process{{PID: 42, Args: []string{"/usr/bin/python3", script, "--port", "1081", "--hidden"}, Env: env}}
+	h.d.Running = func(arg string) []Process {
+		if arg != script {
+			t.Fatal(arg)
+		}
+		return running
+	}
+	var spawned [][]string
+	h.d.Run = func(c service.Cmd) (service.Result, error) {
+		h.commands = append(h.commands, c.Args)
+		running = nil
+		return service.Result{}, nil
+	}
+	h.d.SpawnEnv = func(args, got []string) bool {
+		if !reflect.DeepEqual(got, env) {
+			t.Fatal(got)
+		}
+		spawned = append(spawned, args)
+		return true
+	}
+	if !h.d.RestartApp(1081) || !h.ran("pkill", "-f", script) ||
+		!reflect.DeepEqual(spawned, [][]string{{"/usr/bin/python3", script, "--port", "1081", "--hidden"}}) {
+		t.Fatal(h.commands, spawned)
+	}
+
+	// Without a display to show it on, the running one stays.
+	h.commands, spawned = nil, nil
+	running = []Process{{PID: 42, Args: []string{"/usr/bin/python3", script}, Env: []string{"DISPLAY="}}}
+	if h.d.RestartApp(1081) || len(h.commands) != 0 || len(spawned) != 0 {
+		t.Fatal(h.commands, spawned)
 	}
 }
 
@@ -403,4 +532,28 @@ func posixOnly(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX only")
 	}
+}
+
+func TestRunningFindsTheProcessAndItsEnvironment(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("reads /proc")
+	}
+	marker := filepath.Join(t.TempDir(), "uni-vpn-app.py")
+	cmd := exec.Command("sh", "-c", "sleep 30; exit 0", marker)
+	cmd.Env = []string{"WAYLAND_DISPLAY=wayland-1"}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { cmd.Process.Kill(); cmd.Wait() }()
+	for i := 0; i < 50; i++ {
+		if got := Running(marker); len(got) == 1 {
+			if got[0].PID != cmd.Process.Pid || !slices.Contains(got[0].Env, "WAYLAND_DISPLAY=wayland-1") ||
+				!reflect.DeepEqual(got[0].Args, []string{"sh", "-c", "sleep 30; exit 0", marker}) {
+				t.Fatal(got)
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("not found")
 }

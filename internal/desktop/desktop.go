@@ -14,14 +14,17 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/DavidVinu/uni-vpn/internal/platform"
 	"github.com/DavidVinu/uni-vpn/internal/service"
+	"github.com/DavidVinu/uni-vpn/internal/updater"
 	"github.com/DavidVinu/uni-vpn/internal/winsys"
 )
 
@@ -66,7 +69,9 @@ type Desktop struct {
 	Getenv func(string) string
 	Home   func() string
 	// Spawn starts a program detached from this one; false when it could not start.
-	Spawn      func(args []string) bool
+	Spawn func(args []string) bool
+	// SpawnEnv is Spawn with the environment env.
+	SpawnEnv   func(args, env []string) bool
 	HasDesktop func() bool
 	IsAdmin    func() bool // Windows: setup runs elevated
 	UID        int
@@ -74,6 +79,14 @@ type Desktop struct {
 	PackageDir string
 	// Candidates are the Pythons tried for the Linux shell, in order.
 	Candidates []string
+	// Running lists the processes whose command line has the argument arg (Linux).
+	Running func(arg string) []Process
+}
+
+// Process is a running program: its id, command line and environment.
+type Process struct {
+	PID       int
+	Args, Env []string
 }
 
 // New acts on this machine, for the installation at root.
@@ -84,8 +97,9 @@ func New(root string) *Desktop {
 	}
 	return &Desktop{
 		GOOS: runtime.GOOS, Root: root, Run: service.Exec, Out: os.Stdout, Getenv: os.Getenv,
-		Home: home, Spawn: Spawn, HasDesktop: func() bool { return HasDesktop(runtime.GOOS, os.Getenv) },
+		Home: home, Spawn: Spawn, SpawnEnv: SpawnEnv, HasDesktop: func() bool { return HasDesktop(runtime.GOOS, os.Getenv) },
 		IsAdmin: winsys.IsAdmin, UID: os.Getuid(), PackageDir: platform.PackageDir(), Candidates: candidates,
+		Running: Running,
 	}
 }
 
@@ -194,6 +208,45 @@ func (d *Desktop) PackagedApp() string {
 		return ""
 	}
 	return app
+}
+
+// UpdatedAppFile is the app window's program as the updates install it below the root
+// (internal/updater): on macOS a copy of the app next to the core, the one in /Applications
+// belongs to root.
+func UpdatedAppFile(goos string) string {
+	switch goos {
+	case "darwin":
+		return "desktop/" + AppName + ".app/Contents/MacOS/" + AppName
+	case "windows":
+		return "desktop/" + AppName + ".exe"
+	}
+	return "app/linux/uni-vpn-app.py"
+}
+
+// updatedApp reports whether the updates installed the app window (UpdatedAppFile).
+func (d *Desktop) updatedApp() bool {
+	rel := UpdatedAppFile(d.GOOS)
+	return slices.Contains(updater.Listed(d.Root), rel) && isFile(filepath.Join(d.Root, filepath.FromSlash(rel)))
+}
+
+// UpdatedMacApp is the app the updates installed next to the core on macOS, "" when there is none.
+func (d *Desktop) UpdatedMacApp() string {
+	if !d.macOS() || !d.updatedApp() {
+		return ""
+	}
+	return filepath.Join(d.Root, "desktop", AppName+".app")
+}
+
+// macApp is the app that runs on macOS: the updated one, else the one in Launchpad. "" when
+// there is no native app.
+func (d *Desktop) macApp() string {
+	if app := d.UpdatedMacApp(); app != "" {
+		return app
+	}
+	if isFile(filepath.Join(d.AppPath(), "Contents", "MacOS", AppName)) {
+		return d.AppPath()
+	}
+	return ""
 }
 
 // LegacyPaths are app entries of earlier versions, which opened the browser.
@@ -335,7 +388,10 @@ func (d *Desktop) builtApp(port int) string {
 }
 
 func (d *Desktop) installMacOS(port int, dry bool, created func(string)) bool {
-	app := d.PackagedApp()
+	app := d.UpdatedMacApp()
+	if app == "" {
+		app = d.PackagedApp()
+	}
 	if app == "" {
 		app = d.builtApp(port)
 	}
@@ -569,7 +625,8 @@ func (d *Desktop) installLinux(port int, dry bool, created func(string)) bool {
 // there is no app.
 func (d *Desktop) AppCommand(port int, page string) []string {
 	if d.macOS() {
-		if !exists(filepath.Join(d.AppPath(), "Contents", "MacOS", AppName)) {
+		app := d.macApp()
+		if app == "" {
 			return nil
 		}
 		var link string
@@ -581,7 +638,7 @@ func (d *Desktop) AppCommand(port int, page string) []string {
 				link += "?" + strings.TrimLeft(page, "&")
 			}
 		}
-		return []string{"open", link}
+		return []string{"open", "-a", app, link}
 	}
 	if d.windows() {
 		exe := d.WindowsExe()
@@ -649,6 +706,104 @@ func PageFor(pairs []Pair) string {
 		return "&" + text
 	}
 	return ""
+}
+
+// --- after an update ------------------------------------------------------------
+
+// RestartApp replaces the running app window of a version that cannot restart itself after
+// an update (it does not say "shell=1" when it asks for the status) with the one the updates
+// installed, without a window: as it starts at login. False when there is none to switch to.
+func (d *Desktop) RestartApp(port int) bool {
+	if !d.updatedApp() {
+		return false
+	}
+	switch {
+	case d.macOS():
+		d.stopRunning()
+		return d.registerMacOS(d.UpdatedMacApp(), func(string) {})
+	case d.windows():
+		if !exists(d.LoginPath()) {
+			return false
+		}
+		d.stopRunning()
+		// As the signed-in user, not elevated like the service.
+		return d.Spawn([]string{"explorer.exe", d.LoginPath()})
+	}
+	return d.restartLinux(port)
+}
+
+// UseUpdatedApp points the macOS login item at the app the updates installed, for the next
+// login; the running app window switches over by itself.
+func (d *Desktop) UseUpdatedApp() {
+	app := d.UpdatedMacApp()
+	login := d.LoginPath()
+	if app == "" || !isFile(login) {
+		return
+	}
+	want := LoginPlist(filepath.Join(app, "Contents", "MacOS", AppName))
+	if data, err := os.ReadFile(login); err == nil && string(data) == want {
+		return
+	}
+	if os.WriteFile(login, []byte(want), 0o644) == nil {
+		d.quiet(lsregister, "-f", app)
+	}
+}
+
+// restartLinux starts the shell again in the desktop session of the running one: the service
+// has no display of its own.
+func (d *Desktop) restartLinux(port int) bool {
+	script := d.linuxScript()
+	running := d.Running(script)
+	if len(running) == 0 || len(running[0].Args) == 0 {
+		return false
+	}
+	old := running[0]
+	if !slices.ContainsFunc(old.Env, func(v string) bool {
+		return (strings.HasPrefix(v, "DISPLAY=") || strings.HasPrefix(v, "WAYLAND_DISPLAY=")) && !strings.HasSuffix(v, "=")
+	}) {
+		return false
+	}
+	python := old.Args[0]
+	if !filepath.IsAbs(python) {
+		if python = d.GTKPython(); python == "" {
+			return false
+		}
+	}
+	d.stopRunning()
+	for i := 0; i < 50 && len(d.Running(script)) > 0; i++ {
+		time.Sleep(100 * time.Millisecond)
+	}
+	command := []string{python, script, "--port", strconv.Itoa(port), "--hidden"}
+	// Not in the service's cgroup, which systemd ends with the service.
+	if d.Getenv("INVOCATION_ID") != "" {
+		if run, err := exec.LookPath("systemd-run"); err == nil {
+			command = append([]string{run, "--user", "--scope", "--quiet", "--collect"}, command...)
+		}
+	}
+	return d.SpawnEnv(command, old.Env)
+}
+
+// Running lists the processes whose command line has the argument arg; Linux only.
+func Running(arg string) []Process {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil
+	}
+	var out []Process
+	for _, entry := range entries {
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil || pid == os.Getpid() {
+			continue
+		}
+		cmdline, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "cmdline"))
+		args := strings.Split(strings.TrimRight(string(cmdline), "\x00"), "\x00")
+		if err != nil || !slices.Contains(args, arg) {
+			continue
+		}
+		environ, _ := os.ReadFile(filepath.Join("/proc", entry.Name(), "environ"))
+		out = append(out, Process{PID: pid, Args: args, Env: strings.Split(strings.TrimRight(string(environ), "\x00"), "\x00")})
+	}
+	return out
 }
 
 // Uninstall stops the running app; the files themselves are in the installed-files list.
