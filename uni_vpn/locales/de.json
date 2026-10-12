@@ -107,6 +107,7 @@
   "sync.code_unknown": "Dieser Code funktioniert nicht. Prüfe ihn oder lass dir einen neuen anzeigen.",
   "sync.setup_first": "Richte Uni VPN zuerst auf einem der Geräte ein.",
   "sync.offline": "Der Sync-Dienst ist nicht erreichbar. Prüfe die Internetverbindung.",
+  "sync.not_used": "Einige Einstellungen von deinen anderen Geräten konnten hier nicht übernommen werden.",
   "totp.line_break": "Der Schlüssel muss in einer Zeile stehen",
   "totp.only_totp": "Dieser Schlüssel ist nicht für Codes, die sich mit der Zeit ändern. Wähle den zeitbasierten",
   "totp.algorithm": "Diese Art von Schlüssel wird nicht unterstützt",

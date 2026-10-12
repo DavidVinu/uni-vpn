@@ -9,5 +9,6 @@ binding = "DB"
 database_name = "uni-vpn-sync"
 database_id = "REPLACED_BY_THE_DEPLOY_WORKFLOW"
 
+# Hourly: a pairing slot lives ten minutes and should not linger for a day.
 [triggers]
-crons = ["17 3 * * *"]
+crons = ["17 * * * *"]

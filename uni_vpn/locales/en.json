@@ -106,6 +106,7 @@
   "sync.code_unknown": "This code doesn't work. Check it, or show a new one.",
   "sync.setup_first": "Set up Uni VPN on one of the devices first.",
   "sync.offline": "Can't reach the sync service. Check the internet connection.",
+  "sync.not_used": "Some settings from your other devices could not be used here.",
   "totp.line_break": "The key must be on one line",
   "totp.only_totp": "This key is not for codes that change over time. Choose the time-based one",
   "totp.algorithm": "This kind of key isn't supported",

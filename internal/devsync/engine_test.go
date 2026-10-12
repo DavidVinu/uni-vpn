@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -647,5 +648,304 @@ func TestRemovedDeviceCannotRewriteTheOldGroup(t *testing.T) {
 	_, now, _ := stolen.fetch(ctx, old)
 	if _, err := stolen.Engine.store(ctx, old, now, Doc{Format: Format, Entries: map[string]Entry{}}, false); !errors.Is(err, errConflict) {
 		t.Fatalf("write after removal: %v (version %d -> %d)", err, version, now)
+	}
+}
+
+// otherID is the id of the first device in e's list that is not e itself, or of the one named.
+func otherID(e *Engine, name string) string {
+	for _, d := range e.Status().Devices {
+		if !d.This && (name == "" || d.Name == name) {
+			return d.ID
+		}
+	}
+	return ""
+}
+
+func TestOfferAfterRemovalElsewhere(t *testing.T) {
+	ctx := context.Background()
+	_, url := startRelay(t)
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	laptop := newDevice(t, url, "Laptop", setUpLaptop(), c)
+	desktop := newDevice(t, url, "Desktop", newLocal(false, nil), c)
+	old := newDevice(t, url, "Old", newLocal(false, nil), c)
+	pair(t, ctx, laptop, desktop)
+	pair(t, ctx, laptop, old)
+	if err := desktop.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := desktop.Remove(ctx, otherID(desktop.Engine, "Old")); err != nil {
+		t.Fatal(err)
+	}
+	// The laptop has not synced since: its code must carry the new key, not the old one.
+	phone := newDevice(t, url, "Phone", newLocal(false, nil), c)
+	pair(t, ctx, laptop, phone)
+	if !phone.local.SetupDone() || !phone.Status().On {
+		t.Fatal("the phone joined a group that had moved on")
+	}
+}
+
+func TestCodeFromBeforeARemovalIsRefused(t *testing.T) {
+	ctx := context.Background()
+	_, url := startRelay(t)
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	laptop := newDevice(t, url, "Laptop", setUpLaptop(), c)
+	desktop := newDevice(t, url, "Desktop", newLocal(false, nil), c)
+	pair(t, ctx, laptop, desktop)
+	p, err := laptop.Offer(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer laptop.CancelPairing()
+	// While the code is on the laptop's screen, the desktop removes the laptop.
+	if err := desktop.Remove(ctx, otherID(desktop.Engine, "Laptop")); err != nil {
+		t.Fatal(err)
+	}
+	phone := newDevice(t, url, "Phone", newLocal(false, nil), c)
+	if err := phone.Enter(ctx, p.Code); !errors.Is(err, ErrCodeUnknown) {
+		t.Fatalf("got %v, the phone is set up: %v", err, phone.local.SetupDone())
+	}
+	if phone.Status().On {
+		t.Fatal("still syncing")
+	}
+}
+
+func TestRefusedSettingDoesNotBlockAddingOrRemoving(t *testing.T) {
+	ctx := context.Background()
+	_, url := startRelay(t)
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	laptop := newDevice(t, url, "Laptop", setUpLaptop(), c)
+	desktop := newDevice(t, url, "Desktop", newLocal(false, nil), c)
+	pair(t, ctx, laptop, desktop)
+	// A newer version's language this one cannot take over, for good.
+	desktop.local.mu.Lock()
+	desktop.local.reject = map[string]bool{KeyLanguage: true}
+	desktop.local.mu.Unlock()
+	laptop.local.set(KeyLanguage, "xx")
+	if err := laptop.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	phone := newDevice(t, url, "Phone", newLocal(false, nil), c)
+	p, err := desktop.Offer(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := phone.Enter(ctx, p.Code); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, desktop.Engine, "done")
+	var ae *ApplyError
+	if err := desktop.Sync(ctx); !errors.As(err, &ae) {
+		t.Fatalf("got %v", err)
+	}
+	if err := desktop.Remove(ctx, otherID(desktop.Engine, "Phone")); err != nil {
+		t.Fatal(err)
+	}
+	if got := names(desktop.Engine); !slices.Equal(got, []string{"Desktop", "Laptop"}) {
+		t.Fatalf("after removal %v", got)
+	}
+}
+
+func TestPairingFitsInTheTunnelExtension(t *testing.T) {
+	defer func(n int) { scryptN = n }(scryptN)
+	scryptN = 1 << 15
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	pairingFor("0123456789AB")
+	runtime.ReadMemStats(&after)
+	if used := after.TotalAlloc - before.TotalAlloc; used > 8<<20 {
+		t.Fatalf("a code takes %d MiB, the iPhone's tunnel extension has about 50 MB in all", used>>20)
+	}
+}
+
+func TestStateFileHasNoPasswordHash(t *testing.T) {
+	ctx := context.Background()
+	_, url := startRelay(t)
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	laptop := newDevice(t, url, "Laptop", setUpLaptop(), c)
+	desktop := newDevice(t, url, "Desktop", newLocal(false, nil), c)
+	pair(t, ctx, laptop, desktop)
+	for _, d := range []device{laptop, desktop} {
+		data, err := os.ReadFile(d.opts.StatePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// SHA-256 of a password can be guessed back; sync.json must not let anyone try.
+		if strings.Contains(string(data), hash(mustJSON("secret"))) || !strings.Contains(string(data), `"password"`) {
+			t.Fatalf("%s: %s", d.opts.Name, data)
+		}
+	}
+}
+
+// An older version wrote plain hashes into sync.json: after the update, what did not change
+// here stays the group's, and a change made here before the update still goes out.
+func TestUpdateFromPlainStateHashes(t *testing.T) {
+	ctx := context.Background()
+	_, url := startRelay(t)
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	laptop := newDevice(t, url, "Laptop", setUpLaptop(), c)
+	desktop := newDevice(t, url, "Desktop", newLocal(false, nil), c)
+	pair(t, ctx, laptop, desktop)
+	k, _ := desktop.loadKeys(ctx)
+	remote, version, err := desktop.fetch(ctx, k.group())
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := state{Version: version, Hashes: map[string]savedHash{}}
+	for key, ent := range remote.Entries {
+		old.Hashes[key] = savedHash{H: hash(ent.V), T: ent.T, D: ent.D}
+	}
+	if err := writeFile(desktop.opts.StatePath, mustJSON(old)); err != nil {
+		t.Fatal(err)
+	}
+	laptop.local.set(KeyLanguage, "fr")
+	laptop.Notify(false)
+	if err := laptop.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Then, before the update and offline, the desktop turned automatic updates off.
+	desktop.local.set(KeyAutoUpdate, false)
+	if err := writeFile(desktop.opts.StatePath+".pending", mustJSON(map[string]any{"at": c.now().UnixMilli()})); err != nil {
+		t.Fatal(err)
+	}
+	updated := New(desktop.opts)
+	if err := updated.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := laptop.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []device{laptop, desktop} {
+		if d.local.get(KeyLanguage) != `"fr"` || d.local.get(KeyAutoUpdate) != "false" || d.local.get(KeyPassword) != `"secret"` {
+			t.Fatalf("%s: %v", d.opts.Name, d.local.values)
+		}
+	}
+	if st := updated.loadState(); !st.Keyed {
+		t.Fatal("sync.json not carried over")
+	}
+}
+
+// keyringStore misses the first reads the way the keyring does when it does not answer:
+// keyringSync.Load reads any failed lookup as no entry.
+type keyringStore struct {
+	memStore
+	misses int
+}
+
+func (s *keyringStore) Load(ctx context.Context) (string, error) {
+	s.mu.Lock()
+	if s.misses > 0 {
+		s.misses--
+		s.mu.Unlock()
+		return "", nil
+	}
+	s.mu.Unlock()
+	return s.memStore.Load(ctx)
+}
+
+func TestKeyringThatAnswersLate(t *testing.T) {
+	ctx := context.Background()
+	_, url := startRelay(t)
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	laptop := newDevice(t, url, "Laptop", setUpLaptop(), c)
+	desktop := newDevice(t, url, "Desktop", newLocal(false, nil), c)
+	pair(t, ctx, laptop, desktop)
+	laptop.local.set(KeyLanguage, "fr")
+	if err := laptop.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	restart := func() (*Engine, *keyringStore) {
+		store := &keyringStore{misses: 1}
+		store.value = desktop.store.value
+		opts := desktop.opts
+		opts.Store = store
+		e := New(opts)
+		e.Load(ctx) // the keyring does not answer at start
+		return e, store
+	}
+	// Opening Settings finds the keys.
+	e, _ := restart()
+	if err := e.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !e.Status().On || desktop.local.get(KeyLanguage) != `"fr"` {
+		t.Fatalf("on %v, language %s", e.Status().On, desktop.local.get(KeyLanguage))
+	}
+	// "Add a device" keeps the group.
+	e, store := restart()
+	if _, err := e.Offer(ctx); err != nil {
+		t.Fatal(err)
+	}
+	e.CancelPairing()
+	if store.value != desktop.store.value {
+		t.Fatal("the keys were replaced by a new group")
+	}
+}
+
+func TestDeviceWithoutSetupRemovesNoWebsites(t *testing.T) {
+	ctx := context.Background()
+	_, url := startRelay(t)
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	laptop := newDevice(t, url, "Laptop", setUpLaptop(), c)
+	desktop := newDevice(t, url, "Desktop", newLocal(false, nil), c)
+	pair(t, ctx, laptop, desktop)
+	// The desktop's config.toml is gone (uninstalled and installed again) and the group's
+	// account cannot be set up there yet.
+	desktop.local.mu.Lock()
+	desktop.local.setup = false
+	desktop.local.reject = map[string]bool{KeyAccount: true, KeyLanguage: true, KeyAutoUpdate: true}
+	desktop.local.mu.Unlock()
+	var ae *ApplyError
+	if err := desktop.Sync(ctx); err != nil && !errors.As(err, &ae) {
+		t.Fatal(err)
+	}
+	if err := laptop.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := laptop.local.getDomains(); len(got) != 2 {
+		t.Fatalf("laptop websites %v", got)
+	}
+}
+
+func TestOfflineEditKeepsItsTime(t *testing.T) {
+	ctx := context.Background()
+	_, url := startRelay(t)
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	laptop := newDevice(t, url, "Laptop", setUpLaptop(), c)
+	desktop := newDevice(t, url, "Desktop", newLocal(false, nil), c)
+	pair(t, ctx, laptop, desktop)
+	// The desktop, offline, changes the language; the laptop changes it later and syncs; the
+	// desktop, still offline, then adds a website.
+	desktop.local.set(KeyLanguage, "de")
+	desktop.Notify(false)
+	laptop.local.set(KeyLanguage, "fr")
+	laptop.Notify(false)
+	if err := laptop.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	desktop.local.setDomains("sogo.uni-heidelberg.de", "heico.uni-heidelberg.de", "lsf.uni-heidelberg.de")
+	desktop.Notify(false)
+	for _, d := range []device{desktop, laptop} {
+		if err := d.Sync(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, d := range []device{laptop, desktop} {
+		if d.local.get(KeyLanguage) != `"fr"` || len(d.local.getDomains()) != 3 {
+			t.Fatalf("%s: language %s, websites %v", d.opts.Name, d.local.get(KeyLanguage), d.local.getDomains())
+		}
+	}
+}
+
+func TestRemoveOffline(t *testing.T) {
+	ctx := context.Background()
+	_, url := startRelay(t)
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	laptop := newDevice(t, url, "Laptop", setUpLaptop(), c)
+	desktop := newDevice(t, url, "Desktop", newLocal(false, nil), c)
+	pair(t, ctx, laptop, desktop)
+	opts := laptop.opts
+	opts.Relay = "http://127.0.0.1:1" // nothing listens there
+	if err := New(opts).Remove(ctx, otherID(laptop.Engine, "")); !errors.Is(err, ErrOffline) {
+		t.Fatalf("got %v", err)
 	}
 }

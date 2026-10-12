@@ -2,6 +2,7 @@ package devsync
 
 import (
 	"bytes"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -67,10 +68,18 @@ func compact(v json.RawMessage) json.RawMessage {
 	return b.Bytes()
 }
 
-// hash identifies a value without keeping it: the local state file has no secrets.
+// hash identifies a value without keeping it. sync.json from before keyedHash has these.
 func hash(v json.RawMessage) string {
 	sum := sha256.Sum256(compact(v))
 	return hex.EncodeToString(sum[:16])
+}
+
+// keyedHash is hash for sync.json: with a key from the keyring, so the file tells nothing
+// about a password, not even to someone who tries every likely one.
+func keyedHash(key []byte, v json.RawMessage) string {
+	m := hmac.New(sha256.New, key)
+	m.Write(compact(v))
+	return hex.EncodeToString(m.Sum(nil)[:16])
 }
 
 func mustJSON(v any) json.RawMessage {

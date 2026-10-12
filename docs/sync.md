@@ -17,8 +17,10 @@ device, the setup assistant's "Use settings from another device" shows a code to
 device can scan or type the other's code ("Enter a code instead"). The new device is then set
 up completely, including the password and the second factor, so it needs no second trip to
 the university's MFA portal. Changes on any device reach the others when it starts, every 30
-minutes, and whenever Settings is opened. Remove takes a device out of the list; the others
-switch to a new key the removed device never sees.
+minutes, and whenever Settings is opened. A password or second factor from another device is
+for the next connection: a device does not connect for it, it only tries again when its last
+attempt failed. Remove takes a device out of the list; the others switch to a new key the
+removed device never sees.
 
 ## Keys
 
@@ -60,7 +62,7 @@ The plaintext of a group blob is JSON:
 
 | Key | Value |
 |---|---|
-| `account` | `{"university": id, "user": name, "overrides": [[field, value], ...]}` in config.toml's order |
+| `account` | `{"university": id, "user": name, "overrides": [[field, value], ...]}` in config.toml's order; a device taking it over writes them in this order |
 | `password` | string |
 | `totp` | string, `""` without a second factor |
 | `language` | string, `""` follows the system |
@@ -73,9 +75,16 @@ was made, not when it was sent, so an edit made offline loses against a later on
 elsewhere. One key per website means a website added on one device and another removed
 elsewhere both survive. A device keeps `sync.json` next to config.toml with a hash, time and
 device of every key as last synced, so it notices its own changes without storing a secret on
-disk, and `sync.json.pending` with the time of a change not yet sent and whether a secret
-changed; secrets are read from the keyring only then. A value this device cannot take over (a
-newer version's setting, say) is logged and skipped; the rest of the round goes through.
+disk. The hash is HMAC-SHA256 of the compact JSON value, first 16 bytes in hex, keyed with
+HKDF-SHA256 of the device's private key (info `uni-vpn state hash`, 32 bytes), so nobody can try
+passwords against the file; `"keyed": true` marks it. A `sync.json` of an older version has
+plain SHA-256: the next round counts a value that still has its hash as unchanged and any other
+as changed here, then writes keyed hashes. `sync.json.pending` holds what changed here and is not
+sent yet: the keyed hash and time of each changed value, so an edit made offline keeps its time
+when another follows before the device is back online, and whether a secret changed (password
+and second factor share one time and have no hash there); secrets are read from the keyring
+only then. A value this device cannot take over (a newer version's setting, say) is logged and
+skipped; the rest of the round goes through, and adding or removing a device still works.
 
 ## Removing a device
 
@@ -100,7 +109,9 @@ shown as `XXXX-XXXX-XXXX`. The QR code holds `UNIVPN:` and the 12 characters (al
 mode, error correction M). Typed input ignores case, spaces and dashes and reads `O` as `0`,
 `I` and `L` as `1`.
 
-`S = scrypt(code, salt "uni-vpn pairing", N=32768, r=8, p=1, 32 bytes)`, then with HKDF-SHA256:
+`S = scrypt(code, salt "uni-vpn pairing", N=32768, r=1, p=8, 32 bytes)` (4 MiB, so an iPhone
+can pair in its tunnel extension; versions before used r=8, p=1, and the two do not find each
+other's codes), then with HKDF-SHA256:
 slot A id (`uni-vpn pairing slot a`, 16 bytes, hex), slot B id (`uni-vpn pairing slot b`),
 key (`uni-vpn pairing key`, 32 bytes). Both scanning and typing use the same code, so one
 slot pair serves both.
@@ -124,11 +135,12 @@ bodies are `application/octet-stream`.
 | `PUT /v1/pair/<id>` (up to 8 KiB) | 201; 409 while the slot holds something; 413 too large or empty |
 | `GET /v1/pair/<id>` | 200 with the blob, which is deleted with this answer; 404 |
 | `GET /v1/group/<id>`, `Authorization: Bearer <token>` | 200 with the blob and `ETag: "<version>"`; 404; 403 wrong token |
-| `PUT /v1/group/<id>` with `If-None-Match: *` (create) or `If-Match: "<version>"` (up to 256 KiB), optionally `Sync-Final: 1` | 200 with the new `ETag`; 412 changed meanwhile; 410 closed; 403; 413 |
+| `PUT /v1/group/<id>` with `If-None-Match: *` (create, up to 64 KiB) or `If-Match: "<version>"` (up to 256 KiB), optionally `Sync-Final: 1` | 200 with the new `ETag`; 412 changed meanwhile; 410 closed; 403; 413 |
 
 Pairing slots expire after 10 minutes, groups 400 days after they were last read or written
-(reads count once a day; a daily cron deletes). Taking a code off the screen reads its slot,
-which empties it, so a code someone saw stops working at once.
+(reads count once a day), a new group that no device read or wrote again after 7 days; an
+hourly cron deletes. Taking a code off the screen reads its slot, which empties it, so a code
+someone saw stops working at once.
 `node --test relay/` tests the Worker against an in-memory database; `node relay/serve.mjs`
 runs it locally, and `UNI_VPN_TEST_RELAY=<its URL> go test ./internal/devsync` runs the Go
 tests against it instead of the in-memory copy.

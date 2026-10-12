@@ -107,6 +107,7 @@
   "sync.code_unknown": "Este código no funciona. Revísalo o muestra uno nuevo.",
   "sync.setup_first": "Primero configura Uni VPN en uno de los dispositivos.",
   "sync.offline": "No se puede conectar con el servicio de sincronización. Revisa la conexión a Internet.",
+  "sync.not_used": "Algunos ajustes de tus otros dispositivos no se pudieron usar aquí.",
   "totp.line_break": "La clave debe ir en una sola línea",
   "totp.only_totp": "Esta clave no es para códigos que cambian con el tiempo. Elige la basada en tiempo",
   "totp.algorithm": "Este tipo de clave no se admite",

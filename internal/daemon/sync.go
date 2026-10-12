@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -168,15 +169,28 @@ func (l syncLocal) Apply(ctx context.Context, all map[string]devsync.Entry, keys
 			fail(err, secrets...)
 		}
 	} else {
+		// Not SetPassword and SetTOTP: those connect, and a synced secret is for the next
+		// connection (secretsSynced).
+		stored := false
 		if changed(devsync.KeyPassword) && text(devsync.KeyPassword) != "" {
-			if err := d.SetPassword(text(devsync.KeyPassword)); err != nil {
+			if err := d.opts.PasswordSetter(text(devsync.KeyPassword)); err != nil {
 				fail(err, devsync.KeyPassword)
+			} else {
+				d.logf(slog.LevelInfo, "Password stored in the keyring")
+				stored = true
 			}
 		}
 		if changed(devsync.KeyTOTP) && text(devsync.KeyTOTP) != "" {
-			if err := d.SetTOTP(text(devsync.KeyTOTP)); err != nil {
+			if err := d.opts.TOTPSetter(text(devsync.KeyTOTP)); err != nil {
 				fail(err, devsync.KeyTOTP)
+			} else {
+				d.logf(slog.LevelInfo, "TOTP secret stored in the keyring")
+				d.NoteCodeShown() // the other device showed its check code, maybe typed in by now
+				stored = true
 			}
+		}
+		if stored {
+			d.secretsSynced(false)
 		}
 	}
 	if changed(devsync.KeyLanguage) {
@@ -224,7 +238,9 @@ func (l syncLocal) applyAccount(all map[string]devsync.Entry, password, token st
 			overrides = append(overrides, config.Setting{Key: key, Value: o[1]})
 		}
 	}
-	// Overrides another device dropped go here too; the assistant only replaces values.
+	// Overrides another device dropped go here too, and the file takes the group's order: the
+	// assistant replaces values where they are and adds new ones at the end, and another order
+	// would go back to the group as a change of this device's own, back and forth for ever.
 	d.mu.Lock()
 	path, setUp := d.configPath, !d.needsSetup && d.configError == ""
 	d.mu.Unlock()
@@ -233,19 +249,33 @@ func (l syncLocal) applyAccount(all map[string]devsync.Entry, password, token st
 		if err != nil {
 			return err
 		}
-		var stale []string
-		for _, s := range current {
-			if !slices.ContainsFunc(overrides, func(o config.Setting) bool { return o.Key == s.Key }) {
-				stale = append(stale, s.Key)
+		if !slices.EqualFunc(current, overrides, func(a, b config.Setting) bool { return a.Key == b.Key }) {
+			var keys []string
+			for _, s := range current {
+				keys = append(keys, s.Key)
 			}
-		}
-		if len(stale) > 0 {
-			if err := config.RemoveKeys(path, stale); err != nil {
+			if err := config.RemoveKeys(path, keys); err != nil {
 				return err
 			}
 		}
 	}
-	return d.CompleteSetup(account.User, password, token, account.University, overrides)
+	return d.completeSetup(account.User, password, token, account.University, overrides, true)
+}
+
+// secretsSynced: password or second factor came from another device. They are for the next
+// connection: an idle device stays idle and a tunnel stays up; only an attempt under way or
+// one that failed (the old password, say) starts over with them. reconnect: the tunnel was
+// just taken down for another account or gateway.
+func (d *Daemon) secretsSynced(reconnect bool) {
+	d.mu.Lock()
+	retry := reconnect || d.state == Connecting || d.state.final() || d.state.retry()
+	if !retry {
+		d.secretsGen++
+	}
+	d.mu.Unlock()
+	if retry {
+		d.secretsChanged()
+	}
 }
 
 func (l syncLocal) applyDomains(all map[string]devsync.Entry) error {
@@ -285,15 +315,23 @@ func syncError(err error) error {
 		return httpapi.TextValueError(i18n.T("sync.setup_first"))
 	case errors.Is(err, devsync.ErrUnavailable), errors.Is(err, devsync.ErrOffline):
 		return httpapi.TextValueError(i18n.T("sync.offline"))
+	case errors.As(err, new(*devsync.ApplyError)):
+		return httpapi.TextValueError(i18n.T("sync.not_used"))
 	}
 	return err
 }
 
+// pairingJSON: error is the catalog text of what went wrong, also with "done" (linked, but
+// some settings could not be used), null when there is none to show.
 func pairingJSON(p *devsync.Pairing) any {
 	if p == nil {
 		return nil
 	}
-	return pyjson.O("mode", p.Mode, "code", p.Code, "qr", p.QR, "state", p.State)
+	var text any
+	if p.Error != nil {
+		text = i18n.Of(syncError(p.Error))
+	}
+	return pyjson.O("mode", p.Mode, "code", p.Code, "qr", p.QR, "state", p.State, "error", text)
 }
 
 // syncStatus is the "sync" object of /status.json.
@@ -341,11 +379,10 @@ func (d *Daemon) Sync(action string, data pyjson.Object) (pyjson.Object, error) 
 		}
 	case "refresh":
 		if err := e.Refresh(ctx); err != nil {
-			var ae *devsync.ApplyError
-			if errors.As(err, &ae) {
-				return nil, err
+			if !errors.As(err, new(*devsync.ApplyError)) {
+				err = fmt.Errorf("%w: %w", devsync.ErrOffline, err)
 			}
-			return nil, syncError(fmt.Errorf("%w: %w", devsync.ErrOffline, err))
+			return nil, syncError(err)
 		}
 	default:
 		return nil, httpapi.ErrNotFound

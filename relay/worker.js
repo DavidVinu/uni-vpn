@@ -5,10 +5,15 @@
 
 const MAX_PAIR = 8 * 1024;
 const MAX_GROUP = 256 * 1024;
+// A first document is a few KiB; nobody gets to park big blobs here without a group to sync.
+const MAX_NEW_GROUP = 64 * 1024;
 const PAIR_LIFETIME = 10 * 60 * 1000;
-// A group no device read or wrote for this long is gone. Reads count once a day.
-const GROUP_LIFETIME = 400 * 24 * 60 * 60 * 1000;
 const DAY = 24 * 60 * 60 * 1000;
+// A group no device read or wrote for this long is gone. Reads count once a day.
+const GROUP_LIFETIME = 400 * DAY;
+// A new group lives a week until a device reads or writes it: the one that made it reads it
+// again within half an hour, a group made only to fill the database is gone soon.
+const NEW_GROUP_LIFETIME = 7 * DAY;
 const ID = /^[0-9a-f]{32}$/;
 const TOKEN = /^Bearer ([0-9a-f]{64})$/;
 
@@ -72,13 +77,15 @@ async function group(request, env, id, now) {
       {headers: {"Content-Type": "application/octet-stream", ...etag(row.version)}});
   }
   if (request.method === "PUT") {
-    const data = await body(request, MAX_GROUP);
+    const create = request.headers.get("If-None-Match") === "*";
+    const data = await body(request, create ? MAX_NEW_GROUP : MAX_GROUP);
     if (!data) return text(413, "too large");
-    if (request.headers.get("If-None-Match") === "*") {
+    if (create) {
+      // updated as if last used long ago: cleanup takes it after NEW_GROUP_LIFETIME unless used.
       const row = await env.DB.prepare(
         "INSERT INTO groups (id, token, version, body, updated) VALUES (?1, ?2, 1, ?3, ?4) " +
         "ON CONFLICT (id) DO NOTHING RETURNING version",
-      ).bind(id, token, data, now).first();
+      ).bind(id, token, data, now - GROUP_LIFETIME + NEW_GROUP_LIFETIME).first();
       return row ? new Response(null, {status: 200, headers: etag(row.version)}) : denied();
     }
     const match = /^"(\d+)"$/.exec(request.headers.get("If-Match") || "");

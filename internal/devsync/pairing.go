@@ -48,24 +48,31 @@ func (e *Engine) takeSlot(ctx context.Context, p pairing, slot string) (pairMess
 
 // ensureGroup makes this device the first of a new group when it is in none yet.
 func (e *Engine) ensureGroup(ctx context.Context) (*keys, error) {
-	k, err := e.loadKeys(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if k == nil {
-		k = newKeys(newGroup().root, "", nil)
-		if err := e.saveKeys(k); err != nil {
+	for range 2 {
+		k, err := e.recheck(ctx)
+		if err != nil {
 			return nil, err
 		}
-		if err := e.saveState(state{Hashes: map[string]savedHash{}}); err != nil {
+		if k == nil {
+			k = newKeys(newGroup().root, "", nil)
+			if err := e.saveKeys(k); err != nil {
+				return nil, err
+			}
+			if err := e.saveState(state{Keyed: true, Hashes: map[string]savedHash{}}); err != nil {
+				return nil, err
+			}
+			e.logf(slog.LevelInfo, "Syncing turned on")
+		}
+		if err := e.Sync(ctx); err != nil && !partly(err) {
 			return nil, err
 		}
-		e.logf(slog.LevelInfo, "Syncing turned on")
+		// The round may have moved this device to the new key of a removal made elsewhere, or
+		// out of its group: the code hands out the key it has now.
+		if k, err = e.loadKeys(ctx); err != nil || k != nil {
+			return k, err
+		}
 	}
-	if err := e.Sync(ctx); err != nil {
-		return nil, err
-	}
-	return k, nil
+	return nil, errConflict
 }
 
 // join puts this device into the group of root and takes the group's settings.
@@ -83,11 +90,16 @@ func (e *Engine) join(ctx context.Context, root []byte) error {
 	if err := e.saveKeys(newKeys(root, device, priv)); err != nil {
 		return err
 	}
-	if err := e.saveState(state{Adopt: true, Hashes: map[string]savedHash{}}); err != nil {
+	if err := e.saveState(state{Adopt: true, Keyed: true, Hashes: map[string]savedHash{}}); err != nil {
 		return err
 	}
 	e.logf(slog.LevelInfo, "Joined the settings of another device")
-	return e.Sync(ctx)
+	err := e.Sync(ctx)
+	if k, _ := e.loadKeys(ctx); k == nil {
+		// The group has moved on without this device: the code was shown before a removal.
+		return ErrCodeUnknown
+	}
+	return err
 }
 
 // Offer shows a code another device enters or scans to get this device's settings

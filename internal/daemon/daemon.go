@@ -650,6 +650,11 @@ func (d *Daemon) watchRepair(process Process) {
 // secrets, then a test connection. token "" means none. The error is a *unis.FieldError
 // naming the step to change, a *httpapi.ValueError, or any other failure.
 func (d *Daemon) CompleteSetup(user, password, token, university string, overrides []config.Setting) error {
+	return d.completeSetup(user, password, token, university, overrides, false)
+}
+
+// completeSetup: synced is an account from another device (syncLocal.Apply).
+func (d *Daemon) completeSetup(user, password, token, university string, overrides []config.Setting, synced bool) error {
 	user = httpapi.PyStrip(user)
 	if !config.ValidUser(user) {
 		return unis.TextError("user", i18n.T("setup.invalid_user"))
@@ -682,8 +687,11 @@ func (d *Daemon) CompleteSetup(user, password, token, university string, overrid
 	// Secrets first: if the keyring refuses, no config.toml exists yet and the assistant
 	// stays the way in after a restart.
 	previousUser := d.cfg.User
-	// Settings, Account runs the assistant again: the tunnel of the old account goes.
-	teardown := !d.needsSetup && d.tun != nil
+	// Settings, Account runs the assistant again: the tunnel of the old account goes. An account
+	// from another device leaves a set-up device as it is unless account or gateway changed.
+	quiet := synced && !d.needsSetup && d.configError == ""
+	teardown := !d.needsSetup && d.tun != nil &&
+		(!quiet || user != d.cfg.User || university != d.cfg.University || profile.Host != d.cfg.Host)
 	d.mu.Unlock()
 	if teardown {
 		d.RequestDisconnect()
@@ -766,7 +774,11 @@ func (d *Daemon) CompleteSetup(user, password, token, university string, overrid
 		d.startEnrollLocked(code, profile.MFAPortalURL)
 	}
 	d.mu.Unlock()
-	d.secretsChanged()
+	if quiet {
+		d.secretsSynced(teardown)
+	} else {
+		d.secretsChanged()
+	}
 	d.syncChanged(true)
 	return nil
 }

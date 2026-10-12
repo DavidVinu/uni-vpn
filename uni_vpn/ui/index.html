@@ -977,8 +977,9 @@ function openSettings() {
   domainsShown = false;
   show("settings");
   render();
-  // Like Chrome sync: opening Settings picks up changes from the other devices.
-  if (S.sync && S.sync.on) send("/api/sync/refresh").then(() => refresh());
+  // Like Chrome sync: opening Settings picks up changes from the other devices (and finds the
+  // sync keys when the keyring did not answer before).
+  if (S.sync && S.sync.available) send("/api/sync/refresh").then(() => refresh());
 }
 $("open-settings").onclick = openSettings;
 // An otpauth:// link the app was opened with (the MFA portal's "follow this link", see the
@@ -1165,9 +1166,10 @@ function showPairing(p) {
 function renderPair() {
   const p = S.sync && S.sync.pairing;
   if (!p || p.code !== pairShown || $("pair-show").hidden) return;
-  if (p.state === "done") { pairPart("pair-done"); $("pair-done").querySelector("h2").focus(); pairShown = null; }
+  // error: linked, but some settings could not be used here; or why it failed.
+  if (p.state === "done") { pairPart("pair-done"); err("pair-err", tr("", p.error)); $("pair-done").querySelector("h2").focus(); pairShown = null; }
   else if (p.state === "expired" || p.state === "failed") {
-    err("pair-err", t(p.state === "expired" ? "sync.expired" : "sync.offline"));
+    err("pair-err", p.error ? tr("", p.error) : t(p.state === "expired" ? "sync.expired" : "sync.offline"));
     $("pair-new").hidden = false;
   }
 }

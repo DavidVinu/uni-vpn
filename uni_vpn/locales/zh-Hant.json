@@ -107,6 +107,7 @@
   "sync.code_unknown": "此代碼無效。請檢查，或顯示新代碼。",
   "sync.setup_first": "請先在其中一台裝置上設定 Uni VPN。",
   "sync.offline": "無法連線到同步服務。請檢查網路連線。",
+  "sync.not_used": "來自你其他裝置的部分設定無法在此使用。",
   "totp.line_break": "密鑰必須在同一行",
   "totp.only_totp": "這個密鑰不是用於隨時間變化的驗證碼。請選擇按時間產生的那個",
   "totp.algorithm": "不支援這種密鑰",
