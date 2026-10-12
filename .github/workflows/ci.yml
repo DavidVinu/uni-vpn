@@ -139,7 +139,9 @@ jobs:
       - name: go vet with libopenconnect
         run: go vet -tags libopenconnect ./...
       - name: go test -race with libopenconnect
-        run: go test -race -tags libopenconnect ./...
+        run: |
+          go test -race -tags libopenconnect ./...
+          go test -race -tags "libopenconnect iosapi" ./cmd/uni-vpn-ios/
       - name: Heidelberg's gateway with a made-up account
         run: UNI_VPN_NET_TESTS=1 go test -tags libopenconnect -run Heidelberg -v ./internal/octunnel/
       - name: End to end against ocserv
