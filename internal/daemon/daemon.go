@@ -683,11 +683,11 @@ func (d *Daemon) CompleteSetup(user, password, token, university string, overrid
 	d.mu.Unlock()
 	err = func() error {
 		if err := d.opts.PasswordSetter(password); err != nil {
-			return err
+			return d.keyringFailed(err)
 		}
 		if profile.NeedsTOTP() && !once {
 			if err := d.opts.TOTPSetter(token); err != nil {
-				return err
+				return d.keyringFailed(err)
 			}
 		}
 		broken := configError != "" && exists(path)
@@ -730,6 +730,10 @@ func (d *Daemon) CompleteSetup(user, password, token, university string, overrid
 		var ce *config.ConfigError
 		if errors.As(err, &ce) {
 			return &httpapi.ValueError{Msg: ce.Error()}
+		}
+		var text i18n.Text
+		if errors.As(err, &text) {
+			return text
 		}
 		return errors.New(pyErr(err))
 	}
@@ -1133,10 +1137,21 @@ func (d *Daemon) RequestDisconnect() {
 	d.mu.Unlock()
 }
 
+// keyringFailed: a keyring that did not save shows the keyring message in the user's
+// language; the keyring's own words go to the log.
+func (d *Daemon) keyringFailed(err error) error {
+	var ke *credentials.KeyringError
+	if !errors.As(err, &ke) {
+		return err
+	}
+	d.logf(slog.LevelWarn, "%s", ke.Msg)
+	return i18n.T(messages.KeyPrefix + messages.KeyringLocked.ID)
+}
+
 // SetPassword stores a new password and connects with it.
 func (d *Daemon) SetPassword(password string) error {
 	if err := d.opts.PasswordSetter(password); err != nil {
-		return err
+		return d.keyringFailed(err)
 	}
 	d.logf(slog.LevelInfo, "Password stored in the keyring")
 	d.secretsChanged()
@@ -1147,7 +1162,7 @@ func (d *Daemon) SetPassword(password string) error {
 // SetTOTP stores a new TOTP secret and connects with it.
 func (d *Daemon) SetTOTP(token string) error {
 	if err := d.opts.TOTPSetter(token); err != nil {
-		return err
+		return d.keyringFailed(err)
 	}
 	d.logf(slog.LevelInfo, "TOTP secret stored in the keyring")
 	d.NoteCodeShown() // the page shows the new check code

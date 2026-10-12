@@ -7,6 +7,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"net"
 	"os"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/DavidVinu/uni-vpn/internal/config"
 	"github.com/DavidVinu/uni-vpn/internal/credentials"
+	"github.com/DavidVinu/uni-vpn/internal/i18n"
 	"github.com/DavidVinu/uni-vpn/internal/messages"
 	"github.com/DavidVinu/uni-vpn/internal/pyjson"
 	"github.com/DavidVinu/uni-vpn/internal/tunnel"
@@ -1056,5 +1058,21 @@ func TestVersionAndProtocolMatchThePythonPackage(t *testing.T) {
 	}
 	if !strings.Contains(text, "PROTOCOL = "+strconv.Itoa(Protocol)+"\n") {
 		t.Fatal("PROTOCOL differs from", Protocol)
+	}
+}
+
+// A keyring that does not save shows the keyring message in the user's language, not the
+// keyring tool's English.
+func TestSavingIntoABrokenKeyringIsTranslated(t *testing.T) {
+	h := newHarness(t)
+	broken := func(string) error { return &credentials.KeyringError{Msg: "Uni VPN could not be saved: 5"} }
+	d := h.start(func(o *Options) { o.PasswordSetter, o.TOTPSetter = broken, broken })
+	for name, err := range map[string]error{"password": d.SetPassword("pw"), "totp": d.SetTOTP("JBSWY3DPEHPK3PXP")} {
+		if key, _ := i18n.Of(err).(pyjson.Object); key == nil || fmt.Sprint(key) != fmt.Sprint(i18n.T("msg.keyring_locked").JSON()) {
+			t.Errorf("%s: %v %v", name, err, i18n.Of(err))
+		}
+	}
+	if !strings.Contains(h.logs.String(), "could not be saved: 5") {
+		t.Error("keyring's own words not logged")
 	}
 }

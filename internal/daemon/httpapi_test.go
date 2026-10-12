@@ -519,7 +519,8 @@ func TestKeyringFailureWritesNoConfigSoTheAssistantStays(t *testing.T) {
 	h.totpSetter = func(string) error { return &credentials.KeyringError{Msg: "keyring locked"} }
 	d, cfgPath := h.startSetup()
 	r := h.post("/api/setup", `{"user": "ab123", "password": "pw", "secret": "GEZDGNBVGY3TQOJQ"}`)
-	if r.status != 500 || !bytes.Contains(r.body, []byte("keyring locked")) {
+	// The keyring message in the user's language, not the keyring tool's English.
+	if r.status != 500 || !bytes.Contains(r.body, []byte(`"msg.keyring_locked"`)) {
 		t.Fatal(r.status, string(r.body))
 	}
 	if _, err := os.Stat(cfgPath); err == nil {
