@@ -27,6 +27,7 @@ import (
 
 	"github.com/DavidVinu/uni-vpn/internal/config"
 	"github.com/DavidVinu/uni-vpn/internal/credentials"
+	"github.com/DavidVinu/uni-vpn/internal/devsync"
 	"github.com/DavidVinu/uni-vpn/internal/forwarder"
 	"github.com/DavidVinu/uni-vpn/internal/httpapi"
 	"github.com/DavidVinu/uni-vpn/internal/i18n"
@@ -125,6 +126,11 @@ type Options struct {
 	Updater Updater
 	// PackageWatch: uninstall once the installer's folder is gone (removal.go).
 	PackageWatch PackageWatch
+	// Syncing with the user's other devices (sync.go): relay "" means syncRelay(), the
+	// store nil the keyring, the state path "" sync.json next to config.toml.
+	SyncRelay     string
+	SyncStore     devsync.Store
+	SyncStatePath string
 }
 
 type lastError struct {
@@ -182,6 +188,8 @@ type Daemon struct {
 	updateJitter     time.Duration
 	after            func(time.Duration) <-chan time.Time
 	updateNow        chan struct{}
+
+	sync *devsync.Engine
 
 	forwarder *forwarder.Forwarder
 	closeAll  func() // forwarder.CloseAll; tests replace it before Run
@@ -261,7 +269,11 @@ func New(cfg *config.Config, log *slog.Logger, opts Options) *Daemon {
 			return &admin
 		}
 	}
+	if opts.SyncRelay == "" {
+		opts.SyncRelay = syncRelay()
+	}
 	d.opts = opts
+	d.sync = d.newSync()
 	d.configError, d.configPath, d.needsSetup = opts.ConfigError, opts.ConfigPath, opts.NeedsSetup
 	d.state, d.message, d.since = Idle, messages.NotConnected, d.wall()
 	d.lastActivity = d.mono()
@@ -517,6 +529,8 @@ func (d *Daemon) Status() (pyjson.Object, error) {
 		"error_kind", nullable(d.errorKindLocked()),
 		"platform", platformName(),
 		"elevated", elevated,
+		// Syncing with other devices, see sync.go.
+		"sync", d.syncStatus(),
 	), nil
 }
 
@@ -695,6 +709,7 @@ func (d *Daemon) CompleteSetup(user, password, token, university string, overrid
 	d.configError = ""
 	d.mu.Unlock()
 	d.secretsChanged()
+	d.syncChanged(true)
 	return nil
 }
 
@@ -766,6 +781,7 @@ func (d *Daemon) SetDomains(text string) ([]string, error) {
 	port := d.cfg.HTTPPort
 	d.mu.Unlock()
 	d.opts.ProxyRefresh(port)
+	d.syncChanged(false)
 	return domains, nil
 }
 
@@ -790,6 +806,7 @@ func (d *Daemon) SetLanguage(code string) error {
 	d.mu.Lock()
 	d.cfg.Language = code
 	d.mu.Unlock()
+	d.syncChanged(false)
 	if code == "" {
 		code = "from the system"
 	}
@@ -820,6 +837,7 @@ func (d *Daemon) SetAutoUpdate(enabled bool) error {
 		word = "on"
 	}
 	d.logf(slog.LevelInfo, "Automatic updates %s", word)
+	d.syncChanged(false)
 	if enabled {
 		select {
 		case d.updateNow <- struct{}{}:
@@ -866,10 +884,17 @@ func (d *Daemon) Run() {
 	updatesDone := make(chan struct{})
 	go func() { d.autoUpdate(); close(updatesDone) }()
 	go d.watchPackage(d.opts.PackageWatch)
+	syncDone := make(chan struct{})
+	go func() {
+		d.sync.Load(context.Background())
+		d.sync.Run(d.stop)
+		close(syncDone)
+	}()
 	close(d.started)
 	<-d.stop
 	<-tickerDone
 	<-updatesDone
+	<-syncDone
 	d.mu.Lock()
 	if d.loopRunning {
 		d.loopCancel()
@@ -1067,6 +1092,7 @@ func (d *Daemon) SetPassword(password string) error {
 	}
 	d.logf(slog.LevelInfo, "Password stored in the keyring")
 	d.secretsChanged()
+	d.syncChanged(true)
 	return nil
 }
 
@@ -1078,6 +1104,7 @@ func (d *Daemon) SetTOTP(token string) error {
 	d.logf(slog.LevelInfo, "TOTP secret stored in the keyring")
 	d.NoteCodeShown() // the page shows the new check code
 	d.secretsChanged()
+	d.syncChanged(true)
 	return nil
 }
 

@@ -99,6 +99,8 @@ type Setup struct {
 	StoreTOTP      func(user, token string) error
 	DeletePassword func(user string) (bool, error)
 	DeleteTOTP     func(user string) (bool, error)
+	// DeleteSync removes this device's sync keys (internal/devsync); nil skips it.
+	DeleteSync func() (bool, error)
 	// KeyringState is "present", "missing", "locked" or "error:<text>".
 	KeyringState func(user string, kind credentials.Kind) string
 
@@ -180,6 +182,9 @@ func New(root string) *Setup {
 		ProxyUninstall: func() (string, error) { return sysproxy.Uninstall("") },
 		StorePassword:  keyring.StorePassword, StoreTOTP: keyring.StoreTotp,
 		DeletePassword: keyring.DeletePassword, DeleteTOTP: keyring.DeleteTotp,
+		DeleteSync: func() (bool, error) {
+			return keyring.DeleteSecret(credentials.SyncUser, credentials.KindSync)
+		},
 		KeyringState: KeyringState, PortOpen: PortOpen, Sleep: time.Sleep, Now: time.Now,
 		OpenURL: desktop.OpenURL, HasDesktop: app.HasDesktop,
 		Probe: func(host, usergroup, group string) (detect.Detection, error) {
@@ -968,6 +973,14 @@ func (s *Setup) Uninstall(a Args) (int, error) {
 				return 1, err
 			}
 			s.say("%s", pick(deleted, "TOTP secret deleted", "TOTP secret was not in the keyring"))
+			if s.DeleteSync != nil {
+				if deleted, err = s.DeleteSync(); err != nil {
+					return 1, err
+				}
+				if deleted {
+					s.say("Sync keys deleted")
+				}
+			}
 		}
 	}
 	app := realpath(s.Root)

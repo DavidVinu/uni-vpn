@@ -400,6 +400,26 @@ func orderedKeys(keys []toml.Key, prefix ...string) []string {
 	return out
 }
 
+// Overrides are the profile fields config.toml sets itself, in file order: what makes this
+// device's account differ from its university's profile.
+func Overrides(path string) ([]Setting, error) {
+	text, err := readText(path)
+	if err != nil {
+		return nil, err
+	}
+	data, keys, err := decode(text)
+	if err != nil {
+		return nil, err
+	}
+	var out []Setting
+	for _, key := range orderedKeys(keys) {
+		if slices.Contains(unis.ProfileFields, key) {
+			out = append(out, Setting{key, data[key]})
+		}
+	}
+	return out, nil
+}
+
 // Load reads config.toml; path "" is DefaultPath. A problem in the file is a *ConfigError.
 func Load(path string) (*Config, error) {
 	if path == "" {

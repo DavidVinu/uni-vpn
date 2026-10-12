@@ -979,7 +979,8 @@ func TestStatusKeys(t *testing.T) {
 	}
 }
 
-// The keys and their order are those of daemon.py's status(); values Python would write the same.
+// The keys and their order are those of daemon.py's status(), then the Go core's own (sync);
+// values Python would write the same.
 func TestStatusKeyOrderLikePython(t *testing.T) {
 	h := newHarness(t)
 	d := h.start(nil)
@@ -992,7 +993,7 @@ func TestStatusKeyOrderLikePython(t *testing.T) {
 		"message_id", "message_t", "action", "since", "host", "user", "university", "university_name", "mfa", "mfa_portal_url",
 		"mfa_steps", "socks_port", "http_port", "idle_minutes", "active_connections", "bytes_in", "bytes_out",
 		"connects", "last_error", "domains", "pac_url", "pac_refresh", "log_tail", "setup_needed", "repairing",
-		"busy", "error_kind", "platform", "elevated"}
+		"busy", "error_kind", "platform", "elevated", "sync"}
 	if !slices.Equal(keys, want) {
 		t.Fatal(keys)
 	}
