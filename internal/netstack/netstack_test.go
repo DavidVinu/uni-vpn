@@ -257,12 +257,15 @@ func TestBulkTransfer(t *testing.T) {
 	}
 	defer c.Close()
 	c.SetDeadline(time.Now().Add(20 * time.Second))
-	if n, err := io.Copy(io.Discard, c); n != size || err != nil {
-		for name, st := range map[string]*Stack{"client": client, "server": server} {
-			tcpStats := st.stack.Stats().TCP
-			t.Logf("%s: dropped %d, retransmits %d, timeouts %d", name, st.dropped.Load(),
-				tcpStats.Retransmits.Value(), tcpStats.Timeouts.Value())
-		}
+	start := time.Now()
+	n, err := io.Copy(io.Discard, c)
+	t.Logf("%d bytes in %v", n, time.Since(start))
+	for name, st := range map[string]*Stack{"client": client, "server": server} {
+		tcpStats := st.stack.Stats().TCP
+		t.Logf("%s: waits %d, dropped %d, retransmits %d, timeouts %d", name, st.waits.Load(),
+			st.dropped.Load(), tcpStats.Retransmits.Value(), tcpStats.Timeouts.Value())
+	}
+	if n != size || err != nil {
 		t.Fatal(n, err)
 	}
 }

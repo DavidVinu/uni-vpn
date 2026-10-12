@@ -97,6 +97,9 @@ jobs:
           if [ -n "$unformatted" ]; then echo "$unformatted"; exit 1; fi
       - name: go vet
         run: go vet ./...
+      - name: Packet throughput of the in-process network stack
+        if: runner.os == 'macOS'
+        run: go test -count=1 -run TestBulkTransfer -v ./internal/netstack/
       - name: go test -race
         if: runner.os != 'Windows'
         run: go test -race ./...

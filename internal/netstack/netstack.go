@@ -54,6 +54,8 @@ type Stack struct {
 	prefix int
 	// dropped counts packets the fd did not take.
 	dropped atomic.Uint64
+	// waits counts the pauses for a full queue.
+	waits atomic.Uint64
 
 	cancel context.CancelFunc
 	once   sync.Once
@@ -195,6 +197,7 @@ func (s *Stack) write(ctx context.Context, pkt []byte) {
 			}
 			return
 		}
+		s.waits.Add(1)
 		time.Sleep(time.Millisecond)
 	}
 	s.dropped.Add(1)
