@@ -49,13 +49,20 @@ final class CoreHost: @unchecked Sendable {
         }
     }
 
-    /// Returns once the core stopped and released its lock and ports.
+    /// Returns once the core stopped and released its lock and ports. The core bounds its own
+    /// shutdown (about 5 s), so this never outlasts the time iOS gives an app going away.
     func stop() async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            queue.async {
-                if UniVPNRunning() == 1 { UniVPNStop() }
-                continuation.resume()
-            }
+            stop { continuation.resume() }
+        }
+    }
+
+    /// The same, queued right away from the caller's thread (no hop to a task first);
+    /// `done` runs on the core's queue.
+    func stop(then done: @escaping @Sendable () -> Void) {
+        queue.async {
+            if UniVPNRunning() == 1 { UniVPNStop() }
+            done()
         }
     }
 

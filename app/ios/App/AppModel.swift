@@ -45,8 +45,12 @@ final class AppModel {
     @ObservationIgnored private var lastStart = Date.distantPast
     /// Turning the VPN on or off: the core changes hands, the app must not start its own.
     @ObservationIgnored private var switching = false
+    /// The VPN was just started: the app leaves the lock to the extension until then.
+    @ObservationIgnored private var handOverUntil = Date.distantPast
 
     init() {
+        // The Control Center button turns the VPN on from this process too.
+        SetVPN.beforeStart = { await CoreHost.shared.stop() }
         vpn.onStatus = { [weak self] status in
             guard let self else { return }
             Task { await self.vpnChanged(status) }
@@ -87,18 +91,22 @@ final class AppModel {
     func wentToBackground() {
         poll?.cancel()
         poll = nil
-        let app = UIApplication.shared
+        // Ask for background time first, then queue the stop at once: it runs while iOS still
+        // lets the app run. The core gives up its lock and ports within about 5 s, well inside
+        // the time iOS grants. If iOS takes the time back anyway, the handler ends the task so
+        // iOS does not end the app for overrunning; the extension then finds the lock taken,
+        // fails its start, and connect on demand tries again.
         let task = BackgroundTask()
-        task.id = app.beginBackgroundTask { task.end() }
-        Task {
-            await CoreHost.shared.stop()
-            task.end()
+        task.id = UIApplication.shared.beginBackgroundTask(withName: "stop core") { task.end() }
+        CoreHost.shared.stop {
+            Task { @MainActor in task.end() }
         }
     }
 
     /// Starts the app's core while the VPN is off. Cheap to call often.
     func ensureCore() async {
-        guard vpn.idle, !switching, UIApplication.shared.applicationState != .background else { return }
+        guard vpn.idle, !switching, Date() >= handOverUntil,
+              UIApplication.shared.applicationState != .background else { return }
         // A core that just failed to start (another one holds the lock) is not retried in a
         // tight loop.
         guard Date().timeIntervalSince(lastStart) > 1 else { return }
@@ -107,6 +115,10 @@ final class AppModel {
     }
 
     private func vpnChanged(_ status: NEVPNStatus) async {
+        if status == .connecting || status == .connected {
+            // The extension has it now; from here on the status says who runs the core.
+            handOverUntil = .distantPast
+        }
         if status == .connecting {
             // The extension waits for the lock; let go of it.
             await CoreHost.shared.stop()
@@ -131,7 +143,12 @@ final class AppModel {
         switching = true
         await CoreHost.shared.stop()
         let saved = await vpn.enable()
-        if saved { vpn.start() }
+        if saved {
+            // The status still reads "disconnected" for a moment: until it moves on (or the
+            // start failed for 15 s), the lock is the extension's, not the app's.
+            handOverUntil = Date().addingTimeInterval(15)
+            vpn.start()
+        }
         switching = false
         if !saved { await ensureCore() }
     }
