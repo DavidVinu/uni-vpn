@@ -135,6 +135,10 @@ func (k *Keyring) goos() string {
 func (k *Keyring) isMacOS() bool   { return k.goos() == "darwin" }
 func (k *Keyring) isWindows() bool { return k.goos() == "windows" }
 
+// credStore: Windows keeps secrets in Credential Manager, Android in an encrypted file
+// (filecred.go). Both go through CredStore.
+func (k *Keyring) credStore() bool { return k.isWindows() || k.goos() == "android" }
+
 func (k *Keyring) run(cmd []string, input []byte, timeout time.Duration) (Result, error) {
 	if k.Run != nil {
 		return k.Run(cmd, input, timeout)
@@ -145,6 +149,9 @@ func (k *Keyring) run(cmd []string, input []byte, timeout time.Duration) (Result
 func (k *Keyring) cred() CredStore {
 	if k.Cred != nil {
 		return k.Cred
+	}
+	if k.goos() == "android" {
+		return AndroidStore()
 	}
 	return nativeCred{}
 }
@@ -231,7 +238,7 @@ func (k *Keyring) getSecretWindows(ctx context.Context, user string, kind Kind, 
 // GetSecret reads one entry. command replaces the lookup command (tests); on Windows an
 // empty command means Credential Manager.
 func (k *Keyring) GetSecret(ctx context.Context, user string, kind Kind, timeout time.Duration, command []string) ([]byte, error) {
-	if k.isWindows() && len(command) == 0 {
+	if k.credStore() && len(command) == 0 {
 		return k.getSecretWindows(ctx, user, kind, timeout)
 	}
 	if _, _, err := names(kind); err != nil {
@@ -331,7 +338,7 @@ func (k *Keyring) StoreSecret(user string, kind Kind, value string) error {
 	if err != nil {
 		return err
 	}
-	if k.isWindows() {
+	if k.credStore() {
 		// UTF-8 blob, not UTF-16: what the Python core writes.
 		if err := k.cred().Write(CredentialTarget(service, user), user, []byte(value), label); err != nil {
 			var ce *CredentialError
@@ -391,7 +398,7 @@ func (k *Keyring) DeleteSecret(user string, kind Kind) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if k.isWindows() {
+	if k.credStore() {
 		return k.cred().Delete(CredentialTarget(service, user)), nil
 	}
 	var cmd []string

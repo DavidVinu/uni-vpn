@@ -217,6 +217,7 @@ username_suffix = "@student-net.ethz.ch"
 | Other Linux (Debian, Fedora, openSUSE, Arch; GNOME or KDE) | installer and unit tests only, no real login yet |
 | macOS 14+ (Apple Silicon and Intel) | CI only (unit tests, keychain, installer dry run), checklist in `docs/macos-test.md` |
 | Windows 10 and 11 (64-bit, Intel or AMD) | CI only (unit tests, Credential Manager, registry, Task Scheduler, installer dry run), checklist in `docs/windows-test.md` |
+| Android 10+ (64-bit) | CI only (build, lint, unit tests, emulator test against a real gateway), not in a store yet, see `docs/android.md` |
 
 ### How it works
 

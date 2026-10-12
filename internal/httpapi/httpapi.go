@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"io"
@@ -98,6 +99,10 @@ type Server struct {
 	Host     string
 	Port     int
 	Detector DetectFunc
+	// Token, when set, must come in the X-Uni-VPN-Token header of every request but the PAC
+	// file's. On Android every app can reach 127.0.0.1, so there only our own app may talk to
+	// the core; the browsers still read the PAC file.
+	Token string
 
 	daemon Daemon
 	log    *slog.Logger
@@ -300,6 +305,13 @@ func (s *Server) handle(c net.Conn) {
 	if !AllowedHost(host, present, s.Port) {
 		s.respond(c, 403, "text/plain", []byte("forbidden"), hdrs)
 		return
+	}
+	if s.Token != "" && !(method == "GET" && path == "/proxy.pac") {
+		got, _ := hdrs.get("x-uni-vpn-token")
+		if subtle.ConstantTimeCompare([]byte(got), []byte(s.Token)) != 1 {
+			s.respond(c, 403, "text/plain", []byte("forbidden"), hdrs)
+			return
+		}
 	}
 	status, ctype, payload := s.routeSafe(method, path, query, hdrs, body)
 	s.respond(c, status, ctype, payload, hdrs)

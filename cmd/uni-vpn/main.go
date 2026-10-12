@@ -18,12 +18,16 @@ import (
 	"syscall"
 
 	"github.com/DavidVinu/uni-vpn/internal/config"
+	"github.com/DavidVinu/uni-vpn/internal/credentials"
 	"github.com/DavidVinu/uni-vpn/internal/daemon"
 	"github.com/DavidVinu/uni-vpn/internal/logsetup"
 	"github.com/DavidVinu/uni-vpn/internal/platform"
 	"github.com/DavidVinu/uni-vpn/internal/winsys"
 	"github.com/DavidVinu/uni-vpn/internal/wintunnel"
 )
+
+// apiTokenEnv: when set, the local API answers only requests that carry this token.
+const apiTokenEnv = "UNI_VPN_API_TOKEN"
 
 const usage = "usage: uni-vpn [--config CONFIG] [--version] {daemon,update,setup,uninstall,app} ..."
 
@@ -146,9 +150,16 @@ func cmdDaemon(configArg string) int {
 			log.Warn("Not running elevated: openconnect cannot create the Wintun adapter")
 		}
 	}
+	// The Android app hands over its keys this way; openconnect and ocproxy need neither.
+	apiToken := os.Getenv(apiTokenEnv)
+	os.Unsetenv(apiTokenEnv)
+	if platform.IsAndroid {
+		credentials.AndroidStore()
+		os.Unsetenv(credentials.KeyEnv)
+	}
 	_, statErr := os.Stat(cfgPath)
 	d := daemon.New(cfg, log, daemon.Options{ConfigError: configError, LogTail: tail.Lines, ConfigPath: cfgPath,
-		NeedsSetup: errors.Is(statErr, fs.ErrNotExist), Updater: coreUpdater()})
+		NeedsSetup: errors.Is(statErr, fs.ErrNotExist), Updater: coreUpdater(), APIToken: apiToken})
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGTERM, os.Interrupt)
 	go func() {
