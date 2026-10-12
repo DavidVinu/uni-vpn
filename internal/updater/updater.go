@@ -161,6 +161,8 @@ func (u *Updater) Disabled() string {
 	switch {
 	case runtime.GOOS == "android":
 		return "the app store updates the Android app"
+	case runtime.GOOS == "ios":
+		return "the App Store updates the iPhone app"
 	case !ValidCommit(u.Commit):
 		return "this copy was built without a version number"
 	case u.rootErr != "":

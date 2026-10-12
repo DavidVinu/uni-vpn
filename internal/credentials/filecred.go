@@ -34,18 +34,33 @@ type FileStore struct {
 }
 
 var (
-	androidOnce  sync.Once
+	androidMu    sync.Mutex
 	androidStore *FileStore
 )
 
-// AndroidStore is the FileStore of the Android app: secrets.json in the config folder, the key
-// from KeyEnv.
+// AndroidStore is the FileStore of the phone apps (Android and iOS): secrets.json in the
+// config folder, the key from KeyEnv, both read on the first call.
 func AndroidStore() *FileStore {
-	androidOnce.Do(func() {
-		key, _ := hex.DecodeString(os.Getenv(KeyEnv))
-		androidStore = &FileStore{Path: filepath.Join(platform.ConfigDir(), SecretsFile), Key: key}
-	})
+	androidMu.Lock()
+	defer androidMu.Unlock()
+	if androidStore == nil {
+		androidStore = phoneStore()
+	}
 	return androidStore
+}
+
+// ReloadFileStore reads the config folder and KeyEnv again: the iOS core can start more than
+// once in one process.
+func ReloadFileStore() *FileStore {
+	androidMu.Lock()
+	defer androidMu.Unlock()
+	androidStore = phoneStore()
+	return androidStore
+}
+
+func phoneStore() *FileStore {
+	key, _ := hex.DecodeString(os.Getenv(KeyEnv))
+	return &FileStore{Path: filepath.Join(platform.ConfigDir(), SecretsFile), Key: key}
 }
 
 func (s *FileStore) aead() (cipher.AEAD, error) {
