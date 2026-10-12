@@ -240,7 +240,7 @@ func New(cfg *config.Config, log *slog.Logger, opts Options) *Daemon {
 	}
 	if opts.ProxyRefresh == nil {
 		opts.ProxyRefresh = sysproxy.Refresh
-		if platform.IsAndroid {
+		if platform.IsAndroid || platform.IsIOS {
 			// The app's VPN carries the PAC address and notices new websites in status.json.
 			opts.ProxyRefresh = func(int) {}
 		}
@@ -375,13 +375,16 @@ func (s socksServer) Update(source string, dns []string) { s.SetRoute(source, dn
 
 func (d *Daemon) makeTunnel() (Tunnel, error) {
 	cfg := d.cfg // called with mu held
+	tc := tunnel.Config{Host: cfg.Host, UserAgent: cfg.Useragent, LoginName: cfg.LoginName(), AuthGroup: cfg.Authgroup,
+		UserGroup: cfg.Usergroup, OS: cfg.OS, NoExternalAuth: cfg.NoExternalAuth, MFA: cfg.MFA,
+		TOTPSeparator: cfg.TOTPSeparator, StopGrace: seconds(cfg.StopGrace)}
+	if platform.InProcessOpenConnect {
+		return d.inProcessTunnel(tc) // inprocess.go: no programs to look for
+	}
 	openconnect := platform.FindBinary("openconnect", cfg.OpenConnect)
 	if openconnect == "" {
 		return nil, &notFoundError{"openconnect not found"}
 	}
-	tc := tunnel.Config{Host: cfg.Host, UserAgent: cfg.Useragent, LoginName: cfg.LoginName(), AuthGroup: cfg.Authgroup,
-		UserGroup: cfg.Usergroup, OS: cfg.OS, NoExternalAuth: cfg.NoExternalAuth, MFA: cfg.MFA,
-		TOTPSeparator: cfg.TOTPSeparator, StopGrace: seconds(cfg.StopGrace)}
 	if platform.IsWindows {
 		w := wintunnel.New(tc, openconnect, filepath.Join(BinDir(), "uni-vpn-vpnc.js"), d.log, d.opts.TokenDir)
 		w.TOTPCode = totp.CodeAt
@@ -456,6 +459,8 @@ func platformName() string {
 		return "macos"
 	case platform.IsAndroid:
 		return "android"
+	case platform.IsIOS:
+		return "ios"
 	}
 	return "linux"
 }
