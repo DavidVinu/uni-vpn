@@ -64,6 +64,7 @@ import de.davidvinu.univpn.AppModel
 import de.davidvinu.univpn.MainActivity
 import de.davidvinu.univpn.R
 import de.davidvinu.univpn.Scanner
+import de.davidvinu.univpn.Strings
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -130,6 +131,9 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
     var ownGroup by rememberSaveable { mutableStateOf(groups.isNotEmpty()) }
     var otherMfa by rememberSaveable { mutableStateOf(current?.optString("mfa")?.ifEmpty { "none" } ?: "") }
     var detecting by remember { mutableStateOf(false) }
+    // The gateway check whose answer counts (index.html detectSeq): one for an address, group or
+    // university chosen before counts for nothing.
+    var detectSeq by remember { mutableIntStateOf(0) }
     var user by rememberSaveable { mutableStateOf(if (model.changingAccount) status.optString("user") else "") }
     var password by rememberSaveable { mutableStateOf("") }
     var secret by rememberSaveable { mutableStateOf("") }
@@ -160,6 +164,31 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
     fun go(next: Int) {
         error = null
         step = next
+    }
+
+    // Another address or university, or back to the start: a check still on its way is not
+    // for it.
+    fun dropDetect() {
+        detectSeq++
+        detecting = false
+    }
+
+    // Asks the gateway of the address what it needs, like the page's detect().
+    fun detectGateway(picked: String) {
+        val seq = ++detectSeq
+        val address = host
+        detecting = true
+        error = null
+        scope.launch {
+            val found = detect(model, address, picked)
+            if (seq != detectSeq) return@launch
+            detecting = false
+            error = found.error
+            found.groups?.let { group = found.group; groups = it; ownGroup = false }
+            // Like the desktop page: whatever the check found, the choice shows, so a gateway
+            // that does not answer can still be set up. Not after SAML: Next asks again.
+            otherMfa = found.mfa ?: otherMfa.ifEmpty { "totp_field" }
+        }
     }
 
     fun finishChange() {
@@ -269,7 +298,7 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
                 else -> { { go(SIGN_IN) } }
             }
             CODE -> { { go(WELCOME) } }
-            UNIVERSITY -> if (model.changingAccount) { { finishChange() } } else if (syncAvailable) { { go(WELCOME) } } else null
+            UNIVERSITY -> if (model.changingAccount) { { finishChange() } } else if (syncAvailable) { { dropDetect(); go(WELCOME) } } else null
             CONNECTING -> if (!model.setupBusy) { { model.setupSentAt = 0; go(if (needsTotp) SECOND_FACTOR else SIGN_IN) } } else null
             else -> null
         }
@@ -345,7 +374,7 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
                 }
                 OutlinedTextField(
                     value = if (uni != null && query.isEmpty()) uni.name else if (isOther && query.isEmpty()) model.t("setup.not_listed") else query,
-                    onValueChange = { query = it; uniId = "" },
+                    onValueChange = { query = it; uniId = ""; dropDetect() },
                     label = { Text(model.t("setup.find")) },
                     placeholder = { Text(model.t("setup.find_placeholder")) },
                     singleLine = true,
@@ -359,19 +388,19 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
                             ListItem(
                                 headlineContent = { Text(u.name) },
                                 trailingContent = { Text(u.country, color = MaterialTheme.colorScheme.onSurfaceVariant) },
-                                modifier = Modifier.clickable { uniId = u.id; query = ""; error = if (u.mfa == "saml") model.t("setup.saml") else null },
+                                modifier = Modifier.clickable { uniId = u.id; query = ""; dropDetect(); error = if (u.mfa == "saml") model.t("setup.saml") else null },
                             )
                         }
                         ListItem(
                             headlineContent = { Text(model.t("setup.not_listed"), color = MaterialTheme.colorScheme.primary) },
-                            modifier = Modifier.clickable { uniId = "other"; query = ""; error = null },
+                            modifier = Modifier.clickable { uniId = "other"; query = ""; dropDetect(); error = null },
                         )
                     }
                 }
                 if (isOther) {
                     OutlinedTextField(
                         value = host,
-                        onValueChange = { host = it; otherMfa = ""; groups = emptyList(); ownGroup = false },
+                        onValueChange = { host = it; otherMfa = ""; groups = emptyList(); ownGroup = false; dropDetect() },
                         label = { Text(model.t("setup.vpn_address")) },
                         placeholder = { Text("vpn.example.edu") },
                         singleLine = true,
@@ -381,7 +410,7 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
                     if (groups.size > 1 || ownGroup) {
                         Choice(model.t("setup.group"), groups.map { it to it }, group) { picked ->
                             group = picked
-                            scope.launch { detect(model, host, picked, { detecting = it }, { error = it }) { g, gs, m -> group = g; groups = gs; otherMfa = m; ownGroup = false } }
+                            detectGateway(picked)
                         }
                     }
                     if (otherMfa.isNotEmpty()) {
@@ -400,12 +429,7 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
                             uniId.isEmpty() -> error = model.t("setup.choose")
                             uni?.mfa == "saml" -> error = model.t("setup.saml")
                             isOther && host.isBlank() -> error = model.t("setup.enter_address")
-                            isOther && otherMfa.isEmpty() -> scope.launch {
-                                detect(model, host, "", { detecting = it }, { error = it }) { g, gs, m -> group = g; groups = gs; otherMfa = m; ownGroup = false }
-                                // Like the desktop page: whatever the check found, the choice
-                                // shows, so a gateway that does not answer can still be set up.
-                                if (otherMfa.isEmpty()) otherMfa = "totp_field"
-                            }
+                            isOther && otherMfa.isEmpty() -> detectGateway("")
                             else -> go(SIGN_IN)
                         }
                     }) { Text(model.t("app.next")) }
@@ -531,35 +555,30 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
     }
 }
 
-private suspend fun detect(
-    model: AppModel,
-    host: String,
-    group: String,
-    busy: (Boolean) -> Unit,
-    error: (String?) -> Unit,
-    found: (group: String, groups: List<String>, mfa: String) -> Unit,
-) {
-    busy(true)
-    error(null)
+/**
+ * What the gateway of an address that is not listed needs (/api/detect): [groups] is null when
+ * it did not say (then [error] says why), [mfa] the second factor to suggest, "" when the group
+ * needs a web page (SAML), null without an answer.
+ */
+internal class Detected(val error: String?, val group: String = "", val groups: List<String>? = null, val mfa: String? = null)
+
+private suspend fun detect(model: AppModel, host: String, group: String): Detected {
     val result = model.post("/api/detect", JSONObject().put("host", host.trim()).put("group", group), timeoutMs = 30_000)
-    busy(false)
     val d = result.json
-    if (!result.ok || d == null) {
-        error(result.error)
-        return
-    }
+    if (!result.ok || d == null) return Detected(result.error)
+    return detected(d, model.strings)
+}
+
+/** The answer of /api/detect, read like the page's detect(). */
+internal fun detected(d: JSONObject, strings: Strings): Detected {
     // The core always sends "error", empty when the gateway answered (as the page reads it).
     val problem = if (d.isNull("error")) "" else d.optString("error")
-    if (problem.isNotEmpty()) {
-        error(model.strings.message(problem, d.optJSONObject("error_t")))
-        return
-    }
+    if (problem.isNotEmpty()) return Detected(strings.message(problem, d.optJSONObject("error_t")))
     val groups = d.optJSONArray("groups")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
-    if (d.optBoolean("saml")) {
-        error(model.t("setup.saml"))
-        return
-    }
-    found(d.optString("group"), groups, d.optJSONObject("suggestion")?.optString("mfa")?.takeIf { it.isNotEmpty() } ?: "totp_field")
+    // No way on with this group: its groups show all the same, another one may do without a
+    // web page.
+    if (d.optBoolean("saml")) return Detected(strings.t("setup.saml"), d.optString("group"), groups, "")
+    return Detected(null, d.optString("group"), groups, d.optJSONObject("suggestion")?.optString("mfa")?.takeIf { it.isNotEmpty() } ?: "totp_field")
 }
 
 /** A university's own steps, translated where the catalog has them, else the general ones. */
