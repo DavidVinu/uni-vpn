@@ -350,10 +350,13 @@ async function post(path, body) {
 
 // --- language ----------------------------------------------------------------
 // Like macOS and Windows apps: the system's language unless chosen in Settings, else English.
-let L = {languages: [["en", "English"]], catalogs: {en: {}}}, lang = "en";
+let L = {languages: [["en", "English"]], catalogs: {en: {}}}, lang = "en", localesLoaded = false;
 
 async function loadLocales() {
-  try { L = await (await fetch("/locales.json", {cache: "no-store"})).json(); } catch (e) { /* English keys stay */ }
+  try {
+    L = await (await fetch("/locales.json", {cache: "no-store"})).json();
+    localesLoaded = true;
+  } catch (e) { /* keys until the core answers again (refresh) */ }
 }
 
 function systemLanguage() {
@@ -506,6 +509,11 @@ async function refresh() {
   else if (core !== pageCore && document.visibilityState === "hidden" && view === "main" && !changing) {
     location.reload();
     return;
+  }
+  // The core was away when the page asked for its texts (a restart just then).
+  if (!localesLoaded) {
+    await loadLocales();
+    if (localesLoaded) delete document.documentElement.dataset.ready;
   }
   if (!languageSaving) applyLanguage(S.language);
   $("s-use-other").hidden = !(S.sync && S.sync.available) || changing;
