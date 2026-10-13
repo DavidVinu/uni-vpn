@@ -818,7 +818,7 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 		d.secretsChanged()
 	}
 	if !synced { // the group's values: nothing new to send it
-		d.syncChanged(devsync.KeyPassword, devsync.KeyTOTP)
+		d.syncChanged(devsync.KeyAccount, devsync.KeyPassword, devsync.KeyTOTP)
 	}
 	return nil
 }

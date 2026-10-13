@@ -291,6 +291,44 @@ func TestSyncedOverridesTakeTheGroupsOrder(t *testing.T) {
 	}
 }
 
+// Settings, Account on a desktop whose sync.json a crash left unreadable (the keyring kept the
+// sync keys): the user typed there goes out, and a website the laptop removed meanwhile does not
+// come back from the desktop's list.
+func TestSyncAccountTypedAfterSyncStateWasLost(t *testing.T) {
+	ctx := context.Background()
+	laptop, _, desktop, _ := syncedPair(t, nil)
+	domains := statusValue(t, laptop, "domains").([]string)
+	if len(domains) < 2 {
+		t.Fatalf("websites %v", domains)
+	}
+	gone := domains[0]
+	if _, err := laptop.SetDomains(strings.Join(domains[1:], "\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := laptop.sync.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(desktop.opts.SyncStatePath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := desktop.CompleteSetup("cd456", "pw-s3cret", "base32:GEZDGNBVGY3TQOJQ", "heidelberg", nil); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		for _, d := range []*Daemon{desktop, laptop} {
+			if err := d.sync.Sync(ctx); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for name, d := range map[string]*Daemon{"laptop": laptop, "desktop": desktop} {
+		user, listed := statusValue(t, d, "user"), statusValue(t, d, "domains").([]string)
+		if user != "cd456" || slices.Contains(listed, gone) {
+			t.Errorf("%s: user %v, websites %v; want the cd456 typed on the desktop, %s removed", name, user, listed, gone)
+		}
+	}
+}
+
 func TestSyncErrorsForTheApp(t *testing.T) {
 	notUsed := &devsync.ApplyError{Keys: []string{"language"}, Err: errors.New("unknown language 'it'")}
 	for _, c := range []struct {

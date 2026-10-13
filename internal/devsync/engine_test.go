@@ -1193,16 +1193,27 @@ func TestRemoveWithManyWebsites(t *testing.T) {
 }
 
 // agingRelay drops a new group that no device read or wrote again after its creation, as
-// relay/worker.js's cleanup does a week later: expire is that week.
+// relay/worker.js's cleanup does a week later: expire is that week. failRead loses the next
+// read of a new group nobody used yet (no network for a moment).
 type agingRelay struct {
 	next                http.Handler
 	mu                  sync.Mutex
 	created, used, gone map[string]bool
+	failRead            atomic.Bool
+}
+
+func newAgingRelay(next http.Handler) *agingRelay {
+	return &agingRelay{next: next, created: map[string]bool{}, used: map[string]bool{}, gone: map[string]bool{}}
 }
 
 func (a *agingRelay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if id, ok := strings.CutPrefix(r.URL.Path, "/v1/group/"); ok {
 		a.mu.Lock()
+		if r.Method == "GET" && a.created[id] && !a.used[id] && a.failRead.CompareAndSwap(true, false) {
+			a.mu.Unlock()
+			http.Error(w, "unavailable", 503)
+			return
+		}
 		if r.Method == "PUT" && r.Header.Get("If-None-Match") == "*" {
 			a.created[id] = true
 		} else {
@@ -1227,34 +1238,44 @@ func (a *agingRelay) expire() {
 }
 
 // The phone turns syncing off itself (Remove on its own row) while the laptop and the desktop
-// are switched off for more than a week. Back on, they still sync with each other.
+// are switched off for more than a week. Back on, they still sync with each other; also when
+// the phone's read of the new group got lost (Remove fails, the user tries again).
 func TestRemovingThisDeviceKeepsTheOthersGroup(t *testing.T) {
-	ctx := context.Background()
-	_, target := startRelay(t)
-	u, err := url.Parse(target)
-	if err != nil {
-		t.Fatal(err)
-	}
-	relay := &agingRelay{next: httputil.NewSingleHostReverseProxy(u), created: map[string]bool{}, used: map[string]bool{},
-		gone: map[string]bool{}}
-	srv := httptest.NewServer(relay)
-	t.Cleanup(srv.Close)
-	c := &clock{t: time.Unix(1_800_000_000, 0)}
-	laptop := newDevice(t, srv.URL, "Laptop", setUpLaptop(), c)
-	desktop := newDevice(t, srv.URL, "Desktop", newLocal(false, nil), c)
-	phone := newDevice(t, srv.URL, "Phone", newLocal(false, nil), c)
-	pair(t, ctx, laptop, desktop)
-	pair(t, ctx, laptop, phone)
-	syncAll(t, desktop, phone)
-	if err := phone.Remove(ctx, phone.Status().Devices[0].ID); err != nil || phone.Status().On {
-		t.Fatalf("still on: %v", err)
-	}
-	relay.expire()
-	syncAll(t, laptop, desktop)
-	for _, d := range []device{laptop, desktop} {
-		if got := names(d.Engine); !d.Status().On || len(got) != 2 {
-			t.Errorf("%s: syncing %v, devices %v; want laptop and desktop still linked", d.opts.Name, d.Status().On, got)
-		}
+	for _, readLost := range []bool{false, true} {
+		t.Run(fmt.Sprintf("read lost %v", readLost), func(t *testing.T) {
+			ctx := context.Background()
+			_, target := startRelay(t)
+			u, err := url.Parse(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			relay := newAgingRelay(httputil.NewSingleHostReverseProxy(u))
+			srv := httptest.NewServer(relay)
+			t.Cleanup(srv.Close)
+			c := &clock{t: time.Unix(1_800_000_000, 0)}
+			laptop := newDevice(t, srv.URL, "Laptop", setUpLaptop(), c)
+			desktop := newDevice(t, srv.URL, "Desktop", newLocal(false, nil), c)
+			phone := newDevice(t, srv.URL, "Phone", newLocal(false, nil), c)
+			pair(t, ctx, laptop, desktop)
+			pair(t, ctx, laptop, phone)
+			syncAll(t, desktop, phone)
+			relay.failRead.Store(readLost)
+			id := phone.Status().Devices[0].ID
+			err = phone.Remove(ctx, id)
+			if err != nil && readLost {
+				err = phone.Remove(ctx, id)
+			}
+			if err != nil || phone.Status().On {
+				t.Fatalf("still on: %v", err)
+			}
+			relay.expire()
+			syncAll(t, laptop, desktop)
+			for _, d := range []device{laptop, desktop} {
+				if got := names(d.Engine); !d.Status().On || len(got) != 2 {
+					t.Errorf("%s: syncing %v, devices %v; want laptop and desktop still linked", d.opts.Name, d.Status().On, got)
+				}
+			}
+		})
 	}
 }
 
@@ -1646,10 +1667,11 @@ func (l *refusingLocal) Apply(ctx context.Context, all map[string]Entry, keys []
 }
 
 // conflictRelay is a lossyRelay that can run another device's round between a read and a
-// write, so the write finds the group changed.
+// write, so the write finds the group changed. Behind it, aging can let a week pass.
 type conflictRelay struct {
 	*lossyRelay
 	between atomic.Pointer[func()]
+	aging   *agingRelay
 }
 
 func (f *conflictRelay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -1678,7 +1700,8 @@ func randomDevices(t *testing.T) (*conflictRelay, []*randomDevice) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	relay := &conflictRelay{lossyRelay: &lossyRelay{next: httputil.NewSingleHostReverseProxy(u)}}
+	aging := newAgingRelay(httputil.NewSingleHostReverseProxy(u))
+	relay := &conflictRelay{lossyRelay: &lossyRelay{next: aging}, aging: aging}
 	srv := httptest.NewServer(relay)
 	t.Cleanup(srv.Close)
 	c := &clock{t: time.Unix(1_800_000_000, 0)}
@@ -1932,6 +1955,84 @@ func TestRandomRemovalOverALossyNetwork(t *testing.T) {
 	}
 }
 
+// One device turns syncing off itself (Remove on its own row) at a random time, tried again until
+// it goes through, while the others change and sync over a lossy network; now and then a week
+// passes with every device off. The two others stay linked and agree. Seeds 13 and 28 found them
+// switched off when the read of the new group got lost.
+func TestRandomRemovalOfThisDeviceWithWeeksOff(t *testing.T) {
+	for _, seed := range []uint64{13, 28, 0, 1, 2, 3} {
+		t.Run(fmt.Sprint(seed), func(t *testing.T) {
+			ctx := context.Background()
+			relay, devices := randomDevices(t)
+			rng := rand.New(rand.NewPCG(seed, 21))
+			relay.mu.Lock()
+			relay.rng, relay.odds = rand.New(rand.NewPCG(seed, 22)), 0.15
+			relay.mu.Unlock()
+			leaving := rng.IntN(len(devices))
+			k, _ := devices[leaving].loadKeys(ctx)
+			left, removeAt := false, 20+rng.IntN(100)
+			removed := map[string]bool{}
+			for step := range 150 {
+				if step == removeAt && !left {
+					if err := devices[leaving].Remove(ctx, k.Device); err == nil && !devices[leaving].Status().On {
+						left = true
+					} else {
+						removeAt = step + 1 + rng.IntN(10)
+					}
+					continue
+				}
+				if rng.IntN(15) == 0 {
+					relay.aging.expire()
+					continue
+				}
+				i := rng.IntN(len(devices))
+				if left && i == leaving {
+					devices[i].Sync(ctx)
+					continue
+				}
+				if _, _, _, gone := randomStep(rng, relay, devices, i, step, removed); gone != "" {
+					removed[gone] = true
+				}
+			}
+			relay.mu.Lock()
+			relay.rng = nil
+			relay.mu.Unlock()
+			for range 3 {
+				for _, d := range devices {
+					if err := d.Sync(ctx); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			var stay []*randomDevice
+			for i, d := range devices {
+				if !left || i != leaving {
+					stay = append(stay, d)
+				}
+			}
+			for _, d := range stay {
+				if !d.Status().On || len(d.Status().Devices) != len(stay) {
+					t.Fatalf("%s: syncing %v, devices %v", d.opts.Name, d.Status().On, names(d.Engine))
+				}
+				for _, key := range []string{KeyLanguage, KeyPassword, KeyTOTP, KeyAccount} {
+					if got := d.local.get(key); got != stay[0].local.get(key) {
+						t.Fatalf("%s: %s %s, %s has %s", d.opts.Name, key, got, stay[0].opts.Name, stay[0].local.get(key))
+					}
+				}
+				got, want := d.local.getDomains(), stay[0].local.getDomains()
+				slices.Sort(got)
+				slices.Sort(want)
+				if !slices.Equal(got, want) {
+					t.Fatalf("%s: websites %v, %s has %v", d.opts.Name, got, stay[0].opts.Name, want)
+				}
+			}
+			if left && devices[leaving].Status().On {
+				t.Fatal("the device that left still syncs")
+			}
+		})
+	}
+}
+
 // olderLocal is a device of a version without the setting "theme": its Apply answers
 // ErrNotKnown for it, as the daemon's does, until the update.
 type olderLocal struct {
@@ -2064,7 +2165,8 @@ func TestChangesElsewhereStayAfterASetUpDevicesFirstWriteFailed(t *testing.T) {
 
 // sync.json is gone (its folder deleted, the keyring kept the sync keys) and the desktop is set
 // up by hand before its first round. The new config.toml's defaults do not replace the group's
-// language and automatic updates; the password typed goes out.
+// language and automatic updates, nor bring back a default website the laptop removed; the
+// account and password typed go out.
 func TestSetUpByHandAfterSyncStateWasLost(t *testing.T) {
 	ctx := context.Background()
 	_, url := startRelay(t)
@@ -2072,24 +2174,110 @@ func TestSetUpByHandAfterSyncStateWasLost(t *testing.T) {
 	laptop := newDevice(t, url, "Laptop", setUpLaptop(), c)
 	desktop := newDevice(t, url, "Desktop", newLocal(false, nil), c)
 	pair(t, ctx, laptop, desktop)
+	const heico = "heico.uni-heidelberg.de"
 	laptop.local.set(KeyLanguage, "de")
 	laptop.local.set(KeyAutoUpdate, false)
+	laptop.local.setDomains(without(laptop.local.getDomains(), heico)...)
 	laptop.Notify()
 	syncAll(t, laptop, desktop)
 	os.Remove(desktop.opts.StatePath)
 	os.Remove(desktop.opts.StatePath + ".pending")
-	local := setUpLaptop() // the new config.toml
+	local := setUpLaptop() // the new config.toml, with the university's default websites
+	typed := map[string]any{"university": "heidelberg", "user": "cd456", "overrides": map[string]any{}}
+	local.set(KeyAccount, typed)
 	local.set(KeyPassword, "typed")
 	opts := desktop.opts
 	opts.Local = local
 	again := device{New(opts), local, desktop.store}
 	again.Load(ctx)
-	again.Notify(KeyPassword, KeyTOTP)
+	again.Notify(KeyAccount, KeyPassword, KeyTOTP) // as the daemon's setup does
 	syncAll(t, again, laptop, again)
 	for _, d := range []device{laptop, again} {
 		if d.local.get(KeyLanguage) != `"de"` || d.local.get(KeyAutoUpdate) != "false" || d.local.get(KeyPassword) != `"typed"` {
 			t.Errorf("%s: language %s, automatic updates %s, password %s; want the group's de and off, the typed password",
 				d.opts.Name, d.local.get(KeyLanguage), d.local.get(KeyAutoUpdate), d.local.get(KeyPassword))
+		}
+		if d.local.get(KeyAccount) != string(mustJSON(typed)) || slices.Contains(d.local.getDomains(), heico) {
+			t.Errorf("%s: account %s, websites %v; want the typed account, %s still removed", d.opts.Name,
+				d.local.get(KeyAccount), d.local.getDomains(), heico)
+		}
+	}
+}
+
+// A crash left sync.json unreadable (config.toml is fine) and the desktop, offline, gets a new
+// language before its first round. Meanwhile the laptop changed the account and removed a
+// website: neither comes back from the desktop, which has them as they were.
+func TestUnreadableSyncStateSendsNoOlderValues(t *testing.T) {
+	ctx := context.Background()
+	_, url := startRelay(t)
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	laptop := newDevice(t, url, "Laptop", setUpLaptop(), c)
+	desktop := newDevice(t, url, "Desktop", newLocal(false, nil), c)
+	pair(t, ctx, laptop, desktop)
+	syncAll(t, desktop)
+	const heico = "heico.uni-heidelberg.de"
+	changed := map[string]any{"university": "heidelberg", "user": "cd456", "overrides": map[string]any{}}
+	laptop.local.set(KeyAccount, changed)
+	laptop.local.setDomains(without(laptop.local.getDomains(), heico)...)
+	laptop.Notify()
+	syncAll(t, laptop)
+	if err := os.WriteFile(desktop.opts.StatePath, make([]byte, 64), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	again := device{New(desktop.opts), desktop.local, desktop.store}
+	again.Load(ctx)
+	desktop.local.set(KeyLanguage, "fr")
+	again.Notify()
+	syncAll(t, again, laptop, again)
+	for _, d := range []device{laptop, again} {
+		if d.local.get(KeyAccount) != string(mustJSON(changed)) || slices.Contains(d.local.getDomains(), heico) {
+			t.Errorf("%s: account %s, websites %v; want the laptop's later account, %s removed", d.opts.Name,
+				d.local.get(KeyAccount), d.local.getDomains(), heico)
+		}
+	}
+}
+
+// The same after a website added on the desktop, not sent yet: the desktop's first round takes
+// the laptop's language over but cannot write its website list (refused for a moment), and its
+// write fails. Changes made next go out; the website the laptop removed does not come back.
+func TestUnreadableSyncStateAfterAFailedFirstWrite(t *testing.T) {
+	ctx := context.Background()
+	relay, devices := lossyDevices(t)
+	laptop := devices[0]
+	fl := newLocal(false, nil)
+	opts := newDevice(t, laptop.opts.Relay, "Desktop", fl, &clock{}).opts
+	opts.Now = laptop.opts.Now
+	local := &refusingLocal{fakeLocal: fl}
+	opts.Local = local
+	desktop := device{New(opts), fl, opts.Store.(*memStore)}
+	pair(t, ctx, laptop, desktop)
+	const heico, lsf = "heico.uni-heidelberg.de", "lsf.uni-heidelberg.de"
+	laptop.local.set(KeyLanguage, "fr")
+	laptop.local.setDomains(without(laptop.local.getDomains(), heico)...)
+	laptop.Notify()
+	syncAll(t, laptop)
+	fl.setDomains(append(fl.getDomains(), lsf)...)
+	desktop.Notify()
+	if err := os.WriteFile(opts.StatePath, make([]byte, 64), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	again := device{New(opts), fl, desktop.store}
+	again.Load(ctx)
+	local.mu.Lock()
+	local.refuse = map[string]bool{"domains": true}
+	local.mu.Unlock()
+	relay.drop.Store(true)
+	if err := again.Sync(ctx); err == nil || fl.get(KeyLanguage) != `"fr"` || !slices.Contains(fl.getDomains(), heico) {
+		t.Fatalf("want fr taken over, the websites refused and the write failed: %v %s %v", err, fl.get(KeyLanguage), fl.getDomains())
+	}
+	fl.set(KeyAutoUpdate, false)
+	again.Notify()
+	syncAll(t, again, laptop, again)
+	for _, d := range []device{laptop, again} {
+		got := d.local.getDomains()
+		if d.local.get(KeyAutoUpdate) != "false" || slices.Contains(got, heico) || !slices.Contains(got, lsf) {
+			t.Errorf("%s: automatic updates %s, websites %v; want the desktop's off and %s, %s removed", d.opts.Name,
+				d.local.get(KeyAutoUpdate), got, lsf, heico)
 		}
 	}
 }

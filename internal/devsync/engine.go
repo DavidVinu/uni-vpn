@@ -90,7 +90,7 @@ type state struct {
 	Adopt   bool                 `json:"adopt,omitempty"` // just joined: take everything from the group
 	Keyed   bool                 `json:"keyed,omitempty"` // Hashes are keyedHash, not hash (older versions)
 	Hashes  map[string]savedHash `json:"hashes"`
-	lost    bool                 // the file was missing or unreadable
+	Lost    bool                 `json:"lost,omitempty"` // the file was missing or unreadable, no round went through since
 }
 
 // Pairing is a code on screen, for the app.
@@ -247,7 +247,7 @@ func (e *Engine) loadState() state {
 	var st state
 	data, err := os.ReadFile(e.opts.StatePath)
 	if err != nil || json.Unmarshal(data, &st) != nil {
-		st = state{Keyed: true, lost: true} // nothing to carry over
+		st = state{Keyed: true, Lost: true} // nothing to carry over
 	}
 	if st.Hashes == nil {
 		st.Hashes = map[string]savedHash{}
@@ -344,18 +344,20 @@ func (e *Engine) loadPendingLocked() {
 	}
 }
 
-// Notify: a setting changed on this device; secrets names the password or second factor when
-// one of them did (KeyPassword, KeyTOTP). The change goes out in the background.
-func (e *Engine) Notify(secrets ...string) {
+// Notify: a setting changed on this device; typed names what was typed here: the password or
+// second factor when one of them changed (KeyPassword, KeyTOTP), the account after a setup by
+// hand (KeyAccount). The change goes out in the background.
+func (e *Engine) Notify(typed ...string) {
 	if e.relay == nil {
 		return
 	}
 	e.mu.Lock()
 	k, applying := e.keys, e.applying
 	e.mu.Unlock()
+	secrets := slices.ContainsFunc(typed, isSecret)
 	// A setting from another device being taken over is not a change made here. A password or
 	// second factor is: Apply stores those without a Notify, so one now was typed on this device.
-	if applying && len(secrets) == 0 {
+	if applying && !secrets {
 		e.Wake()
 		return
 	}
@@ -371,7 +373,7 @@ func (e *Engine) Notify(secrets ...string) {
 	e.mu.Lock()
 	e.loadPendingLocked()
 	p := &e.pending
-	p.Secrets = p.Secrets || len(secrets) > 0
+	p.Secrets = p.Secrets || secrets
 	p.At = now
 	note := func(key, h string) {
 		if p.Changes == nil {
@@ -398,10 +400,12 @@ func (e *Engine) Notify(secrets ...string) {
 			// A value sync.json never had after a round went through (linked while the account could
 			// not be used here, then set up by hand) is not a change made here: the new config.toml's
 			// defaults must not replace the group's language. The account typed by hand is one.
-			// Before the first round went through (its answer lost), every change is one; not when
-			// sync.json itself is gone (its folder deleted, the keyring kept).
+			// Before the first round went through (its answer lost), every change is one. Not when
+			// sync.json itself is gone (its folder deleted, a crash left it unreadable): the account
+			// and websites here may be older than the group's then, only what was typed is a change.
 			_, known := st.Hashes[key]
-			if _, noted := p.Changes[key]; st.Keyed && (st.Version > 0 || st.lost) && !known && !noted && key != KeyAccount && !strings.HasPrefix(key, DomainPrefix) {
+			if _, noted := p.Changes[key]; !known && !noted && !slices.Contains(typed, key) &&
+				(st.Lost || st.Keyed && st.Version > 0 && key != KeyAccount && !strings.HasPrefix(key, DomainPrefix)) {
 				continue
 			}
 			note(key, h)
@@ -417,8 +421,10 @@ func (e *Engine) Notify(secrets ...string) {
 	}
 	// Each with its own time: a password typed here must not make this device's older second
 	// factor win over one set up on another device since.
-	for _, key := range secrets {
-		note(key, "")
+	for _, key := range typed {
+		if isSecret(key) {
+			note(key, "")
+		}
 	}
 	e.pendingGen++
 	data := mustJSON(*p)
@@ -906,8 +912,11 @@ func (e *Engine) Remove(ctx context.Context, device string) error {
 			return offline(err)
 		}
 		// Read once: the relay drops a new group nobody read within a week, and after Remove on this
-		// device's own row the others may all be switched off that long.
-		e.relay.getGroup(ctx, next)
+		// device's own row the others may all be switched off that long. A read that fails stops the
+		// removal before the old group is closed: it can be tried again.
+		if _, _, err := e.relay.getGroup(ctx, next); err != nil {
+			return offline(err)
+		}
 		if _, err := e.store(ctx, old, version, Doc{Format: Format, Moved: &Moved{Keys: sealed}}, true); errors.Is(err, errConflict) {
 			continue
 		} else if err != nil {
