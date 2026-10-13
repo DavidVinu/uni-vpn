@@ -117,8 +117,8 @@ Windows-Anmeldeinformationsverwaltung. Beim Verbinden legt die App das
 Geheimnis kurz in eine Datei, die nur Ihr Benutzerkonto lesen kann, und
 löscht sie gleich danach.</li>
 <li><strong>Benutzername, Universität und Einstellungen</strong> (zum
-Beispiel die eingetragenen Websites): in einer Einstellungsdatei
-(config.toml) in Ihrem Benutzerordner.</li>
+Beispiel die eingetragenen Websites): in Einstellungsdateien
+(config.toml, domains.txt) in Ihrem Benutzerordner.</li>
 <li><strong>Protokoll</strong>: eine Logdatei in Ihrem Benutzerordner
 mit Verbindungsereignissen und Ihrem Benutzernamen. Sie ist höchstens
 etwa 4 MB groß, ältere Einträge werden überschrieben. Sie verlässt Ihren
@@ -128,7 +128,7 @@ Fehlermeldung auf GitHub.</li>
 <p>Beim Deinstallieren unter Windows löscht die App die Einträge im
 Passwortspeicher, auf dem Mac und unter Linux bleiben sie erhalten. Sie
 können sie dort jederzeit selbst löschen ("uni-vpn", "uni-vpn-totp" und
-"uni-vpn-sync"), ebenso die Einstellungs- und die Logdatei.</p>
+"uni-vpn-sync"), ebenso die Einstellungsdateien und die Logdatei.</p>
 <h3 id="mit-wem-die-app-verbindung-aufnimmt">Mit wem die App Verbindung
 aufnimmt</h3>
 <ol type="1">
@@ -270,8 +270,8 @@ keyring (Linux), the macOS keychain or the Windows Credential Manager.
 When connecting, the app briefly puts the secret into a file only your
 user account can read and deletes it right afterwards.</li>
 <li><strong>User name, university and settings</strong> (for example the
-listed websites): in a settings file (config.toml) in your user
-folder.</li>
+listed websites): in settings files (config.toml, domains.txt) in your
+user folder.</li>
 <li><strong>Log</strong>: a log file in your user folder with connection
 events and your user name. It is at most about 4 MB; older entries are
 overwritten. It only leaves your computer if you share it yourself, for

@@ -74,7 +74,7 @@ written by `build-core.sh`. The language follows Settings, else the phone's.
 
 ## Building
 
-On a Mac with Xcode 16, Go and Homebrew:
+On a Mac with Xcode 26, Go and Homebrew:
 
 ```sh
 brew install xcodegen pkg-config

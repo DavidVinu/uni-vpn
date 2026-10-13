@@ -54,9 +54,11 @@ final class AppModel {
     @ObservationIgnored private var poll: Task<Void, Never>?
     /// The core kept running in the background for a sign-in (wentToBackground).
     @ObservationIgnored private var keepAlive: Task<Void, Never>?
-    @ObservationIgnored private var lastStart = Date.distantPast
-    /// The VPN was just started: the app leaves the lock to the extension until then.
-    @ObservationIgnored private var handOverUntil = Date.distantPast
+    /// Seconds on a clock that a date set back in Settings does not move (unlike Date()).
+    private static var uptime: TimeInterval { ProcessInfo.processInfo.systemUptime }
+    @ObservationIgnored private var lastStart = -TimeInterval.infinity
+    /// The VPN was just started: the app leaves the lock to the extension until then (uptime).
+    @ObservationIgnored private var handOverUntil = -TimeInterval.infinity
 
     init() {
         // The Control Center button turns the VPN on from this process too.
@@ -146,13 +148,13 @@ final class AppModel {
 
     /// Starts the app's core while the VPN is off. Cheap to call often.
     func ensureCore() async {
-        guard vpn.idle, !switching, Date() >= handOverUntil,
+        guard vpn.idle, !switching, Self.uptime >= handOverUntil,
               UIApplication.shared.applicationState != .background else { return }
         // A core that just failed to start (another one holds the lock) is not retried in a
         // tight loop. Another app may hold the port all day: then only every half minute, which
         // still finds the port once that app lets go (Android's Core.kt).
-        guard Date().timeIntervalSince(lastStart) > (portTaken ? 30 : 1) else { return }
-        lastStart = Date()
+        guard Self.uptime - lastStart > (portTaken ? 30 : 1) else { return }
+        lastStart = Self.uptime
         let started = await CoreHost.shared.start(lockWaitMs: 2_000)
         if started != .busy { portTaken = started == .portsTaken }
     }
@@ -160,7 +162,7 @@ final class AppModel {
     private func vpnChanged(_ status: NEVPNStatus) async {
         if status == .connecting || status == .connected {
             // The extension has it now; from here on the status says who runs the core.
-            handOverUntil = .distantPast
+            handOverUntil = -.infinity
         }
         if status == .connecting {
             // The extension waits for the lock; let go of it.
@@ -192,7 +194,7 @@ final class AppModel {
         if saved {
             // The status still reads "disconnected" for a moment: until it moves on (or the
             // start failed for 15 s), the lock is the extension's, not the app's.
-            handOverUntil = Date().addingTimeInterval(15)
+            handOverUntil = Self.uptime + 15
             vpn.start()
         }
         switching = false
@@ -210,7 +212,7 @@ final class AppModel {
     func repair() async {
         if vpn.idle {
             await CoreHost.shared.stop()
-            lastStart = .distantPast
+            lastStart = -.infinity
             await ensureCore()
         } else {
             await vpn.restart()

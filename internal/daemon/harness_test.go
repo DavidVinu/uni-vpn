@@ -70,8 +70,10 @@ type harness struct {
 	totpErr     error
 	stored      []string
 	storedTOTP  []string
-	refreshed   []int
-	totpSetter  func(string) error
+	// deletedSecrets: the accounts whose secrets SecretsDeleter removed.
+	deletedSecrets []string
+	refreshed      []int
+	totpSetter     func(string) error
 
 	d    *Daemon
 	done chan struct{}
@@ -167,6 +169,11 @@ func (h *harness) start(edit func(*Options), before ...func(*Daemon)) *Daemon {
 			defer h.mu.Unlock()
 			h.storedTOTP = append(h.storedTOTP, token)
 			return nil
+		},
+		SecretsDeleter: func(user string) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.deletedSecrets = append(h.deletedSecrets, user)
 		},
 		Probe:      func(context.Context) bool { return h.probeResult.Load() },
 		CiscoCheck: func() bool { return h.cisco.Load() },

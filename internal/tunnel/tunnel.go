@@ -383,6 +383,7 @@ func (t *Tunnel) Start(password []byte, totp string) error {
 	t.mu.Unlock()
 	if totp != "" && t.Cfg.MFA == "totp_field" && !once {
 		if err := t.writeTokenFile(totp); err != nil {
+			t.RemoveTokenFile() // a disk that is full: no part of the secret stays behind
 			return err
 		}
 	}

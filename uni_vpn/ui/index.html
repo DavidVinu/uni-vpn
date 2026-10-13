@@ -1094,7 +1094,9 @@ window.addEventListener("hashchange", () => {
   // Taken, also when ignored below: the menu's next "Open" or "Settings" is a change again.
   if (location.hash) history.replaceState(null, "", location.pathname + location.search);
   if (S.setup_needed || !["main", "settings"].includes(target)) return;
-  if (view === "setup" && autoRunning) return;  // the tray's "Open" during the short way: stay on it
+  // The tray's "Open" during the short way, or while the first setup is sent or tests the
+  // connection: stay on it ("All set" comes next and says to reopen the browser).
+  if (view === "setup" && (autoRunning || (!changing && (submitting || !$("step3").hidden)))) return;
   // Ended here: Settings stays when it says to restart the browser (else the note is never seen).
   if (changing && !submitting) { endChange(); if (target === "settings" || $("dommsg").textContent) return; }
   if (changing) return;

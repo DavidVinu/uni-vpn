@@ -1,5 +1,6 @@
 package de.davidvinu.univpn.ui
 
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.core.net.toUri
@@ -503,7 +504,13 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
                     Info(model, mfaSteps(model, uni).joinToString("\n") + "\n\n" + model.t("setup.totp_help"))
                 }
                 if (uni?.portal?.isNotEmpty() == true) {
-                    TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, uni.portal.toUri())) }) {
+                    TextButton(onClick = {
+                        try {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, uni.portal.toUri()))
+                        } catch (_: ActivityNotFoundException) {
+                            // No browser on this phone or profile: nothing to open.
+                        }
+                    }) {
                         Text(model.t("setup.mfa_portal"))
                     }
                 }

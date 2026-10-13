@@ -514,9 +514,10 @@ jobs:
 
   # The iPhone app (app/ios, docs/ios.md): libopenconnect, OpenSSL and the Go core for iOS, the
   # Xcode project, the simulator tests against Heidelberg's real gateway, and an unsigned device
-  # archive. Signed and sent to TestFlight from main once the Apple Developer secrets exist.
+  # archive. Signed and sent to TestFlight from main once the Apple Developer secrets exist
+  # (App Store Connect takes only builds made with Xcode 26 and the iOS 26 SDK).
   ios:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 90
     env:
       HAS_IOS_SIGNING: ${{ secrets.IOS_CERTIFICATE_P12_BASE64 != '' && secrets.APP_STORE_CONNECT_API_KEY_BASE64 != '' }}
@@ -870,9 +871,14 @@ jobs:
       - name: Uninstall it like a user would
         shell: powershell
         run: |
+          # An update unpacked next to the app that waited for the VPN to go idle.
+          $staged = "$env:ProgramFiles\.uni-vpn-core-update-ci"
+          New-Item -ItemType Directory $staged | Out-Null
+          New-Item -ItemType File "$staged\uni-vpn-core.exe" | Out-Null
           $process = Start-Process -FilePath "$env:ProgramFiles\uni-vpn\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES" -Wait -PassThru
           Start-Sleep 5
           if (Test-Path "$env:ProgramFiles\uni-vpn\bin\uni-vpn-core.exe") { throw "files are left in Program Files" }
+          if (Test-Path $staged) { throw "a waiting update is left in Program Files" }
           if (Get-ScheduledTask -TaskName uni-vpn -ErrorAction SilentlyContinue) { throw "the task is still registered" }
           if (Test-Path "$env:ProgramFiles\uni-vpn") { Write-Host "note: the folder is still there:"; Get-ChildItem -Recurse "$env:ProgramFiles\uni-vpn" | ForEach-Object FullName }
       - uses: actions/upload-artifact@v4
