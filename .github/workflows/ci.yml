@@ -809,7 +809,7 @@ jobs:
           # The tray app must keep running: one that ends at start would reach every user with the
           # next update. Setup and the installer each start a copy (one stays, the other hands over
           # and quits); the one that stays must still run 10 s later. Where the window cannot start
-          # (no WebView2 runtime, or as on this runner) the page opens in the browser instead.
+          # (no WebView2 runtime) the page opens in the browser instead.
           function Trays { @(Get-CimInstance Win32_Process -Filter "Name = 'Uni VPN.exe'") }
           function ShowTrays {
             Trays | Format-Table ProcessId, ParentProcessId, SessionId, CreationDate, CommandLine -AutoSize -Wrap | Out-String -Width 400 | Write-Host
@@ -827,7 +827,11 @@ jobs:
           if ((Trays).Count -eq 0) { Explain; throw "no tray app runs after the install" }
           Start-Sleep 10
           if ((Trays).Count -eq 0) { Explain; throw "the tray app ends at start" }
-          # Whether the app window can start here, and why not (only a note: the copy above stays).
+          # Whether the app window started (its WebView2 runs with the app's data folder) or the
+          # page went to the browser instead. Only notes: the copy above stays either way.
+          $web = @(Get-CimInstance Win32_Process -Filter "Name = 'msedgewebview2.exe'" | Where-Object { $_.CommandLine -like "*uni-vpn\WebView2*" })
+          $browser = @(Get-CimInstance Win32_Process -Filter "Name = 'msedge.exe' OR Name = 'chrome.exe' OR Name = 'firefox.exe'" | Where-Object { $_.CommandLine -like "*127.0.0.1:1081*" })
+          Write-Host "app window WebView2 processes: $($web.Count); browser with the page: $($browser.Count)"
           $desktop = "$env:ProgramFiles\uni-vpn\desktop"
           $env:PATH = "$desktop;$env:PATH"
           try {
