@@ -78,13 +78,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
             for _ in 0..<100 where kill(after, 0) == 0 { usleep(100_000) }
         }
         // One menu bar item: the login item and the installer's "open" can start a second copy
-        // at the same moment. The newer one hands its page to the older one and quits.
+        // at the same moment. The newer one hands its page to the older one and quits. This copy
+        // listens before it decides, so that a page handed over meanwhile is not lost.
+        DistributedNotificationCenter.default().addObserver(forName: showNote, object: nil, queue: .main) { [weak self] note in
+            self?.show(note.object as? String ?? "")
+        }
         let me = NSRunningApplication.current
         let older = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
             .filter { $0 != me && !$0.isTerminated && $0.processIdentifier != after }
             .first { other in
-                let (a, b) = (other.launchDate ?? .distantPast, me.launchDate ?? .distantFuture)
-                return a < b || (a == b && other.processIdentifier < me.processIdentifier)
+                // The login item has no launchDate (launchd starts it, not LaunchServices): then the
+                // process id decides, the same way in both copies, so that exactly one stays.
+                guard let a = other.launchDate, let b = me.launchDate, a != b else {
+                    return other.processIdentifier < me.processIdentifier
+                }
+                return a < b
             }
         if let older = older {
             if !CommandLine.arguments.contains("--hidden") || pending != nil {
@@ -93,9 +101,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
                 older.activate(options: [])
             }
             exit(0)
-        }
-        DistributedNotificationCenter.default().addObserver(forName: showNote, object: nil, queue: .main) { [weak self] note in
-            self?.show(note.object as? String ?? "")
         }
         buildMenus()
         stateItem.isEnabled = false

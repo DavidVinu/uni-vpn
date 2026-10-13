@@ -39,6 +39,7 @@ struct VPNState: ControlValueProvider {
         }
         guard let manager = managers.first else { return false }
         let running: [NEVPNStatus] = [.connected, .connecting, .reasserting]
-        return manager.isOnDemandEnabled || running.contains(manager.connection.status)
+        // As the app's switch: another VPN app turned on disables this configuration.
+        return (manager.isEnabled && manager.isOnDemandEnabled) || running.contains(manager.connection.status)
     }
 }

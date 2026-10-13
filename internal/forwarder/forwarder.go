@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"strconv"
@@ -22,6 +23,11 @@ type TargetFunc func(ctx context.Context) (port int, ok bool)
 const (
 	cancelWait = time.Second
 	stopWait   = 5 * time.Second
+	// greetWait: browsers send their SOCKS greeting as soon as they are connected.
+	greetWait = 10 * time.Second
+	// socksVersion starts every SOCKS5 greeting, the only SOCKS that ocproxy and
+	// internal/socks speak (the PAC file says SOCKS5).
+	socksVersion = 5
 )
 
 // Forwarder accepts on Host:Port and forwards to 127.0.0.1:<target>.
@@ -197,12 +203,18 @@ func (f *Forwarder) serve(ln net.Listener) {
 
 func (f *Forwarder) handle(client net.Conn) {
 	defer f.wg.Done()
+	f.track(client)
+	defer f.untrack(client)
+	// Only a SOCKS client starts the tunnel. Anything else on this port, like a web page's
+	// <img src="http://127.0.0.1:1080/"> or a port scan, would sign in to the VPN: a Duo push
+	// nobody asked for.
+	if !greets(client) {
+		return
+	}
 	f.active.Add(1)
 	w := &waiter{done: make(chan struct{})}
 	defer close(w.done)
 	defer f.active.Add(-1)
-	f.track(client)
-	defer f.untrack(client)
 
 	port, ok, cancelled := f.target(w)
 	if cancelled {
@@ -223,8 +235,8 @@ func (f *Forwarder) handle(client net.Conn) {
 	defer f.untrack(upstream)
 
 	done := make(chan struct{}, 2)
-	go func() { f.pipe(client, upstream, &f.bytesOut); done <- struct{}{} }()
-	go func() { f.pipe(upstream, client, &f.bytesIn); done <- struct{}{} }()
+	go func() { f.pipe(client, upstream, &f.bytesOut, []byte{socksVersion}); done <- struct{}{} }()
+	go func() { f.pipe(upstream, client, &f.bytesIn, nil); done <- struct{}{} }()
 	<-done
 	timer := time.NewTimer(f.halfcloseGrace)
 	defer timer.Stop()
@@ -235,6 +247,15 @@ func (f *Forwarder) handle(client net.Conn) {
 		upstream.Close()
 		<-done
 	}
+}
+
+// greets reads the first byte of a new connection: true when it is the SOCKS version.
+func greets(c net.Conn) bool {
+	c.SetReadDeadline(time.Now().Add(greetWait))
+	var first [1]byte
+	_, err := io.ReadFull(c, first[:])
+	c.SetReadDeadline(time.Time{})
+	return err == nil && first[0] == socksVersion
 }
 
 // target asks getTarget while the handler counts as waiting for CloseAll.
@@ -268,10 +289,14 @@ func (f *Forwarder) target(w *waiter) (port int, ok, cancelled bool) {
 }
 
 // pipe copies until EOF or an error, counting and noting activity, then half-closes dst.
-func (f *Forwarder) pipe(src, dst net.Conn, counter *atomic.Int64) {
+// head (the byte greets read) goes out together with the first bytes read, so the greeting
+// stays in one piece.
+func (f *Forwarder) pipe(src, dst net.Conn, counter *atomic.Int64, head []byte) {
 	buf := make([]byte, 65536)
+	held := copy(buf, head)
 	for {
-		n, err := src.Read(buf)
+		n, err := src.Read(buf[held:])
+		n, held = n+held, 0
 		if n > 0 {
 			counter.Add(int64(n))
 			f.onActivity()

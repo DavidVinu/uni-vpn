@@ -68,6 +68,8 @@ class MacTests(Harness):
         self.assertEqual(info["CFBundleURLTypes"][0]["CFBundleURLSchemes"], ["uni-vpn", "otpauth"])
         self.assertEqual(info["CFBundleExecutable"], "Uni VPN")
         self.assertNotIn("LSUIElement", info)  # a Dock icon while the window is open
+        # Else the page's navigator.languages says English on every Mac.
+        self.assertEqual(info["CFBundleLocalizations"], ["en", "de", "fr", "es", "zh-Hans", "zh-Hant"])
 
     def test_login_item_starts_the_menu_bar_item_without_a_window(self):
         binary = Path("/x/Uni VPN.app/Contents/MacOS/Uni VPN")

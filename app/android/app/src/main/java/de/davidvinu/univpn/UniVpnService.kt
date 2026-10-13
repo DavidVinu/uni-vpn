@@ -82,6 +82,9 @@ class UniVpnService : VpnService() {
     @Synchronized
     private fun applyRule(force: Boolean) {
         if (stopped) return
+        // Android does not tell a running VPN when the user turns "Block connections without
+        // VPN" on or off: Home's warning follows it here, not only when the VPN starts.
+        if (tun != null) blocking.value = isLockdownEnabled
         val status = core.get("/status.json").json
         // Without an answer the list is unknown: keep the rule as it is (the first start still
         // hands Android the address, which answers once the core listens).

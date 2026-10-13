@@ -60,7 +60,15 @@ func setup(t *testing.T) (*env, *syncBuffer) {
 			if err != nil {
 				return
 			}
-			go func() { io.Copy(c, c); c.Close() }()
+			// ocproxy: the SOCKS version first (the forwarder passes on the one it checked),
+			// then an echo of the rest.
+			go func() {
+				defer c.Close()
+				version := make([]byte, 1)
+				if _, err := io.ReadFull(c, version); err == nil && version[0] == socksVersion {
+					io.Copy(c, c)
+				}
+			}()
 		}
 	}()
 	t.Cleanup(func() { echo.Close() })
@@ -89,7 +97,16 @@ func (e *env) getTarget(ctx context.Context) (int, bool) {
 	return fn(ctx)
 }
 
+// dial connects like a browser: its SOCKS greeting starts with the version.
 func (e *env) dial(t *testing.T) net.Conn {
+	c := e.dialRaw(t)
+	if _, err := c.Write([]byte{socksVersion}); err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+func (e *env) dialRaw(t *testing.T) net.Conn {
 	c, err := net.Dial("tcp", "127.0.0.1:"+strconv.Itoa(e.fwd.Port))
 	if err != nil {
 		t.Fatal(err)
@@ -142,7 +159,7 @@ func TestPipesBothDirectionsAndCounts(t *testing.T) {
 	if got := readWithin(t, c, 5, 2*time.Second); string(got) != "hello" {
 		t.Fatal(got)
 	}
-	if e.fwd.Active() != 1 || e.fwd.BytesOut() != 5 || e.fwd.BytesIn() != 5 {
+	if e.fwd.Active() != 1 || e.fwd.BytesOut() != 1+5 || e.fwd.BytesIn() != 5 {
 		t.Fatal(e.fwd.Active(), e.fwd.BytesOut(), e.fwd.BytesIn())
 	}
 	if e.activity.Load() < 2 {
@@ -265,5 +282,27 @@ func TestStopEndsWaitingAndCancelsContext(t *testing.T) {
 	expectEOF(t, c, 2*time.Second)
 	if e.fwd.Addr() != nil || e.fwd.Active() != 0 {
 		t.Fatal("still running")
+	}
+}
+
+func TestOnlySocksClientsAskForTheTunnel(t *testing.T) {
+	// A web page's <img src="http://127.0.0.1:1080/"> must not sign in to the VPN.
+	e, _ := setup(t)
+	var asked atomic.Int64
+	e.setTarget(func(context.Context) (int, bool) { asked.Add(1); return e.echoPort, true })
+	page := e.dialRaw(t)
+	page.Write([]byte("GET /pixel.gif HTTP/1.1\r\nHost: 127.0.0.1:1080\r\n\r\n"))
+	expectEOF(t, page, 2*time.Second)
+	silent := e.dialRaw(t)
+	time.Sleep(200 * time.Millisecond)
+	if asked.Load() != 0 || e.fwd.Active() != 0 {
+		t.Fatal(asked.Load(), e.fwd.Active())
+	}
+	silent.Close()
+	// A SOCKS client still gets through.
+	c := e.dial(t)
+	c.Write([]byte{1, 0})
+	if got := readWithin(t, c, 2, 2*time.Second); string(got) != "\x01\x00" || asked.Load() != 1 {
+		t.Fatal(got, asked.Load())
 	}
 }

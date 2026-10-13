@@ -4,9 +4,8 @@
 // internal/devsync/relaytest the same server in memory for the Go tests.
 
 const MAX_PAIR = 8 * 1024;
+// Also for a new group: removing a device moves the whole document into one.
 const MAX_GROUP = 256 * 1024;
-// A first document is a few KiB; nobody gets to park big blobs here without a group to sync.
-const MAX_NEW_GROUP = 64 * 1024;
 const PAIR_LIFETIME = 10 * 60 * 1000;
 const DAY = 24 * 60 * 60 * 1000;
 // A group no device read or wrote for this long is gone. Reads count once a day.
@@ -78,7 +77,7 @@ async function group(request, env, id, now) {
   }
   if (request.method === "PUT") {
     const create = request.headers.get("If-None-Match") === "*";
-    const data = await body(request, create ? MAX_NEW_GROUP : MAX_GROUP);
+    const data = await body(request, MAX_GROUP);
     if (!data) return text(413, "too large");
     if (create) {
       // updated as if last used long ago: cleanup takes it after NEW_GROUP_LIFETIME unless used.

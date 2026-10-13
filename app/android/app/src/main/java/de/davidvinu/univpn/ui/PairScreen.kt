@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -107,7 +108,7 @@ fun PairScreen(model: AppModel, mode: String, activity: MainActivity) {
         }
     }
 
-    Column(Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState())) {
+    Column(Modifier.fillMaxSize().navigationBarsPadding().imePadding().verticalScroll(rememberScrollState())) {
         Bar(model, model.t(if (mode == "offer") "sync.add" else "sync.use_other"))
         Column(
             Modifier.fillMaxWidth().padding(24.dp),

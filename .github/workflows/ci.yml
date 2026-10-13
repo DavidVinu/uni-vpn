@@ -664,7 +664,7 @@ jobs:
       - name: The Go core and its files
         shell: bash
         run: packaging/stage-app.sh --go windows/amd64 stage
-      - name: Build uni-vpn-setup.exe
+      - name: The app window and OpenConnect
         shell: powershell
         run: |
           # The app window, ready built: users need no compiler and no SDK download. Python only
@@ -672,13 +672,46 @@ jobs:
           python -c "import sys; from uni_vpn import desktop; sys.exit(desktop.build_windows_app())"
           if ($LASTEXITCODE -ne 0) { exit 1 }
           Move-Item desktop stage\desktop
+          Copy-Item -Recurse openconnect-win64 stage\openconnect
+      # Switches on by itself with the Azure Trusted Signing secrets, like "Sign". Smart App Control
+      # blocks every program and library without a signature, not only the installer; what
+      # Microsoft and WireGuard signed keeps their signature.
+      - name: Unsigned program files
+        id: unsigned
+        if: env.AZURE_CLIENT_ID != ''
+        shell: powershell
+        run: |
+          $files = Get-ChildItem stage -Recurse -Include *.exe, *.dll |
+            Where-Object { (Get-AuthenticodeSignature $_.FullName).Status -ne 'Valid' } | ForEach-Object FullName
+          Add-Content $env:GITHUB_OUTPUT "files=$($files -join ',')"
+      - name: Sign the program files
+        if: env.AZURE_CLIENT_ID != '' && steps.unsigned.outputs.files != ''
+        uses: azure/trusted-signing-action@v0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_SIGNING_PROFILE }}
+          files: ${{ steps.unsigned.outputs.files }}
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+      - name: Build uni-vpn-setup.exe
+        shell: powershell
+        run: |
           # The app window alone, for the updates (core-files).
           New-Item -ItemType Directory -Force app-update\windows | Out-Null
           Copy-Item -Recurse stage\desktop app-update\windows\desktop
+          # Signed, the core goes along: build-core.sh then puts this one into the update instead of its own.
+          if ($env:AZURE_CLIENT_ID) {
+            New-Item -ItemType Directory -Force app-update\windows\bin | Out-Null
+            Copy-Item stage\bin\uni-vpn-core.exe app-update\windows\bin\
+          }
           New-Item -ItemType File -Path "stage\desktop\.prebuilt" | Out-Null
-          Copy-Item -Recurse openconnect-win64 stage\openconnect
           New-Item -ItemType Directory -Force out | Out-Null
-          Compress-Archive -Path openconnect-win64\* -DestinationPath out\uni-vpn-openconnect-win64.zip
+          Compress-Archive -Path stage\openconnect\* -DestinationPath out\uni-vpn-openconnect-win64.zip
           iscc.exe /Q "/DAppVersion=$env:UNI_VPN_VERSION" "/DSourceDir=$PWD\stage" "/DOutputDir=$PWD\out" packaging\windows\uni-vpn.iss
           if ($LASTEXITCODE -ne 0) { exit 1 }
       # Switches on by itself once the Azure Trusted Signing secrets exist (see docs/superpowers/specs).
@@ -791,12 +824,13 @@ jobs:
             gh release create latest --title "Uni VPN" --latest \
               --notes "Download the file for your computer and open it: uni-vpn.pkg (Mac), uni-vpn-setup.exe (Windows), uni-vpn.deb (Ubuntu, Debian, Mint) or uni-vpn.rpm (Fedora)."
           fi
+          # The manifest after its zips: it must never name a file that is not there yet. Both before
+          # the installers: a new installer that finds the old manifest would update itself back.
+          gh release upload latest core/uni-vpn-core-*.zip --clobber
+          gh release upload latest core/core-manifest.json --clobber
           # uni-vpn-openconnect-win64.zip: what install.ps1 downloads when run without the installer.
           gh release upload latest out/uni-vpn.pkg out/uni-vpn-setup.exe out/uni-vpn.deb out/uni-vpn.rpm \
             out/uni-vpn-arm64.deb out/uni-vpn-arm64.rpm out/uni-vpn-openconnect-win64.zip --clobber
-          # The manifest last: it must never name a file that is not there yet.
-          gh release upload latest core/uni-vpn-core-*.zip --clobber
-          gh release upload latest core/core-manifest.json --clobber
           gh release edit latest --notes "Version $UNI_VPN_VERSION, $(date -u +%Y-%m-%d). Download the file for your computer and open it: uni-vpn.pkg (Mac), uni-vpn-setup.exe (Windows), uni-vpn.deb (Ubuntu, Debian, Mint) or uni-vpn.rpm (Fedora)."
 
   # Only a signed app goes to the release page; sideloading is not the way for users
@@ -808,7 +842,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    concurrency: publish-installers
+    # Not "publish-installers": a run waiting here would cancel the next run's waiting "publish".
+    concurrency: publish-android
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4

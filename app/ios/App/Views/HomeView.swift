@@ -90,7 +90,8 @@ struct HomeView: View {
     }
 
     private func hint(_ status: JSON, vpnOn: Bool, state: String) -> String {
-        if !vpnOn { return "" }
+        // Tapping the switch asks iOS again.
+        if !vpnOn { return model.vpnRefused ? model.t("phone.vpn_not_allowed") : "" }
         if !quiet.contains(status.string("message_id")) {
             return model.strings.message(status.string("message"), status.object("message_t"))
         }

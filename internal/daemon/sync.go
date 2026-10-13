@@ -238,27 +238,9 @@ func (l syncLocal) applyAccount(all map[string]devsync.Entry, password, token st
 			overrides = append(overrides, config.Setting{Key: key, Value: o[1]})
 		}
 	}
-	// Overrides another device dropped go here too, and the file takes the group's order: the
-	// assistant replaces values where they are and adds new ones at the end, and another order
-	// would go back to the group as a change of this device's own, back and forth for ever.
-	d.mu.Lock()
-	path, setUp := d.configPath, !d.needsSetup && d.configError == ""
-	d.mu.Unlock()
-	if setUp && exists(path) {
-		current, err := config.Overrides(path)
-		if err != nil {
-			return err
-		}
-		if !slices.EqualFunc(current, overrides, func(a, b config.Setting) bool { return a.Key == b.Key }) {
-			var keys []string
-			for _, s := range current {
-				keys = append(keys, s.Key)
-			}
-			if err := config.RemoveKeys(path, keys); err != nil {
-				return err
-			}
-		}
-	}
+	// Overrides another device dropped go too, in completeSetup once the secrets are stored: a
+	// keyring that refuses must not leave this device without them (they would go back to the
+	// group as its own change, a "Not listed" gateway's address among them).
 	return d.completeSetup(account.User, password, token, account.University, overrides, true)
 }
 
@@ -318,7 +300,7 @@ func syncError(err error) error {
 	case errors.As(err, new(*devsync.ApplyError)):
 		return httpapi.TextValueError(i18n.T("sync.not_used"))
 	}
-	return err
+	return httpapi.TextValueError(i18n.T("sync.failed"))
 }
 
 // pairingJSON: error is the catalog text of what went wrong, also with "done" (linked, but
@@ -334,15 +316,20 @@ func pairingJSON(p *devsync.Pairing) any {
 	return pyjson.O("mode", p.Mode, "code", p.Code, "qr", p.QR, "state", p.State, "error", text)
 }
 
-// syncStatus is the "sync" object of /status.json.
+// syncStatus is the "sync" object of /status.json. error is the catalog text of why the last
+// sync did not go through, null after a good one: Settings shows it under the devices.
 func (d *Daemon) syncStatus() pyjson.Object {
 	s := d.sync.Status()
 	devices := []any{}
 	for _, dv := range s.Devices {
 		devices = append(devices, pyjson.O("id", dv.ID, "name", dv.Name, "platform", dv.Platform, "this", dv.This))
 	}
+	var problem any
+	if s.Error != nil {
+		problem = i18n.Of(syncError(s.Error))
+	}
 	return pyjson.O("available", s.Available, "on", s.On, "devices", devices, "pairing", pairingJSON(s.Pairing),
-		"error", s.Error != nil)
+		"error", problem)
 }
 
 // Sync is the app's /api/sync/<action>: offer, request, enter (code), cancel, remove
@@ -366,7 +353,13 @@ func (d *Daemon) Sync(action string, data pyjson.Object) (pyjson.Object, error) 
 	case "enter":
 		value, _ := data.Get("code")
 		code, _ := value.(string)
-		if err := e.Enter(ctx, code); err != nil {
+		err := e.Enter(ctx, code)
+		if errors.As(err, new(*devsync.ApplyError)) {
+			// Linked: what could not be used here is a note, as with "done" of a shown code.
+			note := i18n.T("sync.not_used")
+			return pyjson.O("error", note.String(), "error_t", note.JSON()), nil
+		}
+		if err != nil {
 			return nil, syncError(err)
 		}
 	case "cancel":
@@ -375,6 +368,7 @@ func (d *Daemon) Sync(action string, data pyjson.Object) (pyjson.Object, error) 
 		value, _ := data.Get("device")
 		id, _ := value.(string)
 		if err := e.Remove(ctx, id); err != nil {
+			d.logf(slog.LevelWarn, "Could not remove the device from syncing: %s", err)
 			return nil, syncError(err)
 		}
 	case "refresh":

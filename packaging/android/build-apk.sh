@@ -39,5 +39,18 @@ for abi in arm64-v8a x86_64; do
     go build -trimpath -ldflags "-s -w -X github.com/DavidVinu/uni-vpn/internal/daemon.Commit=$commit${UNI_VPN_VERSION:+ -X github.com/DavidVinu/uni-vpn/internal/daemon.Version=$UNI_VPN_VERSION}" \
     -o "$libs/libunivpn.so" ./cmd/uni-vpn)
 done
+# And every Go module in the core, as on the iPhone (packaging/ios/build-core.sh).
+(cd "$root" && CGO_ENABLED=1 GOOS=android GOARCH=arm64 go list -deps \
+  -f '{{with .Module}}{{if not .Main}}{{.Path}}|{{.Dir}}{{end}}{{end}}' ./cmd/uni-vpn) | sort -u |
+  while IFS='|' read -r path dir; do
+    [ -n "$path" ] || continue
+    found=""
+    for file in "$dir"/LICENSE* "$dir"/COPYING* "$dir"/LICENCE*; do
+      [ -f "$file" ] || continue
+      cp "$file" "$licenses/$(echo "$path" | tr / _)-$(basename "$file")"
+      found=1
+    done
+    [ -n "$found" ] || echo "build-apk: warning: no licence file in Go module $path ($dir)" >&2
+  done
 cd "$app"
 ./gradlew --no-daemon -q "${tasks[@]}"

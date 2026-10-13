@@ -12,6 +12,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"log/slog"
 	"net"
@@ -28,6 +29,7 @@ import (
 	"github.com/DavidVinu/uni-vpn/internal/i18n"
 	"github.com/DavidVinu/uni-vpn/internal/pyjson"
 	"github.com/DavidVinu/uni-vpn/internal/qrscan"
+	"github.com/DavidVinu/uni-vpn/internal/sockowner"
 	"github.com/DavidVinu/uni-vpn/internal/totp"
 	"github.com/DavidVinu/uni-vpn/internal/tunnel"
 	unis "github.com/DavidVinu/uni-vpn/internal/universities"
@@ -121,6 +123,10 @@ type Server struct {
 	// AppPolled is told of each status request of the native app (status.json?menu=), with
 	// whether the app restarts itself after updates ("shell=1"); nil ignores them.
 	AppPolled func(restartsItself bool)
+	// OtherAccount tells whether a connection comes from another account of this computer
+	// (fast user switching: its app and browser reach the uni-vpn that started first). Only
+	// the PAC file is served to them. Tests replace it.
+	OtherAccount func(c net.Conn) (bool, error)
 
 	daemon Daemon
 	log    *slog.Logger
@@ -128,6 +134,8 @@ type Server struct {
 	wg     sync.WaitGroup
 	mu     sync.Mutex
 	conns  map[net.Conn]struct{}
+	// lookupWarning: a failing OtherAccount is logged once.
+	lookupWarning sync.Once
 }
 
 // New returns a server; Start listens.
@@ -139,7 +147,7 @@ func New(daemon Daemon, host string, port int, log *slog.Logger) *Server {
 		Detector: func(ctx context.Context, host, usergroup, group string) (detect.Detection, error) {
 			return detect.Probe(ctx, host, usergroup, group, detect.Options{})
 		},
-		Reachable: reachable}
+		Reachable: reachable, OtherAccount: sockowner.OtherAccount}
 }
 
 // AllowedOrigin: "null" (sandboxed iframe, data: page) is a foreign origin, not a missing one.
@@ -281,6 +289,8 @@ func (h headers) get(key string) (string, bool) {
 }
 
 func (s *Server) handle(c net.Conn) {
+	// Before reading: a client that sends its request and closes at once is still listed.
+	other := s.otherAccount(c)
 	r := bufio.NewReader(c)
 	c.SetReadDeadline(time.Now().Add(ioTimeout))
 	head, ok := readHead(r)
@@ -346,8 +356,47 @@ func (s *Server) handle(c net.Conn) {
 			return
 		}
 	}
+	if other && !(method == "GET" && path == "/proxy.pac") {
+		s.refuse(c, path, hdrs)
+		return
+	}
 	status, ctype, payload := s.routeSafe(method, path, query, hdrs, body)
 	s.respond(c, status, ctype, payload, hdrs)
+}
+
+// otherAccount fails open: when the system cannot tell, the request goes through.
+func (s *Server) otherAccount(c net.Conn) bool {
+	if s.OtherAccount == nil {
+		return false
+	}
+	other, err := s.OtherAccount(c)
+	if err != nil {
+		s.lookupWarning.Do(func() {
+			s.log.Warn(fmt.Sprintf("Could not tell which account a connection comes from: %s", err))
+		})
+		return false
+	}
+	return other
+}
+
+// otherAccountPage reloads itself: once this account's own uni-vpn has the port (the other
+// account signed out), the window shows it.
+const otherAccountPage = `<!doctype html><html lang="%s"><meta charset="utf-8">` +
+	`<meta http-equiv="refresh" content="5"><meta name="color-scheme" content="light dark">` +
+	`<title>Uni VPN</title><p style="font:16px/1.5 system-ui,sans-serif;margin:2em">%s</p></html>`
+
+// refuse answers another account's window (in its language) and its programs (JSON).
+func (s *Server) refuse(c net.Conn, path string, hdrs headers) {
+	text := i18n.T("app.other_account")
+	if path != "/" {
+		status, ctype, payload, _ := problem(403, text)
+		s.respond(c, status, ctype, payload, hdrs)
+		return
+	}
+	accepted, _ := hdrs.get("accept-language")
+	lang := i18n.Negotiate("", accepted)
+	page := fmt.Sprintf(otherAccountPage, lang, html.EscapeString(i18n.Catalog(lang)[text.Key]))
+	s.respond(c, 403, "text/html", []byte(page), hdrs)
 }
 
 var reasons = map[int]string{200: "OK", 204: "No Content", 400: "Bad Request", 403: "Forbidden", 404: "Not Found",

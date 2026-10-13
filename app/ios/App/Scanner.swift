@@ -94,8 +94,9 @@ struct ScanButton: View {
     var body: some View {
         if QRScanner.supported {
             Button {
-                // Said no before: iOS does not ask again, only Settings can allow the camera.
-                if AVCaptureDevice.authorizationStatus(for: .video) == .denied {
+                // Said no before, or Screen Time blocks the camera: iOS does not ask again, only
+                // Settings can allow it.
+                if [.denied, .restricted].contains(AVCaptureDevice.authorizationStatus(for: .video)) {
                     denied = true
                     return
                 }

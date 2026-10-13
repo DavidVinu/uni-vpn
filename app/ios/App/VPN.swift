@@ -44,7 +44,9 @@ final class VPN {
     private func update() {
         let old = (status, onDemand)
         status = manager?.connection.status ?? .invalid
-        onDemand = manager?.isOnDemandEnabled ?? false
+        // iOS enables one VPN at a time: once another VPN app (Cisco's, say) is turned on, this
+        // configuration is disabled and its connect on demand no longer runs.
+        onDemand = (manager?.isEnabled ?? false) && (manager?.isOnDemandEnabled ?? false)
         if old != (status, onDemand) {
             UserDefaults(suiteName: SetVPN.appGroup)?.set(isOn, forKey: SetVPN.onKey)
             if #available(iOS 18.0, *) {
@@ -73,8 +75,8 @@ final class VPN {
             try await m.saveToPreferences()
             try await m.loadFromPreferences()
         } catch {
-            manager = m
-            update()
+            // "Don't Allow": the switch shows what iOS really has, not the copy changed above.
+            await load()
             return false
         }
         manager = m
