@@ -394,6 +394,9 @@ func (e *Engine) Notify(typed ...string) {
 		sk := k.stateKey()
 		for key, v := range snap {
 			h := keyedHash(sk, v)
+			if c, ok := p.Changes[key]; ok && c.H == "" && !slices.Contains(typed, key) {
+				continue // typed before the keys could be read: it keeps the time it was typed
+			}
 			if isSecret(key) || last(key) == h {
 				continue
 			}
@@ -420,9 +423,11 @@ func (e *Engine) Notify(typed ...string) {
 		}
 	}
 	// Each with its own time: a password typed here must not make this device's older second
-	// factor win over one set up on another device since.
+	// factor win over one set up on another device since. Without a snapshot (the keyring did not
+	// give the sync keys yet), the account typed is noted by name too: with sync.json lost, the
+	// group's older account would replace it while the password typed with it goes out.
 	for _, key := range typed {
-		if isSecret(key) {
+		if isSecret(key) || snap == nil {
 			note(key, "")
 		}
 	}
@@ -435,6 +440,31 @@ func (e *Engine) Notify(typed ...string) {
 	e.Wake()
 }
 
+// Defaulted: a new config.toml is set up by hand (the app installed again, the old file
+// unreadable), so keys are at their defaults there, not chosen here: as for a value never synced
+// here, the group's is taken over. Not under run, so setup never waits for a round: only one that
+// read sync.json before this and the settings after it, with no request in between, still sends
+// the defaults.
+func (e *Engine) Defaulted(keys ...string) {
+	if e.relay == nil {
+		return
+	}
+	st := e.loadState()
+	n := len(st.Hashes)
+	if n == 0 { // nothing known (sync.json lost): only what was typed is a change already
+		return
+	}
+	for _, key := range keys {
+		delete(st.Hashes, key)
+	}
+	if len(st.Hashes) == n {
+		return
+	}
+	if err := e.saveState(st); err != nil {
+		e.logf(slog.LevelWarn, "Could not write the sync state: %s", err)
+	}
+}
+
 // donePending clears what was pending at gen, unless something changed since.
 func (e *Engine) donePending(gen int) {
 	e.mu.Lock()
@@ -444,6 +474,26 @@ func (e *Engine) donePending(gen int) {
 	}
 	e.pending = pending{}
 	os.Remove(e.pendingPath())
+}
+
+// replacedPending drops keys from what was pending at gen, unless something changed since:
+// the group's values replaced them here.
+func (e *Engine) replacedPending(gen int, keys []string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	n := len(e.pending.Changes)
+	if e.pendingGen != gen || n == 0 {
+		return
+	}
+	for _, key := range keys {
+		delete(e.pending.Changes, key)
+	}
+	if len(e.pending.Changes) == n {
+		return
+	}
+	if err := writeFile(e.pendingPath(), mustJSON(e.pending)); err != nil {
+		e.logf(slog.LevelWarn, "Could not note a settings change for syncing: %s", err)
+	}
 }
 
 // Wake asks the loop for a sync now.
@@ -561,7 +611,7 @@ func (e *Engine) syncLocked(ctx context.Context) error {
 		p.Changes = maps.Clone(p.Changes)
 		e.mu.Unlock()
 		// A sync.json from before keyed hashes is carried over by comparing values, secrets too.
-		done, err := e.step(ctx, k, remote, version, st, p.Secrets || version == 0 || !st.Keyed, p)
+		done, err := e.step(ctx, k, remote, version, st, p.Secrets || version == 0 || !st.Keyed, p, gen)
 		if done {
 			e.donePending(gen)
 		}
@@ -574,8 +624,8 @@ func (e *Engine) syncLocked(ctx context.Context) error {
 
 // step is one round: stamp local changes, merge, apply what came in, write back. done is
 // false when another device wrote in between and the round has to start over. p is what this
-// device changed and when.
-func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, st state, withSecrets bool, p pending) (bool, error) {
+// device changed and when, pending at gen.
+func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, st state, withSecrets bool, p pending, gen int) (bool, error) {
 	snap, err := e.opts.Local.Snapshot(ctx, withSecrets)
 	if err != nil {
 		return false, err
@@ -614,10 +664,10 @@ func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, s
 		return t
 	}
 	// changedHere: this device changed key to this value since its last round. Password and
-	// second factor are noted without a hash.
+	// second factor are noted without a hash, so is what was typed before the keys could be read.
 	changedHere := func(key, hv string) bool {
 		c, ok := p.Changes[key]
-		return ok && (c.H == hv || c.H == "" && isSecret(key))
+		return ok && (c.H == hv || c.H == "")
 	}
 	snap[DevicePrefix+me] = mustJSON(Device{Name: e.opts.Name, Platform: e.opts.Platform,
 		Pub: k.private().PublicKey().Bytes()})
@@ -748,6 +798,10 @@ func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, s
 			if err := e.saveState(st); err != nil {
 				return false, err
 			}
+			// A change made here that the group's later one replaced is no change any more: after a
+			// failed write, the next Notify must not take the value taken over for one, sent with
+			// its time once sync.json got lost.
+			e.replacedPending(gen, applied)
 		}
 	}
 	if !sameEntries(merged, remote.Entries) {

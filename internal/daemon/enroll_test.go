@@ -377,6 +377,12 @@ func TestEnrollEndsWhenTheAttemptWithTheCodeFails(t *testing.T) {
 	if got := h.pwLines(); !slices.Equal(got, []string{"pw"}) {
 		t.Fatal(got)
 	}
+	// Nothing wants the tunnel any more: an update may install.
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !d.idleForUpdateLocked() {
+		t.Fatal(d.explicit, d.loopRunning)
+	}
 }
 
 // A wrong password with the typed code: one refused sign-in, the code does not go in as a

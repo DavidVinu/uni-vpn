@@ -70,6 +70,9 @@ func (s *FileStore) aead() (cipher.AEAD, error) {
 	return chacha20poly1305.NewX(s.Key)
 }
 
+// errDamaged: the file is no JSON (cut short by a power cut), so none of it can be read.
+var errDamaged = &CredentialError{"The secrets file is damaged"}
+
 func (s *FileStore) load() (map[string]string, error) {
 	data, err := os.ReadFile(s.Path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -80,7 +83,7 @@ func (s *FileStore) load() (map[string]string, error) {
 	}
 	entries := map[string]string{}
 	if err := json.Unmarshal(data, &entries); err != nil {
-		return nil, &CredentialError{"The secrets file is damaged"}
+		return nil, errDamaged
 	}
 	return entries, nil
 }
@@ -98,6 +101,9 @@ func (s *FileStore) save(entries map[string]string) error {
 		return &CredentialError{err.Error()}
 	}
 	_, werr := tmp.Write(data)
+	if werr == nil {
+		werr = tmp.Sync() // a power cut right after the rename must not leave an empty file
+	}
 	cerr := tmp.Close()
 	if werr == nil {
 		werr = cerr
@@ -147,7 +153,10 @@ func (s *FileStore) Write(target, _ string, secret []byte, _ string) error {
 		return err
 	}
 	entries, err := s.load()
-	if err != nil {
+	if errors.Is(err, errDamaged) {
+		// Setting up again starts over instead of failing the same way.
+		entries = map[string]string{}
+	} else if err != nil {
 		return err
 	}
 	nonce := make([]byte, aead.NonceSize())

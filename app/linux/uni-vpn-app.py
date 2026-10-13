@@ -111,7 +111,7 @@ class App(Gtk.Application):
         self.items = {}
         self.started = False
         self.misses = 0
-        self.last_start = 0.0
+        self.last_start = float("-inf")  # time.monotonic() counts from boot: no wait right after it
         self.program = stamp()
         self.seen = None
         self.restarting = False
