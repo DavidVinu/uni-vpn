@@ -161,7 +161,10 @@ class TrayApp : ApplicationContext
     {
         if (!int.TryParse(Options.Value(args, "--port") ?? "", out port)) port = 1081;
         baseUrl = "http://127.0.0.1:" + port + "/";
-        ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
+        // Not SynchronizationContext.Current: the menu items above made it a plain context
+        // (ToolStrip subscribes to SystemEvents), which runs Post on a thread pool thread, where
+        // the window's WebView2 cannot start (RPC_E_CHANGED_MODE). This one posts to this thread.
+        ui = new WindowsFormsSynchronizationContext();
 
         ContextMenuStrip menu = new ContextMenuStrip();
         stateItem.Enabled = false;
@@ -475,7 +478,7 @@ class MainWindow : Form
             // No WebView2 runtime (Windows 10 without a current Edge): the page asked for in the
             // browser, but not an otpauth link's key (the browser's history would keep it). This
             // can happen before the constructor returns; Close then disposes the window.
-            Note("WebView2 did not start: " + ex.GetType().FullName + " (0x" + ex.HResult.ToString("X8") + "): " + ex.Message);
+            Note("WebView2 did not start (" + Thread.CurrentThread.GetApartmentState() + " thread): " + ex.GetType().FullName + " (0x" + ex.HResult.ToString("X8") + "): " + ex.Message);
             string page = pending ?? "";
             if (page.StartsWith("#otpauth=")) page = "";
             try { Process.Start(baseUrl + (page.StartsWith("&") ? "?" + page.Substring(1) : page)); }

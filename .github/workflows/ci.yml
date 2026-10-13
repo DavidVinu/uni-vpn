@@ -827,8 +827,9 @@ jobs:
           if ((Trays).Count -eq 0) { Explain; throw "no tray app runs after the install" }
           Start-Sleep 10
           if ((Trays).Count -eq 0) { Explain; throw "the tray app ends at start" }
-          # Whether the app window started (its WebView2 runs with the app's data folder) or the
-          # page went to the browser instead. Only notes: the copy above stays either way.
+          # The installer's copy handed its window over: the app window opened (its WebView2 runs
+          # with the app's data folder), not the browser. A window that cannot start on a handover
+          # would open the browser on every Start menu click while the icon runs.
           $web = @(Get-CimInstance Win32_Process -Filter "Name = 'msedgewebview2.exe'" | Where-Object { $_.CommandLine -like "*uni-vpn\WebView2*" })
           $browser = @(Get-CimInstance Win32_Process -Filter "Name = 'msedge.exe' OR Name = 'chrome.exe' OR Name = 'firefox.exe'" | Where-Object { $_.CommandLine -like "*127.0.0.1:1081*" })
           Write-Host "app window WebView2 processes: $($web.Count); browser with the page: $($browser.Count)"
@@ -846,6 +847,7 @@ jobs:
             while ($e.InnerException) { $e = $e.InnerException }
             Write-Host "WebView2 cannot start: $($e.GetType().FullName): $($e.Message)"
           }
+          if ($web.Count -eq 0) { Explain; throw "the app window did not open on the handover" }
           $lnk = Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter "Uni VPN.lnk"
           if (-not $lnk) { throw "no Start menu entry" }
       - name: Uninstall it like a user would
