@@ -286,7 +286,7 @@ func (e *Engine) cancelPairing() {
 func offline(err error) error {
 	var ae *ApplyError
 	if err == nil || errors.Is(err, ErrCodeUnknown) || errors.Is(err, ErrSetupFirst) || errors.Is(err, ErrUnavailable) ||
-		errors.As(err, &ae) {
+		errors.Is(err, ErrOffline) || errors.As(err, &ae) {
 		return err
 	}
 	return fmt.Errorf("%w: %w", ErrOffline, err)

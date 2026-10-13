@@ -51,12 +51,12 @@ func (r *relay) do(ctx context.Context, method, path string, body []byte, hdr ma
 	}
 	resp, err := r.client.Do(req)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("%w: %w", ErrOffline, err)
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, MaxGroupBlob+1))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("%w: %w", ErrOffline, err)
 	}
 	return resp, data, nil
 }
