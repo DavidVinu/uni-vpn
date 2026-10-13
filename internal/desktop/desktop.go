@@ -633,7 +633,11 @@ func (d *Desktop) installLinux(port int, dry, keep bool, created func(string)) b
 		if !dry {
 			d.printf("   WebKitGTK is missing, the app opens in the browser for now")
 		}
-		return d.browserEntry(port, dry, created)
+		ok := d.browserEntry(port, dry, created)
+		if !dry {
+			d.serviceAtLogin(created)
+		}
+		return ok
 	}
 	if dry {
 		d.say("would add %s to open the app with %s", d.AppPath(), python)
@@ -664,19 +668,33 @@ func (d *Desktop) installLinux(port int, dry, keep bool, created func(string)) b
 	if !keep {
 		d.stopRunning()
 	}
-	if d.HasIndicator(python) {
-		login := d.LoginPath()
-		os.MkdirAll(filepath.Dir(login), 0o777)
-		if os.WriteFile(login, []byte(d.DesktopEntry(python, port, true)), 0o666) == nil {
-			created(login)
-		}
-		command := []string{python, d.linuxScript(), "--port", strconv.Itoa(port), "--hidden"}
-		if !running && !(keep && d.ownService(command)) {
-			d.Spawn(command)
-		}
-		d.say("Panel icon starts at login")
+	if !d.HasIndicator(python) {
+		d.serviceAtLogin(created)
+		return true
 	}
+	login := d.LoginPath()
+	os.MkdirAll(filepath.Dir(login), 0o777)
+	if os.WriteFile(login, []byte(d.DesktopEntry(python, port, true)), 0o666) == nil {
+		created(login)
+	}
+	command := []string{python, d.linuxScript(), "--port", strconv.Itoa(port), "--hidden"}
+	if !running && !(keep && d.ownService(command)) {
+		d.Spawn(command)
+	}
+	d.say("Panel icon starts at login")
 	return true
+}
+
+// serviceAtLogin starts the service at login when no panel icon does: only GNOME and KDE start
+// graphical-session.target, which the service is wanted by (not Xfce, MATE, older Cinnamon).
+func (d *Desktop) serviceAtLogin(created func(string)) {
+	login := d.LoginPath()
+	os.MkdirAll(filepath.Dir(login), 0o777)
+	entry := "[Desktop Entry]\nType=Application\nName=" + AppName + "\nExec=systemctl --user start " + service.UnitName +
+		".service\nTerminal=false\nNoDisplay=true\nX-GNOME-Autostart-enabled=true\n"
+	if os.WriteFile(login, []byte(entry), 0o666) == nil {
+		created(login)
+	}
 }
 
 // --- open --------------------------------------------------------------------

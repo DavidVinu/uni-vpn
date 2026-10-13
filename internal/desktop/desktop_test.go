@@ -103,7 +103,15 @@ func TestBrowserEntries(t *testing.T) {
 			if h.install(false) {
 				t.Fatal("native app reported")
 			}
-			if !reflect.DeepEqual(h.created, []string{path}) {
+			want := []string{path}
+			if tc.goos == "linux" {
+				// The service starts at login without a panel icon too.
+				want = append(want, h.d.LoginPath())
+				if !strings.Contains(read(h.d.LoginPath()), "Exec=systemctl --user start uni-vpn.service\n") {
+					t.Fatal(read(h.d.LoginPath()))
+				}
+			}
+			if !reflect.DeepEqual(h.created, want) {
 				t.Fatal(h.created)
 			}
 			if tc.command != nil {
@@ -491,12 +499,13 @@ func TestLinuxApp(t *testing.T) {
 		entry := filepath.Join(h.home, "data", "applications", "de.davidvinu.UniVPN.desktop")
 		login := filepath.Join(h.home, "config", "autostart", "de.davidvinu.UniVPN.desktop")
 		icon := filepath.Join(h.home, "data", "icons", "hicolor", "scalable", "apps", "de.davidvinu.UniVPN.svg")
-		want := []string{icon, entry}
-		if indicator {
-			want = append(want, login)
-		}
-		if !reflect.DeepEqual(h.created, want) || read(icon) != "<svg/>" {
+		if !reflect.DeepEqual(h.created, []string{icon, entry, login}) || read(icon) != "<svg/>" {
 			t.Fatal(h.created)
+		}
+		// Without a panel icon the login item starts the service itself (not every desktop
+		// starts graphical-session.target).
+		if strings.Contains(read(login), "Exec=systemctl --user start uni-vpn.service\n") == indicator {
+			t.Fatal(read(login))
 		}
 		if indicator != (len(h.spawns) == 1) || (indicator && !slices.Contains(h.spawns[0], "--hidden")) {
 			t.Fatal(h.spawns)

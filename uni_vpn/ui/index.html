@@ -675,6 +675,7 @@ function renderAuto(error) {
   $("a-field").hidden = $("a-next").hidden = busy;
   $("a-busy").hidden = !busy;
   $("a-fix").hidden = busy || S.action !== "repair";
+  $("a-fix").disabled = !!S.repairing;  // a Repair left running on another page may be over by now
   $("a-download").hidden = busy || S.message_id !== "reinstall_needed";
   if (error !== undefined) err("a-err", error);
   $("step2a").querySelector(".step").hidden = changingTotp;
@@ -712,6 +713,7 @@ function autoProgress() {
 $("step2a").onsubmit = async (e) => {
   e.preventDefault();
   if (submitting) return;
+  autoRepair = false;  // what this code brings is said now, not the Repair's outcome
   const code = $("a-code").value.replace(/\s/g, "");
   if (!/^[0-9]{6,8}$/.test(code)) { err("a-err", t("enroll.enter_code")); return; }
   const answer = autoRunning && S.enroll && S.enroll.stage === "code";

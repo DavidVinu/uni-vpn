@@ -469,8 +469,14 @@ func (d *Daemon) final(state State, message messages.Message) {
 
 func (d *Daemon) noteActivity() {
 	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.state == Disconnecting {
+		// The last bytes of the connections the stop closes: no new use, which would sign in
+		// again right after a Disconnect.
+		d.lastActivity = d.mono()
+		return
+	}
 	d.noteActivityLocked()
-	d.mu.Unlock()
 }
 
 func (d *Daemon) noteActivityLocked() {
@@ -812,7 +818,7 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 		d.secretsChanged()
 	}
 	if !synced { // the group's values: nothing new to send it
-		d.syncChanged(devsync.KeyPassword, devsync.KeyTOTP)
+		d.syncChanged(devsync.KeyAccount, devsync.KeyPassword, devsync.KeyTOTP)
 	}
 	return nil
 }
@@ -1494,7 +1500,7 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 		if at := tun.OTPGeneratedAt(); !at.IsZero() {
 			d.lastOTPStep = int64(math.Floor(float64(at.UnixNano()) / 1e9 / OTPStep))
 		}
-		if ready && tun.StoppedByUs() {
+		if ready && (tun.StoppedByUs() || d.state == Disconnecting) {
 			// Disconnect (or a resume) came while the port opened: the tunnel is going away, a
 			// stop while connecting, not a connection (whose demand would connect again).
 			d.unlocked(func() {
