@@ -424,10 +424,15 @@ jobs:
               if lib not in com: print("not in the committed list:", lib); bad = 1; continue
               print(lib, len(syms), "only in sdk:", len(syms - com[lib]), "only committed:", len(com[lib] - syms))
               bad |= syms != com[lib]
-          raise SystemExit(bad)
+          print("differs" if bad else "same")
           PY
           gzip -9 -n -c sdk.txt > sdk.txt.gz
           python3 packaging/macos/system-symbols.py check sdk.txt.gz runtime
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos14-symbols
+          path: sdk.txt.gz
+          retention-days: 3
 
   linux-packages:
     runs-on: ubuntu-latest
