@@ -36,6 +36,12 @@ static class Program
     [System.Runtime.InteropServices.DllImport("kernel32.dll")]
     static extern bool GetNamedPipeServerSessionId(Microsoft.Win32.SafeHandles.SafePipeHandle pipe, out uint session);
 
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    static extern bool GetNamedPipeServerProcessId(Microsoft.Win32.SafeHandles.SafePipeHandle pipe, out uint process);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool AllowSetForegroundWindow(uint process);
+
     [STAThread]
     static void Main(string[] args)
     {
@@ -73,6 +79,10 @@ static class Program
                             uint server;
                             if (GetNamedPipeServerSessionId(client.SafePipeHandle, out server) && server == (uint)session)
                             {
+                                // This copy was started by a click: it may hand the running one the
+                                // right to bring its window to the front (else it opens behind the browser).
+                                uint owner;
+                                if (GetNamedPipeServerProcessId(client.SafePipeHandle, out owner)) AllowSetForegroundWindow(owner);
                                 byte[] data = Encoding.UTF8.GetBytes(page);
                                 client.Write(data, 0, data.Length);
                             }
@@ -161,7 +171,10 @@ class TrayApp : ApplicationContext
     {
         if (!int.TryParse(Options.Value(args, "--port") ?? "", out port)) port = 1081;
         baseUrl = "http://127.0.0.1:" + port + "/";
-        ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
+        // Not SynchronizationContext.Current: the menu items above made it a plain context
+        // (ToolStrip subscribes to SystemEvents), which runs Post on a thread pool thread, where
+        // the window's WebView2 cannot start (RPC_E_CHANGED_MODE). This one posts to this thread.
+        ui = new WindowsFormsSynchronizationContext();
 
         ContextMenuStrip menu = new ContextMenuStrip();
         stateItem.Enabled = false;
@@ -227,7 +240,9 @@ class TrayApp : ApplicationContext
 
     public void Show(string page)
     {
-        if (window == null || window.IsDisposed) window = new MainWindow(baseUrl);
+        if (window == null || window.IsDisposed) window = new MainWindow(baseUrl, page);
+        // No WebView2 runtime: the window closed itself at once and the page is open in the browser.
+        if (window.IsDisposed) return;
         window.Open(page);
     }
 
@@ -439,9 +454,10 @@ class MainWindow : Form
     string pending;
     string target;
 
-    public MainWindow(string baseUrl)
+    public MainWindow(string baseUrl, string page)
     {
         this.baseUrl = baseUrl;
+        pending = page;
         Text = "Uni VPN";
         Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
         AutoScaleMode = AutoScaleMode.None;
@@ -467,10 +483,16 @@ class MainWindow : Form
         {
             await view.EnsureCoreWebView2Async(null);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // No WebView2 runtime (Windows 10 without a current Edge): the page in the browser.
-            Process.Start(baseUrl);
+            // No WebView2 runtime (Windows 10 without a current Edge): the page asked for in the
+            // browser, but not an otpauth link's key (the browser's history would keep it). This
+            // can happen before the constructor returns; Close then disposes the window.
+            Note("WebView2 did not start (" + Thread.CurrentThread.GetApartmentState() + " thread): " + ex.GetType().FullName + " (0x" + ex.HResult.ToString("X8") + "): " + ex.Message);
+            string page = pending ?? "";
+            if (page.StartsWith("#otpauth=")) page = "";
+            try { Process.Start(baseUrl + (page.StartsWith("&") ? "?" + page.Substring(1) : page)); }
+            catch (Exception) { }
             quitting = true;
             Close();
             return;
@@ -487,7 +509,8 @@ class MainWindow : Form
         settings.UserAgent = settings.UserAgent + " UniVPN";
         view.CoreWebView2.NavigationStarting += delegate(object sender, CoreWebView2NavigationStartingEventArgs e)
         {
-            if (!Local(e.Uri)) { e.Cancel = true; Process.Start(e.Uri); }
+            // Only web links: another scheme (a file, an app's own) would run without the browser's question.
+            if (!Local(e.Uri)) { e.Cancel = true; if (e.Uri.StartsWith("http://") || e.Uri.StartsWith("https://")) Process.Start(e.Uri); }
         };
         view.CoreWebView2.NewWindowRequested += delegate(object sender, CoreWebView2NewWindowRequestedEventArgs e)
         {
@@ -499,8 +522,12 @@ class MainWindow : Form
         view.CoreWebView2.NavigationCompleted += delegate(object sender, CoreWebView2NavigationCompletedEventArgs e)
         {
             if (!e.IsSuccess && e.WebErrorStatus == CoreWebView2WebErrorStatus.OperationCanceled) return;
-            loaded = e.IsSuccess;
-            if (e.IsSuccess || quitting) return;
+            // A page the service answered with an error (403: another account's service has the
+            // port) reloads itself; retrying here as well would make it flicker.
+            int status = 0;
+            try { status = e.HttpStatusCode; } catch (Exception) { }  // older runtimes cannot say
+            loaded = e.IsSuccess || status != 0;
+            if (loaded || quitting) return;
             System.Windows.Forms.Timer retry = new System.Windows.Forms.Timer();
             retry.Interval = 2000;
             // Hidden, it stops; opening the window again loads the page (ShowPage, !loaded).
@@ -509,6 +536,18 @@ class MainWindow : Form
         };
         ready = true;
         ShowPage(pending ?? "");
+    }
+
+    // Why the window did not open, for a bug report: the latest line only, next to the service's log.
+    static void Note(string text)
+    {
+        try
+        {
+            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "uni-vpn", "logs");
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(Path.Combine(dir, "app.log"), DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + " " + text + Environment.NewLine);
+        }
+        catch (Exception) { }
     }
 
     bool Local(string uri)

@@ -1,6 +1,6 @@
-// Package logsetup: rotating file (0600), log tail for the status page, stderr for
-// journal/launchd. It mirrors uni_vpn/logsetup.py: same line format, same rotation
-// (1,000,000 bytes, 3 backups: daemon.log.1 .. daemon.log.3).
+// Package logsetup: rotating file (0600), log tail for the status page, stderr for a
+// terminal (for journal/launchd only without a file). It mirrors uni_vpn/logsetup.py: same
+// line format, same rotation (1,000,000 bytes, 3 backups: daemon.log.1 .. daemon.log.3).
 package logsetup
 
 import (
@@ -155,6 +155,7 @@ type core struct {
 	tail   *Tail
 	file   *rotatingFile
 	stderr io.Writer
+	quiet  bool // stderr only gets lines the file could not take
 }
 
 // Handler writes "2006-01-02 15:04:05 LEVEL message" to the tail, the file and stderr.
@@ -226,15 +227,19 @@ func (h *Handler) Handle(_ context.Context, r slog.Record) error {
 	defer h.c.mu.Unlock()
 	h.c.tail.add(line)
 	var errs []error
+	mirror := !h.c.quiet
 	if h.c.file != nil {
 		// Like logging.Handler.handleError: report, keep logging.
 		if err := h.c.file.write(line); err != nil {
 			fmt.Fprintf(h.c.stderr, "--- Logging error ---\n%v\n", err)
 			errs = append(errs, err)
+			mirror = true
 		}
 	}
-	if _, err := io.WriteString(h.c.stderr, line+"\n"); err != nil {
-		errs = append(errs, err)
+	if mirror {
+		if _, err := io.WriteString(h.c.stderr, line+"\n"); err != nil {
+			errs = append(errs, err)
+		}
 	}
 	return errors.Join(errs...)
 }
@@ -305,10 +310,21 @@ func New(path string, level slog.Leveler, stderr io.Writer) (*Handler, *Tail, er
 }
 
 // Setup is setup_logging: tail, optional rotating file (platform.LogFile()), stderr.
+// With a log file, stderr only gets the lines when it is a terminal: launchd's file
+// (launchd.log) and systemd's journal would keep them beyond the file's rotation. Crashes
+// still reach them; a launchd.log grown by an earlier version is emptied.
 func Setup(path string, level slog.Level) (*slog.Logger, *Tail, error) {
 	h, tail, err := New(path, level, os.Stderr)
 	if err != nil {
 		return nil, nil, err
+	}
+	if path != "" {
+		if st, err := os.Stderr.Stat(); err == nil && st.Mode()&os.ModeCharDevice == 0 {
+			h.c.quiet = true
+			if st.Mode().IsRegular() && st.Size() > MaxBytes {
+				os.Stderr.Truncate(0)
+			}
+		}
 	}
 	return slog.New(h), tail, nil
 }

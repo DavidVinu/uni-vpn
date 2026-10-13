@@ -235,7 +235,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     @objc(webView:decidePolicyForNavigationAction:decisionHandler:)
     func webView(_ view: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         if let url = action.request.url, url.host != "127.0.0.1" && url.host != "localhost" {
-            NSWorkspace.shared.open(url)
+            // Only web links: another scheme (a file, an app's own) would run without the browser's question.
+            if ["http", "https"].contains(url.scheme?.lowercased() ?? "") { NSWorkspace.shared.open(url) }
             decisionHandler(.cancel)
             return
         }

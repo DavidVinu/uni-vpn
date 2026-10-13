@@ -333,7 +333,7 @@ const $ = (id) => document.getElementById(id);
 const H = {"X-Uni-VPN": "1", "Content-Type": "application/json"};
 let S = null, view = null, setupDone = false, submitting = false, setupSent = false, domainsShown = false, connectRequested = 0,
   codeTimer = null, refreshing = false, autoUpdateSaving = false, changing = false, languageSaving = false,
-  domainsBase = "", removeError = null, removeSeen = false;
+  domainsBase = "", removeError = null, removeSeen = false, changeWebsites = "";
 // Inside the Uni VPN app window (not a browser tab): no page title, no browser context menu.
 if (new URLSearchParams(location.search).has("app")) {
   document.body.classList.add("app");
@@ -1089,7 +1089,7 @@ window.addEventListener("hashchange", () => {
   const target = location.hash.slice(1);
   if (!S || S.setup_needed || !["main", "settings"].includes(target)) return;
   if (view === "setup" && autoRunning) return;  // the tray's "Open" during the short way: stay on it
-  if (changing && !submitting) endChange();
+  if (changing && !submitting) { endChange(); if (target === "settings") return; }  // keeps its note
   if (changing) return;
   if (target === "settings") openSettings(); else { show("main"); render(); }
 });
@@ -1103,6 +1103,7 @@ async function startChange(first) {
   if (!UNIS) return false;
   changing = true;
   $("s-use-other").hidden = true;  // first setup only; refresh() would hide it a poll later
+  changeWebsites = (S.domains || []).join("\n");
   setupDone = setupSent = false;
   const current = UNIS.find((u) => u.id === S.university);
   if (current) {
@@ -1137,12 +1138,19 @@ async function resumeAuto() {
   autoSentAt = 0;
 }
 function endChange() {
+  const sent = setupSent && !changingTotp;  // an account went to the service (not just Back)
   stopAuto();  // the back arrow: the core must not go on with a code nobody wants any more
   changing = changingTotp = keyRead = setupDone = setupSent = false;
   clearInterval(codeTimer);
   $("s-pw").value = $("s-totp").value = "";
   $("cancel-change").hidden = true;
   openSettings();
+  // Another university's websites: browsers that read the rule only at start (macOS) need a
+  // restart, as after an edit of the list.
+  if (sent && S.pac_refresh === "manual" && (S.domains || []).join("\n") !== changeWebsites) {
+    $("d-dom").open = true;
+    saved("dommsg", {ok: true}, t("app.saved_restart"));
+  }
 }
 $("row-uni").onclick = () => startChange("step0");
 $("row-user").onclick = () => startChange("step1");
@@ -1308,7 +1316,12 @@ function closePair() {
 $("s-use-other").onmousedown = (e) => e.preventDefault();
 $("s-use-other").onclick = () => startPair("request", "setup");
 $("close-pair").onclick = closePair;
-$("pair-ok").onclick = () => { if (S && !S.setup_needed) { show("main"); render(); } else closePair(); };
+$("pair-ok").onclick = () => {
+  if (!S || S.setup_needed) { closePair(); return; }
+  // Set up from another device: "All set", which says to reopen the browser, as after the assistant.
+  if (pairFrom === "setup") { setupSent = true; show("setup"); finish(); return; }
+  show("main"); render();
+};
 $("pair-new").onclick = () => startPair($("pair-new").dataset.mode, pairFrom);
 $("pair-type").onclick = () => { pairShown = null; send("/api/sync/cancel"); err("pair-err", ""); pairPart("pair-entry"); $("pair-input").focus(); };
 $("pair-entry").onsubmit = async (e) => {

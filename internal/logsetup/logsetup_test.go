@@ -129,3 +129,42 @@ func TestRotation(t *testing.T) {
 		t.Fatal("more than 3 backups")
 	}
 }
+
+// launchd's launchd.log (a file as stderr) does not get a second, unrotated copy of the log,
+// and one grown by an earlier version is emptied.
+func TestSetupKeepsLinesOutOfAFileStderr(t *testing.T) {
+	dir := t.TempDir()
+	launchd, err := os.Create(filepath.Join(dir, "launchd.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer launchd.Close()
+	if _, err := launchd.WriteString(strings.Repeat("old line\n", MaxBytes/9+1)); err != nil {
+		t.Fatal(err)
+	}
+	saved := os.Stderr
+	os.Stderr = launchd
+	defer func() { os.Stderr = saved }()
+	log, _, err := Setup(filepath.Join(dir, "daemon.log"), slog.LevelInfo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer log.Handler().(*Handler).Close()
+	log.Info("connected")
+	if data, _ := os.ReadFile(launchd.Name()); len(data) != 0 {
+		t.Fatalf("launchd.log has %d bytes: %.80q", len(data), data)
+	}
+	if data, _ := os.ReadFile(filepath.Join(dir, "daemon.log")); !strings.Contains(string(data), "connected") {
+		t.Fatalf("daemon.log %q", data)
+	}
+
+	// Without a log file the lines still go to stderr.
+	log, _, err = Setup("", slog.LevelInfo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log.Info("no file")
+	if data, _ := os.ReadFile(launchd.Name()); !strings.Contains(string(data), "no file") {
+		t.Fatalf("launchd.log %q", data)
+	}
+}
