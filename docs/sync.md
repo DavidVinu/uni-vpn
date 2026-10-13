@@ -83,8 +83,10 @@ as changed here, then writes keyed hashes. `sync.json.pending` holds what change
 sent yet: the keyed hash and time of each changed value, so an edit made offline keeps its time
 when another follows before the device is back online, and whether a secret changed (password
 and second factor share one time and have no hash there); secrets are read from the keyring
-only then. A value this device cannot take over (a newer version's setting, say) is logged and
-skipped; the rest of the round goes through, and adding or removing a device still works.
+only then. A value this device cannot take over (a newer version's language, say) is logged and
+skipped; the rest of the round goes through, and adding or removing a device still works. A
+setting this version does not know at all is not noted in `sync.json` either: after the update
+the device takes the group's value instead of sending its own default.
 
 ## Removing a device
 
@@ -147,9 +149,9 @@ Pairing slots expire after 10 minutes, groups 400 days after they were last read
 (reads count once a day), a new group that no device read or wrote again after 7 days; an
 hourly cron deletes. Taking a code off the screen reads its slot, which empties it, so a code
 someone saw stops working at once.
-`node --test relay/` tests the Worker against an in-memory database; `node relay/serve.mjs`
-runs it locally, and `UNI_VPN_TEST_RELAY=<its URL> go test ./internal/devsync` runs the Go
-tests against it instead of the in-memory copy.
+`node --test relay/worker.test.mjs` tests the Worker against an in-memory database;
+`node relay/serve.mjs` runs it locally, and `UNI_VPN_TEST_RELAY=<its URL> go test ./internal/devsync`
+runs the Go tests against it instead of the in-memory copy.
 
 ### Deploying
 

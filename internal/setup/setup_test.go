@@ -16,6 +16,7 @@ import (
 	"github.com/DavidVinu/uni-vpn/internal/credentials"
 	"github.com/DavidVinu/uni-vpn/internal/desktop"
 	"github.com/DavidVinu/uni-vpn/internal/detect"
+	"github.com/DavidVinu/uni-vpn/internal/messages"
 	"github.com/DavidVinu/uni-vpn/internal/platform"
 	"github.com/DavidVinu/uni-vpn/internal/service"
 )
@@ -456,7 +457,7 @@ func TestMissingPrograms(t *testing.T) {
 		if dry && (code != 0 || !strings.Contains(h.out.String(), "would require")) {
 			t.Fatal(code, h.out.String())
 		}
-		if !dry && (code != 1 || !strings.Contains(h.out.String(), "Missing: openconnect")) {
+		if !dry && (code != messages.ReinstallNeededExit || !strings.Contains(h.out.String(), "Missing: openconnect")) {
 			t.Fatal(code, h.out.String())
 		}
 	}

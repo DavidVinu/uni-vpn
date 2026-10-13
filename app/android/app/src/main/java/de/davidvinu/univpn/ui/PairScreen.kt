@@ -77,11 +77,14 @@ fun PairScreen(model: AppModel, mode: String, activity: MainActivity) {
     var offered by rememberSaveable { mutableIntStateOf(-1) }
     // Whose answer model.pairResult is: one that comes after the user left is not for this visit.
     val pairOwner = rememberSaveable { UUID.randomUUID().toString() }
+    // The code on screen was in the status: if it goes from there, the core lost it.
+    var listed by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(attempt) {
         if (offered == attempt && shown != null) return@LaunchedEffect
         error = null
         shown = null
+        listed = false
         val result = model.post("/api/sync/$mode", timeoutMs = 30_000)
         if (result.ok) {
             shown = result.json?.optJSONObject("pairing")?.optString("code")
@@ -101,11 +104,27 @@ fun PairScreen(model: AppModel, mode: String, activity: MainActivity) {
         }
     }
     val pairing = status.optJSONObject("sync")?.optJSONObject("pairing")
-    val pairingState = if (pairing != null && pairing.optString("code") == shown) pairing.optString("state") else ""
+    // "gone": the code on screen is no longer in the status. The core stopped meanwhile (Android
+    // can end it while the app is in the background) and took the code back with it.
+    val pairingState = when {
+        pairing != null && pairing.optString("code") == shown -> pairing.optString("state")
+        shown == null -> ""
+        else -> "gone"
+    }
     LaunchedEffect(pairingState) {
+        if (pairingState == "waiting") listed = true
+        // Linked: the check mark stays. Typing a code: the one shown before is not on screen,
+        // only its "done" counts.
+        if (done || typing && pairingState != "done") return@LaunchedEffect
         when (pairingState) {
-            "done" -> done = true
+            "done" -> {
+                done = true
+                // No earlier error under the check mark; what could not be used here, if anything.
+                error = pairing?.optJSONObject("error")?.let { model.strings.t(it) }
+            }
             "expired" -> error = model.t("sync.expired")
+            // Only after it was there: a status from before the code counts for nothing.
+            "gone" -> if (listed) error = model.t("sync.expired")
             "failed" -> error = model.t("sync.offline")
         }
     }

@@ -1072,6 +1072,21 @@ func TestRepairRunsTheInstallerAndReportsAFailure(t *testing.T) {
 	}
 }
 
+func TestRepairWithAMissingProgramSaysToDownloadAgain(t *testing.T) {
+	// Setup cannot bring back openconnect: no Repair button that would only fail again.
+	h := newHarness(t)
+	process := newFakeProcess()
+	d := h.start(func(o *Options) { o.RepairStart = func() (Process, error) { return process, nil } })
+	d.forceSet(Error, messages.ProgramMissing)
+	d.StartRepair()
+	process.finish(messages.ReinstallNeededExit)
+	waitFor(3*time.Second, func() bool { _, m := d.snapshot(); return m != messages.Repairing })
+	if state, m := d.snapshot(); state != Error || m != messages.ReinstallNeeded ||
+		statusValue(t, d, "message_id") != "reinstall_needed" || statusValue(t, d, "action") != nil {
+		t.Fatal(state, m)
+	}
+}
+
 func TestRepairThatCannotStartSaysSo(t *testing.T) {
 	h := newHarness(t)
 	d := h.start(func(o *Options) {

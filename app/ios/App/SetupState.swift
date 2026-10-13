@@ -238,23 +238,31 @@ final class SetupState {
         error = nil
         // Setup stays for its last page ("All set"), also while the core already counts as set
         // up and its answer is still on the way: no Home in between (Android's enterPairCode).
+        let finishing = model.setupFinishing
+        let wasNeeded = model.setupNeeded
         model.setupFinishing = true
         let result = await model.post("/api/sync/enter", ["code": pairCode], timeout: 60)
         busy = false
-        if !result.ok || model.setupNeeded { model.setupFinishing = false }
         // Linked, but some settings could not be used here: the core says so in a note.
         let note: String? = result.json.map { model.strings.message($0.string("error"), $0.object("error_t")) }
             .flatMap { $0.isEmpty ? nil : $0 }
-        if !result.ok {
+        if !result.ok && !(wasNeeded && !model.setupNeeded) {
+            // Not linked. An account sent before (and left with the back arrow) keeps the setup
+            // page, which says why the code did not work.
+            model.setupFinishing = finishing && !model.setupNeeded
             error = result.error
         } else if model.setupNeeded {
+            model.setupFinishing = false
             // The account did not come over: setup goes on by hand with that note, not with an
             // "All set" that would bring it back.
             go(.university)
             error = note
         } else {
             go(.done)
-            error = note
+            // Also when the answer failed after the account came over (the network went away
+            // before the other device heard back): set up all the same, with the core's error as
+            // the note; none when only the wait for the answer ran out ("not running" is wrong).
+            error = result.ok ? note : (result.reply.status == 0 ? nil : result.error)
         }
     }
 

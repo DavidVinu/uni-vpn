@@ -103,7 +103,13 @@ var (
 	SettingsBroken = m("settings_broken", "setup")
 	Repairing      = m("repairing")
 	RepairFailed   = m("repair_failed", "repair")
+	// No button: Repair cannot bring back a program the installer brought, only the installer can.
+	ReinstallNeeded = m("reinstall_needed")
 )
+
+// ReinstallNeededExit is the exit code of "setup" when a program it needs is missing
+// (EX_UNAVAILABLE), so the service, which ran it for the Repair button, shows ReinstallNeeded.
+const ReinstallNeededExit = 69
 
 // --- The app, when the service does not answer ---
 var NotRunning = m("not_running")

@@ -19,6 +19,12 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -28,9 +34,14 @@ import de.davidvinu.univpn.AppModel
 import de.davidvinu.univpn.MainActivity
 import de.davidvinu.univpn.R
 import de.davidvinu.univpn.Screen
+import java.util.UUID
 
 @Composable
 fun App(model: AppModel, vpnOn: Boolean, activity: MainActivity) {
+    // The setup assistant's visit, like a screen's (AppModel.Visit) but saved: after Android ended
+    // the app during setup, setup goes on where it was. Once something else shows, what it saved
+    // is not for the next time (an account change from Settings starts at the university).
+    var setupVisit by rememberSaveable { mutableStateOf(UUID.randomUUID().toString()) }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
         // Turned sideways, the camera cutout sits at one side: nothing goes under it. The top
         // bars keep clear of it themselves and do not add it twice.
@@ -54,16 +65,21 @@ fun App(model: AppModel, vpnOn: Boolean, activity: MainActivity) {
                 model.status == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
-                model.setupNeeded || model.changingAccount || model.setupFinishing -> SetupFlow(model, activity)
-                else -> when (val screen = model.screen) {
-                    Screen.Home -> HomeScreen(model, vpnOn, activity)
-                    Screen.Settings -> SettingsScreen(model)
-                    Screen.Websites -> WebsitesScreen(model)
-                    Screen.SecondFactor -> SecondFactorScreen(model, activity)
-                    Screen.Language -> LanguageScreen(model)
-                    Screen.Log -> LogScreen(model)
-                    Screen.Licenses -> LicensesScreen(model)
-                    is Screen.Pair -> PairScreen(model, screen.mode, activity)
+                model.setupNeeded || model.changingAccount || model.setupFinishing -> key(setupVisit) { SetupFlow(model, activity) }
+                else -> {
+                    LaunchedEffect(Unit) { setupVisit = UUID.randomUUID().toString() }
+                    key(model.visit) {
+                        when (val screen = model.screen) {
+                            Screen.Home -> HomeScreen(model, vpnOn, activity)
+                            Screen.Settings -> SettingsScreen(model)
+                            Screen.Websites -> WebsitesScreen(model)
+                            Screen.SecondFactor -> SecondFactorScreen(model, activity)
+                            Screen.Language -> LanguageScreen(model)
+                            Screen.Log -> LogScreen(model)
+                            Screen.Licenses -> LicensesScreen(model)
+                            is Screen.Pair -> PairScreen(model, screen.mode, activity)
+                        }
+                    }
                 }
             }
         }

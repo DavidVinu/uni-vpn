@@ -185,6 +185,7 @@
   "msg.settings_broken": "Your settings could not be read. Set up Uni VPN again.",
   "msg.repairing": "Repairing. Allow it if your computer asks.",
   "msg.repair_failed": "The repair did not finish. Click Repair to try again, or restart the computer.",
+  "msg.reinstall_needed": "Part of Uni VPN is missing. Download Uni VPN again from vpn.davidvinu.de and open it.",
   "msg.not_running": "Uni VPN is not running. Restart the computer to start it again.",
   "main.repair": "Repair",
   "phone.off": "Off",

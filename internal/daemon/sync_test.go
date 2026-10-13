@@ -4,6 +4,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -526,5 +527,112 @@ func TestSetUpByHandAfterALinkKeepsTheGroupsSettings(t *testing.T) {
 		if len(stored) == 0 || stored[len(stored)-1] != "typed-by-hand" {
 			t.Errorf("%s stored %v, want the password typed by hand last", name, stored)
 		}
+	}
+}
+
+// newerLocal is a device of a newer version: it syncs a setting this version does not know.
+type newerLocal struct {
+	mu     sync.Mutex
+	values map[string]json.RawMessage
+}
+
+func (l *newerLocal) Snapshot(_ context.Context, withSecrets bool) (map[string]json.RawMessage, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := map[string]json.RawMessage{}
+	for key, v := range l.values {
+		secret := key == devsync.KeyPassword || key == devsync.KeyTOTP
+		if secret && !withSecrets || strings.HasPrefix(key, devsync.DomainPrefix) && string(v) != "true" {
+			continue
+		}
+		out[key] = v
+	}
+	return out, nil
+}
+
+func (l *newerLocal) Apply(_ context.Context, all map[string]devsync.Entry, keys []string) map[string]error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, key := range keys {
+		l.values[key] = all[key].V
+	}
+	return nil
+}
+
+func (l *newerLocal) SetupDone() bool { return true }
+
+// A tablet with a newer version syncs a setting this version does not know. The laptop syncs
+// on without a note and without noting it as taken over (after an update it takes the
+// tablet's value instead of sending its default), its own changes still go out, and it does
+// not sync over and over.
+func TestSyncSettingOfANewerVersion(t *testing.T) {
+	ctx := context.Background()
+	relay, _ := relaytest.Start(t)
+	var groupReads atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/v1/group/") {
+			groupReads.Add(1)
+		}
+		relay.ServeHTTP(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	laptopH := newHarness(t)
+	laptopH.cfg.User = "ab123"
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := config.WriteInitial(path, "ab123", "heidelberg", nil); err != nil {
+		t.Fatal(err)
+	}
+	laptop := laptopH.start(syncOptions(srv.URL, dir, func(o *Options) { o.ConfigPath = path }))
+	tabletLocal := &newerLocal{values: map[string]json.RawMessage{"theme": json.RawMessage(`"dark"`)}}
+	tablet := devsync.New(devsync.Options{Relay: srv.URL, StatePath: filepath.Join(t.TempDir(), "sync.json"),
+		Store: &memSyncStore{}, Local: tabletLocal, Name: "Tablet", Platform: "android"})
+	offer, err := laptop.Sync("offer", pyjson.O())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pairing, _ := offer.Get("pairing")
+	code, _ := pairing.(pyjson.Object).Get("code")
+	if err := tablet.Enter(ctx, code.(string)); err != nil {
+		t.Fatal(err)
+	}
+	if !waitFor(5*time.Second, func() bool { // the laptop's round for the new device is under way
+		p, _ := statusValue(t, laptop, "sync").(pyjson.Object).Get("pairing")
+		shown, _ := p.(pyjson.Object)
+		state, _ := shown.Get("state")
+		return state == "done"
+	}) {
+		t.Fatal("the laptop does not see the code used")
+	}
+	if err := tablet.Sync(ctx); err != nil { // the round after joining sends its own setting
+		t.Fatal(err)
+	}
+	if err := laptop.SetLanguage("fr"); err != nil {
+		t.Fatal(err)
+	}
+	if err := laptop.sync.Sync(ctx); err != nil {
+		t.Fatalf("got %v, want no note for a newer version's setting", err)
+	}
+	if problem, _ := statusValue(t, laptop, "sync").(pyjson.Object).Get("error"); problem != nil {
+		t.Fatalf("status error %v", problem)
+	}
+	if state, _ := os.ReadFile(filepath.Join(dir, "sync.json")); !strings.Contains(string(state), `"language"`) ||
+		strings.Contains(string(state), `"theme"`) {
+		t.Fatalf("sync.json %s", state)
+	}
+	if err := tablet.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	tabletLocal.mu.Lock()
+	language := string(tabletLocal.values[devsync.KeyLanguage])
+	tabletLocal.mu.Unlock()
+	if language != `"fr"` {
+		t.Fatalf("tablet language %s, want the laptop's fr", language)
+	}
+	time.Sleep(200 * time.Millisecond) // the round SetLanguage woke is over
+	before := groupReads.Load()
+	time.Sleep(time.Second)
+	if n := groupReads.Load() - before; n > 2 {
+		t.Fatalf("%d group reads in a second", n)
 	}
 }
