@@ -145,7 +145,7 @@ func (e *Engine) show(mode, code string, p pairing) Pairing {
 	ctx, cancel := context.WithTimeout(context.Background(), e.opts.CodeLifetime)
 	e.cancelPairing() // a new code replaces the one on screen
 	e.mu.Lock()
-	e.pairing, e.cancelPair, e.pairSlot = &shown, cancel, p.a
+	e.pairing, e.cancelPair, e.pairSlots = &shown, cancel, p
 	e.mu.Unlock()
 	go e.await(ctx, cancel, &shown, p)
 	return shown
@@ -164,6 +164,9 @@ func (e *Engine) await(ctx context.Context, cancel context.CancelFunc, shown *Pa
 	}
 	defer func() {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			if shown.Mode == "request" {
+				e.closeSlots(shown.Mode, p) // an answer sent after the last look
+			}
 			finish("expired", nil)
 		}
 	}()
@@ -246,7 +249,11 @@ func (e *Engine) Enter(ctx context.Context, text string) error {
 		if err != nil {
 			return offline(err)
 		}
-		if err := e.putSlot(ctx, p, "b", pairMessage{Kind: "root", Root: k.Root}); err != nil {
+		err = e.putSlot(ctx, p, "b", pairMessage{Kind: "root", Root: k.Root})
+		if errors.Is(err, errConflict) {
+			return ErrCodeUnknown // the code left the other screen meanwhile
+		}
+		if err != nil {
 			return offline(err)
 		}
 		e.logf(slog.LevelInfo, "Sent the settings to another device")
@@ -266,19 +273,39 @@ func (e *Engine) CancelPairing() { e.cancelPairing() }
 func (e *Engine) cancelPairing() {
 	e.mu.Lock()
 	waiting := e.pairing != nil && e.pairing.State == "waiting"
+	mode := ""
+	if waiting {
+		mode = e.pairing.Mode
+	}
 	if e.cancelPair != nil {
 		e.cancelPair()
 	}
-	slot := e.pairSlot
-	e.pairing, e.cancelPair, e.pairSlot = nil, nil, ""
+	slots := e.pairSlots
+	e.pairing, e.cancelPair, e.pairSlots = nil, nil, pairing{}
 	e.mu.Unlock()
-	if waiting && slot != "" {
-		// Reading the slot empties it: a code someone saw no longer works.
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if _, err := e.relay.takePair(ctx, slot); err != nil && !errors.Is(err, errNotFound) {
-			e.logf(slog.LevelWarn, "Could not withdraw the code: %s", err)
-		}
+	if waiting && slots.a != "" {
+		e.closeSlots(mode, slots)
+	}
+}
+
+// closeSlots ends a code that left the screen. Reading a slot empties it: a code someone saw
+// no longer works. The answer to a request carries the group's key: one already sent is read
+// away, and one still on its way finds the slot filled and is refused.
+func (e *Engine) closeSlots(mode string, p pairing) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if _, err := e.relay.takePair(ctx, p.a); err != nil && !errors.Is(err, errNotFound) {
+		e.logf(slog.LevelWarn, "Could not withdraw the code: %s", err)
+	}
+	if mode != "request" {
+		return
+	}
+	err := e.relay.putPair(ctx, p.b, []byte("closed"))
+	if errors.Is(err, errConflict) {
+		_, err = e.relay.takePair(ctx, p.b)
+	}
+	if err != nil && !errors.Is(err, errNotFound) {
+		e.logf(slog.LevelWarn, "Could not withdraw the code: %s", err)
 	}
 }
 

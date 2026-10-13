@@ -148,7 +148,9 @@ bodies are `application/octet-stream`.
 Pairing slots expire after 10 minutes, groups 400 days after they were last read or written
 (reads count once a day), a new group that no device read or wrote again after 7 days; an
 hourly cron deletes. Taking a code off the screen reads its slot, which empties it, so a code
-someone saw stops working at once.
+someone saw stops working at once. For a request code it also reads slot B and then fills it,
+also when the code runs out: an answer (the group's key) never waits there for whoever saw the
+code, and one still on its way is refused.
 `node --test relay/worker.test.mjs` tests the Worker against an in-memory database;
 `node relay/serve.mjs` runs it locally, and `UNI_VPN_TEST_RELAY=<its URL> go test ./internal/devsync`
 runs the Go tests against it instead of the in-memory copy.
