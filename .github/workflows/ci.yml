@@ -827,6 +827,20 @@ jobs:
           if ((Trays).Count -eq 0) { Explain; throw "no tray app runs after the install" }
           Start-Sleep 10
           if ((Trays).Count -eq 0) { Explain; throw "the tray app ends at start" }
+          # Whether the app window can start here, and why not (only a note: the copy above stays).
+          $desktop = "$env:ProgramFiles\uni-vpn\desktop"
+          $env:PATH = "$desktop;$env:PATH"
+          try {
+            Add-Type -Path "$desktop\Microsoft.Web.WebView2.Core.dll"
+            Write-Host "WebView2 found: $([Microsoft.Web.WebView2.Core.CoreWebView2Environment]::GetAvailableBrowserVersionString())"
+            # As the window does it (a failure here comes at once, as in the window's constructor).
+            $start = [Microsoft.Web.WebView2.Core.CoreWebView2Environment]::CreateAsync($null, "$env:LOCALAPPDATA\uni-vpn\WebView2", $null)
+            if ($start.Wait(30000)) { Write-Host "WebView2 starts: $($start.Result.BrowserVersionString)" } else { Write-Host "WebView2 did not start within 30 s" }
+          } catch {
+            $e = $_.Exception
+            while ($e.InnerException) { $e = $e.InnerException }
+            Write-Host "WebView2 cannot start: $($e.GetType().FullName): $($e.Message)"
+          }
           $lnk = Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter "Uni VPN.lnk"
           if (-not $lnk) { throw "no Start menu entry" }
       - name: Uninstall it like a user would
