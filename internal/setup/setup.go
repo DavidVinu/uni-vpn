@@ -56,10 +56,11 @@ var MacOSBinDirs = []string{"/opt/homebrew/bin", "/usr/local/bin"}
 // ErrNoTerminal means a question could not be asked: stdin ended.
 var ErrNoTerminal = errors.New("no terminal to answer questions")
 
-// Args are the command line options of "setup" and "uninstall".
+// Args are the command line options of "setup" and "uninstall". Repair: the app's Repair
+// button runs setup (internal/daemon/repair.go), which leaves the app window open.
 type Args struct {
-	DryRun, NoGUI, NoBrowser, Yes bool
-	User, University              string
+	DryRun, NoGUI, NoBrowser, Repair, Yes bool
+	User, University                      string
 }
 
 // Service registers the background service (service.Manager).
@@ -72,6 +73,8 @@ type Service interface {
 // App sets up and opens the app window (desktop.Desktop).
 type App interface {
 	Install(port int, dry bool, created func(string)) bool
+	// Repair is Install that leaves a running app window open.
+	Repair(port int, created func(string)) bool
 	OpenApp(port int, page string) bool
 	Uninstall()
 }
@@ -774,7 +777,11 @@ func (s *Setup) setup(a Args, created func(string)) (int, error) {
 		}
 	}
 
-	s.App.Install(cfg.HTTPPort, dry, created)
+	if a.Repair && !dry {
+		s.App.Repair(cfg.HTTPPort, created)
+	} else {
+		s.App.Install(cfg.HTTPPort, dry, created)
+	}
 
 	if s.CiscoInstalled() {
 		s.printf("   Note: Cisco Secure Client is installed. Uni VPN pauses while Cisco is connected.")

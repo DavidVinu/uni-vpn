@@ -387,9 +387,18 @@ func (e *Engine) Notify(secrets bool) {
 	if snap != nil {
 		sk := k.stateKey()
 		for key, v := range snap {
-			if h := keyedHash(sk, v); !isSecret(key) && last(key) != h {
-				note(key, h)
+			h := keyedHash(sk, v)
+			if isSecret(key) || last(key) == h {
+				continue
 			}
+			// A value sync.json never had (linked while the account could not be used here, then
+			// set up by hand) is not a change made here: the new config.toml's defaults must not
+			// replace the group's language. The account typed by hand is one.
+			_, known := st.Hashes[key]
+			if _, noted := p.Changes[key]; st.Keyed && !known && !noted && key != KeyAccount && !strings.HasPrefix(key, DomainPrefix) {
+				continue
+			}
+			note(key, h)
 		}
 		removed := keyedHash(sk, jsonFalse)
 		for _, known := range []map[string]savedHash{st.Hashes, maps.Clone(p.Changes)} {
@@ -588,10 +597,11 @@ func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, s
 		}
 		return t
 	}
-	// changedHere: this device changed key to this value since its last round.
+	// changedHere: this device changed key to this value since its last round. Password and
+	// second factor are noted without a hash.
 	changedHere := func(key, hv string) bool {
 		c, ok := p.Changes[key]
-		return ok && c.H == hv
+		return ok && (c.H == hv || c.H == "" && isSecret(key))
 	}
 	snap[DevicePrefix+me] = mustJSON(Device{Name: e.opts.Name, Platform: e.opts.Platform,
 		Pub: k.private().PublicKey().Bytes()})
@@ -616,7 +626,9 @@ func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, s
 			r, inRemote := remote.Entries[key]
 			switch {
 			case key == own:
-			case known && old.H == hv: // unchanged here
+			// Back at what sync.json has while the group holds another value of this device's own:
+			// a write whose answer got lost, changed back since. Changing back is the later change.
+			case known && old.H == hv && !(changedHere(key, hv) && inRemote && r.D == me && h(r.V) != hv): // unchanged here
 			case inRemote && h(r.V) == hv: // already the same
 			case !known && inRemote && !changedHere(key, hv): // never synced here: the group's value is applied below
 			default:
@@ -631,12 +643,12 @@ func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, s
 			stamp(key, jsonFalse, when(key, removed)) // removed here
 		}
 		// Added and removed again here while the answer to the addition got lost: sync.json
-		// never knew the website, the group lists it.
+		// never knew the website, or knew it as removed before, the group lists it.
 		for key, c := range p.Changes {
 			_, present := snap[key]
-			_, known := st.Hashes[key]
+			old, known := st.Hashes[key]
 			r, listed := remote.Entries[key]
-			if strings.HasPrefix(key, DomainPrefix) && c.H == removed && !present && !known && listed && h(r.V) != removed {
+			if strings.HasPrefix(key, DomainPrefix) && c.H == removed && !present && (!known || old.H == removed) && listed && h(r.V) != removed {
 				stamp(key, jsonFalse, when(key, removed))
 			}
 		}

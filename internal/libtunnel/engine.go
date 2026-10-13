@@ -44,6 +44,10 @@ const defaultMTU = 1406
 
 const tailLen = 20
 
+// exitLocal is the exit code of a run that failed on this device, not at the gateway: the
+// daemon reads code 1 without a classified line as a refused login ("check the password").
+const exitLocal = 70
+
 // Tunnel is one openconnect session; like tunnel.Tunnel it is used once: Start, WaitReady, Stop.
 type Tunnel struct {
 	Cfg      tunnel.Config
@@ -150,7 +154,7 @@ func (t *Tunnel) run(o octunnel.Options, stdin []byte, port int) int {
 			return exit.Code
 		}
 		t.logf(slog.LevelError, "openconnect: %s", err)
-		return 1
+		return exitLocal
 	}
 	defer session.Free()
 	t.mu.Lock()
@@ -164,7 +168,7 @@ func (t *Tunnel) run(o octunnel.Options, stdin []byte, port int) int {
 	addr, dns, mtu := session.IPInfo()
 	if !addr.Is4() {
 		t.logf(slog.LevelError, "The gateway assigned no IPv4 address")
-		return 1
+		return exitLocal
 	}
 	if mtu <= 0 {
 		mtu = defaultMTU
@@ -172,13 +176,13 @@ func (t *Tunnel) run(o octunnel.Options, stdin []byte, port int) int {
 	mine, theirs, err := socketPair()
 	if err != nil {
 		t.logf(slog.LevelError, "No socket pair for the tunnel: %s", err)
-		return 1
+		return exitLocal
 	}
 	defer closeFD(theirs)
 	stack, err := netstack.New(mine, addr, dns, mtu)
 	if err != nil {
 		t.logf(slog.LevelError, "Network stack failed: %s", err)
-		return 1
+		return exitLocal
 	}
 	defer stack.Close()
 	servers := make([]string, len(dns))
@@ -189,7 +193,7 @@ func (t *Tunnel) run(o octunnel.Options, stdin []byte, port int) int {
 	server.Net = stack
 	if err := server.Start(context.Background()); err != nil {
 		t.logf(slog.LevelError, "SOCKS server on port %d failed: %s", port, err)
-		return 1
+		return exitLocal
 	}
 	defer server.Stop()
 	t.logf(slog.LevelInfo, "Tunnel address %s, DNS %s, MTU %d", addr, strings.Join(servers, " "), mtu)

@@ -282,6 +282,11 @@ func (l syncLocal) applyDomains(all map[string]devsync.Entry) error {
 			list = append(list, host)
 		}
 	}
+	if slices.Equal(list, current) {
+		// Nothing to write: SetDomains would wake syncing for another round, and a device that
+		// waits for setup by hand (its snapshot has no websites) would sync over and over.
+		return nil
+	}
 	_, err = d.SetDomains(strings.Join(list, "\n"))
 	return err
 }

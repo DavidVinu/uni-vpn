@@ -84,19 +84,28 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         private set
     /** Its answer, until the setup page or Add a device takes it. */
     var pairResult by mutableStateOf<Result?>(null)
+    /**
+     * The screen that sent the code ([enterPairCode]'s owner): an answer that comes after the
+     * user left it is not for the next Add a device or setup page.
+     */
+    var pairResultFor = ""
+        private set
 
-    fun enterPairCode(code: String, inSetup: Boolean = true) {
+    fun enterPairCode(code: String, owner: String, inSetup: Boolean = true) {
         if (pairBusy) return
         pairBusy = true
+        val finishing = setupFinishing
         // The setup page stays for its last page ("All set"), also while the core already
         // counts as set up and its answer is still on the way (no Home in between).
         if (inSetup) setupFinishing = true
         viewModelScope.launch {
             val result = post("/api/sync/enter", JSONObject().put("code", code), timeoutMs = 60_000)
             // Not linked, or linked without the account (a university this version does not
-            // know yet, for example): still to be set up.
-            if (inSetup && (!result.ok || setupNeeded)) setupFinishing = false
+            // know yet, for example): still to be set up. An account sent before (and left with
+            // the back arrow) keeps the setup page, which says why the code did not work.
+            if (inSetup && (!result.ok || setupNeeded)) setupFinishing = finishing && !setupNeeded
             pairBusy = false
+            pairResultFor = owner
             pairResult = result
         }
     }

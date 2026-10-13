@@ -604,6 +604,52 @@ func TestWindowsControlEndsTaskAfterLoggingOut(t *testing.T) {
 	}
 }
 
+func TestWindowsStopWaitsForASlowLogout(t *testing.T) {
+	// The daemon answers the disconnect once openconnect logged out, here after longer than a
+	// status request may take: the task must not end before.
+	defer func(d time.Duration) { statusTimeout = d }(statusTimeout)
+	statusTimeout = 50 * time.Millisecond
+	var mu sync.Mutex
+	loggedOut := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path == "/api/disconnect" {
+			time.Sleep(300 * time.Millisecond)
+			mu.Lock()
+			loggedOut = true
+			mu.Unlock()
+			return
+		}
+		fmt.Fprint(w, `{"state": "idle"}`)
+	}))
+	defer srv.Close()
+	port, _ := strconv.Atoi(srv.URL[strings.LastIndex(srv.URL, ":")+1:])
+
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	endedEarly := false
+	r := &recorder{reply: func(c Cmd) (Result, error) {
+		if c.Args[0] == "schtasks" && c.Args[1] == "/End" {
+			mu.Lock()
+			endedEarly = !loggedOut
+			mu.Unlock()
+		}
+		if c.Args[0] == "powershell" {
+			return Result{Stdout: "Ready\r\n"}, nil
+		}
+		return Result{}, nil
+	}}
+	m, _ := manager("windows", r)
+	m.HTTPPort = func() (int, error) { return port, nil }
+	target := m.UnitTargetPath()
+	os.MkdirAll(filepath.Dir(target), 0o700)
+	os.WriteFile(target, []byte("x"), 0o600)
+	if rc, err := m.Control("stop"); rc != 0 || err != nil {
+		t.Fatal(rc, err)
+	}
+	if !r.called("schtasks", "/End", "/TN", "uni-vpn") || endedEarly {
+		t.Fatal("task ended during the logout", r.calls)
+	}
+}
+
 func TestWindowsControlStopsAfterAFailedStep(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	r := &recorder{reply: func(c Cmd) (Result, error) {

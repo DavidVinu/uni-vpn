@@ -18,7 +18,10 @@ struct PairView: View {
 
     var body: some View {
         let pairing = model.status?.object("sync")?.object("pairing")
-        let pairingState = pairing != nil && pairing?.string("code") == shown ? pairing?.string("state") ?? "" : ""
+        // "gone": the code on screen is no longer in the status. The core stopped meanwhile (the
+        // app left the screen while the VPN was off) and took the code back with it.
+        let pairingState = pairing != nil && pairing?.string("code") == shown
+            ? pairing?.string("state") ?? "" : (shown == nil ? "" : "gone")
         Form {
             if done {
                 Section {
@@ -105,15 +108,28 @@ struct PairView: View {
                 error = result.error
             }
         }
-        .onChange(of: pairingState) { _, state in
+        .onChange(of: pairingState) { old, state in
+            // Typing a code: the one shown before is not on screen, only its "done" counts.
+            if typing && state != "done" { return }
             switch state {
-            case "done": done = true
+            case "done":
+                done = true
+                // No earlier error under the check mark; what could not be used here, if anything.
+                error = model.status?.object("sync")?.object("pairing")?.object("error").map { model.strings.t($0) }
             case "expired": error = model.t("sync.expired")
+            // Only after it was there: a status from before the code counts for nothing.
+            case "gone" where old == "waiting": error = model.t("sync.expired")
             case "failed": error = model.t("sync.offline")
             default: break
             }
         }
+        // The phone stays awake while its code shows: locked, the app stops its core (VPN off)
+        // and the code goes while the other device is still typing it.
+        .onChange(of: shown != nil && !done && !typing, initial: true) { _, showing in
+            UIApplication.shared.isIdleTimerDisabled = showing
+        }
         .onDisappear {
+            UIApplication.shared.isIdleTimerDisabled = false
             Task { _ = await API.post("/api/sync/cancel") }
         }
     }

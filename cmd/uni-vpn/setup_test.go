@@ -15,6 +15,8 @@ func TestParseArgs(t *testing.T) {
 		{[]string{"--dry-run", "--no-gui", "--user", "ab123", "--university=ethz", "--no-browser"},
 			map[string]string{"--dry-run": "1", "--no-gui": "1", "--user": "ab123", "--university": "ethz", "--no-browser": "1"}, -1},
 		{[]string{"--dry", "--univ", "bonn"}, map[string]string{"--dry-run": "1", "--university": "bonn"}, -1},
+		// What the Repair button runs (internal/daemon/repair.go).
+		{[]string{"--no-browser", "--repair"}, map[string]string{"--no-browser": "1", "--repair": "1"}, -1},
 		{[]string{"--no"}, nil, 2}, // --no-gui or --no-browser
 		{[]string{"--user"}, nil, 2},
 		{[]string{"--user", "--dry-run"}, nil, 2},

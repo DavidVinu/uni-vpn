@@ -56,9 +56,11 @@ private struct PortTakenView: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        let setupDone = UserDefaults(suiteName: CoreHost.appGroup)?.bool(forKey: "setup_done") ?? false
+        let defaults = UserDefaults(suiteName: CoreHost.appGroup)
+        let setupDone = defaults?.bool(forKey: "setup_done") ?? false
+        let language = defaults?.string(forKey: "language") ?? ""
         VStack(spacing: 24) {
-            Text(Strings.portTaken(Locale.preferredLanguages))
+            Text(Strings.portTaken(language, Locale.preferredLanguages))
                 .multilineTextAlignment(.center)
             if model.vpn.isOn || setupDone {
                 HStack(spacing: 16) {

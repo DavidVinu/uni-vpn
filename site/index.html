@@ -88,27 +88,33 @@ const T = {
   en: {tagline: "Your university's websites from home, as if you were on campus.", download: "Download for {os}",
     others: "Other computers", source: "Source code", imprint: "Imprint", privacy: "Privacy", phone: "For computers. Open this page on your Mac, Windows or Linux computer.",
     mac: "If your Mac says the file cannot be opened: open System Settings, Privacy & Security, and click \"Open Anyway\".",
-    win: "If a blue box appears: click \"More info\", then \"Run anyway\".", arm: "ARM processor"},
+    win: "If a blue box appears: click \"More info\", then \"Run anyway\".", arm: "ARM processor",
+    winarm: "Not available yet for Windows computers with an ARM processor.", help: "More help"},
   de: {tagline: "Die Webseiten deiner Uni von zu Hause, als wärst du auf dem Campus.", download: "Für {os} herunterladen",
     others: "Andere Computer", source: "Quellcode", imprint: "Impressum", privacy: "Datenschutz", phone: "Für Computer. Öffne diese Seite auf deinem Mac, Windows- oder Linux-Computer.",
     mac: "Wenn dein Mac sagt, dass die Datei nicht geöffnet werden kann: Öffne die Systemeinstellungen, Datenschutz & Sicherheit, und klicke auf \"Dennoch öffnen\".",
-    win: "Wenn ein blaues Fenster erscheint: Klicke auf \"Weitere Informationen\", dann auf \"Trotzdem ausführen\".", arm: "ARM-Prozessor"},
+    win: "Wenn ein blaues Fenster erscheint: Klicke auf \"Weitere Informationen\", dann auf \"Trotzdem ausführen\".", arm: "ARM-Prozessor",
+    winarm: "Für Windows-Computer mit ARM-Prozessor noch nicht verfügbar.", help: "Weitere Hilfe"},
   fr: {tagline: "Les sites de votre université depuis chez vous, comme sur le campus.", download: "Télécharger pour {os}",
     others: "Autres ordinateurs", source: "Code source", imprint: "Mentions légales", privacy: "Confidentialité", phone: "Pour ordinateurs. Ouvrez cette page sur votre Mac, PC Windows ou Linux.",
     mac: "Si votre Mac indique que le fichier ne peut pas être ouvert : ouvrez Réglages Système, Confidentialité et sécurité, puis cliquez sur « Ouvrir quand même ».",
-    win: "Si une fenêtre bleue apparaît : cliquez sur « Informations complémentaires », puis sur « Exécuter quand même ».", arm: "Processeur ARM"},
+    win: "Si une fenêtre bleue apparaît : cliquez sur « Informations complémentaires », puis sur « Exécuter quand même ».", arm: "Processeur ARM",
+    winarm: "Pas encore disponible pour les ordinateurs Windows avec processeur ARM.", help: "Plus d’aide"},
   es: {tagline: "Las webs de tu universidad desde casa, como si estuvieras en el campus.", download: "Descargar para {os}",
     others: "Otros ordenadores", source: "Código fuente", imprint: "Aviso legal", privacy: "Privacidad", phone: "Para ordenadores. Abre esta página en tu Mac, PC con Windows o Linux.",
     mac: "Si tu Mac dice que el archivo no se puede abrir: abre Ajustes del Sistema, Privacidad y seguridad, y haz clic en \"Abrir igualmente\".",
-    win: "Si aparece un recuadro azul: haz clic en \"Más información\" y luego en \"Ejecutar de todas formas\".", arm: "Procesador ARM"},
+    win: "Si aparece un recuadro azul: haz clic en \"Más información\" y luego en \"Ejecutar de todas formas\".", arm: "Procesador ARM",
+    winarm: "Aún no está disponible para ordenadores con Windows y procesador ARM.", help: "Más ayuda"},
   "zh-Hans": {tagline: "在家访问学校网站，就像在校园里一样。", download: "下载 {os} 版",
     others: "其他电脑", source: "源代码", imprint: "网站信息", privacy: "隐私", phone: "适用于电脑。请在 Mac、Windows 或 Linux 电脑上打开此页面。",
     mac: "如果 Mac 提示无法打开该文件：打开“系统设置”>“隐私与安全性”，然后点击“仍要打开”。",
-    win: "如果出现蓝色窗口：点击“更多信息”，然后点击“仍要运行”。", arm: "ARM 处理器"},
+    win: "如果出现蓝色窗口：点击“更多信息”，然后点击“仍要运行”。", arm: "ARM 处理器",
+    winarm: "暂不支持使用 ARM 处理器的 Windows 电脑。", help: "更多帮助"},
   "zh-Hant": {tagline: "在家存取學校網站，就像在校園裡一樣。", download: "下載 {os} 版",
     others: "其他電腦", source: "原始碼", imprint: "網站資訊", privacy: "隱私權", phone: "適用於電腦。請在 Mac、Windows 或 Linux 電腦上開啟此頁面。",
     mac: "如果 Mac 提示無法打開該檔案：打開「系統設定」>「隱私權與安全性」，然後按一下「強制打開」。",
-    win: "如果出現藍色視窗：按一下「其他資訊」，然後按一下「仍要執行」。", arm: "ARM 處理器"},
+    win: "如果出現藍色視窗：按一下「其他資訊」，然後按一下「仍要執行」。", arm: "ARM 處理器",
+    winarm: "暫不支援使用 ARM 處理器的 Windows 電腦。", help: "更多說明"},
 };
 function lang() {
   for (const l of navigator.languages || [navigator.language || "en"]) {
@@ -145,7 +151,7 @@ function tip(key) {
   const d = document.createElement("details");
   d.className = "info";
   d.innerHTML = "<summary>" + INFO + "</summary><p class='tip'></p>";
-  d.querySelector("summary").setAttribute("aria-label", "Info");
+  d.querySelector("summary").setAttribute("aria-label", t("help"));
   d.querySelector("p").textContent = t(key);
   return d;
 }
@@ -153,7 +159,14 @@ function tip(key) {
 async function detect() {
   const ua = navigator.userAgent, plat = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "";
   if (/Android|iPhone|iPad|iPod/i.test(ua) || (/Mac/.test(plat) && navigator.maxTouchPoints > 1)) return {kind: "phone"};
-  if (/Win/i.test(plat) || /Windows/.test(ua)) return {kind: "windows"};
+  if (/Win/i.test(plat) || /Windows/.test(ua)) {
+    // The setup is for Intel and AMD only (README); on ARM it would end in its own refusal.
+    try {
+      const h = await navigator.userAgentData.getHighEntropyValues(["architecture"]);
+      if (h.architecture === "arm") return {kind: "winarm"};
+    } catch (e) {}
+    return {kind: "windows"};
+  }
   if (/Mac/i.test(plat) || /Mac OS X/.test(ua)) return {kind: "mac"};
   if (/Linux|X11|CrOS/i.test(plat + ua)) {
     let arm = /aarch64|arm/i.test(plat + ua);
@@ -177,8 +190,8 @@ detect().then(d => {
   shown.forEach(f => main.appendChild(button(f)));
   if (d.kind === "mac") note.appendChild(tip("mac"));
   if (d.kind === "windows") note.appendChild(tip("win"));
-  if (d.kind === "phone") { note.textContent = t("phone"); }
-  if (!shown.length && d.kind !== "phone") document.querySelector(".others h2").hidden = true;
+  if (d.kind === "phone" || d.kind === "winarm") { note.textContent = t(d.kind); }
+  if (!shown.length && d.kind !== "phone" && d.kind !== "winarm") document.querySelector(".others h2").hidden = true;
   const list = document.getElementById("list");
   ALL.filter(f => !shown.includes(f)).forEach(f => {
     const a = document.createElement("a");

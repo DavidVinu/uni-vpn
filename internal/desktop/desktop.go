@@ -294,13 +294,24 @@ func (d *Desktop) LinuxIconPath() string {
 // Install sets up the app and its login item. True if the native app is in place, false if
 // the app entry only opens the browser. created records each file it makes.
 func (d *Desktop) Install(port int, dry bool, created func(string)) bool {
+	return d.install(port, dry, false, created)
+}
+
+// Repair is Install for the app's Repair button: the entries and the login item again, but a
+// running app and the window the user clicked Repair in stay open.
+func (d *Desktop) Repair(port int, created func(string)) bool {
+	return d.install(port, false, true, created)
+}
+
+// install: keep leaves a running app as it is.
+func (d *Desktop) install(port int, dry, keep bool, created func(string)) bool {
 	switch {
 	case d.macOS():
-		return d.installMacOS(port, dry, created)
+		return d.installMacOS(port, dry, keep, created)
 	case d.windows():
-		return d.installWindows(port, dry, created)
+		return d.installWindows(port, dry, keep, created)
 	}
-	return d.installLinux(port, dry, created)
+	return d.installLinux(port, dry, keep, created)
 }
 
 // browserEntry is the fallback: an app entry that opens the page in the default browser.
@@ -387,7 +398,7 @@ func (d *Desktop) builtApp(port int) string {
 	return app
 }
 
-func (d *Desktop) installMacOS(port int, dry bool, created func(string)) bool {
+func (d *Desktop) installMacOS(port int, dry, keep bool, created func(string)) bool {
 	app := d.UpdatedMacApp()
 	if app == "" {
 		app = d.PackagedApp()
@@ -405,16 +416,20 @@ func (d *Desktop) installMacOS(port int, dry bool, created func(string)) bool {
 		d.say("would start %s at login (%s)", app, d.LoginPath())
 		return true
 	}
-	d.stopRunning()
+	if !keep {
+		d.stopRunning()
+	}
 	if d.PackagedApp() != "" {
 		for _, legacy := range d.LegacyPaths() {
 			os.RemoveAll(legacy)
 		}
 	}
-	return d.registerMacOS(app, created)
+	return d.registerMacOS(app, !keep, created)
 }
 
-func (d *Desktop) registerMacOS(app string, created func(string)) bool {
+// registerMacOS writes the login item and loads it; restart first unloads a loaded one, which
+// ends the running menu bar item.
+func (d *Desktop) registerMacOS(app string, restart bool, created func(string)) bool {
 	login := d.LoginPath()
 	d.quiet(lsregister, "-f", app)
 	d.say("App ready: %s", app)
@@ -428,7 +443,10 @@ func (d *Desktop) registerMacOS(app string, created func(string)) bool {
 	}
 	created(login)
 	domain := fmt.Sprintf("gui/%d", d.UID)
-	d.quiet("launchctl", "bootout", domain, login)
+	if restart {
+		d.quiet("launchctl", "bootout", domain, login)
+	}
+	// Without restart a loaded one stays (bootstrap fails), a missing one is loaded.
 	d.quiet("launchctl", "bootstrap", domain, login)
 	d.say("Menu bar item starts at login")
 	return true
@@ -472,7 +490,7 @@ func winDir(path string) string {
 	return path[:i]
 }
 
-func (d *Desktop) installWindows(port int, dry bool, created func(string)) bool {
+func (d *Desktop) installWindows(port int, dry, keep bool, created func(string)) bool {
 	exe := d.WindowsExe()
 	// Shipped by the Windows installer (PrebuiltMarker) or the release files.
 	ready := isFile(exe)
@@ -487,8 +505,11 @@ func (d *Desktop) installWindows(port int, dry bool, created func(string)) bool 
 		d.printf("   The app window is not installed, the app opens in the browser for now")
 		return d.browserEntry(port, dry, created)
 	}
-	// Restart the running copy.
-	d.stopRunning()
+	if !keep {
+		// Restart the running copy.
+		d.stopRunning()
+	}
+	// With keep a running copy stays; the login item's start then quits at once (one copy).
 	return d.windowsEntries(port, created)
 }
 
@@ -606,7 +627,7 @@ func (d *Desktop) linuxPython() string {
 	return d.GTKPython()
 }
 
-func (d *Desktop) installLinux(port int, dry bool, created func(string)) bool {
+func (d *Desktop) installLinux(port int, dry, keep bool, created func(string)) bool {
 	python := d.linuxPython()
 	if python == "" {
 		if !dry {
@@ -639,14 +660,24 @@ func (d *Desktop) installLinux(port int, dry bool, created func(string)) bool {
 	created(path)
 	d.say("App entry created: %s", path)
 	d.quiet("update-desktop-database", filepath.Dir(path))
-	d.stopRunning()
+	running := keep && d.Running != nil && len(d.Running(d.linuxScript())) > 0
+	if !keep {
+		d.stopRunning()
+	}
 	if d.HasIndicator(python) {
 		login := d.LoginPath()
 		os.MkdirAll(filepath.Dir(login), 0o777)
 		if os.WriteFile(login, []byte(d.DesktopEntry(python, port, true)), 0o666) == nil {
 			created(login)
 		}
-		d.Spawn([]string{python, d.linuxScript(), "--port", strconv.Itoa(port), "--hidden"})
+		command := []string{python, d.linuxScript(), "--port", strconv.Itoa(port), "--hidden"}
+		if keep {
+			// Repair runs in a systemd-run unit of its own, which systemd ends with its processes.
+			command = d.ownScope(command)
+		}
+		if !running {
+			d.Spawn(command)
+		}
 		d.say("Panel icon starts at login")
 	}
 	return true
@@ -757,7 +788,7 @@ func (d *Desktop) RestartApp(port int) bool {
 			return false
 		}
 		d.stopRunning()
-		return d.registerMacOS(d.UpdatedMacApp(), func(string) {})
+		return d.registerMacOS(d.UpdatedMacApp(), true, func(string) {})
 	case d.windows():
 		if !exists(d.LoginPath()) {
 			return false
@@ -810,14 +841,19 @@ func (d *Desktop) restartLinux(port int) bool {
 	for i := 0; i < 50 && len(d.Running(script)) > 0; i++ {
 		time.Sleep(100 * time.Millisecond)
 	}
-	command := []string{python, script, "--port", strconv.Itoa(port), "--hidden"}
 	// Not in the service's cgroup, which systemd ends with the service.
+	command := d.ownScope([]string{python, script, "--port", strconv.Itoa(port), "--hidden"})
+	return d.SpawnEnv(command, old.Env)
+}
+
+// ownScope runs command in a scope of its own when this program runs in a systemd unit.
+func (d *Desktop) ownScope(command []string) []string {
 	if d.Getenv("INVOCATION_ID") != "" {
 		if run, err := exec.LookPath("systemd-run"); err == nil {
-			command = append([]string{run, "--user", "--scope", "--quiet", "--collect"}, command...)
+			return append([]string{run, "--user", "--scope", "--quiet", "--collect"}, command...)
 		}
 	}
-	return d.SpawnEnv(command, old.Env)
+	return command
 }
 
 // Running lists the processes whose command line has the argument arg; Linux only.

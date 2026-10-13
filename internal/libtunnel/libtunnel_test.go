@@ -175,6 +175,45 @@ func TestTunnelEndsByItself(t *testing.T) {
 	}
 }
 
+type ipv6Session struct{ *fakeSession }
+
+func (ipv6Session) IPInfo() (netip.Addr, []netip.Addr, int) {
+	return netip.MustParseAddr("fd00::2"), nil, 1400
+}
+
+// The daemon reads an exit code 1 without a classified line as a refused password: a failure
+// on this side of the tunnel must not end with it.
+func TestLocalFailureIsNoRefusedLogin(t *testing.T) {
+	cases := map[string]func(tun *Tunnel) (Session, error){
+		"no IPv4 address": func(*Tunnel) (Session, error) { return ipv6Session{newSession()}, nil },
+		"SOCKS port taken": func(tun *Tunnel) (Session, error) {
+			ln, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(tun.Port()))
+			if err != nil {
+				t.Error(err)
+				return nil, err
+			}
+			t.Cleanup(func() { ln.Close() })
+			return newSession(), nil
+		},
+		"library error": func(*Tunnel) (Session, error) { return nil, errors.New("no memory") },
+	}
+	for name, connect := range cases {
+		var tun *Tunnel
+		tun = newTunnel(tunnel.Config{Host: "vpn.example"},
+			&fakeEngine{connect: func(octunnel.Options) (Session, error) { return connect(tun) }})
+		if err := tun.Start([]byte("pw"), ""); err != nil {
+			t.Fatal(err)
+		}
+		exited(t, tun)
+		if _, ok := tun.Classification(); ok {
+			t.Fatal(name, "classified")
+		}
+		if code, ok := tun.ReturnCode(); !ok || code != exitLocal {
+			t.Fatal(name, code)
+		}
+	}
+}
+
 func TestStopDuringLogin(t *testing.T) {
 	tun := newTunnel(tunnel.Config{Host: "vpn.example"},
 		&fakeEngine{connect: func(o octunnel.Options) (Session, error) {

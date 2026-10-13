@@ -87,11 +87,11 @@ class CatalogTests(unittest.TestCase):
                 self.assertGreater(len(used), 50)
 
     def test_phones_never_speak_of_the_computer(self):
-        # The phones show phone.<key> where there is one (Strings.kt, Strings.swift). A locked
-        # keyring is a computer's: the phones keep their secrets in the app's own file.
+        # The phones show phone.<key> where there is one (Strings.kt, Strings.swift). Their
+        # secrets file failing to save shows the keyring's message too (keyringFailed).
         source = i18n.catalog("en")
         missing = [key for key, text in source.items() if key.startswith(("msg.", "enroll.")) and "computer" in text
-                   and key != "msg.keyring_locked" and "phone." + key not in source]
+                   and "phone." + key not in source]
         self.assertEqual(missing, [])
 
     def test_languages_are_named_in_their_own_language(self):

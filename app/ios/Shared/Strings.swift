@@ -114,8 +114,9 @@ final class Strings {
     }
 
     /// Another app holds the core's port, so there is no core to ask for its texts: this one
-    /// comes with the app (the core's phone.msg.port_in_use, like Android's port_in_use).
-    static func portTaken(_ preferred: [String]) -> String {
+    /// comes with the app (the core's phone.msg.port_in_use, like Android's port_in_use), in the
+    /// language chosen in Settings when the core last said ("" for the phone's).
+    static func portTaken(_ setting: String, _ preferred: [String]) -> String {
         let texts = [
             "en": "Another app is in the way. Uni VPN keeps trying. If this stays, restart the phone.",
             "de": "Eine andere App ist im Weg. Uni VPN versucht es weiter. Bleibt es so, starte das Handy neu.",
@@ -124,6 +125,7 @@ final class Strings {
             "zh-Hans": "另一个应用造成了干扰。Uni VPN 会继续尝试。如果问题持续，请重启手机。",
             "zh-Hant": "另一個 App 造成了干擾。Uni VPN 會繼續嘗試。如果問題持續，請重新啟動手機。",
         ]
-        return texts[systemLanguage(preferred, codes: Array(texts.keys))] ?? texts["en", default: ""]
+        let lang = texts[setting] != nil ? setting : systemLanguage(preferred, codes: Array(texts.keys))
+        return texts[lang] ?? texts["en", default: ""]
     }
 }

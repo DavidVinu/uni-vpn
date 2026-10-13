@@ -569,6 +569,46 @@ func TestGUISetup(t *testing.T) {
 	}
 }
 
+// recordingApp stands in for desktop.Desktop where only the calls count.
+type recordingApp struct{ calls []string }
+
+func (a *recordingApp) Install(port int, dry bool, created func(string)) bool {
+	a.calls = append(a.calls, "install")
+	return true
+}
+
+func (a *recordingApp) Repair(port int, created func(string)) bool {
+	a.calls = append(a.calls, "repair")
+	return true
+}
+
+func (a *recordingApp) OpenApp(port int, page string) bool {
+	a.calls = append(a.calls, "open")
+	return false
+}
+
+func (a *recordingApp) Uninstall() {}
+
+// The Repair button runs setup from the app window: that window stays open, the installers
+// still restart the app.
+func TestRepairLeavesTheAppWindowOpen(t *testing.T) {
+	for _, tc := range []struct {
+		args Args
+		want []string
+	}{
+		{Args{NoBrowser: true}, []string{"install"}},
+		{Args{NoBrowser: true, Repair: true}, []string{"repair"}},
+	} {
+		h := newHarness(t)
+		h.s.HasDesktop = func() bool { return true }
+		app := &recordingApp{}
+		h.s.App = app
+		if code := h.setup(tc.args); code != 0 || !reflect.DeepEqual(app.calls, tc.want) {
+			t.Fatal(tc.args, code, app.calls, h.out.String())
+		}
+	}
+}
+
 func TestNoGUIFlagAsksInTheTerminal(t *testing.T) {
 	h := newHarness(t)
 	h.s.HasDesktop = func() bool { return true }

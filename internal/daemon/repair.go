@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sync"
 
 	"github.com/DavidVinu/uni-vpn/internal/platform"
@@ -23,9 +24,13 @@ import (
 // RepoRoot is the installation the installer scripts live in: the parent of BinDir.
 func RepoRoot() string { return filepath.Dir(BinDir()) }
 
+// repairFlag tells this program's setup that the Repair button runs it: the app window the
+// user clicked in stays open.
+const repairFlag = "--repair"
+
 // RepairCommand is the installer's command line. An installation without the installer
-// scripts (the Go core on its own) runs this program's "setup --no-browser" instead, which
-// registers the service and the app again and restarts the service.
+// scripts (the Go core on its own) runs this program's "setup --no-browser --repair" instead,
+// which registers the service and the app again and restarts the service.
 func RepairCommand() []string {
 	root := RepoRoot()
 	self := func() []string {
@@ -33,7 +38,7 @@ func RepairCommand() []string {
 		if err != nil {
 			exe = filepath.Join(BinDir(), "uni-vpn-core")
 		}
-		return []string{exe, "setup", "--no-browser"}
+		return []string{exe, "setup", "--no-browser", repairFlag}
 	}
 	if platform.IsWindows {
 		script := filepath.Join(root, "install.ps1")
@@ -105,7 +110,8 @@ func StartRepairProcess() (Process, error) {
 		cmd.Dir = RepoRoot()
 		return cmd
 	}
-	cmd, err := startRepair(newCmd)
+	// Only Windows tells the two apart; its install.ps1 takes -Repair.
+	cmd, err := startRepair(newCmd, slices.Contains(argv, repairFlag))
 	if err != nil {
 		return nil, err
 	}

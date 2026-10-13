@@ -212,6 +212,7 @@
   "phone.msg.repairing": "Reparando.",
   "phone.msg.repair_failed": "La reparación no terminó. Toca Reparar para intentarlo de nuevo o reinicia el teléfono.",
   "phone.msg.not_running": "Uni VPN no se está ejecutando. Cierra la aplicación y vuelve a abrirla.",
+  "phone.msg.keyring_locked": "No se pudo guardar tu contraseña en este teléfono. Libera espacio de almacenamiento y vuelve a intentarlo.",
   "phone.msg.hostscan_required": "Tu universidad comprueba el dispositivo antes de conectarse. Uni VPN aún no puede hacerlo.",
   "phone.enroll.clock": "Comprueba que la hora del teléfono es correcta y vuelve a intentarlo con un código nuevo.",
   "phone.camera_use": "Uni VPN usa la cámara para escanear códigos QR.",
