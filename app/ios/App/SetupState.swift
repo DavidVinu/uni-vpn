@@ -55,6 +55,9 @@ final class SetupState {
 
     /// For the bindings below; set by prepare.
     @ObservationIgnored private weak var model: AppModel?
+    /// The gateway check asked last: an answer for an earlier address or group no longer counts
+    /// (the desktop page's detectSeq).
+    @ObservationIgnored private var detectSeq = 0
 
     var uni: University? { universities.first { $0.id == uniId } }
 
@@ -79,6 +82,10 @@ final class SetupState {
             otherMfa = ""
             groups = []
             keptGroup = false
+            // A check of the old address still on its way (a typo fixed meanwhile) is dropped:
+            // Next asks the new one.
+            detectSeq += 1
+            detecting = false
         }
     }
 
@@ -268,28 +275,39 @@ final class SetupState {
         }
     }
 
-    /// Asks the gateway of a VPN address that is not listed what it needs.
+    /// Asks the gateway of a VPN address that is not listed what it needs, as the desktop page
+    /// does: whatever the check found, the second factor can be chosen, so a gateway that does
+    /// not answer can still be set up; not for a group that signs in on a web page.
     func detect(_ model: AppModel, group picked: String) async {
+        detectSeq += 1
+        let seq = detectSeq
         detecting = true
         error = nil
         let result = await model.post("/api/detect", ["host": host.trimmingCharacters(in: .whitespacesAndNewlines), "group": picked], timeout: 30)
+        // The address or the group changed meanwhile: this answer is for the old one.
+        guard seq == detectSeq else { return }
         detecting = false
         guard result.ok, let d = result.json else {
             error = result.error
+            if otherMfa.isEmpty { otherMfa = "totp_field" }
             return
         }
         // The core always sends "error", empty when the gateway answered (as the page reads it).
         if !d.string("error").isEmpty {
             error = model.strings.message(d.string("error"), d.object("error_t"))
-            return
-        }
-        if d.bool("saml") {
-            error = model.t("setup.saml")
+            if otherMfa.isEmpty { otherMfa = "totp_field" }
             return
         }
         keptGroup = false
         group = d.string("group")
         groups = d.strings("groups")
+        if d.bool("saml") {
+            // No way on with this group (Stanford's default): another one may do without a web
+            // page, and Next asks again.
+            otherMfa = ""
+            error = model.t("setup.saml")
+            return
+        }
         let suggested = d.object("suggestion")?.string("mfa") ?? ""
         otherMfa = suggested.isEmpty ? "totp_field" : suggested
     }

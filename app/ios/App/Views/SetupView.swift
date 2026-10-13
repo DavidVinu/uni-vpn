@@ -235,12 +235,7 @@ private struct UniversityPage: View {
         } else if setup.isOther && setup.host.trimmingCharacters(in: .whitespaces).isEmpty {
             setup.error = model.t("setup.enter_address")
         } else if setup.isOther && setup.otherMfa.isEmpty {
-            Task {
-                await setup.detect(model, group: "")
-                // Like the desktop page: whatever the check found, the choice shows, so a
-                // gateway that does not answer can still be set up.
-                if setup.otherMfa.isEmpty { setup.otherMfa = "totp_field" }
-            }
+            Task { await setup.detect(model, group: "") }
         } else {
             setup.go(.signIn)
         }

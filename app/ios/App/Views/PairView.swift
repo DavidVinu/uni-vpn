@@ -63,9 +63,11 @@ struct PairView: View {
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                                 .multilineTextAlignment(.center)
-                        } else if error == nil {
+                        } else if error == nil && !busy {
                             ProgressView()
                         }
+                        // A scanned code on its way: the scanner closed, nothing else shows it.
+                        if busy { ProgressView() }
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
@@ -85,6 +87,7 @@ struct PairView: View {
                         Button(model.t("sync.new_code")) { attempt += 1 }
                     }
                 }
+                .disabled(busy)
             }
         }
         .navigationTitle(model.t(mode == "offer" ? "sync.add" : "sync.use_other"))
@@ -136,10 +139,15 @@ struct PairView: View {
     }
 
     private func enter(_ code: String) async {
+        // One code at a time: scanned again while the first is on its way, the code would
+        // already be used up ("unknown").
+        guard !busy else { return }
         busy = true
         let before = others()
         let result = await model.post("/api/sync/enter", ["code": code], timeout: 60)
         busy = false
+        // Linked meanwhile through the code on screen: its check mark stays as it is.
+        if done { return }
         // No answer in time (a slow relay), but a device syncs with this phone that did not before
         // (a code sent to another device starts a group of this phone alone; joining another
         // group can keep the count): linked all the same, not "not running".
