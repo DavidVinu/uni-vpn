@@ -50,6 +50,9 @@ var (
 	// ErrNotKnown: Local.Apply's answer for a setting of a newer version. It is not taken over
 	// and not noted as synced: after the update the device takes the group's value.
 	ErrNotKnown = errors.New("a setting of a newer version")
+	// ErrBusy: Local.Snapshot's answer while its settings are half changed (an account being
+	// set up). The round waits for the Notify that follows; it is no failure to show.
+	ErrBusy = errors.New("the settings are being changed")
 )
 
 // Options configure an Engine; zero values are the defaults.
@@ -601,7 +604,9 @@ func (e *Engine) Sync(ctx context.Context) error {
 	e.mu.Unlock()
 	err := e.syncLocked(ctx)
 	e.mu.Lock()
-	e.lastError = err
+	if !errors.Is(err, ErrBusy) {
+		e.lastError = err
+	}
 	e.mu.Unlock()
 	return err
 }

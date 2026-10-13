@@ -104,6 +104,12 @@ func (l syncLocal) Snapshot(ctx context.Context, withSecrets bool) (map[string]j
 		return out, nil
 	}
 	d.mu.Lock()
+	if d.switching {
+		// completeSetup is between two accounts (the new user with the old university): its
+		// Notify asks for the round again.
+		d.mu.Unlock()
+		return nil, devsync.ErrBusy
+	}
 	cfg := *d.cfg
 	path := d.configPath
 	d.mu.Unlock()
