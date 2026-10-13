@@ -107,6 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         buildMenus()
         stateItem.isEnabled = false
         toggleItem.target = self
+        menu.autoenablesItems = false  // else isEnabled does nothing: Connect while it cannot
         menu.delegate = self
         statusItem.menu = menu
         render()
