@@ -185,6 +185,7 @@ type Daemon struct {
 	secretsGen    int
 	switching     bool // completeSetup: the new account's secrets go in before its gateway
 	accountGen    int
+	setupMu       sync.Mutex // one completeSetup at a time: switching and the user it puts back are its own
 	disconnects   int
 	changed       chan struct{}
 	wake          chan struct{}
@@ -706,6 +707,8 @@ func (d *Daemon) CompleteSetup(user, password, token, university string, overrid
 
 // completeSetup: synced is an account from another device (syncLocal.Apply).
 func (d *Daemon) completeSetup(user, password, token, university string, overrides []config.Setting, synced bool) error {
+	d.setupMu.Lock()
+	defer d.setupMu.Unlock()
 	user = httpapi.PyStrip(user)
 	if !config.ValidUser(user) {
 		return unis.TextError("user", i18n.T("setup.invalid_user"))
@@ -813,6 +816,7 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 		d.mu.Lock()
 		d.cfg.User = previousUser
 		d.switching = false
+		d.accountGen++ // an attempt may have read the new user's secrets meanwhile
 		d.wakeUp()
 		d.mu.Unlock()
 		var ce *config.ConfigError
