@@ -101,6 +101,8 @@ final class SetupState {
         get { group }
         set {
             group = newValue
+            // Not the last group's second factor: a check cut short leaves Next asking again.
+            otherMfa = ""
             guard let model else { return }
             Task { await detect(model, group: newValue) }
         }

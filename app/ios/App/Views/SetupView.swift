@@ -244,7 +244,7 @@ private struct UniversityPage: View {
         } else if setup.isOther && setup.host.trimmingCharacters(in: .whitespaces).isEmpty {
             setup.error = model.t("setup.enter_address")
         } else if setup.isOther && setup.otherMfa.isEmpty {
-            Task { await setup.detect(model, group: "") }
+            Task { await setup.detect(model, group: setup.showsGroups ? setup.group : "") }
         } else {
             setup.go(.signIn)
         }

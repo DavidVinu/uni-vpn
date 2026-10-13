@@ -132,6 +132,8 @@ fun PairScreen(model: AppModel, mode: String, activity: MainActivity) {
     LaunchedEffect(model.pairResult) {
         val result = model.pairResult?.takeIf { model.pairResultFor == pairOwner } ?: return@LaunchedEffect
         model.pairResult = null
+        // Linked already (the other device took this one's code): the check mark stays.
+        if (done) return@LaunchedEffect
         // Linked although the answer did not come (AppModel.pairLinked): the check mark all the same.
         if (!result.ok && !model.pairLinked) {
             error = result.error
@@ -174,7 +176,7 @@ fun PairScreen(model: AppModel, mode: String, activity: MainActivity) {
                 else -> {
                     val code = shown
                     if (code == null) {
-                        if (error == null) CircularProgressIndicator()
+                        if (error == null && !model.pairBusy) CircularProgressIndicator()
                     } else {
                         val qr = remember(code) { qrBitmap("UNIVPN:" + code.replace("-", "")) }
                         Image(
@@ -190,13 +192,15 @@ fun PairScreen(model: AppModel, mode: String, activity: MainActivity) {
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    TextButton(onClick = {
+                    // A scanned code on its way.
+                    if (model.pairBusy) CircularProgressIndicator()
+                    TextButton(enabled = !model.pairBusy, onClick = {
                         scanPairing(context, model, pairOwner) { error = it }
                     }) {
                         Icon(Icons.Outlined.QrCodeScanner, contentDescription = null)
                         Text("  " + model.t("phone.scan_code"))
                     }
-                    TextButton(onClick = { typing = true; error = null }) { Text(model.t("sync.enter")) }
+                    TextButton(enabled = !model.pairBusy, onClick = { typing = true; error = null }) { Text(model.t("sync.enter")) }
                 }
             }
             ErrorText(error)
