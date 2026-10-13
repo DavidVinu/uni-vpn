@@ -247,6 +247,31 @@ func TestIgnoreSigtermIsKilled(t *testing.T) {
 	}
 }
 
+// Logout, an update's restart or Repair stop the service while openconnect takes a moment to
+// sign off. A Connect (or a new password) then must not sign in again with an openconnect that
+// outlives the service.
+func TestConnectDuringShutdownStartsNoTunnel(t *testing.T) {
+	h := newHarness(t)
+	t.Setenv("FAKE_MODE", "ignore_sigterm") // killed after stop_grace (1 s)
+	d := h.start(nil)
+	c := h.client()
+	echo(t, c, "x")
+	waitState(t, d, Connected)
+	before := len(h.pwLines())
+	go d.Stop()
+	time.Sleep(300 * time.Millisecond) // Run is stopping the tunnel
+	d.RequestConnect()
+	select {
+	case <-h.done:
+	case <-time.After(15 * time.Second):
+		t.Fatal("Run did not end")
+	}
+	time.Sleep(1500 * time.Millisecond)
+	if after := len(h.pwLines()); after != before {
+		t.Fatalf("sign-ins %d -> %d: an openconnect started while the service stopped", before, after)
+	}
+}
+
 // --- Failures --------------------------------------------------------------------
 
 func TestAuthFailNoRetryUntilExplicitConnect(t *testing.T) {

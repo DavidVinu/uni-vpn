@@ -1238,8 +1238,8 @@ func (d *Daemon) acquire(ctx context.Context) (int, bool) {
 // ensureLoop starts the connect loop unless it runs; mu must be held. The loop takes mu
 // before its first step, like a task that starts once the caller yields.
 func (d *Daemon) ensureLoop() {
-	if d.loopRunning {
-		return
+	if d.loopRunning || d.stopping() {
+		return // nothing connects once the service stops: Run stops the tunnel and is gone
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
