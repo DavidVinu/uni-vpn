@@ -464,12 +464,13 @@ func (e *Engine) Defaulted(keys ...string) {
 			}
 		}
 	}
-	k := e.keys
 	e.mu.Unlock()
 	st := e.loadState()
 	if len(st.Hashes) == 0 { // nothing known (sync.json lost): only what was typed is a change already
 		return
 	}
+	// The keyring just took the password: keys it did not give at start come now.
+	k, _ := e.recheck(context.Background())
 	var snap map[string]json.RawMessage
 	if k != nil {
 		snap, _ = e.opts.Local.Snapshot(context.Background(), false)
