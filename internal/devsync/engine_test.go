@@ -2282,6 +2282,95 @@ func TestUnreadableSyncStateAfterAFailedFirstWrite(t *testing.T) {
 	}
 }
 
+// sync.json is gone and the keyring did not give the sync keys when the desktop started (locked,
+// its prompt dismissed): the user sets up another account by hand. The keys come while it is
+// offline, and a website added next goes out with the account: the account typed goes out
+// with the password typed with it, and an account set up on the laptop after it still wins.
+func TestAccountTypedBeforeTheKeysCouldBeRead(t *testing.T) {
+	for _, later := range []bool{false, true} {
+		t.Run(fmt.Sprintf("later elsewhere %v", later), func(t *testing.T) {
+			ctx := context.Background()
+			relay, devices := lossyDevices(t, "Desktop")
+			laptop, desktop := devices[0], devices[1]
+			os.Remove(desktop.opts.StatePath)
+			os.Remove(desktop.opts.StatePath + ".pending")
+			local := setUpLaptop()
+			typed := map[string]any{"university": "heidelberg", "user": "cd456", "overrides": map[string]any{}}
+			local.set(KeyAccount, typed)
+			local.set(KeyPassword, "typed")
+			store := &keyringStore{misses: 1}
+			store.value = desktop.store.value
+			opts := desktop.opts
+			opts.Local, opts.Store = local, store
+			again := device{New(opts), local, &store.memStore}
+			again.Load(ctx)                                // the keyring does not answer at start
+			again.Notify(KeyAccount, KeyPassword, KeyTOTP) // as the daemon's setup does
+			wantAccount, wantPassword := string(mustJSON(typed)), `"typed"`
+			if later {
+				other := map[string]any{"university": "heidelberg", "user": "ef789", "overrides": map[string]any{}}
+				laptop.local.set(KeyAccount, other)
+				laptop.local.set(KeyPassword, "laptop")
+				laptop.Notify(KeyAccount, KeyPassword, KeyTOTP)
+				syncAll(t, laptop)
+				wantAccount, wantPassword = string(mustJSON(other)), `"laptop"`
+			}
+			relay.rng, relay.odds = rand.New(rand.NewPCG(1, 2)), 1
+			if err := again.Refresh(ctx); err == nil { // Settings opens: the keyring answers now
+				t.Fatal("want the round to fail offline")
+			}
+			relay.rng = nil
+			local.setDomains(append(local.getDomains(), "lsf.uni-heidelberg.de")...)
+			again.Notify()
+			syncAll(t, again, laptop, again)
+			for _, d := range []device{laptop, again} {
+				if d.local.get(KeyAccount) != wantAccount || d.local.get(KeyPassword) != wantPassword {
+					t.Errorf("%s: account %s, password %s; want %s and %s", d.opts.Name,
+						d.local.get(KeyAccount), d.local.get(KeyPassword), wantAccount, wantPassword)
+				}
+			}
+		})
+	}
+}
+
+// The desktop chose fr offline, then its round took the laptop's later de over but could not
+// write. The laptop chooses es; sync.json is lost (a crash left it unreadable) after the desktop
+// switched automatic updates off. The de taken over is no change made on the desktop: the
+// laptop's later es stays.
+func TestTakenOverValueIsNotSentAsOwnAfterSyncStateWasLost(t *testing.T) {
+	ctx := context.Background()
+	relay, devices := lossyDevices(t, "Desktop")
+	laptop, desktop := devices[0], devices[1]
+	syncAll(t, desktop, laptop, desktop)
+	desktop.local.set(KeyLanguage, "fr")
+	desktop.Notify()
+	laptop.local.set(KeyLanguage, "de")
+	laptop.Notify()
+	syncAll(t, laptop)
+	desktop.local.setDomains(append(desktop.local.getDomains(), "lsf.uni-heidelberg.de")...)
+	desktop.Notify()
+	relay.drop.Store(true)
+	if err := desktop.Sync(ctx); err == nil || desktop.local.get(KeyLanguage) != `"de"` {
+		t.Fatalf("want de taken over and the write failed: %v %s", err, desktop.local.get(KeyLanguage))
+	}
+	laptop.local.set(KeyLanguage, "es")
+	laptop.Notify()
+	syncAll(t, laptop)
+	desktop.local.set(KeyAutoUpdate, false)
+	desktop.Notify()
+	if err := os.WriteFile(desktop.opts.StatePath, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	again := device{New(desktop.opts), desktop.local, desktop.store}
+	again.Load(ctx)
+	syncAll(t, again, laptop, again)
+	for _, d := range []device{laptop, again} {
+		if d.local.get(KeyLanguage) != `"es"` || d.local.get(KeyAutoUpdate) != "false" {
+			t.Errorf("%s: language %s, automatic updates %s; want the laptop's later es, the desktop's off", d.opts.Name,
+				d.local.get(KeyLanguage), d.local.get(KeyAutoUpdate))
+		}
+	}
+}
+
 // "Add a device": the relay takes the new group but its answer gets lost. The language chosen
 // next stays, and reaches the device linked later.
 func TestLanguageChosenAfterALostFirstWrite(t *testing.T) {

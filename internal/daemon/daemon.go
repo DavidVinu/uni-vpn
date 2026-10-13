@@ -782,6 +782,11 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 			values := append([]config.Setting{{Key: "user", Value: user}, {Key: "university", Value: university}}, checked...)
 			return config.SetValues(path, values)
 		}
+		if !synced {
+			// Its language and automatic updates are defaults, not chosen here (the app was
+			// installed again): the group's stay.
+			d.sync.Defaulted(devsync.KeyLanguage, devsync.KeyAutoUpdate)
+		}
 		if err := config.WriteInitial(path, user, university, checked); err != nil {
 			return err
 		}
