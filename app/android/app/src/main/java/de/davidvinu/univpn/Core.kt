@@ -13,6 +13,7 @@ import androidx.core.content.edit
 import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
+import java.net.Proxy
 import java.net.URL
 import java.security.KeyStore
 import java.security.SecureRandom
@@ -220,7 +221,8 @@ class Core(private val context: Context) {
             return Reply(0, null, "the core is not ready")
         }
         return try {
-            val conn = URL("http://127.0.0.1:$port$path").openConnection() as HttpURLConnection
+            // Straight to the core: a Wi-Fi proxy with an empty bypass list would get 127.0.0.1 too.
+            val conn = URL("http://127.0.0.1:$port$path").openConnection(Proxy.NO_PROXY) as HttpURLConnection
             conn.requestMethod = method
             conn.connectTimeout = 2_000
             conn.readTimeout = timeoutMs
