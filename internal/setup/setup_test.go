@@ -19,6 +19,7 @@ import (
 	"github.com/DavidVinu/uni-vpn/internal/messages"
 	"github.com/DavidVinu/uni-vpn/internal/platform"
 	"github.com/DavidVinu/uni-vpn/internal/service"
+	"github.com/DavidVinu/uni-vpn/internal/updater"
 )
 
 // The tests are a port of tests/test_setup.py: a temporary HOME, a fake service, keyring and
@@ -917,6 +918,24 @@ func TestRemovesTheGetShCopy(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Dir(app)); err == nil {
 		t.Fatal("copy left behind")
+	}
+}
+
+// An update unpacked next to the app that waited for the VPN to go idle goes too: the
+// uninstall ends the service, which would have installed or removed it.
+func TestUninstallRemovesAWaitingUpdate(t *testing.T) {
+	posixOnly(t)
+	h := newHarness(t)
+	h.setup(Args{})
+	app := getShCopy(t, h, false)
+	staged := filepath.Join(filepath.Dir(app), updater.StagePrefix+"123")
+	os.MkdirAll(filepath.Join(staged, "bin"), 0o755)
+	os.WriteFile(filepath.Join(staged, "bin", "uni-vpn-core"), []byte(""), 0o755)
+	if code := h.uninstall(Args{}); code != 0 {
+		t.Fatal(code, h.out.String())
+	}
+	if _, err := os.Stat(staged); err == nil {
+		t.Fatal("the waiting update is left behind")
 	}
 }
 

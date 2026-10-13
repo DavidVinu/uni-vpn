@@ -855,7 +855,8 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 		d.startEnrollLocked(code, profile.MFAPortalURL)
 	}
 	d.mu.Unlock()
-	if previousUser != "" && previousUser != user {
+	// Only case changed: Windows' Credential Manager reads the new entries as the old ones.
+	if previousUser != "" && !strings.EqualFold(previousUser, user) {
 		// Only this account's secrets are used, and an uninstall finds only those (also after
 		// a mistyped ID).
 		d.opts.SecretsDeleter(previousUser)

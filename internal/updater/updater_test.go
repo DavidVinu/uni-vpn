@@ -154,7 +154,7 @@ func read(t *testing.T, path string) string {
 
 // leftovers are staging folders next to the root.
 func (f *fixture) leftovers() []string {
-	matches, _ := filepath.Glob(filepath.Join(filepath.Dir(f.root), stagePrefix+"*"))
+	matches, _ := filepath.Glob(filepath.Join(filepath.Dir(f.root), StagePrefix+"*"))
 	return matches
 }
 

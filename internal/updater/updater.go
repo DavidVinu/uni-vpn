@@ -46,8 +46,8 @@ const (
 	maxManifest = 1 << 20
 	maxDownload = 256 << 20
 	maxUnpacked = 512 << 20
-	// stagePrefix names the folder a new version is unpacked into, next to the install root.
-	stagePrefix = ".uni-vpn-core-update-"
+	// StagePrefix names the folder a new version is unpacked into, next to the install root.
+	StagePrefix = ".uni-vpn-core-update-"
 )
 
 var (
@@ -346,7 +346,7 @@ func (u *Updater) stage(data []byte, commit string) (*staged, error) {
 	if !seen[fold(u.Exe)] {
 		return nil, errorf("the download does not look like uni-vpn")
 	}
-	folder, err := os.MkdirTemp(filepath.Dir(u.Root), stagePrefix)
+	folder, err := os.MkdirTemp(filepath.Dir(u.Root), StagePrefix)
 	if err != nil {
 		return nil, errorf("unpacking the update failed: %s", err)
 	}
@@ -551,7 +551,7 @@ func (u *Updater) RemoveOld() {
 	if u.rootErr != "" {
 		return // not an installation: the folder next to it is none of ours
 	}
-	folders, _ := filepath.Glob(filepath.Join(filepath.Dir(u.Root), stagePrefix+"*"))
+	folders, _ := filepath.Glob(filepath.Join(filepath.Dir(u.Root), StagePrefix+"*"))
 	for _, folder := range folders {
 		if st, err := os.Lstat(folder); err == nil && st.IsDir() {
 			os.RemoveAll(folder)

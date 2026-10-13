@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"time"
 
 	"rsc.io/qr"
@@ -143,7 +143,7 @@ func (e *Engine) Request(ctx context.Context) (Pairing, error) {
 // show puts the code on screen and waits in the background for the other device's answer.
 func (e *Engine) show(mode, code string, p pairing) Pairing {
 	shown := Pairing{Mode: mode, Code: FormatCode(code), QR: QRSVG(QRPrefix + code), State: "waiting"}
-	p.closed = new(atomic.Bool) // shared by the cancel and the expiry: the code is closed once
+	p.close = new(sync.Once) // shared by the cancel and the expiry: the code is closed once
 	ctx, cancel := context.WithTimeout(context.Background(), e.opts.CodeLifetime)
 	e.cancelPairing() // a new code replaces the one on screen
 	e.mu.Lock()
@@ -294,9 +294,15 @@ func (e *Engine) cancelPairing() {
 // no longer works. The answer to a request carries the group's key: one already sent is read
 // away, and one still on its way finds the slot filled and is refused.
 func (e *Engine) closeSlots(mode string, p pairing) {
-	if p.closed != nil && p.closed.Swap(true) {
-		return // the cancel or the expiry closes it already
+	if p.close == nil {
+		e.closeSlotsOnce(mode, p)
+		return
 	}
+	// The second close waits for the first: Run's at a stop must not return before it is through.
+	p.close.Do(func() { e.closeSlotsOnce(mode, p) })
+}
+
+func (e *Engine) closeSlotsOnce(mode string, p pairing) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if _, err := e.relay.takePair(ctx, p.a); err != nil && !errors.Is(err, errNotFound) {

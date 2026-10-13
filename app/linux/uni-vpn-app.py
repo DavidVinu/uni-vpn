@@ -237,9 +237,13 @@ class App(Gtk.Application):
                 OPENER.open(request, timeout=20).close()
             except OSError:
                 pass
-            GLib.idle_add(self.poll)
+            GLib.idle_add(self.poll_once)
 
         threading.Thread(target=send, daemon=True).start()
+
+    def poll_once(self):
+        self.poll()
+        return False  # poll returns True for its 3 s timer: an idle callback would run forever
 
     # --- window --------------------------------------------------------------
 

@@ -31,6 +31,7 @@ import (
 	"github.com/DavidVinu/uni-vpn/internal/sysproxy"
 	"github.com/DavidVinu/uni-vpn/internal/totp"
 	unis "github.com/DavidVinu/uni-vpn/internal/universities"
+	"github.com/DavidVinu/uni-vpn/internal/updater"
 	"github.com/DavidVinu/uni-vpn/internal/winsys"
 )
 
@@ -1006,6 +1007,13 @@ func (s *Setup) Uninstall(a Args) (int, error) {
 			moveAside(s.Binary)
 		}
 		os.RemoveAll(app)
+		// An update that waited for the VPN to go idle: with the service gone nothing installs it.
+		staged, _ := filepath.Glob(filepath.Join(filepath.Dir(app), updater.StagePrefix+"*"))
+		for _, folder := range staged {
+			if st, err := os.Lstat(folder); err == nil && st.IsDir() {
+				os.RemoveAll(folder)
+			}
+		}
 		if exists(app) {
 			// For example the folder a shell is in, or a file still open on Windows.
 			s.printf("   Could not delete everything in %s, remove it by hand", app)

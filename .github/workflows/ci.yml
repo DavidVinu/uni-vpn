@@ -517,6 +517,8 @@ jobs:
   # archive. Signed and sent to TestFlight from main once the Apple Developer secrets exist
   # (App Store Connect takes only builds made with Xcode 26 and the iOS 26 SDK).
   ios:
+    # The signed build goes to TestFlight: only once the core's tests pass, the iPhone tunnel's too.
+    needs: [go, inprocess]
     runs-on: macos-26
     timeout-minutes: 90
     env:

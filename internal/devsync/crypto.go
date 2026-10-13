@@ -11,7 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"strings"
-	"sync/atomic"
+	"sync"
 
 	"golang.org/x/crypto/chacha20poly1305"
 	"golang.org/x/crypto/scrypt"
@@ -168,9 +168,9 @@ func NormalizeCode(text string) (code string, ok bool) {
 // pairing is what both sides of one code derive: slot A, written by the device showing the
 // code, slot B, written by the device that typed or scanned it, and the key for both.
 type pairing struct {
-	a, b   string
-	key    []byte
-	closed *atomic.Bool // set by show
+	a, b  string
+	key   []byte
+	close *sync.Once // set by show
 }
 
 // scrypt makes each guess at a 60-bit code expensive; the code is the only secret. r=1, p=8
