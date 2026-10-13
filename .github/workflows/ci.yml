@@ -808,11 +808,11 @@ jobs:
           if (-not (Test-Path "$env:ProgramFiles\uni-vpn\openconnect\wintun.dll")) { throw "Wintun is missing" }
           # The tray app must keep running: one that ends at start would reach every user with the
           # next update. Setup and the installer each start a copy (one stays, the other hands over
-          # and quits); the one that stays must still run 10 s later. Without the WebView2 runtime
-          # (hosted runners list none) the window opens the page in the browser, the copy stays.
+          # and quits); the one that stays must still run 10 s later. Where the window cannot start
+          # (no WebView2 runtime, or as on this runner) the page opens in the browser instead.
           function Trays { @(Get-CimInstance Win32_Process -Filter "Name = 'Uni VPN.exe'") }
           function ShowTrays {
-            Trays | Format-Table ProcessId, ParentProcessId, CreationDate, CommandLine -AutoSize -Wrap | Out-String -Width 400 | Write-Host
+            Trays | Format-Table ProcessId, ParentProcessId, SessionId, CreationDate, CommandLine -AutoSize -Wrap | Out-String -Width 400 | Write-Host
           }
           function Explain {
             ShowTrays
@@ -821,7 +821,7 @@ jobs:
             Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\daemon.log" -Tail 40 -ErrorAction SilentlyContinue
           }
           $runtime = Get-ItemProperty "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" -ErrorAction SilentlyContinue
-          Write-Host "WebView2 runtime: $(if ($runtime) { $runtime.pv } else { 'none' })"
+          Write-Host "WebView2 runtime: $(if ($runtime) { $runtime.pv } else { 'none' }); session: $((Get-Process -Id $PID).SessionId); interactive: $([Environment]::UserInteractive)"
           Start-Sleep 5
           ShowTrays
           if ((Trays).Count -eq 0) { Explain; throw "no tray app runs after the install" }
