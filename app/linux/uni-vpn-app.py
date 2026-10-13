@@ -271,7 +271,8 @@ class App(Gtk.Application):
             if page:
                 self.view.run_javascript(f"location.hash = {json.dumps(page)}", None, None, None)
             return
-        self.view.load_uri(self.base + "?app=1" + page)
+        self.target = self.base + "?app=1" + page
+        self.view.load_uri(self.target)
 
     def on_policy(self, _view, decision, kind):
         if kind in (WebKit2.PolicyDecisionType.NAVIGATION_ACTION, WebKit2.PolicyDecisionType.NEW_WINDOW_ACTION):
@@ -290,7 +291,7 @@ class App(Gtk.Application):
 
         def retry():
             if self.view is view and self.window.get_visible():
-                view.load_uri(self.base + "?app=1")
+                view.load_uri(self.target)  # the page asked for (Settings), not the main one
             return False
 
         GLib.timeout_add_seconds(2, retry)
