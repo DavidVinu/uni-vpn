@@ -97,6 +97,8 @@ Filename: "{app}\bin\uni-vpn-core.exe"; Parameters: "uninstall --yes"; Flags: ru
 [UninstallDelete]
 ; Files the automatic updates added after the installation.
 Type: filesandordirs; Name: "{app}"
+; An update that waited for the VPN to go idle (the uninstall ends the service without a clean stop).
+Type: filesandordirs; Name: "{commonpf64}\.uni-vpn-core-update-*"
 
 [Code]
 function SameAccount(): Boolean;
