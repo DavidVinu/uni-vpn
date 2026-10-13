@@ -333,7 +333,7 @@ const $ = (id) => document.getElementById(id);
 const H = {"X-Uni-VPN": "1", "Content-Type": "application/json"};
 let S = null, view = null, setupDone = false, submitting = false, setupSent = false, domainsShown = false, connectRequested = 0,
   codeTimer = null, refreshing = false, autoUpdateSaving = false, changing = false, languageSaving = false,
-  domainsBase = "", removeError = null, removeSeen = false;
+  domainsBase = "", removeError = null, removeSeen = false, changeWebsites = "";
 // Inside the Uni VPN app window (not a browser tab): no page title, no browser context menu.
 if (new URLSearchParams(location.search).has("app")) {
   document.body.classList.add("app");
@@ -1103,6 +1103,7 @@ async function startChange(first) {
   if (!UNIS) return false;
   changing = true;
   $("s-use-other").hidden = true;  // first setup only; refresh() would hide it a poll later
+  changeWebsites = (S.domains || []).join("\n");
   setupDone = setupSent = false;
   const current = UNIS.find((u) => u.id === S.university);
   if (current) {
@@ -1143,6 +1144,12 @@ function endChange() {
   $("s-pw").value = $("s-totp").value = "";
   $("cancel-change").hidden = true;
   openSettings();
+  // Another university's websites: browsers that read the rule only at start (macOS) need a
+  // restart, as after an edit of the list.
+  if (S.pac_refresh === "manual" && (S.domains || []).join("\n") !== changeWebsites) {
+    $("d-dom").open = true;
+    saved("dommsg", {ok: true}, t("app.saved_restart"));
+  }
 }
 $("row-uni").onclick = () => startChange("step0");
 $("row-user").onclick = () => startChange("step1");
