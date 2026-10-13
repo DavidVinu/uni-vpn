@@ -346,9 +346,12 @@ final class SetupState {
             .replacingOccurrences(of: "ae", with: "a")
     }
 
+    /// Every word somewhere, like the page ("Uni Heidelberg", "Uni Köln").
     func found() -> [University] {
-        let q = SetupState.fold(query.trimmingCharacters(in: .whitespacesAndNewlines))
-        let matches = universities.filter { u in q.isEmpty || u.search.contains { SetupState.fold($0).contains(q) } }
+        let words = SetupState.fold(query).split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        let matches = universities.filter { u in
+            words.allSatisfy { w in u.search.contains { SetupState.fold($0).contains(w) } }
+        }
         return Array(matches.prefix(8))
     }
 }
