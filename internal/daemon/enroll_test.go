@@ -24,14 +24,15 @@ import (
 // enrollHarness: a Heidelberg account and the fake MFA portal in place of the real one. before
 // runs before the daemon starts.
 func enrollHarness(t *testing.T, before ...func(*harness)) (*harness, *fakelinotp.Portal, *Daemon) {
+	// The portal listens before the harness picks the daemon's ports: else it may take one.
+	p := fakelinotp.Start()
+	t.Cleanup(p.Close)
 	h := newHarness(t)
 	h.cfg.University, h.cfg.MFA, h.cfg.User = "heidelberg", "totp_field", "ab123"
 	h.password = []byte("pw")
 	for _, f := range before {
 		f(h)
 	}
-	p := fakelinotp.Start()
-	t.Cleanup(p.Close)
 	d := h.start(func(o *Options) {
 		o.PortalClient = func(portal string, _ func(context.Context, string, string) (net.Conn, error)) (*linotp.Client, error) {
 			if portal != "https://mfa.uni-heidelberg.de/" {
@@ -483,9 +484,9 @@ func TestEnrollOnlyWhereThePortalAllowsIt(t *testing.T) {
 // The setup assistant with a code from the app instead of the portal's QR code: the account is
 // set up, the VPN opens with the code, and the portal step follows.
 func TestSetupWithACodeFromTheApp(t *testing.T) {
-	h := newHarness(t)
-	p := fakelinotp.Start()
+	p := fakelinotp.Start() // before the harness picks the daemon's ports
 	t.Cleanup(p.Close)
+	h := newHarness(t)
 	p.Code = ""
 	cfgPath := t.TempDir() + "/config.toml"
 	h.cfg.User = ""
