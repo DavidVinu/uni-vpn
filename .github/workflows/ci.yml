@@ -23,8 +23,9 @@ jobs:
         run: python3 -m unittest discover -s tests -t . -v
       - name: Shell syntax
         run: |
-          bash -n install.sh get.sh packaging/stage-app.sh packaging/macos/*.sh packaging/linux/build.sh packaging/build-core.sh
-          sh -n packaging/uni-vpn-open packaging/macos/scripts/postinstall
+          # One file per call: "bash -n a b" checks only a.
+          for f in install.sh get.sh packaging/macos/*.sh packaging/linux/build.sh packaging/build-core.sh; do bash -n "$f"; done
+          for f in packaging/stage-app.sh packaging/uni-vpn-open packaging/macos/scripts/postinstall; do sh -n "$f"; done
       - name: Installer dry run
         run: ./install.sh --dry-run --user citest
       - name: Check launchd plist
@@ -393,7 +394,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y ./out/uni-vpn.deb
-          desktop-file-validate /usr/share/applications/uni-vpn.desktop || true
+          desktop-file-validate /usr/share/applications/de.davidvinu.UniVPN.desktop || true
           sudo loginctl enable-linger "$USER"
           export XDG_RUNTIME_DIR="/run/user/$(id -u)"
           for i in $(seq 20); do systemctl --user show-environment >/dev/null 2>&1 && break; sleep 1; done
@@ -848,6 +849,22 @@ jobs:
             Write-Host "WebView2 cannot start: $($e.GetType().FullName): $($e.Message)"
           }
           if ($web.Count -eq 0) { Explain; throw "the app window did not open on the handover" }
+          # A second start on purpose: the install's two starts race, and the copy that stays may
+          # have opened the window itself, without a handover.
+          function AppWebViews { @(Get-CimInstance Win32_Process -Filter "Name = 'msedgewebview2.exe'" | Where-Object { $_.CommandLine -like "*uni-vpn\WebView2*" }) }
+          Get-Process -Name "Uni VPN" -ErrorAction SilentlyContinue | Stop-Process -Force
+          foreach ($i in 1..30) { if ((AppWebViews).Count -eq 0) { break }; Start-Sleep 1 }
+          $old = @(AppWebViews | ForEach-Object ProcessId)
+          function NewWebViews { @(AppWebViews | Where-Object { $old -notcontains $_.ProcessId }) }
+          $exe = "$env:ProgramFiles\uni-vpn\desktop\Uni VPN.exe"
+          $icon = Start-Process $exe -ArgumentList "--port 1081 --hidden" -PassThru
+          Start-Sleep 5
+          if ($icon.HasExited -or (NewWebViews).Count -ne 0) { Explain; throw "the icon alone did not run as it should" }
+          $second = Start-Process $exe -ArgumentList "--port 1081" -PassThru
+          if (-not $second.WaitForExit(10000)) { Explain; throw "the second start did not hand over" }
+          foreach ($i in 1..15) { if ((NewWebViews).Count -gt 0) { break }; Start-Sleep 1 }
+          Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\app.log" -ErrorAction SilentlyContinue
+          if ($icon.HasExited -or (NewWebViews).Count -eq 0) { Explain; throw "the app window did not open on a second start" }
           $lnk = Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter "Uni VPN.lnk"
           if (-not $lnk) { throw "no Start menu entry" }
       - name: Uninstall it like a user would

@@ -131,7 +131,7 @@ type Engine struct {
 	lastAttempt   time.Time
 	lastError     error
 	pairing       *Pairing
-	pairSlot      string // slot A of the code on screen
+	pairSlots     pairing // the slots of the code on screen
 	cancelPair    context.CancelFunc
 	wake          chan struct{}
 	bg            sync.WaitGroup // the sync after a device joined (tests wait for it)

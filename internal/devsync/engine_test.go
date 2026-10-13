@@ -670,6 +670,57 @@ func TestCancelWithdrawsTheCode(t *testing.T) {
 	}
 }
 
+// The answer to a request code carries the group's key: it does not stay on the relay once
+// the code left the screen, whether the answer came before or after.
+func TestClosedRequestLeavesNoKey(t *testing.T) {
+	ctx := context.Background()
+	_, url := startRelay(t)
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	laptop := newDevice(t, url, "Laptop", setUpLaptop(), c)
+	desktop := newDevice(t, url, "Desktop", newLocal(false, nil), c)
+	desktop.opts.PollEvery = time.Minute // the code leaves before the desktop looks
+	answered := func(code string) bool {
+		n, _ := NormalizeCode(code)
+		m, err := laptop.takeSlot(ctx, pairingFor(n), "b")
+		return err == nil && len(m.Root) == 32
+	}
+	p, err := desktop.Request(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := laptop.Enter(ctx, p.Code); err != nil {
+		t.Fatal(err)
+	}
+	desktop.CancelPairing()
+	if answered(p.Code) {
+		t.Fatal("an answer sent before the close stays readable")
+	}
+	// The laptop read the code just before the close and answers just after.
+	if p, err = desktop.Request(ctx); err != nil {
+		t.Fatal(err)
+	}
+	n, _ := NormalizeCode(p.Code)
+	if _, err := laptop.takeSlot(ctx, pairingFor(n), "a"); err != nil {
+		t.Fatal(err)
+	}
+	desktop.CancelPairing()
+	if err := laptop.putSlot(ctx, pairingFor(n), "b", pairMessage{Kind: "root", Root: make([]byte, 32)}); !errors.Is(err, errConflict) {
+		t.Fatalf("an answer after the close: %v", err)
+	}
+	// The code ran out while the answer waited.
+	desktop.opts.CodeLifetime = 200 * time.Millisecond
+	if p, err = desktop.Request(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := laptop.Enter(ctx, p.Code); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, desktop.Engine, "expired")
+	if answered(p.Code) {
+		t.Fatal("an answer to an expired code stays readable")
+	}
+}
+
 func TestExpiredCode(t *testing.T) {
 	ctx := context.Background()
 	_, url := startRelay(t)

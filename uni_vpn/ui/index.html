@@ -1089,9 +1089,11 @@ window.addEventListener("hashchange", () => {
   const target = location.hash.slice(1);
   if (!S || S.setup_needed || !["main", "settings"].includes(target)) return;
   if (view === "setup" && autoRunning) return;  // the tray's "Open" during the short way: stay on it
-  if (changing && !submitting) { endChange(); if (target === "settings") return; }  // keeps its note
+  // Ended here: Settings stays when it says to restart the browser (else the note is never seen).
+  if (changing && !submitting) { endChange(); if (target === "settings" || $("dommsg").textContent) return; }
   if (changing) return;
-  if (target === "settings") openSettings(); else { show("main"); render(); }
+  // Already open: an unsaved edit of the websites stays.
+  if (target === "settings") { if (view !== "settings") openSettings(); } else { show("main"); render(); }
 });
 
 // Account rows: the assistant again, prefilled, back to Settings when done. Role model: macOS
@@ -1307,6 +1309,8 @@ function renderPair() {
 }
 
 function closePair() {
+  // Set up from another device: back from the check mark is its Done, to "All set".
+  if (!$("pair-done").hidden && pairFrom === "setup" && S && !S.setup_needed) { setupSent = true; show("setup"); finish(); return; }
   pairShown = null;
   send("/api/sync/cancel");
   if (pairFrom === "setup" && S && S.setup_needed) { show("setup"); step("step0"); } else openSettings();

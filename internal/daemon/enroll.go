@@ -251,6 +251,15 @@ func (d *Daemon) enroll(ctx context.Context, job *enrollJob, portal string) erro
 		return err
 	}
 	d.mu.Lock()
+	if d.onceCode != "" && d.enrollJob == job {
+		// Connected without it (the attempt had already read the keyring's secret): the
+		// unused code signs in to the portal instead of a later sign-in to the VPN.
+		select {
+		case job.codes <- d.onceCode:
+		default:
+		}
+		d.onceCode = ""
+	}
 	user, socksPort := d.cfg.User, d.cfg.SocksPort
 	d.mu.Unlock()
 	password, err := d.opts.PasswordGetter(ctx)
