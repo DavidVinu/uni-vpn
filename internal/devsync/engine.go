@@ -349,8 +349,10 @@ func (e *Engine) Notify(secrets bool) {
 	e.mu.Lock()
 	k, applying := e.keys, e.applying
 	e.mu.Unlock()
-	if applying {
-		e.Wake() // a setting from another device being taken over, not a change made here
+	// A setting from another device being taken over is not a change made here. A password or
+	// second factor is: Apply stores those without a Notify, so one now was typed on this device.
+	if applying && !secrets {
+		e.Wake()
 		return
 	}
 	now := e.nowMS()
@@ -586,6 +588,11 @@ func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, s
 		}
 		return t
 	}
+	// changedHere: this device changed key to this value since its last round.
+	changedHere := func(key, hv string) bool {
+		c, ok := p.Changes[key]
+		return ok && c.H == hv
+	}
 	snap[DevicePrefix+me] = mustJSON(Device{Name: e.opts.Name, Platform: e.opts.Platform,
 		Pub: k.private().PublicKey().Bytes()})
 	merged := maps.Clone(remote.Entries)
@@ -611,7 +618,7 @@ func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, s
 			case key == own:
 			case known && old.H == hv: // unchanged here
 			case inRemote && h(r.V) == hv: // already the same
-			case !known && inRemote: // never synced here: the group's value is applied below
+			case !known && inRemote && !changedHere(key, hv): // never synced here: the group's value is applied below
 			default:
 				stamp(key, v, when(key, hv))
 			}
@@ -668,6 +675,18 @@ func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, s
 	if !sameEntries(merged, remote.Entries) {
 		next, err := e.store(ctx, k.group(), version, Doc{Format: Format, Entries: merged}, false)
 		if errors.Is(err, errConflict) {
+			// What Apply took over is the group's now, not a change made here: the next attempt
+			// must not send it back with this round's time over a newer one from elsewhere.
+			for _, key := range incoming {
+				if failed[key] == nil {
+					ent := merged[key]
+					st.Hashes[key] = savedHash{H: h(ent.V), T: ent.T, D: ent.D}
+				}
+			}
+			st.Keyed = true // the hashes were carried over above
+			if err := e.saveState(st); err != nil {
+				return false, err
+			}
 			return false, nil
 		}
 		if err != nil {

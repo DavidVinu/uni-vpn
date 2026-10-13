@@ -86,4 +86,10 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onResume() {
+        super.onResume()
+        // Back from Android's VPN settings: "Block connections without VPN" may have changed.
+        UniVpnService.refresh(this)
+    }
 }

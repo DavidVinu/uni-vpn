@@ -83,7 +83,9 @@ func (e *Engine) join(ctx context.Context, root []byte) error {
 	device, priv := "", []byte(nil)
 	if k, _ := e.loadKeys(ctx); k != nil {
 		if string(k.Root) == string(root) {
-			return nil // already in this group
+			// Already in this group: an earlier code stopped halfway (no network for a moment),
+			// this one finishes it.
+			return e.Sync(ctx)
 		}
 		device, priv = k.Device, k.Priv
 	}

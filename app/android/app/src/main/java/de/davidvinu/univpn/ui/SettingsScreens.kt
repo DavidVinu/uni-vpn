@@ -5,9 +5,13 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -68,7 +72,7 @@ fun SettingsScreen(model: AppModel) {
     }
     Column(Modifier.fillMaxSize()) {
         Bar(model, model.t("settings.title"))
-        LazyColumn {
+        LazyColumn(contentPadding = WindowInsets.navigationBars.asPaddingValues()) {
             item {
                 Section(model.t("settings.account"))
                 val change = { model.changingAccount = true }
@@ -167,7 +171,8 @@ fun WebsitesScreen(model: AppModel) {
             }
         }
     }
-    Column(Modifier.fillMaxSize().imePadding()) {
+    // The field to add a website sits at the bottom: above Android's navigation bar or keyboard.
+    Column(Modifier.fillMaxSize().navigationBarsPadding().imePadding()) {
         Bar(model, model.t("settings.through")) { Info(model, model.t("settings.domains_help")) }
         LazyColumn(Modifier.weight(1f)) {
             items(domains) { host ->
@@ -233,7 +238,7 @@ fun SecondFactorScreen(model: AppModel, @Suppress("UNUSED_PARAMETER") activity: 
         }
     }
     BackHandler { leave() }
-    Column(Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState())) {
+    Column(Modifier.fillMaxSize().navigationBarsPadding().imePadding().verticalScroll(rememberScrollState())) {
         Bar(model, model.t("app.second_factor"), onBack = { leave() }) {
             Info(model, model.t(if (autoPage) "setup.auto_help" else "setup.totp_help"))
         }
@@ -274,7 +279,7 @@ fun LanguageScreen(model: AppModel) {
     val setting = status.optString("language")
     Column(Modifier.fillMaxSize()) {
         Bar(model, model.t("settings.language"))
-        LazyColumn {
+        LazyColumn(contentPadding = WindowInsets.navigationBars.asPaddingValues()) {
             items(listOf("" to model.t("settings.language_system")) + model.strings.languages) { (code, name) ->
                 ListItem(
                     headlineContent = { Text(name) },
@@ -297,7 +302,8 @@ fun LogScreen(model: AppModel) {
             lines.joinToString("\n"),
             fontFamily = FontFamily.Monospace,
             fontSize = 11.sp,
-            modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).horizontalScroll(rememberScrollState()).padding(16.dp),
+            modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).horizontalScroll(rememberScrollState())
+                .navigationBarsPadding().padding(16.dp),
         )
     }
 }
@@ -321,10 +327,10 @@ fun LicensesScreen(model: AppModel) {
                 shown.second,
                 fontFamily = FontFamily.Monospace,
                 fontSize = 11.sp,
-                modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),
+                modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(16.dp),
             )
         } else {
-            LazyColumn {
+            LazyColumn(contentPadding = WindowInsets.navigationBars.asPaddingValues()) {
                 items(texts) { (name, _) -> SettingRow(name.replace(Regex("-(LICENSE|COPYING|Copyright).*"), ""), null, { open = name }) }
             }
         }
@@ -332,12 +338,11 @@ fun LicensesScreen(model: AppModel) {
 }
 
 /** Scans the code another device shows ("Use settings from another device" on a computer). */
-fun scanPairing(context: android.content.Context, model: AppModel, scope: kotlinx.coroutines.CoroutineScope, onError: (String?) -> Unit, onDone: () -> Unit) {
+fun scanPairing(context: android.content.Context, model: AppModel, onError: (String?) -> Unit) {
     Scanner.scanQr(context, { onError(model.t("phone.scan_failed")) }) { value ->
         if (value == null || !value.startsWith("UNIVPN:")) return@scanQr
-        scope.launch {
-            val result = model.post("/api/sync/enter", JSONObject().put("code", value.removePrefix("UNIVPN:")), 60_000)
-            if (result.ok) onDone() else onError(result.error)
-        }
+        // The answer comes as model.pairResult (PairScreen).
+        onError(null)
+        model.enterPairCode(value.removePrefix("UNIVPN:"), inSetup = false)
     }
 }

@@ -102,6 +102,12 @@ HKDF-SHA256 of `shared secret || ephemeral public key || recipient public key` w
 `uni-vpn device box`. A device that finds itself in `moved` switches to `R'`; one that does not
 turns syncing off. Its settings stay.
 
+The public keys come from the group document, which every device of the group can write. So
+removing shuts out a device that runs uni-vpn as it is, not one changed to keep access: before
+its removal it could have put a public key of its own under another device's id. Against that,
+turn syncing off on every device (Remove on its own row) and link them again, which starts a
+group with a key nobody else has, and change the password, which every device had.
+
 ## Pairing
 
 The code is 12 characters of Crockford's base32 (`0-9`, `A-Z` without `I L O U`, 60 bits),
@@ -135,7 +141,7 @@ bodies are `application/octet-stream`.
 | `PUT /v1/pair/<id>` (up to 8 KiB) | 201; 409 while the slot holds something; 413 too large or empty |
 | `GET /v1/pair/<id>` | 200 with the blob, which is deleted with this answer; 404 |
 | `GET /v1/group/<id>`, `Authorization: Bearer <token>` | 200 with the blob and `ETag: "<version>"`; 404; 403 wrong token |
-| `PUT /v1/group/<id>` with `If-None-Match: *` (create, up to 64 KiB) or `If-Match: "<version>"` (up to 256 KiB), optionally `Sync-Final: 1` | 200 with the new `ETag`; 412 changed meanwhile; 410 closed; 403; 413 |
+| `PUT /v1/group/<id>` with `If-None-Match: *` (create) or `If-Match: "<version>"`, up to 256 KiB, optionally `Sync-Final: 1` | 200 with the new `ETag`; 412 changed meanwhile; 410 closed; 403; 413 |
 
 Pairing slots expire after 10 minutes, groups 400 days after they were last read or written
 (reads count once a day), a new group that no device read or wrote again after 7 days; an

@@ -38,6 +38,8 @@ final class AppModel {
     var passwordDialog = false
     /// Setup finished in this run and its last page ("All set") is still open.
     var setupFinishing = false
+    /// iOS did not add the VPN ("Don't Allow"): Home says so until the switch is tapped again.
+    private(set) var vpnRefused = false
     var setup = SetupState()
     /// The second factor from one code, in setup or Settings.
     let auto = AutoEnroll()
@@ -176,8 +178,10 @@ final class AppModel {
     /// The switch: on asks iOS once to allow the VPN configuration (as in Tailscale).
     func turnOn() async {
         switching = true
+        vpnRefused = false
         await CoreHost.shared.stop()
         let saved = await vpn.enable()
+        vpnRefused = !saved
         if saved {
             // The status still reads "disconnected" for a moment: until it moves on (or the
             // start failed for 15 s), the lock is the extension's, not the app's.

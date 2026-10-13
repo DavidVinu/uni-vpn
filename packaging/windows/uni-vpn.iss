@@ -114,13 +114,13 @@ begin
     Result := ResultCode <> 1;
 end;
 
-function StatusUrl(): String;
+function HttpPort(): String;
 var
   Lines: TArrayOfString;
-  I, P: Integer;
-  Line, Port: String;
+  I, P, Port: Integer;
+  Line, Value: String;
 begin
-  Port := '1081';
+  Result := '1081';
   if LoadStringsFromFile(ExpandConstant('{localappdata}\uni-vpn\config.toml'), Lines) then
     for I := 0 to GetArrayLength(Lines) - 1 do
     begin
@@ -129,10 +129,18 @@ begin
       begin
         P := Pos('=', Line);
         if P > 0 then
-          Port := Trim(Copy(Line, P + 1, Length(Line)));
+        begin
+          { The file setup writes has a comment after the number: "http_port = 1081   # status page ..." }
+          Value := Copy(Line, P + 1, Length(Line));
+          P := Pos('#', Value);
+          if P > 0 then
+            Value := Copy(Value, 1, P - 1);
+          Port := StrToIntDef(Trim(Value), 0);
+          if (Port >= 1) and (Port <= 65535) then
+            Result := IntToStr(Port);
+        end;
       end;
     end;
-  Result := 'http://127.0.0.1:' + Port + '/';
 end;
 
 procedure StopRunning();
@@ -150,7 +158,7 @@ end;
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
-  LogDir, LogFile: String;
+  LogDir, LogFile, App: String;
   Log: AnsiString;
   Start: Integer;
 begin
@@ -184,5 +192,9 @@ begin
                        Copy(String(Log), Start, 600), mbError, MB_OK, IDOK);
     Exit;
   end;
-  ShellExecAsOriginalUser('open', StatusUrl(), '', '', SW_SHOWNORMAL, ewNoWait, ResultCode);
+  { The app window, as the signed-in user (this runs as administrator). Setup has already put a
+    copy in the notification area; this second start hands it the window, as a click on the
+    Start menu entry does. }
+  App := ExpandConstant('{app}\desktop\Uni VPN.exe');
+  ShellExecAsOriginalUser('open', App, '--port ' + HttpPort(), ExtractFileDir(App), SW_SHOWNORMAL, ewNoWait, ResultCode);
 end;

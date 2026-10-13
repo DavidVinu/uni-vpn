@@ -22,6 +22,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+from . import i18n
 from . import platform as pf
 
 APP_NAME = "Uni VPN"
@@ -186,6 +187,8 @@ def info_plist(port: int) -> dict:
         "public.app-category.utilities", "UniVPNPort": str(port),
         # otpauth: the MFA portal's "follow this link" hands the setup key to the assistant.
         "CFBundleURLTypes": [{"CFBundleURLName": BUNDLE_ID, "CFBundleURLSchemes": [URL_SCHEME, "otpauth"]}],
+        # The page's languages: WKWebView only reports the system's language when the app has it.
+        "CFBundleLocalizations": list(i18n.CODES),
         # The page is plain HTTP on the loopback address.
         "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True, "NSExceptionDomains": {
             "127.0.0.1": {"NSExceptionAllowsInsecureHTTPLoads": True}}},

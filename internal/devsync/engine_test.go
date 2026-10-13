@@ -4,12 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -947,5 +953,189 @@ func TestRemoveOffline(t *testing.T) {
 	opts.Relay = "http://127.0.0.1:1" // nothing listens there
 	if err := New(opts).Remove(ctx, otherID(laptop.Engine, "")); !errors.Is(err, ErrOffline) {
 		t.Fatalf("got %v", err)
+	}
+}
+
+// hookLocal runs onApply inside the first Apply, before anything is taken over.
+type hookLocal struct {
+	*fakeLocal
+	once    sync.Once
+	onApply func()
+}
+
+func (l *hookLocal) Apply(ctx context.Context, all map[string]Entry, keys []string) map[string]error {
+	l.once.Do(l.onApply)
+	return l.fakeLocal.Apply(ctx, all, keys)
+}
+
+// TestTakenOverValueIsNotSentBackAfterAConflict: another device writes between this one's read
+// and its write; the second attempt must not send back what the first took over as a change
+// of its own, over the newer one.
+func TestTakenOverValueIsNotSentBackAfterAConflict(t *testing.T) {
+	ctx := context.Background()
+	_, url := startRelay(t)
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	laptop := newDevice(t, url, "Laptop", setUpLaptop(), c)
+	desktop := newDevice(t, url, "Desktop", newLocal(false, nil), c)
+	pair(t, ctx, laptop, desktop)
+	// The desktop sets the language to de and syncs, then to fr, not sent yet.
+	desktop.local.set(KeyLanguage, "de")
+	desktop.Notify(false)
+	if err := desktop.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	desktop.local.set(KeyLanguage, "fr")
+	desktop.Notify(false)
+	// Then automatic updates go off on the laptop; while it takes over de, fr arrives.
+	laptop.local.set(KeyAutoUpdate, false)
+	laptop.Notify(false)
+	opts := laptop.opts
+	opts.Local = &hookLocal{fakeLocal: laptop.local, onApply: func() {
+		if err := desktop.Sync(ctx); err != nil {
+			t.Error(err)
+		}
+	}}
+	e := New(opts)
+	for _, run := range []func(context.Context) error{e.Sync, desktop.Sync, e.Sync} {
+		if err := run(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, l := range []*fakeLocal{laptop.local, desktop.local} {
+		if l.get(KeyLanguage) != `"fr"` || l.get(KeyAutoUpdate) != "false" {
+			t.Fatalf("language %s, automatic updates %s; want the later fr and off", l.get(KeyLanguage), l.get(KeyAutoUpdate))
+		}
+	}
+}
+
+// A password typed on this device while it takes over a setting from another one goes out.
+func TestPasswordTypedWhileTakingOverGoesOut(t *testing.T) {
+	ctx := context.Background()
+	_, url := startRelay(t)
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	laptop := newDevice(t, url, "Laptop", setUpLaptop(), c)
+	desktop := newDevice(t, url, "Desktop", newLocal(false, nil), c)
+	pair(t, ctx, laptop, desktop)
+	desktop.local.set(KeyLanguage, "de")
+	desktop.Notify(false)
+	if err := desktop.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var e *Engine
+	opts := laptop.opts
+	opts.Local = &hookLocal{fakeLocal: laptop.local, onApply: func() {
+		laptop.local.set(KeyPassword, "typed")
+		e.Notify(true)
+	}}
+	e = New(opts)
+	for _, run := range []func(context.Context) error{e.Sync, e.Sync, desktop.Sync} {
+		if err := run(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := desktop.local.get(KeyPassword); got != `"typed"` {
+		t.Fatalf("desktop has %s", got)
+	}
+}
+
+// A website removed on the laptop and later added on the desktop, which had not synced since:
+// the later addition stays.
+func TestLaterAddOfAWebsiteRemovedElsewhere(t *testing.T) {
+	ctx := context.Background()
+	_, url := startRelay(t)
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	laptop := newDevice(t, url, "Laptop", setUpLaptop(), c)
+	desktop := newDevice(t, url, "Desktop", newLocal(false, nil), c)
+	pair(t, ctx, laptop, desktop)
+	for _, list := range [][]string{
+		{"sogo.uni-heidelberg.de", "heico.uni-heidelberg.de", "lsf.uni-heidelberg.de"},
+		{"sogo.uni-heidelberg.de", "heico.uni-heidelberg.de"},
+	} {
+		laptop.local.setDomains(list...)
+		laptop.Notify(false)
+		if err := laptop.Sync(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	desktop.local.setDomains("sogo.uni-heidelberg.de", "heico.uni-heidelberg.de", "lsf.uni-heidelberg.de")
+	desktop.Notify(false)
+	for _, d := range []device{desktop, laptop} {
+		if err := d.Sync(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, d := range []device{laptop, desktop} {
+		if got := d.local.getDomains(); len(got) != 3 {
+			t.Fatalf("%s: websites %v", d.opts.Name, got)
+		}
+	}
+}
+
+// flakyRelay fails one group read on demand, like a moment without network.
+type flakyRelay struct {
+	next http.Handler
+	fail atomic.Bool
+}
+
+func (f *flakyRelay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/v1/group/") && f.fail.CompareAndSwap(true, false) {
+		http.Error(w, "unavailable", 503)
+		return
+	}
+	f.next.ServeHTTP(w, r)
+}
+
+// The first code's join stops halfway; a new code then sets the device up, not only says
+// linked.
+func TestNewCodeFinishesAJoinThatStopped(t *testing.T) {
+	ctx := context.Background()
+	_, target := startRelay(t)
+	u, err := url.Parse(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	relay := &flakyRelay{next: httputil.NewSingleHostReverseProxy(u)}
+	srv := httptest.NewServer(relay)
+	t.Cleanup(srv.Close)
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	laptop := newDevice(t, srv.URL, "Laptop", setUpLaptop(), c)
+	desktop := newDevice(t, srv.URL, "Desktop", newLocal(false, nil), c)
+	p, err := laptop.Offer(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	relay.fail.Store(true)
+	if err := desktop.Enter(ctx, p.Code); !errors.Is(err, ErrOffline) {
+		t.Fatalf("first code: %v", err)
+	}
+	laptop.CancelPairing()
+	pair(t, ctx, laptop, desktop)
+	if !desktop.local.SetupDone() || desktop.local.get(KeyPassword) != `"secret"` {
+		t.Fatalf("linked, but the desktop is not set up: %v", desktop.local.values)
+	}
+}
+
+// Every website ever listed stays in the group as a key, so a removal moves a large document.
+func TestRemoveWithManyWebsites(t *testing.T) {
+	ctx := context.Background()
+	_, url := startRelay(t)
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	laptop := newDevice(t, url, "Laptop", setUpLaptop(), c)
+	desktop := newDevice(t, url, "Desktop", newLocal(false, nil), c)
+	pair(t, ctx, laptop, desktop)
+	var hosts []string
+	for i := range 800 {
+		hosts = append(hosts, fmt.Sprintf("journal%d.publisher-example.com", i))
+	}
+	laptop.local.setDomains(hosts...)
+	laptop.Notify(false)
+	if err := laptop.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := laptop.Remove(ctx, otherID(laptop.Engine, "Desktop")); err != nil {
+		t.Fatal(err)
+	}
+	if got := names(laptop.Engine); !slices.Equal(got, []string{"Laptop"}) {
+		t.Fatalf("after removal %v", got)
 	}
 }

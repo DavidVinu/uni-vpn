@@ -205,6 +205,8 @@ func (h *harness) pwLines() []string {
 	return strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
 }
 
+// client is a browser connection: it starts with the SOCKS version, like a browser's
+// greeting. The fake openconnect echoes it back; Read skips it.
 func (h *harness) client() net.Conn {
 	h.t.Helper()
 	c, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(h.cfg.SocksPort)))
@@ -212,7 +214,26 @@ func (h *harness) client() net.Conn {
 		h.t.Fatal(err)
 	}
 	h.t.Cleanup(func() { c.Close() })
-	return c
+	if _, err := c.Write([]byte{5}); err != nil {
+		h.t.Fatal(err)
+	}
+	return &browserConn{Conn: c}
+}
+
+type browserConn struct {
+	net.Conn
+	echoed bool // the version byte came back
+}
+
+func (c *browserConn) Read(p []byte) (int, error) {
+	if !c.echoed {
+		version := make([]byte, 1)
+		if n, err := c.Conn.Read(version); n == 0 {
+			return 0, err
+		}
+		c.echoed = true
+	}
+	return c.Conn.Read(p)
 }
 
 func (d *Daemon) snapshot() (State, messages.Message) {

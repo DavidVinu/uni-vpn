@@ -79,6 +79,24 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** The code of another device (/api/sync/enter): kept here like setup, for turning the phone. */
+    var pairBusy by mutableStateOf(false)
+        private set
+    /** Its answer, until the setup page or Add a device takes it. */
+    var pairResult by mutableStateOf<Result?>(null)
+
+    fun enterPairCode(code: String, inSetup: Boolean = true) {
+        if (pairBusy) return
+        pairBusy = true
+        viewModelScope.launch {
+            val result = post("/api/sync/enter", JSONObject().put("code", code), timeoutMs = 60_000)
+            // Set up now: the setup page stays for its last page ("All set").
+            if (result.ok && inSetup) setupFinishing = true
+            pairBusy = false
+            pairResult = result
+        }
+    }
+
     // The second factor with one code (index.html step2a): the core signs in with a code from
     // the user's app and adds itself in the MFA portal. Kept here, like setup, for turning the
     // phone.

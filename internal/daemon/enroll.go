@@ -126,6 +126,11 @@ func (d *Daemon) startEnrollLocked(code, portal string) {
 		job.stage = EnrollWorking
 	} else {
 		d.onceCode = code
+		if d.state.final() {
+			// The last attempt's verdict (a refused code, say) is not this code's: runEnroll may
+			// look before the connect starts.
+			d.set(Idle, messages.NotConnected)
+		}
 	}
 	d.enrollJob = job
 	d.changedLocked()

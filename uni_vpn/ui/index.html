@@ -229,6 +229,7 @@ input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
         <h2 tabindex="-1" data-t="look.connecting"></h2>
         <p class="sub" id="s3-msg" aria-live="polite">&nbsp;</p>
         <div class="actions"><button class="btn text" type="button" id="s3-back" data-t="app.back"></button><button class="btn text" type="button" id="s3-skip" data-t="setup.finish" hidden></button></div>
+        <button class="btn text" type="button" id="s3-fix" data-t="main.repair" hidden></button>
       </div>
 
       <div id="step4" hidden class="center">
@@ -278,6 +279,7 @@ input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
     <div id="devices-group" hidden>
       <p class="group" data-t="settings.devices"></p>
       <div class="list" id="devices"></div>
+      <p class="error" id="sync-err" role="status" hidden></p>
     </div>
     <p class="group" data-t="settings.general"></p>
     <div class="list">
@@ -711,12 +713,14 @@ $("a-back").onclick = async () => {
   err("a-err", "");
   if (changingTotp) endChange(); else step("step1");
 };
-$("a-fix").onclick = async () => {
-  $("a-fix").disabled = true;
-  await send("/api/repair");  // like the main screen's Repair button
-  $("a-fix").disabled = false;
-  refresh();
-};
+for (const id of ["a-fix", "s3-fix"]) {
+  $(id).onclick = async () => {
+    $(id).disabled = true;
+    await send("/api/repair");  // like the main screen's Repair button
+    $(id).disabled = false;
+    refresh();
+  };
+}
 $("a-guide").onclick = async () => {
   if (submitting) return;
   await stopAuto();
@@ -818,9 +822,10 @@ async function useKey(secret, refresh) {
     // A stray paste keeps the key that was already read.
     keyRead = !!previous;
     $("s-totp").value = previous;
-    err("s2-err", errText(r));
+    if (!refresh) err("s2-err", errText(r));  // a failed refresh: the banner says the core is away
     renderGuide();
-    if (previous) useKey(previous, true);
+    // After a failed refresh (the core restarting for an update) a moment's pause, not a tight loop.
+    if (previous) setTimeout(() => { if (seq === checkSeq && !$("step2").hidden) useKey(previous, true); }, refresh ? 3000 : 0);
     return;
   }
   showCode(r.data.code, r.data.remaining, secret);
@@ -904,7 +909,7 @@ async function submitSetup() {
   clearInterval(codeTimer);
   step("step3");
   $("s3-msg").textContent = t("setup.waiting");
-  $("s3-skip").hidden = true;
+  $("s3-skip").hidden = $("s3-fix").hidden = true;
   let r;
   try {
     r = await post("/api/setup", {user: $("s-user").value.trim(), password: $("s-pw").value,
@@ -955,6 +960,8 @@ function setupProgress() {
   const waiting = S.message_id === "waiting_for_code";
   $("s3-msg").textContent = stuck || waiting ? tr(S.message, S.message_t) : t("setup.waiting");
   $("s3-skip").hidden = !stuck;
+  // "Click Repair": the button is here too, not only on the main screen.
+  $("s3-fix").hidden = !stuck || S.action !== "repair";
 }
 
 for (const b of document.querySelectorAll("[data-back]")) b.onclick = () => { if (!submitting) { setupDone = false; step(b.dataset.back); } };
@@ -1040,8 +1047,14 @@ async function startChange(first) {
   if (current) {
     pick(current);
   } else {
+    // Not listed: its gateway settings as they are, or Next would set the account up without them.
     pick(OTHER);
-    $("s-host").value = S.host || "";
+    $("s-host").value = (S.host || "") + (S.usergroup ? "/" + S.usergroup : "");
+    $("s-mfa").value = S.mfa || "none";
+    $("s-mfa-row").hidden = false;
+    $("s-group").replaceChildren(...(S.authgroup ? [new Option(S.authgroup, S.authgroup, true, true)] : []));
+    $("s-group-row").hidden = !S.authgroup;
+    numberSteps();
   }
   $("s-user").value = S.user || "";
   $("s-pw").value = $("s-totp").value = "";
@@ -1128,6 +1141,8 @@ function renderDevices() {
   const sync = S.sync;
   $("devices-group").hidden = !(sync && sync.available);
   if ($("devices-group").hidden) return;
+  // Why the last sync did not go through, like Chrome's sync error under the account.
+  err("sync-err", sync.on && sync.error ? tr("", sync.error) : "");
   const rows = (sync.on ? sync.devices : []).map((d) => {
     const row = document.createElement("div"), name = document.createElement("span"), val = document.createElement("span");
     row.className = "item";
@@ -1215,7 +1230,8 @@ $("pair-entry").onsubmit = async (e) => {
   const r = await send("/api/sync/enter", {code: $("pair-input").value});
   button.disabled = false;
   if (!r.ok) { err("pair-err", errText(r)); return; }
-  err("pair-err", "");
+  // Linked, but some settings could not be used here: said under the check mark.
+  err("pair-err", r.data && r.data.error_t ? errText(r) : "");
   pairPart("pair-done");
   refresh();
 };

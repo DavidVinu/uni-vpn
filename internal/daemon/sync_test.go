@@ -6,11 +6,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -272,6 +275,8 @@ func TestSyncErrorsForTheApp(t *testing.T) {
 		{notUsed, "sync.not_used"},
 		{fmt.Errorf("%w: %w", devsync.ErrOffline, errors.New("dial tcp")), "sync.offline"},
 		{devsync.ErrCodeUnknown, "sync.code_unknown"},
+		// The keyring's or the engine's own words go to the log (Remove), not to the page.
+		{errors.New("sync data could not be decrypted"), "sync.failed"},
 	} {
 		var ve *httpapi.ValueError
 		if !errors.As(syncError(c.err), &ve) || ve.Text == nil || ve.Text.Key != c.want {
@@ -282,5 +287,128 @@ func TestSyncErrorsForTheApp(t *testing.T) {
 	p := pairingJSON(&devsync.Pairing{Mode: "request", State: "done", Error: notUsed}).(pyjson.Object)
 	if text, _ := p.Get("error"); text == nil || !strings.Contains(fmt.Sprint(text), "sync.not_used") {
 		t.Fatalf("pairing %v", p)
+	}
+}
+
+// syncErrorKey is the catalog key of an "error" in a sync answer or status, "" without one.
+func syncErrorKey(t *testing.T, v any) string {
+	t.Helper()
+	if v == nil {
+		return ""
+	}
+	key, _ := v.(pyjson.Object).Get("key")
+	return key.(string)
+}
+
+// An account from another device that cannot be set up here (the keyring refused for a
+// moment) leaves config.toml as it was. With "Not listed" the gateway's address is one of the
+// overrides: without it neither device would start set up any more.
+func TestFailedSyncedAccountKeepsTheGateway(t *testing.T) {
+	ctx := context.Background()
+	laptop, _, desktop, desktopH := syncedPair(t, nil)
+	pw, totp := "pw-s3cret", "base32:GEZDGNBVGY3TQOJQ"
+	gateway := []config.Setting{{Key: "host", Value: "vpn.example.edu"}, {Key: "mfa", Value: "totp_field"}}
+	if err := laptop.CompleteSetup("ab123", pw, totp, "other", gateway); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []*Daemon{laptop, desktop} {
+		if err := d.sync.Sync(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// One more override on the laptop, and the desktop's keyring refuses once.
+	if err := laptop.CompleteSetup("ab123", pw, totp, "other",
+		append(gateway, config.Setting{Key: "authgroup", Value: "staff"})); err != nil {
+		t.Fatal(err)
+	}
+	if err := laptop.sync.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	desktopH.mu.Lock()
+	desktopH.totpSetter = func(string) error { return errors.New("keyring locked") }
+	desktopH.mu.Unlock()
+	var ae *devsync.ApplyError
+	if err := desktop.sync.Sync(ctx); !errors.As(err, &ae) {
+		t.Fatalf("got %v", err)
+	}
+	desktopH.mu.Lock()
+	desktopH.totpSetter = nil
+	desktopH.mu.Unlock()
+	for range 2 {
+		for _, d := range []*Daemon{desktop, laptop} {
+			if err := d.sync.Sync(ctx); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for _, d := range []*Daemon{laptop, desktop} {
+		overrides, _ := config.Overrides(d.configPath)
+		if _, err := config.Load(d.configPath); err != nil || len(overrides) != 3 {
+			t.Fatalf("%s: %v, overrides %v", d.configPath, err, overrides)
+		}
+	}
+}
+
+// Linked, but the second factor could not be stored here: the code worked, the answer says
+// so with a note, and Settings keeps showing it until a sync goes through.
+func TestSyncEnterLinksWithANote(t *testing.T) {
+	relay, _ := relaytest.Start(t)
+	var down atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if down.Load() {
+			http.Error(w, "unavailable", 503)
+			return
+		}
+		relay.ServeHTTP(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	url := srv.URL
+	laptopH := newHarness(t)
+	laptopH.cfg.User = "ab123"
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := config.WriteInitial(path, "ab123", "heidelberg", nil); err != nil {
+		t.Fatal(err)
+	}
+	laptop := laptopH.start(syncOptions(url, dir, func(o *Options) { o.ConfigPath = path }))
+	desktopH := newHarness(t)
+	desktopH.totpSetter = func(string) error { return errors.New("keyring locked") }
+	desktopDir := t.TempDir()
+	desktop := desktopH.start(syncOptions(url, desktopDir, func(o *Options) {
+		o.NeedsSetup, o.ConfigPath = true, filepath.Join(desktopDir, "config.toml")
+	}))
+	offer, err := laptop.Sync("offer", pyjson.O())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pairing, _ := offer.Get("pairing")
+	code, _ := pairing.(pyjson.Object).Get("code")
+	answer, err := desktop.Sync("enter", pyjson.O("code", code))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if note, _ := answer.Get("error_t"); syncErrorKey(t, note) != "sync.not_used" {
+		t.Fatalf("answer %v", answer)
+	}
+	problem, _ := statusValue(t, desktop, "sync").(pyjson.Object).Get("error")
+	if syncErrorKey(t, problem) != "sync.not_used" {
+		t.Fatalf("status error %v", problem)
+	}
+	if !waitFor(5*time.Second, func() bool { laptop.sync.Sync(context.Background()); return len(syncDevices(t, laptop)) == 2 }) {
+		t.Fatal("the laptop does not see the desktop")
+	}
+	// While the relay does not answer, then once it does again.
+	down.Store(true)
+	laptop.sync.Sync(context.Background())
+	problem, _ = statusValue(t, laptop, "sync").(pyjson.Object).Get("error")
+	if syncErrorKey(t, problem) != "sync.failed" {
+		t.Fatalf("status error %v", problem)
+	}
+	down.Store(false)
+	if err := laptop.sync.Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if problem, _ = statusValue(t, laptop, "sync").(pyjson.Object).Get("error"); problem != nil {
+		t.Fatalf("status error %v after a good sync", problem)
 	}
 }

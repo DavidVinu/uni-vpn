@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -15,14 +16,19 @@ import (
 	"github.com/DavidVinu/uni-vpn/internal/credentials"
 	"github.com/DavidVinu/uni-vpn/internal/linotp"
 	"github.com/DavidVinu/uni-vpn/internal/linotp/fakelinotp"
+	"github.com/DavidVinu/uni-vpn/internal/messages"
 	"github.com/DavidVinu/uni-vpn/internal/pyjson"
 )
 
-// enrollHarness: a Heidelberg account and the fake MFA portal in place of the real one.
-func enrollHarness(t *testing.T) (*harness, *fakelinotp.Portal, *Daemon) {
+// enrollHarness: a Heidelberg account and the fake MFA portal in place of the real one. before
+// runs before the daemon starts.
+func enrollHarness(t *testing.T, before ...func(*harness)) (*harness, *fakelinotp.Portal, *Daemon) {
 	h := newHarness(t)
 	h.cfg.University, h.cfg.MFA, h.cfg.User = "heidelberg", "totp_field", "ab123"
 	h.password = []byte("pw")
+	for _, f := range before {
+		f(h)
+	}
 	p := fakelinotp.Start()
 	t.Cleanup(p.Close)
 	d := h.start(func(o *Options) {
@@ -281,6 +287,71 @@ func TestEnrollEndsWhenTheConnectLoopGivesUp(t *testing.T) {
 	d.Enroll("123456", false)
 	if key := waitEnroll(t, d, EnrollFailed); key != "msg.program_missing" {
 		t.Fatal(key)
+	}
+}
+
+// Windows without administrator rights: the connect loop gives up before it takes the typed code,
+// and the setup ends at once with the reason and its Repair, not after enrollTimeout.
+func TestEnrollEndsWhenNotElevated(t *testing.T) {
+	h, _, d := enrollHarness(t)
+	no := false
+	d.mu.Lock()
+	d.opts.Elevated = func() *bool { return &no }
+	d.mu.Unlock()
+	d.Enroll("123456", false)
+	if key := waitEnroll(t, d, EnrollFailed); key != "msg.not_elevated" {
+		t.Fatal(key)
+	}
+	if h.pwLines() != nil {
+		t.Fatal(h.pwLines())
+	}
+}
+
+// Another program held the browsers' port when the code came, then lets go of it: the setup
+// goes on with that code once the port is ours, instead of waiting until enrollTimeout.
+func TestEnrollGoesOnWhenThePortIsFreeAgain(t *testing.T) {
+	var blocker net.Listener
+	h, _, d := enrollHarness(t, func(h *harness) {
+		var err error
+		if blocker, err = net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(h.cfg.SocksPort)); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { blocker.Close() })
+	})
+	d.Enroll("123456", false)
+	time.Sleep(300 * time.Millisecond)
+	if s, m := d.snapshot(); s != Error || m != messages.PortInUse || h.pwLines() != nil {
+		t.Fatal(s, m, h.pwLines())
+	}
+	blocker.Close()
+	waitState(t, d, Connected)
+	if got := h.pwLines(); !slices.Equal(got, []string{"pw", "123456"}) {
+		t.Fatal(got)
+	}
+	if key := waitEnroll(t, d, EnrollCode); key != "enroll.next_code" {
+		t.Fatal(key)
+	}
+}
+
+// The next code after a refused one: runEnroll may look before the connect starts, and must not
+// take the refused code's verdict for this one.
+func TestEnrollAfterARefusedCodeWaitsForItsOwnVerdict(t *testing.T) {
+	h, _, d := enrollHarness(t)
+	d.mu.Lock()
+	d.final(AuthFailed, messages.TOTPRejected)
+	// Enroll without its connect: the setup gets mu first.
+	d.startEnrollLocked("123456", "https://mfa.uni-heidelberg.de/")
+	d.mu.Unlock()
+	time.Sleep(200 * time.Millisecond)
+	if s, key := enrollStage(d); s != EnrollConnecting {
+		t.Fatal(s, key)
+	}
+	d.secretsChanged()
+	if key := waitEnroll(t, d, EnrollCode); key != "enroll.next_code" {
+		t.Fatal(key)
+	}
+	if got := h.pwLines(); !slices.Equal(got, []string{"pw", "123456"}) {
+		t.Fatal(got)
 	}
 }
 

@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -703,6 +704,62 @@ func TestOfflineThenOnline(t *testing.T) {
 	waitState(t, d, Connected)
 }
 
+func TestOfflineAPageLoadLooksForTheNetworkAgain(t *testing.T) {
+	// Wi-Fi comes back a few seconds after waking the laptop: the next page load gets through
+	// instead of failing until the next try (retry_interval, 30 s).
+	h := newHarness(t)
+	h.cfg.RetryInterval = 30
+	h.probeResult.Store(false)
+	var probes atomic.Int64
+	d := h.start(func(o *Options) {
+		o.Probe = func(context.Context) bool { probes.Add(1); return h.probeResult.Load() }
+	}, func(d *Daemon) { d.offlineRecheck = 1 })
+	readEOF(t, h.client(), 3*time.Second)
+	// A page with many requests probes once, not once for each.
+	for range 5 {
+		readEOF(t, h.client(), time.Second)
+	}
+	if s, _ := d.snapshot(); s != Offline || probes.Load() != 1 {
+		t.Fatal(s, probes.Load())
+	}
+	time.Sleep(1200 * time.Millisecond)
+	h.probeResult.Store(true)
+	echo(t, h.client(), "x")
+	if probes.Load() != 2 {
+		t.Fatal(probes.Load())
+	}
+}
+
+func TestOfflineResumeLooksForTheNetworkAgain(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.RetryInterval = 30
+	h.probeResult.Store(false)
+	d := h.start(nil)
+	d.RequestConnect()
+	waitState(t, d, Offline)
+	h.probeResult.Store(true)
+	h.wallOffset.Store(120) // the laptop slept for two minutes
+	waitState(t, d, Connected, 3*time.Second)
+}
+
+func TestNonSocksConnectionDoesNotSignIn(t *testing.T) {
+	// A web page's <img src="http://127.0.0.1:1080/pixel.gif">.
+	h := newHarness(t)
+	d := h.start(nil)
+	c, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(h.cfg.SocksPort)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.Write([]byte("GET /pixel.gif HTTP/1.1\r\nHost: 127.0.0.1:1080\r\n\r\n"))
+	readEOF(t, c, 3*time.Second)
+	time.Sleep(300 * time.Millisecond)
+	if s, _ := d.snapshot(); s != Idle || h.pwLines() != nil {
+		t.Fatal(s, h.pwLines())
+	}
+	echo(t, h.client(), "x")
+}
+
 func TestProbeAsksTheGatewayOfTheCurrentAccount(t *testing.T) {
 	// The service started with Heidelberg's defaults, then the assistant set up another one.
 	var mu sync.Mutex
@@ -817,6 +874,27 @@ func TestPortInUseIsRetriedUntilItIsFree(t *testing.T) {
 		t.Fatal(m)
 	}
 	echo(t, h.client(), "hello")
+}
+
+func TestStatusPortTakenIsRetriedUntilItIsFree(t *testing.T) {
+	// Fast user switching: the other account's uni-vpn holds the port until it signs out.
+	h := newHarness(t)
+	blocker, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(h.cfg.HTTPPort))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := h.start(nil)
+	if d.HTTP() != nil {
+		blocker.Close()
+		t.Fatal("bound a taken port")
+	}
+	blocker.Close()
+	if !waitFor(3*time.Second, func() bool { return d.HTTP() != nil }) {
+		t.Fatal("status port not bound again")
+	}
+	if r := h.http("GET", "/status.json", nil, ""); r.status != 200 {
+		t.Fatal(r.status)
+	}
 }
 
 func TestConnectWhileThePortIsTakenStartsNoTunnel(t *testing.T) {
@@ -1122,6 +1200,33 @@ func TestStatusNamesUniversityAndSecondFactor(t *testing.T) {
 	}
 }
 
+// Settings, Username of a "Not listed" account: the assistant sends back what status.json says
+// about the gateway, so the account keeps its second factor and groups.
+func TestStatusCarriesTheGatewayOfANotListedAccount(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.User = ""
+	path := filepath.Join(t.TempDir(), "config.toml")
+	d := h.start(func(o *Options) { o.ConfigError, o.ConfigPath, o.NeedsSetup = "missing", path, true })
+	gateway := []config.Setting{{Key: "host", Value: "vpn.example.edu"}, {Key: "mfa", Value: "totp_field"},
+		{Key: "usergroup", Value: "staff"}, {Key: "authgroup", Value: "Staff-2FA"}}
+	if err := d.CompleteSetup("ab123", "pw", "base32:GEZDGNBVGY3TQOJQ", "other", gateway); err != nil {
+		t.Fatal(err)
+	}
+	if name := statusValue(t, d, "university_name"); name != "vpn.example.edu" {
+		t.Fatal("the gateway, not \"Other university\" in English:", name)
+	}
+	var again []config.Setting
+	for _, s := range gateway {
+		again = append(again, config.Setting{Key: s.Key, Value: statusValue(t, d, s.Key)})
+	}
+	if err := d.CompleteSetup("cd456", "pw", "base32:GEZDGNBVGY3TQOJQ", "other", again); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := config.Overrides(path); err != nil || !slices.Equal(got, gateway) {
+		t.Fatal(got, err)
+	}
+}
+
 // --- Status ------------------------------------------------------------------------
 
 func TestStatusKeys(t *testing.T) {
@@ -1142,8 +1247,8 @@ func TestStatusKeys(t *testing.T) {
 	}
 }
 
-// The keys and their order are those of daemon.py's status(), then the Go core's own (sync, enroll);
-// values Python would write the same.
+// The keys and their order are those of daemon.py's status(), then the Go core's own (sync, enroll,
+// usergroup, authgroup); values Python would write the same.
 func TestStatusKeyOrderLikePython(t *testing.T) {
 	h := newHarness(t)
 	d := h.start(nil)
@@ -1156,7 +1261,7 @@ func TestStatusKeyOrderLikePython(t *testing.T) {
 		"message_id", "message_t", "action", "since", "host", "user", "university", "university_name", "mfa", "mfa_portal_url",
 		"mfa_steps", "socks_port", "http_port", "idle_minutes", "active_connections", "bytes_in", "bytes_out",
 		"connects", "last_error", "domains", "pac_url", "pac_refresh", "log_tail", "setup_needed", "repairing",
-		"busy", "error_kind", "platform", "elevated", "sync", "enroll"}
+		"busy", "error_kind", "platform", "elevated", "sync", "enroll", "usergroup", "authgroup"}
 	if !slices.Equal(keys, want) {
 		t.Fatal(keys)
 	}

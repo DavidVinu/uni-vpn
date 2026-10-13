@@ -191,10 +191,15 @@ type Daemon struct {
 	loopDone      chan struct{}
 	repairProc    Process
 	http          *httpapi.Server
+	httpWaiting   *httpapi.Server // its port was taken at the start; the ticker tries again
 	// The automatic second factor (enroll.go): its run, and the code from the user's app the
 	// next connect signs in with instead of the stored secret.
 	enrollJob *enrollJob
 	onceCode  string
+	// offlineAt is when the last probe found no network. A page load probes again only
+	// offlineRecheck seconds later, so a page with many requests does not probe for each one.
+	offlineAt      float64
+	offlineRecheck float64
 
 	// RestartRequested is set when the program files were replaced and the caller should
 	// start the new code. Read it after Run returned.
@@ -226,7 +231,7 @@ func New(cfg *config.Config, log *slog.Logger, opts Options) *Daemon {
 		log = slog.New(slog.DiscardHandler)
 	}
 	d := &Daemon{log: log, cfg: cfg, base: time.Now(), changed: make(chan struct{}), wake: make(chan struct{}),
-		stop: make(chan struct{}), started: make(chan struct{})}
+		stop: make(chan struct{}), started: make(chan struct{}), offlineRecheck: 5}
 	d.wall = func() float64 { return float64(time.Now().UnixNano()) / 1e9 }
 	d.updateFirstCheck, d.updateInterval, d.updateJitter = 600*time.Second, 5*time.Hour, 30*time.Minute
 	d.after, d.updateNow = time.After, make(chan struct{}, 1)
@@ -538,6 +543,11 @@ func (d *Daemon) Status() (pyjson.Object, error) {
 	if e := d.opts.Elevated(); e != nil {
 		elevated = *e
 	}
+	// Not listed: the gateway names the account in every language, "Other university" does not.
+	name := cfg.UniversityName
+	if cfg.University == unis.OtherID {
+		name = cfg.Host
+	}
 	return pyjson.O(
 		"protocol", Protocol,
 		"version", Version,
@@ -556,7 +566,7 @@ func (d *Daemon) Status() (pyjson.Object, error) {
 		"host", cfg.Host,
 		"user", cfg.User,
 		"university", cfg.University,
-		"university_name", cfg.UniversityName,
+		"university_name", name,
 		"mfa", cfg.MFA,
 		"mfa_portal_url", cfg.MFAPortalURL,
 		"mfa_steps", append([]string{}, cfg.MFASteps...),
@@ -583,6 +593,9 @@ func (d *Daemon) Status() (pyjson.Object, error) {
 		"sync", d.syncStatus(),
 		// The automatic second factor, see enroll.go.
 		"enroll", d.enrollStatus(),
+		// Not listed: the assistant shows the gateway settings again when the account changes.
+		"usergroup", cfg.Usergroup,
+		"authgroup", cfg.Authgroup,
 	), nil
 }
 
@@ -735,10 +748,12 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 		}
 		if exists(path) {
 			// The old account's profile fields go, also with the same university ("Not
-			// listed" with another gateway): they would come back at the next start.
+			// listed" with another gateway): they would come back at the next start. An account
+			// from another device rewrites all of them, so the file takes the group's order:
+			// another order would go back to the group as a change of this device's own.
 			var stale []string
 			for _, key := range unis.ProfileFields {
-				if !slices.ContainsFunc(checked, func(s config.Setting) bool { return s.Key == key }) {
+				if synced || !slices.ContainsFunc(checked, func(s config.Setting) bool { return s.Key == key }) {
 					stale = append(stale, key)
 				}
 			}
@@ -786,7 +801,9 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 	} else {
 		d.secretsChanged()
 	}
-	d.syncChanged(true)
+	if !synced { // the group's values: nothing new to send it
+		d.syncChanged(true)
+	}
 	return nil
 }
 
@@ -954,6 +971,9 @@ func (d *Daemon) Run() {
 	}
 	if err := server.Start(); err != nil {
 		d.logf(slog.LevelError, "Status port %d not available: %s", httpPort, bindErrorString(err, httpPort))
+		d.mu.Lock()
+		d.httpWaiting = server
+		d.mu.Unlock()
 		server = nil
 	}
 	d.mu.Lock()
@@ -1000,7 +1020,7 @@ func (d *Daemon) Run() {
 		tun.Stop(grace)
 	}
 	d.forwarder.Stop()
-	if server != nil {
+	if server := d.HTTP(); server != nil {
 		server.Stop()
 	}
 	if loopDone != nil {
@@ -1043,7 +1063,26 @@ func (d *Daemon) bindForwarder() {
 	if retry {
 		d.logf(slog.LevelInfo, "SOCKS port %d is free again", port)
 		d.set(Idle, messages.NotConnected)
+		if d.onceCode != "" {
+			// The one-code setup waited for the port (requestConnectLocked): it goes on now.
+			d.requestConnectLocked()
+		}
 	}
+}
+
+// bindHTTP opens the status port once it is free. Another account's uni-vpn holds it while
+// that account stays signed in (fast user switching).
+func (d *Daemon) bindHTTP() {
+	d.mu.Lock()
+	server := d.httpWaiting
+	d.mu.Unlock()
+	if server == nil || server.Start() != nil {
+		return
+	}
+	d.logf(slog.LevelInfo, "Status port %d is free again", server.Port)
+	d.mu.Lock()
+	d.http, d.httpWaiting = server, nil
+	d.mu.Unlock()
 }
 
 // --- Demand ------------------------------------------------------------------
@@ -1057,6 +1096,7 @@ func (d *Daemon) acquire(ctx context.Context) (int, bool) {
 		return 0, false
 	}
 	deadline := d.mono() + d.cfg.ClientWait
+	woke := false
 	for {
 		state := d.state
 		if state == Connected && d.tun != nil {
@@ -1068,7 +1108,13 @@ func (d *Daemon) acquire(ctx context.Context) (int, bool) {
 			d.mu.Unlock()
 			return 0, false
 		}
-		if state.retry() {
+		if state == Offline && !woke && d.mono()-d.offlineAt >= d.offlineRecheck {
+			// The network may be back (Wi-Fi a few seconds after waking the laptop): probe
+			// now and wait for the answer, instead of failing every page until the next try.
+			woke = true
+			d.ensureLoop()
+			d.wakeUp()
+		} else if state.retry() {
 			d.ensureLoop()
 			d.mu.Unlock()
 			return 0, false
@@ -1265,6 +1311,8 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 	for d.hasDemand() {
 		cfg := d.cfg
 		if e := d.opts.Elevated(); e != nil && !*e {
+			// A typed code cannot sign in either: the one-code setup ends now, with Repair.
+			d.onceCode = ""
 			d.final(Error, messages.NotElevated)
 			return
 		}
@@ -1291,6 +1339,7 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 			return
 		}
 		if !online {
+			d.offlineAt = d.mono()
 			d.set(Offline, messages.Offline)
 			d.sleep(ctx, cfg.RetryInterval)
 			if ctx.Err() != nil {
@@ -1606,9 +1655,14 @@ func (d *Daemon) ticker() {
 		lastAwake, lastWall = nowAwake, wall
 		d.mu.Lock()
 		cfg := d.cfg
-		if d.forwarder.Addr() == nil && mono-lastBind >= cfg.RetryInterval {
+		if (d.forwarder.Addr() == nil || d.httpWaiting != nil) && mono-lastBind >= cfg.RetryInterval {
 			lastBind = mono
-			d.unlocked(d.bindForwarder)
+			if d.forwarder.Addr() == nil {
+				d.unlocked(d.bindForwarder)
+			}
+			if d.httpWaiting != nil {
+				d.unlocked(d.bindHTTP)
+			}
 		}
 		grace := seconds(cfg.StopGrace)
 		if mono-lastCisco >= cfg.RetryInterval && (d.state == Connected || d.state == Blocked) {
@@ -1639,6 +1693,9 @@ func (d *Daemon) ticker() {
 					d.closeAll()
 					tun.Stop(grace)
 				})
+			} else if d.state == Offline {
+				// Look for the network now, not at the end of the loop's sleep.
+				d.wakeUp()
 			}
 		}
 		if d.state == Connected && d.tun != nil && mono-d.lastActivity > cfg.IdleMinutes*60 {

@@ -44,6 +44,8 @@ for target in linux/amd64 linux/arm64 darwin/arm64 darwin/amd64 windows/amd64; d
   fi
   case "$goos" in
     linux) mkdir -p "$stage/app/linux" && cp app/linux/uni-vpn-app.py "$stage/app/linux/" ;;
+    # After the build: the core windows-installer signed (windows/bin, with the signing secrets)
+    # replaces this one.
     *) if [ -n "$apps" ]; then cp -R "$apps/$goos/." "$stage/"; fi ;;
   esac
   rm -f "$out/uni-vpn-core-$goos-$goarch.zip"

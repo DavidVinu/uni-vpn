@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -128,7 +129,6 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
     var byHand by rememberSaveable { mutableStateOf(false) }
     var pairCode by rememberSaveable { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
-    var busy by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         val list = model.get("/universities.json")?.optJSONArray("universities")
@@ -194,6 +194,13 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
         error = result.error
     }
 
+    // Another device's code, the same way.
+    LaunchedEffect(model.pairResult) {
+        val result = model.pairResult ?: return@LaunchedEffect
+        model.pairResult = null
+        if (result.ok) go(DONE) else error = result.error
+    }
+
     // While connecting: the first sign-in tells whether everything was right (setupProgress).
     if (step == CONNECTING && model.setupSentAt > 0) {
         val state = status.optString("state")
@@ -219,7 +226,7 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
     }
 
     Column(
-        Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState()),
+        Modifier.fillMaxSize().navigationBarsPadding().imePadding().verticalScroll(rememberScrollState()),
     ) {
         val back: (() -> Unit)? = when (step) {
             SIGN_IN -> { { go(UNIVERSITY) } }
@@ -260,6 +267,8 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
                         if (code != null && value.startsWith("UNIVPN:")) {
                             pairCode = code
                             go(CODE)
+                            // Scanned codes go on by themselves.
+                            model.enterPairCode(code)
                         }
                     }
                 }, modifier = Modifier.fillMaxWidth()) {
@@ -284,14 +293,11 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
                     modifier = Modifier.fillMaxWidth(),
                 )
                 ErrorText(error)
-                if (busy) CircularProgressIndicator()
-                // Scanned codes go on by themselves.
-                LaunchedEffect(Unit) {
-                    if (pairCode.length >= 12 && !busy) enterCode(model, pairCode, { busy = it }, { error = it }) { model.setupFinishing = true; go(DONE) }
-                }
+                if (model.pairBusy) CircularProgressIndicator()
                 Actions {
-                    Button(enabled = !busy && pairCode.isNotBlank(), onClick = {
-                        scope.launch { enterCode(model, pairCode, { busy = it }, { error = it }) { model.setupFinishing = true; go(DONE) } }
+                    Button(enabled = !model.pairBusy && pairCode.isNotBlank(), onClick = {
+                        error = null
+                        model.enterPairCode(pairCode)
                     }) { Text(model.t("app.next")) }
                 }
             }
@@ -485,14 +491,6 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
             }
         }
     }
-}
-
-private suspend fun enterCode(model: AppModel, code: String, busy: (Boolean) -> Unit, error: (String?) -> Unit, done: () -> Unit) {
-    busy(true)
-    error(null)
-    val result = model.post("/api/sync/enter", JSONObject().put("code", code), timeoutMs = 60_000)
-    busy(false)
-    if (result.ok) done() else error(result.error)
 }
 
 private suspend fun detect(

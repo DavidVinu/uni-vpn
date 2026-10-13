@@ -60,8 +60,10 @@ class Core(private val context: Context) {
             if (last?.isAlive == true) return
             if (last != null) portTaken = last.exitValue() == EXIT_PORTS_TAKEN
             // A core that just exited (for example because another one holds the lock) is not
-            // restarted in a tight loop.
-            if (System.currentTimeMillis() - started < 1000) return
+            // restarted in a tight loop. Another app may hold the port all day: then only every
+            // half minute, which still finds the port once that app lets go.
+            val pause = if (portTaken) 30_000L else 1_000L
+            if (System.currentTimeMillis() - started < pause) return
             started = System.currentTimeMillis()
             // Only the core started now may say it holds the ports.
             readyFile.delete()
