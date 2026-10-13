@@ -799,6 +799,26 @@ func TestUninstallRemovesRecordedFiles(t *testing.T) {
 	}
 }
 
+// The app window starts a stopped service again (Windows tray): it is stopped first.
+type orderApp struct {
+	recordingApp
+	svc    *fakeService
+	before bool
+}
+
+func (a *orderApp) Uninstall() { a.before = a.svc.removed == 0 }
+
+func TestUninstallStopsTheAppBeforeTheService(t *testing.T) {
+	h := newHarness(t)
+	h.setup(Args{})
+	app := &orderApp{svc: h.svc}
+	h.s.App = app
+	h.uninstall(Args{Yes: true})
+	if !app.before || h.svc.removed != 1 {
+		t.Fatal(app.before, h.svc.removed)
+	}
+}
+
 func TestUninstallDryRunListsTheFiles(t *testing.T) {
 	h := newHarness(t)
 	h.setup(Args{})

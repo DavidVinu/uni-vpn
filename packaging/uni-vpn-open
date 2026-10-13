@@ -66,6 +66,13 @@ APPLESCRIPT
 }
 
 mkdir -p "$(dirname "$log")"
+# Two clicks on the app entry (nothing shows while the copy runs): the second one leaves the
+# window to the first. macOS has no flock and its callers do not overlap. Not handed on to the
+# core, the window or the browser (fd 9 closed there), or they would keep the lock.
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"$(dirname "$log")/open.lock"
+  flock -n 9 || exit 0
+fi
 # A copy of the Python program from an earlier version is replaced by the Go core; a git
 # checkout is a developer's own and stays as it is.
 old=0
@@ -85,11 +92,11 @@ if [ "$force" = 1 ] || [ "$old" = 1 ] || [ ! -f "$unit" ] || [ ! -x "$core" ]; t
     fail
   fi
   # Nobody can answer a question here; the assistant opens in the app window instead.
-  if ! "$core" setup </dev/null >"$log" 2>&1; then fail; fi
+  if ! "$core" setup </dev/null >"$log" 2>&1 9>&-; then fail; fi
   exit 0
 fi
 
 port=$(sed -n 's/^[[:space:]]*http_port[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$config" 2>/dev/null | head -n 1)
 url="http://127.0.0.1:${port:-1081}/"
 if [ "$(uname -s)" = Darwin ]; then exec open "$url"; fi
-exec xdg-open "$url"
+exec xdg-open "$url" 9>&-

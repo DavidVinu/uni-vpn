@@ -933,13 +933,15 @@ func (s *Setup) Uninstall(a Args) (int, error) {
 	} else {
 		s.say("Proxy setting was not set by uni-vpn")
 	}
+	// The app window first: it starts a stopped service again (UniVpn.cs StartServiceIfDown), also
+	// between ending the task and deleting it.
+	s.App.Uninstall()
 	if removed, err := s.Service.Uninstall(); err != nil || !removed {
 		failed = true
 		s.printf("Service could not be removed")
 	} else {
 		s.say("Service removed")
 	}
-	s.App.Uninstall()
 	for _, path := range Recorded() {
 		st, err := os.Lstat(path)
 		if err != nil {

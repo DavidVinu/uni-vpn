@@ -355,6 +355,10 @@ jobs:
           command -v openconnect || echo "openconnect is the package's"
           grep -q "/Applications/Uni VPN.app/Contents/MacOS/Uni VPN" "$HOME/Library/LaunchAgents/de.davidvinu.uni-vpn.app.plist"
           lipo -archs "/Applications/Uni VPN.app/Contents/MacOS/Uni VPN"
+          # Setup started the menu bar app; one that ends at start would reach every user with the
+          # next update.
+          sleep 5
+          pgrep -x "Uni VPN" >/dev/null || { echo "::error::the menu bar app is not running"; exit 1; }
       - name: Uninstall it with the core
         run: |
           app="$HOME/Library/Application Support/uni-vpn/app"
@@ -802,7 +806,11 @@ jobs:
             throw "the task does not run uni-vpn-core.exe in conhost.exe --headless"
           }
           if (-not (Test-Path "$env:ProgramFiles\uni-vpn\openconnect\wintun.dll")) { throw "Wintun is missing" }
-          if (-not (Get-Process "Uni VPN" -ErrorAction SilentlyContinue)) { Write-Host "note: the tray app is not running" }
+          # The tray app must keep running: one that ends at start would reach every user with the
+          # next update.
+          $tray = Start-Process "$env:ProgramFiles\uni-vpn\desktop\Uni VPN.exe" -ArgumentList "--port 1081 --hidden" -PassThru
+          Start-Sleep 10
+          if ($tray.HasExited -and -not (Get-Process "Uni VPN" -ErrorAction SilentlyContinue)) { throw "the tray app ends at start ($($tray.ExitCode))" }
           $lnk = Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter "Uni VPN.lnk"
           if (-not $lnk) { throw "no Start menu entry" }
       - name: Uninstall it like a user would
