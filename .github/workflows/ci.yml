@@ -808,25 +808,25 @@ jobs:
           if (-not (Test-Path "$env:ProgramFiles\uni-vpn\openconnect\wintun.dll")) { throw "Wintun is missing" }
           # The tray app must keep running: one that ends at start would reach every user with the
           # next update. Setup and the installer each start a copy (one stays, the other hands over
-          # and quits); once they are up, the one that stays must still run 10 s later. Without
-          # one, a copy started here must.
+          # and quits); the one that stays must still run 10 s later. Without the WebView2 runtime
+          # (hosted runners list none) the window opens the page in the browser, the copy stays.
           function Trays { @(Get-CimInstance Win32_Process -Filter "Name = 'Uni VPN.exe'") }
           function ShowTrays {
             Trays | Format-Table ProcessId, ParentProcessId, CreationDate, CommandLine -AutoSize -Wrap | Out-String -Width 400 | Write-Host
           }
-          Start-Sleep 5
-          $before = Trays
-          ShowTrays
-          if ($before.Count -eq 0) {
-            $tray = Start-Process "$env:ProgramFiles\uni-vpn\desktop\Uni VPN.exe" -ArgumentList "--port 1081 --hidden" -PassThru
-            $before = @($tray)
-          }
-          Start-Sleep 10
-          if ((Trays).Count -eq 0) {
+          function Explain {
             ShowTrays
+            Get-WinEvent -FilterHashtable @{LogName = "Application"; ProviderName = ".NET Runtime", "Application Error"} -MaxEvents 6 -ErrorAction SilentlyContinue |
+              Format-List TimeCreated, ProviderName, Message | Out-String -Width 400 | Write-Host
             Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\daemon.log" -Tail 40 -ErrorAction SilentlyContinue
-            throw "the tray app ends at start (running before: $($before.Count))"
           }
+          $runtime = Get-ItemProperty "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" -ErrorAction SilentlyContinue
+          Write-Host "WebView2 runtime: $(if ($runtime) { $runtime.pv } else { 'none' })"
+          Start-Sleep 5
+          ShowTrays
+          if ((Trays).Count -eq 0) { Explain; throw "no tray app runs after the install" }
+          Start-Sleep 10
+          if ((Trays).Count -eq 0) { Explain; throw "the tray app ends at start" }
           $lnk = Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter "Uni VPN.lnk"
           if (-not $lnk) { throw "no Start menu entry" }
       - name: Uninstall it like a user would
