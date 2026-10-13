@@ -54,6 +54,24 @@ func TestFileStoreRoundtrip(t *testing.T) {
 	}
 }
 
+// The phone lost power while saving and the file came back empty: nothing in it can be read,
+// and setting up again saves over it instead of failing the same way.
+func TestFileStoreStartsOverWhenTheFileIsDamaged(t *testing.T) {
+	path := filepath.Join(t.TempDir(), SecretsFile)
+	k := &Keyring{GOOS: "android", Cred: &FileStore{Path: path, Key: bytes.Repeat([]byte{7}, 32)}}
+	os.WriteFile(path, nil, 0o600)
+	var ke *KeyringError
+	if _, err := k.GetPassword(context.Background(), "ab123", time.Second, nil); !errors.As(err, &ke) {
+		t.Fatalf("damaged: %v", err)
+	}
+	if err := k.StorePassword("ab123", "pw"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := k.GetPassword(context.Background(), "ab123", time.Second, nil); err != nil || string(got) != "pw" {
+		t.Fatal(got, err)
+	}
+}
+
 func TestFileStoreWithoutKey(t *testing.T) {
 	k := &Keyring{GOOS: "android", Cred: &FileStore{Path: filepath.Join(t.TempDir(), SecretsFile)}}
 	var ke *KeyringError

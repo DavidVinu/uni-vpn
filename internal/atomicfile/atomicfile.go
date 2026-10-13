@@ -18,6 +18,9 @@ import (
 const (
 	tries = 50
 	pause = 20 * time.Millisecond
+	// A Write's temporary file lives for its fsync and at most a second of rename tries. An
+	// older one was left by a crash and would make every read of a missing file wait.
+	fresh = 10 * time.Second
 )
 
 // Write replaces path with data, keeping its mode (0600 for a new file).
@@ -68,7 +71,8 @@ func Read(path string) ([]byte, error) {
 	return data, err
 }
 
-// writing: a Write's temporary file (os.CreateTemp: the name, a dot, digits) is next to path.
+// writing: a Write's fresh temporary file (os.CreateTemp: the name, a dot, digits) is next to
+// path.
 func writing(path string) bool {
 	entries, err := os.ReadDir(filepath.Dir(path))
 	if err != nil {
@@ -78,7 +82,9 @@ func writing(path string) bool {
 	for _, e := range entries {
 		rest, ok := strings.CutPrefix(e.Name(), prefix)
 		if ok && rest != "" && strings.Trim(rest, "0123456789") == "" {
-			return true
+			if info, err := e.Info(); err == nil && time.Since(info.ModTime()) < fresh {
+				return true
+			}
 		}
 	}
 	return false

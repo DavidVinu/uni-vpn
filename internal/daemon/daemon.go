@@ -183,6 +183,8 @@ type Daemon struct {
 	pausedByCisco bool
 	tun           Tunnel
 	secretsGen    int
+	switching     bool // completeSetup: the new account's secrets go in before its gateway
+	accountGen    int
 	disconnects   int
 	changed       chan struct{}
 	wake          chan struct{}
@@ -734,6 +736,7 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 	}
 	d.mu.Lock()
 	d.cfg.User = user
+	d.switching = true
 	configError := d.configError
 	ports := []config.Setting{}
 	defaults := config.Default()
@@ -791,6 +794,8 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 	if err != nil {
 		d.mu.Lock()
 		d.cfg.User = previousUser
+		d.switching = false
+		d.wakeUp()
 		d.mu.Unlock()
 		var ce *config.ConfigError
 		if errors.As(err, &ce) {
@@ -804,6 +809,9 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 	}
 	d.mu.Lock()
 	config.CopyProfile(d.cfg, &profile)
+	d.switching = false
+	d.accountGen++
+	d.wakeUp()
 	d.configPath = path
 	d.logf(slog.LevelInfo, "Setup completed for %s (%s)", user, profile.UniversityName)
 	d.needsSetup = false
@@ -1394,7 +1402,7 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 			}
 			continue // checks Cisco, network and demand again, then fetches the secrets
 		}
-		generation := d.secretsGen
+		generation, account := d.secretsGen, d.accountGen
 		var password []byte
 		var err error
 		d.unlocked(func() { password, err = d.opts.PasswordGetter(ctx) })
@@ -1452,6 +1460,19 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 			}
 		}
 
+		if d.switching || account != d.accountGen {
+			// The account is changing: its user and password never go to the old gateway.
+			if code, once := tunnel.IsOnce(secret); once {
+				d.onceCode = code // not used yet
+			}
+			if d.switching {
+				d.sleep(ctx, cfg.RetryInterval) // completeSetup wakes the loop
+				if ctx.Err() != nil {
+					return
+				}
+			}
+			continue
+		}
 		d.set(Connecting, messages.Connecting)
 		tun, err := d.opts.TunnelFactory()
 		if err == nil {
@@ -1567,6 +1588,7 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 			if _, once := tunnel.IsOnce(secret); once {
 				// The typed code is used up and a retry would take the keyring's secret (none on
 				// a first setup): the setup ends with "try again with a new code" (enroll.go).
+				d.explicit = false // its "connect now" is over too
 				break
 			}
 			if !d.backoff(ctx) {

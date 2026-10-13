@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // Only a Write's own temporary file means a Write is under way, not a file that merely shares
@@ -23,6 +24,22 @@ func TestWritingSeesOnlyAWritesTemporaryFile(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "domains.txt.3141592653"), nil, 0o600)
 	if !writing(path) {
 		t.Fatal("a Write's temporary file is there")
+	}
+}
+
+// A temporary file left by a crash or a failed Remove is no Write under way: a missing file
+// must not wait a second at every read from then on.
+func TestWritingIgnoresAnOldTemporaryFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "domains.txt")
+	tmp := filepath.Join(dir, "domains.txt.3141592653")
+	os.WriteFile(tmp, nil, 0o600)
+	old := time.Now().Add(-time.Minute)
+	if err := os.Chtimes(tmp, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if writing(path) {
+		t.Fatal("an old temporary file counts as a Write under way")
 	}
 }
 

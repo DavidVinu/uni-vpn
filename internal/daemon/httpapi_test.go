@@ -514,6 +514,59 @@ func TestChangingTheAccountFromSettingsReconnectsAndDropsOldOverrides(t *testing
 	}
 }
 
+func TestChangingTheAccountNeverSignsInToTheOldGateway(t *testing.T) {
+	// The keyring already holds the new password while the old gateway is still configured;
+	// a browser tab of the old university asks for the tunnel just then.
+	h := newHarness(t)
+	h.cfg.MFA = "none"
+	args := filepath.Join(t.TempDir(), "args")
+	t.Setenv("FAKE_ARGS_FILE", args)
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := config.WriteInitial(path, "u", "heidelberg", nil); err != nil {
+		t.Fatal(err)
+	}
+	storing := make(chan struct{})
+	d := h.start(func(o *Options) {
+		o.ConfigPath = path
+		o.PasswordSetter = func(pw string) error {
+			h.mu.Lock()
+			h.password = []byte(pw)
+			h.mu.Unlock()
+			close(storing)
+			time.Sleep(time.Second) // a slow keyring
+			return nil
+		}
+	})
+	echo(t, h.client(), "x")
+	waitState(t, d, Connected)
+	done := make(chan error, 1)
+	go func() {
+		done <- d.CompleteSetup("cd456", "pw2", "", "other",
+			[]config.Setting{{Key: "host", Value: "vpn.other.edu"}, {Key: "mfa", Value: "none"}})
+	}()
+	<-storing
+	c, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(h.cfg.SocksPort)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.Write([]byte{5})
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, d, Connected)
+	data, _ := os.ReadFile(args)
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "--user=cd456") != strings.Contains(line, `"vpn.other.edu"`) {
+			t.Fatalf("%s\n%v", data, h.pwLines())
+		}
+	}
+	if last := lines[len(lines)-1]; !strings.Contains(last, `"vpn.other.edu"`) {
+		t.Fatal(last)
+	}
+}
+
 func TestKeyringFailureWritesNoConfigSoTheAssistantStays(t *testing.T) {
 	h := newHarness(t)
 	h.totpSetter = func(string) error { return &credentials.KeyringError{Msg: "keyring locked"} }
