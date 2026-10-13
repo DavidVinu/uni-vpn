@@ -278,7 +278,8 @@ final class SetupState {
             error = result.error
             return
         }
-        if d.has("error") {
+        // The core always sends "error", empty when the gateway answered (as the page reads it).
+        if !d.string("error").isEmpty {
             error = model.strings.message(d.string("error"), d.object("error_t"))
             return
         }

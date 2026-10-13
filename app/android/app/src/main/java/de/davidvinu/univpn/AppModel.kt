@@ -104,21 +104,25 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         private set
     /**
      * Linked with [pairResult]'s code although its answer did not come: the account came over
-     * (setup), or more devices sync than before (Add a device).
+     * (setup), or a device syncs with this one that did not before (Add a device).
      */
     var pairLinked = false
         private set
 
-    /** The devices that sync, this one among them, as the status last said; none while off. */
-    private fun syncedDevices() =
-        status?.optJSONObject("sync")?.takeIf { it.optBoolean("on") }?.optJSONArray("devices")?.length() ?: 0
+    /** The other devices that sync with this one, as the status last said; none while off. */
+    private fun otherDevices(): Set<String> {
+        val devices = status?.optJSONObject("sync")?.takeIf { it.optBoolean("on") }?.optJSONArray("devices")
+            ?: return emptySet()
+        return (0 until devices.length()).mapNotNull { devices.optJSONObject(it) }
+            .filter { !it.optBoolean("this") }.map { it.optString("id") }.toSet()
+    }
 
     fun enterPairCode(code: String, owner: String, inSetup: Boolean = true) {
         if (pairBusy) return
         pairBusy = true
         val finishing = setupFinishing
         val wasNeeded = setupNeeded
-        val devices = syncedDevices()
+        val others = otherDevices()
         // The setup page stays for its last page ("All set"), also while the core already
         // counts as set up and its answer is still on the way (no Home in between).
         if (inSetup) setupFinishing = true
@@ -126,12 +130,13 @@ class AppModel(app: Application) : AndroidViewModel(app) {
             val result = post("/api/sync/enter", JSONObject().put("code", code), timeoutMs = 60_000)
             // The core went on after the answer went (the network dropped, or the wait ran out):
             // linked all the same. In setup the account came over, so "All set" follows instead
-            // of Home; on Add a device more devices sync than before, more than this one alone
-            // (a code sent to another device starts a group of one here).
+            // of Home; on Add a device a device syncs with this one that did not before (a code
+            // sent to another device starts a group of this one alone; joining another group can
+            // keep the count).
             val linked = when {
                 result.ok -> false
                 inSetup -> wasNeeded && !setupNeeded
-                else -> result.reply.status == 0 && syncedDevices() > maxOf(devices, 1)
+                else -> result.reply.status == 0 && (otherDevices() - others).isNotEmpty()
             }
             // Not linked, or linked without the account (a university this version does not
             // know yet, for example): still to be set up. An account sent before (and left with

@@ -548,8 +548,10 @@ private suspend fun detect(
         error(result.error)
         return
     }
-    if (d.has("error") && !d.isNull("error")) {
-        error(model.strings.message(d.optString("error"), d.optJSONObject("error_t")))
+    // The core always sends "error", empty when the gateway answered (as the page reads it).
+    val problem = if (d.isNull("error")) "" else d.optString("error")
+    if (problem.isNotEmpty()) {
+        error(model.strings.message(problem, d.optJSONObject("error_t")))
         return
     }
     val groups = d.optJSONArray("groups")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
