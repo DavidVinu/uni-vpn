@@ -217,8 +217,9 @@ struct SecondFactorView: View {
             let list = await model.get("/universities.json")?.objects("universities") ?? []
             offersAuto = list.contains { $0.string("id") == id && $0.string("mfa_enroll") == "linotp" }
         }
-        // Leaving stops a run started here, as Back does on the desktop page.
-        .onDisappear { if !model.auto.inSetup { model.auto.cancel() } }
+        // Leaving stops a run started here, as Back does on the desktop page, and drops a typed
+        // code and its error (a finished setup's run leaves inSetup set).
+        .onDisappear { if !(model.auto.running && model.auto.inSetup) { model.auto.cancel() } }
     }
 
     private var keyForm: some View {
