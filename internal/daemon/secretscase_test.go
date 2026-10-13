@@ -50,43 +50,49 @@ func (c *memCred) Delete(target string) bool {
 // does not (the phones' secrets.json, secret-tool).
 func TestACaseOnlyChangeOfTheIDKeepsTheSecrets(t *testing.T) {
 	for _, fold := range []bool{true, false} {
-		store := &memCred{fold: fold, m: map[string][]byte{}}
-		old := credentials.Default
-		credentials.Default = &credentials.Keyring{GOOS: "windows", Cred: store}
-		t.Cleanup(func() { credentials.Default = old })
-
-		h := newHarness(t)
-		a := setupAccounts[2] // heidelberg, with a TOTP secret
-		upper := strings.ToUpper(a.user)
-		h.cfg.User, h.cfg.University, h.cfg.Host = upper, a.university, a.host
-		path := filepath.Join(t.TempDir(), "config.toml")
-		if err := config.WriteInitial(path, upper, a.university, a.overrides); err != nil {
-			t.Fatal(err)
-		}
-		d := h.start(func(o *Options) {
-			o.ConfigPath = path
-			o.PasswordGetter, o.PasswordSetter, o.TOTPGetter, o.TOTPSetter, o.SecretsDeleter = nil, nil, nil, nil, nil
+		t.Run(map[bool]string{true: "without case", false: "with case"}[fold], func(t *testing.T) {
+			caseOnlyChange(t, fold)
 		})
-		if err := d.CompleteSetup(upper, a.password, a.token, a.university, a.overrides); err != nil {
-			t.Fatal(err)
-		}
-		if err := d.CompleteSetup(a.user, a.password, a.token, a.university, a.overrides); err != nil {
-			t.Fatal(err)
-		}
-		pw, err := credentials.GetPassword(context.Background(), a.user, 5e9)
-		if err != nil || string(pw) != a.password {
-			t.Fatalf("fold %v: password of %s after the case correction: %q %v", fold, a.user, pw, err)
-		}
-		tok, err := credentials.GetTotp(context.Background(), a.user, 5e9)
-		if err != nil || string(tok) != a.token {
-			t.Fatalf("fold %v: TOTP of %s after the case correction: %q %v", fold, a.user, tok, err)
-		}
-		store.mu.Lock()
-		for target := range store.m {
-			if strings.Contains(target, upper) {
-				t.Errorf("fold %v: the old ID's %s stays", fold, target)
-			}
-		}
-		store.mu.Unlock()
 	}
+}
+
+func caseOnlyChange(t *testing.T, fold bool) {
+	store := &memCred{fold: fold, m: map[string][]byte{}}
+	old := credentials.Default
+	credentials.Default = &credentials.Keyring{GOOS: "windows", Cred: store}
+	t.Cleanup(func() { credentials.Default = old })
+
+	h := newHarness(t)
+	a := setupAccounts[2] // heidelberg, with a TOTP secret
+	upper := strings.ToUpper(a.user)
+	h.cfg.User, h.cfg.University, h.cfg.Host = upper, a.university, a.host
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := config.WriteInitial(path, upper, a.university, a.overrides); err != nil {
+		t.Fatal(err)
+	}
+	d := h.start(func(o *Options) {
+		o.ConfigPath = path
+		o.PasswordGetter, o.PasswordSetter, o.TOTPGetter, o.TOTPSetter, o.SecretsDeleter = nil, nil, nil, nil, nil
+	})
+	if err := d.CompleteSetup(upper, a.password, a.token, a.university, a.overrides); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.CompleteSetup(a.user, a.password, a.token, a.university, a.overrides); err != nil {
+		t.Fatal(err)
+	}
+	pw, err := credentials.GetPassword(context.Background(), a.user, 5e9)
+	if err != nil || string(pw) != a.password {
+		t.Fatalf("password of %s after the case correction: %q %v", a.user, pw, err)
+	}
+	tok, err := credentials.GetTotp(context.Background(), a.user, 5e9)
+	if err != nil || string(tok) != a.token {
+		t.Fatalf("TOTP of %s after the case correction: %q %v", a.user, tok, err)
+	}
+	store.mu.Lock()
+	for target := range store.m {
+		if strings.Contains(target, upper) {
+			t.Errorf("the old ID's %s stays", target)
+		}
+	}
+	store.mu.Unlock()
 }
