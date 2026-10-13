@@ -12,17 +12,39 @@ esac
 rm -rf "$out"
 mkdir -p "$out/bin" "$out/lib"
 
+# The .pkg installs on macOS from its distribution.xml minimum on.
+minimum=$(sed -n 's/.*<os-version min="\([0-9.]*\)".*/\1/p' "$(dirname "$0")/distribution.xml")
+
 brew install --quiet openconnect ocproxy dylibbundler
 prefix=$(brew --prefix)
+# Homebrew pours its bottles for the runner's newer macOS, which can need what the minimum lacks
+# (openconnect's for Apple Silicon calls strchrnul, new in macOS 15.4). Where Homebrew still has
+# bottles for the minimum, those replace them.
+case "${minimum%.0}" in
+  14) os=sonoma ;;
+  *) echo "which Homebrew bottles are for macOS $minimum?"; exit 1 ;;
+esac
+if [ "$(uname -m)" = arm64 ]; then tag="arm64_$os"; else tag="$os"; fi
+bottles=$(mktemp -d)
+for f in openconnect ocproxy $(brew deps --union openconnect ocproxy); do
+  brew info --json=v2 "$f" | jq -e --arg t "$tag" '.formulae[0].bottle.stable.files[$t]' >/dev/null || continue
+  brew fetch --quiet --bottle-tag="$tag" "$f"
+  # Under its usual name (the download cache puts a hash in front), which brew install reads.
+  cached=$(brew --cache --bottle-tag="$tag" "$f")
+  bottle="$bottles/$(basename "$cached" | sed -E 's/^[0-9a-f]{64}--//')"
+  cp "$cached" "$bottle"
+  brew uninstall --quiet --ignore-dependencies "$f"
+  brew install --quiet --ignore-dependencies "$bottle"
+  echo "the bottle for macOS $minimum: $f"
+done
 cp "$prefix/bin/openconnect" "$prefix/bin/ocproxy" "$out/bin/"
 chmod u+w "$out/bin/"*
 # Copies every Homebrew library they load next to them and points them there.
 dylibbundler -cd -of -b -s "$prefix/lib" -x "$out/bin/openconnect" -x "$out/bin/ocproxy" -d "$out/lib" -p @executable_path/../lib/
 
-# The .pkg installs on macOS from its distribution.xml minimum on. Homebrew's bottles and what it
-# builds itself are for the runner's newer macOS, and dyld on the older one refuses such a library.
-# Marked for the minimum instead; below, a library that really needs the newer macOS fails.
-minimum=$(sed -n 's/.*<os-version min="\([0-9.]*\)".*/\1/p' "$(dirname "$0")/distribution.xml")
+# The rest is for the runner's newer macOS (what Homebrew has no bottle for the minimum for, or
+# builds itself), and dyld on the minimum refuses such a library. Marked for the minimum instead;
+# below, a library that really needs the newer macOS fails.
 newer() { awk -v a="$1" -v b="$2" 'BEGIN { split(a, x, "."); split(b, y, "."); exit !(x[1] > y[1] || (x[1] == y[1] && x[2] + 0 > y[2] + 0)) }'; }
 find "$out" -type f \( -perm -u+x -o -name '*.dylib' -o -name '*.so' \) -print0 |
   while IFS= read -r -d '' f; do
