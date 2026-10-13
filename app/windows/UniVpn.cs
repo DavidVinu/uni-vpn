@@ -227,7 +227,9 @@ class TrayApp : ApplicationContext
 
     public void Show(string page)
     {
-        if (window == null || window.IsDisposed) window = new MainWindow(baseUrl);
+        if (window == null || window.IsDisposed) window = new MainWindow(baseUrl, page);
+        // No WebView2 runtime: the window closed itself at once and the page is open in the browser.
+        if (window.IsDisposed) return;
         window.Open(page);
     }
 
@@ -439,9 +441,10 @@ class MainWindow : Form
     string pending;
     string target;
 
-    public MainWindow(string baseUrl)
+    public MainWindow(string baseUrl, string page)
     {
         this.baseUrl = baseUrl;
+        pending = page;
         Text = "Uni VPN";
         Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
         AutoScaleMode = AutoScaleMode.None;
@@ -469,8 +472,11 @@ class MainWindow : Form
         }
         catch (Exception)
         {
-            // No WebView2 runtime (Windows 10 without a current Edge): the page in the browser.
-            Process.Start(baseUrl);
+            // No WebView2 runtime (Windows 10 without a current Edge): the page asked for in the
+            // browser. This can happen before the constructor returns; Close then disposes the window.
+            string page = pending ?? "";
+            try { Process.Start(baseUrl + (page.StartsWith("&") ? "?" + page.Substring(1) : page)); }
+            catch (Exception) { }
             quitting = true;
             Close();
             return;
@@ -499,8 +505,12 @@ class MainWindow : Form
         view.CoreWebView2.NavigationCompleted += delegate(object sender, CoreWebView2NavigationCompletedEventArgs e)
         {
             if (!e.IsSuccess && e.WebErrorStatus == CoreWebView2WebErrorStatus.OperationCanceled) return;
-            loaded = e.IsSuccess;
-            if (e.IsSuccess || quitting) return;
+            // A page the service answered with an error (403: another account's service has the
+            // port) reloads itself; retrying here as well would make it flicker.
+            int status = 0;
+            try { status = e.HttpStatusCode; } catch (Exception) { }  // older runtimes cannot say
+            loaded = e.IsSuccess || status != 0;
+            if (loaded || quitting) return;
             System.Windows.Forms.Timer retry = new System.Windows.Forms.Timer();
             retry.Interval = 2000;
             // Hidden, it stops; opening the window again loads the page (ShowPage, !loaded).
