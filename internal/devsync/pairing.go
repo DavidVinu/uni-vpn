@@ -302,7 +302,13 @@ func (e *Engine) closeSlots(mode string, p pairing) {
 	}
 	err := e.relay.putPair(ctx, p.b, []byte("closed"))
 	if errors.Is(err, errConflict) {
-		_, err = e.relay.takePair(ctx, p.b)
+		// Read away, and filled again: it may have been the filler of another close of this
+		// code (taken off the screen while it ran out), which must not leave the slot open.
+		if _, err = e.relay.takePair(ctx, p.b); err == nil || errors.Is(err, errNotFound) {
+			if err = e.relay.putPair(ctx, p.b, []byte("closed")); errors.Is(err, errConflict) {
+				err = nil
+			}
+		}
 	}
 	if err != nil && !errors.Is(err, errNotFound) {
 		e.logf(slog.LevelWarn, "Could not withdraw the code: %s", err)

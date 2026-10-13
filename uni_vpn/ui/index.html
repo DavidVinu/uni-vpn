@@ -1055,8 +1055,11 @@ function openSettings() {
   removeError = null;
   show("settings");
   render();
-  // Like Chrome sync: opening Settings picks up changes from the other devices (and finds the
-  // sync keys when the keyring did not answer before).
+  syncNow();
+}
+// Like Chrome sync: opening Settings picks up changes from the other devices (and finds the
+// sync keys when the keyring did not answer before).
+function syncNow() {
   if (S.sync && S.sync.available) send("/api/sync/refresh").then(() => refresh());
 }
 $("open-settings").onclick = openSettings;
@@ -1087,13 +1090,22 @@ async function useOffered() {
 window.addEventListener("hashchange", () => {
   if (catchKey()) { useOffered(); return; }
   const target = location.hash.slice(1);
-  if (!S || S.setup_needed || !["main", "settings"].includes(target)) return;
+  if (!S) return;  // the first status opens it (refresh)
+  // Taken, also when ignored below: the menu's next "Open" or "Settings" is a change again.
+  if (location.hash) history.replaceState(null, "", location.pathname + location.search);
+  if (S.setup_needed || !["main", "settings"].includes(target)) return;
   if (view === "setup" && autoRunning) return;  // the tray's "Open" during the short way: stay on it
   // Ended here: Settings stays when it says to restart the browser (else the note is never seen).
   if (changing && !submitting) { endChange(); if (target === "settings" || $("dommsg").textContent) return; }
   if (changing) return;
-  // Already open: an unsaved edit of the websites stays.
-  if (target === "settings") { if (view !== "settings") openSettings(); } else { show("main"); render(); }
+  if (view === "pair") {
+    // "Devices linked" during the first setup: its Done comes first, "All set" says to reopen the browser.
+    if (!$("pair-done").hidden && pairFrom === "setup") { closePair(); return; }
+    if (pairShown) { pairShown = null; send("/api/sync/cancel"); }  // the code leaves the screen, as with Back
+  }
+  // Already open: an unsaved edit of the websites stays, the other devices' changes still come.
+  if (target === "settings") { if (view !== "settings") openSettings(); else { removeError = null; render(); syncNow(); } }
+  else { show("main"); render(); }
 });
 
 // Account rows: the assistant again, prefilled, back to Settings when done. Role model: macOS

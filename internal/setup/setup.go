@@ -963,17 +963,21 @@ func (s *Setup) Uninstall(a Args) (int, error) {
 	}
 	os.Remove(RecordsPath())
 	os.Remove(filepath.Join(platform.ConfigDir(), "daemon.lock")) // Windows: still locked by a daemon that did not stop
-	if user != "" {
-		answer := "y"
-		if !a.Yes {
-			text, err := s.Input(fmt.Sprintf("Delete the password and TOTP secret for %s from the keyring? [y/N] ", user))
-			if err != nil {
-				s.printf("") // no terminal
-				text = "n"
-			}
-			answer = strings.ToLower(strings.TrimSpace(text))
+	// --yes also without an account: linking stores the sync keys before the account is set up,
+	// which can fail.
+	answer := ""
+	if a.Yes {
+		answer = "y"
+	} else if user != "" {
+		text, err := s.Input(fmt.Sprintf("Delete the password and TOTP secret for %s from the keyring? [y/N] ", user))
+		if err != nil {
+			s.printf("") // no terminal
+			text = "n"
 		}
-		if slices.Contains([]string{"j", "ja", "y", "yes"}, answer) {
+		answer = strings.ToLower(strings.TrimSpace(text))
+	}
+	if slices.Contains([]string{"j", "ja", "y", "yes"}, answer) {
+		if user != "" {
 			deleted, err := s.DeletePassword(user)
 			if err != nil {
 				return 1, err
@@ -983,13 +987,14 @@ func (s *Setup) Uninstall(a Args) (int, error) {
 				return 1, err
 			}
 			s.say("%s", pick(deleted, "TOTP secret deleted", "TOTP secret was not in the keyring"))
-			if s.DeleteSync != nil {
-				if deleted, err = s.DeleteSync(); err != nil {
-					return 1, err
-				}
-				if deleted {
-					s.say("Sync keys deleted")
-				}
+		}
+		if s.DeleteSync != nil {
+			deleted, err := s.DeleteSync()
+			if err != nil {
+				return 1, err
+			}
+			if deleted {
+				s.say("Sync keys deleted")
 			}
 		}
 	}

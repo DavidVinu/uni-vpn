@@ -330,7 +330,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         let me = resolved(Bundle.main.bundlePath)
         let changed = now != nil && (app != me || now != program) && now == seen
         seen = now
-        guard changed, !restarting, !(window?.isVisible ?? false), !(window?.isMiniaturized ?? false) else { return }
+        // A hidden app (Cmd+H) reports its window as not visible: it is still open.
+        guard changed, !restarting, !(window?.isVisible ?? false), !(window?.isMiniaturized ?? false), !NSApp.isHidden else { return }
         restarting = true
         let config = NSWorkspace.OpenConfiguration()
         config.createsNewApplicationInstance = true
