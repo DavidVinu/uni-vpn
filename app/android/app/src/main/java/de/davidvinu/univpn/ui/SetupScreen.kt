@@ -297,7 +297,8 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
                 auto -> { { model.cancelEnroll(); go(SIGN_IN) } }
                 else -> { { go(SIGN_IN) } }
             }
-            CODE -> { { go(WELCOME) } }
+            // Not while a code is on its way: one scanned meanwhile would wait for it unsent.
+            CODE -> if (model.pairBusy) null else { { go(WELCOME) } }
             UNIVERSITY -> if (model.changingAccount) { { finishChange() } } else if (syncAvailable) { { dropDetect(); go(WELCOME) } } else null
             CONNECTING -> if (!model.setupBusy) { { model.setupSentAt = 0; go(if (needsTotp) SECOND_FACTOR else SIGN_IN) } } else null
             else -> null
