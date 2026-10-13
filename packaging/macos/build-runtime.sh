@@ -19,23 +19,28 @@ brew install --quiet openconnect ocproxy dylibbundler
 prefix=$(brew --prefix)
 # Homebrew pours its bottles for the runner's newer macOS, which can need what the minimum lacks
 # (openconnect's for Apple Silicon calls strchrnul, new in macOS 15.4). Where Homebrew still has
-# bottles for the minimum, those replace them.
+# bottles for the minimum, their programs and libraries replace those. Only bottles made for this
+# Cellar or for none: a bottle for any Cellar names libraries by a placeholder until poured.
 case "${minimum%.0}" in
   14) os=sonoma ;;
   *) echo "which Homebrew bottles are for macOS $minimum?"; exit 1 ;;
 esac
 if [ "$(uname -m)" = arm64 ]; then tag="arm64_$os"; else tag="$os"; fi
+cellar=$(brew --cellar)
 bottles=$(mktemp -d)
 for f in openconnect ocproxy $(brew deps --union openconnect ocproxy); do
-  brew info --json=v2 "$f" | jq -e --arg t "$tag" '.formulae[0].bottle.stable.files[$t]' >/dev/null || continue
+  brew info --json=v2 "$f" | jq -e --arg t "$tag" --arg c "$cellar" \
+    '.formulae[0].bottle.stable.files[$t].cellar | . == $c or . == ":any_skip_relocation"' >/dev/null || continue
   brew fetch --quiet --bottle-tag="$tag" "$f"
-  # Under its usual name (the download cache puts a hash in front), which brew install reads.
-  cached=$(brew --cache --bottle-tag="$tag" "$f")
-  bottle="$bottles/$(basename "$cached" | sed -E 's/^[0-9a-f]{64}--//')"
-  cp "$cached" "$bottle"
-  brew uninstall --quiet --ignore-dependencies "$f"
-  brew install --quiet --ignore-dependencies "$bottle"
-  echo "the bottle for macOS $minimum: $f"
+  mkdir "$bottles/$f"
+  tar -xzf "$(brew --cache --bottle-tag="$tag" "$f")" -C "$bottles/$f"
+  (cd "$bottles/$f" && find . -type f) | while IFS= read -r p; do
+    # The same version as the one installed, or nothing is replaced (and the check below tells).
+    if [ -e "$cellar/$p" ] && file -b "$bottles/$f/$p" | grep -q Mach-O; then
+      cp -f "$bottles/$f/$p" "$cellar/$p"
+      echo "from the bottle for macOS $minimum: ${p#./}"
+    fi
+  done
 done
 cp "$prefix/bin/openconnect" "$prefix/bin/ocproxy" "$out/bin/"
 chmod u+w "$out/bin/"*
