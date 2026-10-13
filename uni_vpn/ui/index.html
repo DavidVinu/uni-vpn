@@ -136,6 +136,7 @@ input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
 .list button.item.add{color:var(--accent)}
 .list button.item.add:after{display:none}
 #s-use-other{display:block;margin:16px auto 0}
+#pair-err{margin:16px 0 0}
 .offline{background:var(--bad);color:var(--on-color);border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:14px}
 </style>
 </head>
@@ -410,7 +411,7 @@ function show(id) {
 
 function step(id, focusId) {
   if (id === "step2a" && offeredKey) id = "step2";  // a key from a link: the guide's test step
-  autoRepair = false;  // each visit of the code step starts without a Repair
+  autoRepair = !!(S && S.repairing);  // each visit starts without a Repair, unless one still runs
   for (const s of ["step0", "step1", "step2a", "step2", "step3", "step4"]) $(s).hidden = s !== id;
   if (id === "step2a") renderAuto();
   if (id === "step2") {
@@ -685,9 +686,10 @@ function renderAuto(error) {
 }
 
 function autoProgress() {
-  if (!autoRunning && autoRepair && !$("step2a").hidden) {
-    // Repair clicked here: how it goes is said here too (repairing, failed, download again).
-    err("a-err", QUIET.includes(S.message_id) ? "" : tr(S.message, S.message_t));
+  if (!autoRunning && !autoSending && !$("step2a").hidden) {
+    // A Repair may end at any time: the buttons follow the service. After a Repair here, how it
+    // goes is said here too (repairing, failed, download again).
+    if (autoRepair) err("a-err", QUIET.includes(S.message_id) ? "" : tr(S.message, S.message_t));
     $("a-fix").hidden = S.action !== "repair";
     $("a-fix").disabled = !!S.repairing;
     $("a-download").hidden = S.message_id !== "reinstall_needed";
@@ -713,7 +715,9 @@ function autoProgress() {
 $("step2a").onsubmit = async (e) => {
   e.preventDefault();
   if (submitting) return;
-  autoRepair = false;  // what this code brings is said now, not the Repair's outcome
+  // What this code brings is said now, not the Repair's outcome; a Repair still running goes on
+  // being followed (its end restarts the service and ends this code's run too).
+  if (!S.repairing) autoRepair = false;
   const code = $("a-code").value.replace(/\s/g, "");
   if (!/^[0-9]{6,8}$/.test(code)) { err("a-err", t("enroll.enter_code")); return; }
   const answer = autoRunning && S.enroll && S.enroll.stage === "code";
@@ -1033,12 +1037,14 @@ $("fix").onclick = async () => {
   }
   if (S.action === "totp") { startChange("step2"); return; }
   show("settings");
+  $("pwmsg").textContent = "";  // an earlier "Saved" is not this password's
   const d = $("d-pw");
   d.open = true;
   d.querySelector("input").focus();
 };
 function openSettings() {
   domainsShown = false;
+  $("pwmsg").textContent = $("dommsg").textContent = "";
   removeError = null;
   show("settings");
   render();
@@ -1156,23 +1162,25 @@ $("pwform").onsubmit = async (e) => {
   refresh();
 };
 $("auto-update").onchange = async () => {
-  const box = $("auto-update");
+  const box = $("auto-update"), focused = document.activeElement === box;
   autoUpdateSaving = true;
   box.disabled = true;
   const r = await send("/api/auto-update", {enabled: box.checked});
   if (!r.ok) box.checked = !box.checked;
   box.disabled = false;
+  if (focused) box.focus();
   autoUpdateSaving = false;
   refresh();
 };
 $("language").onchange = async () => {
-  const box = $("language"), previous = S ? S.language || "" : "";
+  const box = $("language"), previous = S ? S.language || "" : "", focused = document.activeElement === box;
   languageSaving = true;
   box.disabled = true;
   applyLanguage(box.value);  // at once, like Mullvad; the service keeps it for next time
   const r = await send("/api/language", {language: box.value});
   if (!r.ok) { box.value = previous; applyLanguage(previous); }
   box.disabled = false;
+  if (focused) box.focus();  // disabling dropped the focus: arrow keys go on choosing
   languageSaving = false;
   refresh();
 };
@@ -1242,6 +1250,7 @@ async function startPair(mode, from) {
   $("pair-title").textContent = t(mode === "offer" ? "sync.add" : "sync.use_other");
   $("pair-sub").textContent = t(mode === "offer" ? "sync.show_offer" : "sync.show_request");
   $("pair-qr").replaceChildren();
+  $("pair-qr").hidden = $("pair-sub").hidden = true;  // no empty white box before the code comes
   $("pair-code").textContent = "\u00a0";
   $("pair-new").hidden = true;
   $("pair-new").dataset.mode = mode;
@@ -1259,6 +1268,7 @@ function showPairing(p) {
   pairListed = false;
   // The service draws the QR code itself; nothing loads from elsewhere.
   $("pair-qr").innerHTML = p.qr;
+  $("pair-qr").hidden = $("pair-sub").hidden = false;
   $("pair-code").textContent = p.code;
 }
 
