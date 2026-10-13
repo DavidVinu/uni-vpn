@@ -807,10 +807,26 @@ jobs:
           }
           if (-not (Test-Path "$env:ProgramFiles\uni-vpn\openconnect\wintun.dll")) { throw "Wintun is missing" }
           # The tray app must keep running: one that ends at start would reach every user with the
-          # next update.
-          $tray = Start-Process "$env:ProgramFiles\uni-vpn\desktop\Uni VPN.exe" -ArgumentList "--port 1081 --hidden" -PassThru
+          # next update. Setup and the installer each start a copy (one stays, the other hands over
+          # and quits); once they are up, the one that stays must still run 10 s later. Without
+          # one, a copy started here must.
+          function Trays { @(Get-CimInstance Win32_Process -Filter "Name = 'Uni VPN.exe'") }
+          function ShowTrays {
+            Trays | Format-Table ProcessId, ParentProcessId, CreationDate, CommandLine -AutoSize -Wrap | Out-String -Width 400 | Write-Host
+          }
+          Start-Sleep 5
+          $before = Trays
+          ShowTrays
+          if ($before.Count -eq 0) {
+            $tray = Start-Process "$env:ProgramFiles\uni-vpn\desktop\Uni VPN.exe" -ArgumentList "--port 1081 --hidden" -PassThru
+            $before = @($tray)
+          }
           Start-Sleep 10
-          if ($tray.HasExited -and -not (Get-Process "Uni VPN" -ErrorAction SilentlyContinue)) { throw "the tray app ends at start ($($tray.ExitCode))" }
+          if ((Trays).Count -eq 0) {
+            ShowTrays
+            Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\daemon.log" -Tail 40 -ErrorAction SilentlyContinue
+            throw "the tray app ends at start (running before: $($before.Count))"
+          }
           $lnk = Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter "Uni VPN.lnk"
           if (-not $lnk) { throw "no Start menu entry" }
       - name: Uninstall it like a user would

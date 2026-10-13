@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/DavidVinu/uni-vpn/internal/atomicfile"
 )
 
 // Local is the device's own settings: what the daemon has in config.toml, the website list
@@ -50,6 +52,9 @@ var (
 	// ErrNotKnown: Local.Apply's answer for a setting of a newer version. It is not taken over
 	// and not noted as synced: after the update the device takes the group's value.
 	ErrNotKnown = errors.New("a setting of a newer version")
+	// ErrBusy: Local.Snapshot's answer while its settings are half changed (an account being
+	// set up). The round waits for the Notify that follows; it is no failure to show.
+	ErrBusy = errors.New("the settings are being changed")
 )
 
 // Options configure an Engine; zero values are the defaults.
@@ -246,7 +251,8 @@ func (k *keys) stateKey() []byte { return derive(k.Priv, "state hash", 32) }
 
 func (e *Engine) loadState() state {
 	var st state
-	data, err := os.ReadFile(e.opts.StatePath)
+	// Windows: a file being replaced can read as missing for a moment, which is no lost state.
+	data, err := atomicfile.Read(e.opts.StatePath)
 	if err != nil || json.Unmarshal(data, &st) != nil {
 		st = state{Keyed: true, Lost: true} // nothing to carry over
 	}
@@ -258,16 +264,13 @@ func (e *Engine) loadState() state {
 
 func (e *Engine) saveState(st state) error { return writeFile(e.opts.StatePath, mustJSON(st)) }
 
-// writeFile replaces path in one step, readable by this user only.
+// writeFile replaces path in one step, readable by this user only; two writes at once (a
+// Notify next to a round) each use their own temporary file.
 func writeFile(path string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return atomicfile.Write(path, data)
 }
 
 // forget turns syncing off on this device: keys and state go, settings stay.
@@ -340,7 +343,7 @@ func (e *Engine) loadPendingLocked() {
 		return
 	}
 	e.pendingLoaded = true
-	if data, err := os.ReadFile(e.pendingPath()); err == nil {
+	if data, err := atomicfile.Read(e.pendingPath()); err == nil {
 		json.Unmarshal(data, &e.pending)
 	}
 }
@@ -461,12 +464,13 @@ func (e *Engine) Defaulted(keys ...string) {
 			}
 		}
 	}
-	k := e.keys
 	e.mu.Unlock()
 	st := e.loadState()
 	if len(st.Hashes) == 0 { // nothing known (sync.json lost): only what was typed is a change already
 		return
 	}
+	// The keyring just took the password: keys it did not give at start come now.
+	k, _ := e.recheck(context.Background())
 	var snap map[string]json.RawMessage
 	if k != nil {
 		snap, _ = e.opts.Local.Snapshot(context.Background(), false)
@@ -601,7 +605,9 @@ func (e *Engine) Sync(ctx context.Context) error {
 	e.mu.Unlock()
 	err := e.syncLocked(ctx)
 	e.mu.Lock()
-	e.lastError = err
+	if !errors.Is(err, ErrBusy) {
+		e.lastError = err
+	}
 	e.mu.Unlock()
 	return err
 }

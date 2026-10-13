@@ -1009,6 +1009,26 @@ func TestRemoveOffline(t *testing.T) {
 	}
 }
 
+// A round that cannot reach the relay is reported as offline: Settings then says to check the
+// internet connection rather than only that the devices cannot sync.
+func TestSyncOfflineIsReportedAsOffline(t *testing.T) {
+	ctx := context.Background()
+	_, url := startRelay(t)
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	laptop := newDevice(t, url, "Laptop", setUpLaptop(), c)
+	desktop := newDevice(t, url, "Desktop", newLocal(false, nil), c)
+	pair(t, ctx, laptop, desktop)
+	opts := laptop.opts
+	opts.Relay = "http://127.0.0.1:1" // nothing listens there
+	e := New(opts)
+	if err := e.Sync(ctx); !errors.Is(err, ErrOffline) {
+		t.Fatalf("sync: %v", err)
+	}
+	if err := e.Status().Error; !errors.Is(err, ErrOffline) {
+		t.Fatalf("status: %v", err)
+	}
+}
+
 // hookLocal runs onApply inside the first Apply, before anything is taken over.
 type hookLocal struct {
 	*fakeLocal

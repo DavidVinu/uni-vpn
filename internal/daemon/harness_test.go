@@ -112,7 +112,9 @@ func newHarness(t *testing.T) *harness {
 	for cfg.HTTPPort == cfg.SocksPort { // the system may hand out a just freed port again
 		cfg.HTTPPort = freePort(t)
 	}
-	cfg.IdleMinutes, cfg.ReadyTimeout, cfg.ClientWait, cfg.StopGrace = 0.01, 4, 2, 1
+	// Idle after 3 s: a slow CI runner can take more than half a second from "connected" to a
+	// waiting connection's first byte, and an idle stop then resets that connection.
+	cfg.IdleMinutes, cfg.ReadyTimeout, cfg.ClientWait, cfg.StopGrace = 0.05, 4, 2, 1
 	cfg.HalfcloseGrace, cfg.DemandWindow, cfg.RetryInterval, cfg.Tick = 0.5, 0.3, 0.2, 0.1
 	cfg.Backoff = []float64{0.1, 0.1}
 	h.cfg = &cfg
@@ -129,6 +131,9 @@ func (h *harness) teardown() {
 	case <-h.done:
 	case <-time.After(10 * time.Second):
 		h.t.Error("daemon did not stop")
+	}
+	if h.t.Failed() { // what the daemon did, for a failure seen only in CI
+		h.t.Logf("daemon log:\n%s", h.logs.String())
 	}
 }
 

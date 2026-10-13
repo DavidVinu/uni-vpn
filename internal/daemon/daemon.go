@@ -827,7 +827,11 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 		return errors.New(pyErr(err))
 	}
 	d.mu.Lock()
+	websites := d.cfg.DefaultDomains
 	config.CopyProfile(d.cfg, &profile)
+	// Another university's websites (no list of the user's own): a new proxy rule.
+	newRule := !slices.Equal(websites, d.cfg.DefaultDomains)
+	port := d.cfg.HTTPPort
 	d.switching = false
 	d.accountGen++
 	d.wakeUp()
@@ -839,6 +843,9 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 		d.startEnrollLocked(code, profile.MFAPortalURL)
 	}
 	d.mu.Unlock()
+	if newRule {
+		d.opts.ProxyRefresh(port)
+	}
 	if quiet {
 		d.secretsSynced(teardown)
 	} else {
@@ -1427,11 +1434,28 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 			continue // checks Cisco, network and demand again, then fetches the secrets
 		}
 		generation, account := d.secretsGen, d.accountGen
+		// An account being set up or just put back (completeSetup): secrets read meanwhile may be
+		// the other account's, no verdict on them and no sign-in. completeSetup wakes the loop.
+		changing := func() bool {
+			if !d.switching && account == d.accountGen {
+				return false
+			}
+			if d.switching {
+				d.sleep(ctx, cfg.RetryInterval)
+			}
+			return true
+		}
 		var password []byte
 		var err error
 		d.unlocked(func() { password, err = d.opts.PasswordGetter(ctx) })
 		if ctx.Err() != nil {
 			return
+		}
+		if changing() {
+			if ctx.Err() != nil {
+				return
+			}
+			continue
 		}
 		if err != nil {
 			var missing *credentials.MissingError
@@ -1456,6 +1480,12 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 			d.unlocked(func() { raw, err = d.opts.TOTPGetter(ctx) })
 			if ctx.Err() != nil {
 				return
+			}
+			if changing() {
+				if ctx.Err() != nil {
+					return
+				}
+				continue
 			}
 			if err != nil {
 				var missing *credentials.MissingError

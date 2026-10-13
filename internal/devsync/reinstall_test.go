@@ -3,7 +3,10 @@ package devsync
 import (
 	"context"
 	"encoding/json"
+	"math/rand/v2"
 	"os"
+	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 )
@@ -44,6 +47,59 @@ func TestUnsentChangeThenInstalledAgainKeepsTheGroups(t *testing.T) {
 		t.Logf("%s: language %s", d.opts.Name, d.local.get(KeyLanguage))
 		if lang := d.local.get(KeyLanguage); lang == `""` {
 			t.Errorf("%s: language %s: the new config.toml's default replaced the group's", d.opts.Name, lang)
+		}
+	}
+}
+
+// As above, but the keyring did not answer at start (its unlock prompt dismissed) and the
+// language is picked after the setup, while offline: the later pick holds.
+func TestLanguagePickedAfterSetUpByHandWithTheKeysNotReadAtStart(t *testing.T) {
+	ctx := context.Background()
+	relay, devices := lossyDevices(t, "Desktop")
+	laptop, desktop := devices[0], devices[1]
+	laptop.local.set(KeyLanguage, "de")
+	laptop.Notify()
+	syncAll(t, laptop, desktop, laptop)
+	// Removed and installed again.
+	desktop.local.mu.Lock()
+	desktop.local.setup = false
+	delete(desktop.local.values, KeyAccount)
+	delete(desktop.local.values, KeyLanguage)
+	delete(desktop.local.values, KeyAutoUpdate)
+	desktop.local.mu.Unlock()
+	store := &keyringStore{misses: 1}
+	store.value = desktop.store.value
+	opts := desktop.opts
+	opts.Store = store
+	again := device{New(opts), desktop.local, desktop.store}
+	again.Load(ctx)
+	// Set up by hand, as completeSetup does: the keyring answers again for the password.
+	desktop.local.mu.Lock()
+	desktop.local.setup = true
+	desktop.local.mu.Unlock()
+	desktop.local.set(KeyAccount, account)
+	desktop.local.set(KeyPassword, "typed")
+	desktop.local.set(KeyTOTP, "JBSWY3DP")
+	desktop.local.set(KeyLanguage, "")
+	desktop.local.set(KeyAutoUpdate, true)
+	again.Defaulted(KeyLanguage, KeyAutoUpdate)
+	again.Notify(KeyAccount, KeyPassword, KeyTOTP)
+	// Settings opens offline, then French is picked.
+	relay.mu.Lock()
+	relay.rng, relay.odds = rand.New(rand.NewPCG(1, 1)), 1
+	relay.mu.Unlock()
+	if err := again.Refresh(ctx); err == nil {
+		t.Fatal("the round went through offline")
+	}
+	desktop.local.set(KeyLanguage, "fr")
+	again.Notify()
+	relay.mu.Lock()
+	relay.odds = 0
+	relay.mu.Unlock()
+	syncAll(t, again, laptop)
+	for _, d := range []device{laptop, again} {
+		if lang := d.local.get(KeyLanguage); lang != `"fr"` {
+			t.Errorf("%s: language %s, want the later pick fr", d.opts.Name, lang)
 		}
 	}
 }
@@ -161,5 +217,30 @@ func TestTakenOverValueAfterAPasswordTypedDuringTheRound(t *testing.T) {
 		if got := dv.local.get(KeyPassword); got != `"typed"` {
 			t.Errorf("%s: password %s, want the typed one", dv.opts.Name, got)
 		}
+	}
+}
+
+// Notify writes its note outside the lock, and Defaulted saves the state next to a round: two
+// writes at once must both go through and leave a whole file.
+func TestWritesAtOnceLeaveAWholeFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sync.json")
+	var failed atomic.Int32
+	var wg sync.WaitGroup
+	for i := range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 50 {
+				if writeFile(path, mustJSON(map[string]int{"writer": i})) != nil {
+					failed.Add(1)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	var got map[string]int
+	data, err := os.ReadFile(path)
+	if err != nil || json.Unmarshal(data, &got) != nil || failed.Load() != 0 {
+		t.Fatalf("%d writes failed, file %q %v", failed.Load(), data, err)
 	}
 }

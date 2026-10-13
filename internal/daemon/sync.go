@@ -100,13 +100,20 @@ type syncAccount struct {
 func (l syncLocal) Snapshot(ctx context.Context, withSecrets bool) (map[string]json.RawMessage, error) {
 	d := l.d
 	out := map[string]json.RawMessage{}
-	if !l.SetupDone() {
-		return out, nil
-	}
 	d.mu.Lock()
+	if d.switching {
+		// completeSetup is between two accounts (the new user with the old university), or a
+		// first setup by hand is under way: its Notify asks for the round again.
+		d.mu.Unlock()
+		return nil, devsync.ErrBusy
+	}
+	setUp := !d.needsSetup && d.configError == ""
 	cfg := *d.cfg
 	path := d.configPath
 	d.mu.Unlock()
+	if !setUp {
+		return out, nil
+	}
 	overrides, err := config.Overrides(path)
 	if err != nil {
 		return nil, err

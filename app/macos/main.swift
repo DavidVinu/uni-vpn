@@ -57,6 +57,8 @@ func t(_ key: String) -> String { texts[key] ?? key }
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate, NSMenuDelegate {
     var window: NSWindow?
     var webView: WKWebView?
+    // The page last asked for: a load that fails (service starting) is tried again as that page.
+    var target = URL(string: "?app=1", relativeTo: base)!.absoluteURL
     let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     let menu = NSMenu()
     let stateItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -197,7 +199,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
             if !page.isEmpty { view.evaluateJavaScript("location.hash = '\(page)'") }
             return
         }
-        view.load(URLRequest(url: URL(string: "?app=1" + page, relativeTo: base)!.absoluteURL))
+        target = URL(string: "?app=1" + page, relativeTo: base)!.absoluteURL
+        view.load(URLRequest(url: target))
     }
 
     func windowWillClose(_ note: Notification) {
@@ -266,7 +269,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     func webView(_ view: WKWebView, didFailProvisionalNavigation nav: WKNavigation!, withError error: Error) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
             guard let self = self, let win = self.window, win.isVisible else { return }
-            view.load(URLRequest(url: URL(string: "?app=1", relativeTo: base)!.absoluteURL))
+            view.load(URLRequest(url: self.target))  // the page asked for (Settings), not the main one
         }
     }
 
