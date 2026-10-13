@@ -82,16 +82,16 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     /** The code of another device (/api/sync/enter): kept here like setup, for turning the phone. */
     var pairBusy by mutableStateOf(false)
         private set
-    /** Its answer, until the setup page takes it. */
+    /** Its answer, until the setup page or Add a device takes it. */
     var pairResult by mutableStateOf<Result?>(null)
 
-    fun enterPairCode(code: String) {
+    fun enterPairCode(code: String, inSetup: Boolean = true) {
         if (pairBusy) return
         pairBusy = true
         viewModelScope.launch {
             val result = post("/api/sync/enter", JSONObject().put("code", code), timeoutMs = 60_000)
             // Set up now: the setup page stays for its last page ("All set").
-            if (result.ok) setupFinishing = true
+            if (result.ok && inSetup) setupFinishing = true
             pairBusy = false
             pairResult = result
         }

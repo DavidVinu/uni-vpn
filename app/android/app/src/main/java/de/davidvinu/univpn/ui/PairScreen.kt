@@ -34,7 +34,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -56,7 +55,6 @@ import de.davidvinu.univpn.AppModel
 import de.davidvinu.univpn.MainActivity
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
-import org.json.JSONObject
 
 /**
  * Add a device. Role models: Signal "Link a device" and WhatsApp linked devices: one device
@@ -66,7 +64,6 @@ import org.json.JSONObject
 @Composable
 fun PairScreen(model: AppModel, mode: String, activity: MainActivity) {
     val status = model.status ?: return
-    val scope = rememberCoroutineScope()
     val context = LocalContext.current
     // Saved, so turning the phone keeps the code the other device may be typing.
     var shown by rememberSaveable { mutableStateOf<String?>(null) }
@@ -77,7 +74,6 @@ fun PairScreen(model: AppModel, mode: String, activity: MainActivity) {
     var attempt by rememberSaveable { mutableIntStateOf(0) }
     // The attempt whose code shows.
     var offered by rememberSaveable { mutableIntStateOf(-1) }
-    var busy by remember { mutableStateOf(false) }
 
     LaunchedEffect(attempt) {
         if (offered == attempt && shown != null) return@LaunchedEffect
@@ -95,7 +91,10 @@ fun PairScreen(model: AppModel, mode: String, activity: MainActivity) {
     DisposableEffect(Unit) {
         onDispose {
             // Turning the phone builds the screen anew: the pairing goes on.
-            if (!activity.isChangingConfigurations) GlobalScope.launch { model.core.post("/api/sync/cancel") }
+            if (!activity.isChangingConfigurations) {
+                GlobalScope.launch { model.core.post("/api/sync/cancel") }
+                model.pairResult = null // not for the next visit
+            }
         }
     }
     val pairing = status.optJSONObject("sync")?.optJSONObject("pairing")
@@ -106,6 +105,12 @@ fun PairScreen(model: AppModel, mode: String, activity: MainActivity) {
             "expired" -> error = model.t("sync.expired")
             "failed" -> error = model.t("sync.offline")
         }
+    }
+    // A typed or scanned code: its answer comes through the model, also after turning the phone.
+    LaunchedEffect(model.pairResult) {
+        val result = model.pairResult ?: return@LaunchedEffect
+        model.pairResult = null
+        if (result.ok) done = true else error = result.error
     }
 
     Column(Modifier.fillMaxSize().navigationBarsPadding().imePadding().verticalScroll(rememberScrollState())) {
@@ -131,14 +136,10 @@ fun PairScreen(model: AppModel, mode: String, activity: MainActivity) {
                         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters, autoCorrectEnabled = false),
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    if (busy) CircularProgressIndicator()
-                    Button(enabled = !busy && typed.isNotBlank(), onClick = {
-                        scope.launch {
-                            busy = true
-                            val result = model.post("/api/sync/enter", JSONObject().put("code", typed), 60_000)
-                            busy = false
-                            if (result.ok) done = true else error = result.error
-                        }
+                    if (model.pairBusy) CircularProgressIndicator()
+                    Button(enabled = !model.pairBusy && typed.isNotBlank(), onClick = {
+                        error = null
+                        model.enterPairCode(typed, inSetup = false)
                     }) { Text(model.t("app.next")) }
                 }
                 else -> {
@@ -161,7 +162,7 @@ fun PairScreen(model: AppModel, mode: String, activity: MainActivity) {
                         )
                     }
                     TextButton(onClick = {
-                        scanPairing(context, model, scope, { error = it }) { done = true }
+                        scanPairing(context, model) { error = it }
                     }) {
                         Icon(Icons.Outlined.QrCodeScanner, contentDescription = null)
                         Text("  " + model.t("phone.scan_code"))
