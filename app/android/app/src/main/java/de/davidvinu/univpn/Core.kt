@@ -2,6 +2,7 @@ package de.davidvinu.univpn
 
 import android.content.Context
 import android.os.Build
+import android.os.SystemClock
 import android.provider.Settings
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyPermanentlyInvalidatedException
@@ -63,8 +64,8 @@ class Core(private val context: Context) {
             // restarted in a tight loop. Another app may hold the port all day: then only every
             // half minute, which still finds the port once that app lets go.
             val pause = if (portTaken) 30_000L else 1_000L
-            if (System.currentTimeMillis() - started < pause) return
-            started = System.currentTimeMillis()
+            if (SystemClock.elapsedRealtime() - started < pause) return  // not the clock: it can go back
+            started = SystemClock.elapsedRealtime()
             // Only the core started now may say it holds the ports.
             readyFile.delete()
             process = try {
