@@ -71,6 +71,7 @@ final class SetupState {
         set {
             query = newValue
             uniId = ""
+            dropDetect()
         }
     }
 
@@ -84,9 +85,15 @@ final class SetupState {
             keptGroup = false
             // A check of the old address still on its way (a typo fixed meanwhile) is dropped:
             // Next asks the new one.
-            detectSeq += 1
-            detecting = false
+            dropDetect()
         }
+    }
+
+    /// Another address or university, or back to the start: a check still on its way is not for
+    /// it (the page's detectSeq).
+    func dropDetect() {
+        detectSeq += 1
+        detecting = false
     }
 
     /// Another group may ask for another second factor: ask again.
@@ -94,6 +101,8 @@ final class SetupState {
         get { group }
         set {
             group = newValue
+            // Not the last group's second factor: a check cut short leaves Next asking again.
+            otherMfa = ""
             guard let model else { return }
             Task { await detect(model, group: newValue) }
         }
@@ -243,6 +252,9 @@ final class SetupState {
 
     /// A pairing code another device showed (scanned or typed).
     func enterCode(_ model: AppModel) async {
+        // One code at a time: scanned again while the first is on its way, the code would already
+        // be used up ("unknown").
+        guard !busy else { return }
         busy = true
         error = nil
         // Setup stays for its last page ("All set"), also while the core already counts as set

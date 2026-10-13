@@ -1191,6 +1191,30 @@ func TestRepairWithAMissingProgramKeepsSayingSo(t *testing.T) {
 	}
 }
 
+func TestConnectDuringARepairKeepsRepairingAndItsFailure(t *testing.T) {
+	// Connect (or a browser) while Repair runs finds the program missing again: the app still
+	// says "Repairing", and a failed Repair is still told.
+	h := newHarness(t)
+	h.cfg.OpenConnect = "/nonexistent/openconnect"
+	process := newFakeProcess()
+	d := h.start(func(o *Options) { o.RepairStart = func() (Process, error) { return process, nil } })
+	d.forceSet(Error, messages.ProgramMissing)
+	d.StartRepair()
+	d.RequestConnect()
+	waitFor(3*time.Second, func() bool { d.mu.Lock(); defer d.mu.Unlock(); return !d.loopRunning })
+	if _, m := d.snapshot(); m != messages.ProgramMissing || statusValue(t, d, "message_id") != "repairing" ||
+		statusValue(t, d, "action") != nil {
+		t.Fatal(m, statusValue(t, d, "message_id"))
+	}
+	process.finish(1)
+	if !waitFor(3*time.Second, func() bool { _, m := d.snapshot(); return m == messages.RepairFailed }) {
+		t.Fatal(d.snapshot())
+	}
+	if statusValue(t, d, "action") != "repair" {
+		t.Fatal(statusValue(t, d, "action"))
+	}
+}
+
 func TestRepairThatCannotStartSaysSo(t *testing.T) {
 	h := newHarness(t)
 	d := h.start(func(o *Options) {

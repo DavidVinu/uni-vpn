@@ -59,10 +59,17 @@ struct SetupView: View {
                 model.auto.cancel()
                 setup.go(.signIn)
             }
-        case .code: return { setup.go(.welcome) }
+        case .code:
+            if setup.busy { return nil } // the code is on its way
+            return { setup.go(.welcome) }
         case .university:
             if model.changingAccount { return { model.finishSetup() } }
-            if model.status?.object("sync")?.bool("available") == true { return { setup.go(.welcome) } }
+            if model.status?.object("sync")?.bool("available") == true {
+                return {
+                    setup.dropDetect()
+                    setup.go(.welcome)
+                }
+            }
             return nil
         case .connecting:
             if setup.sending { return nil }
@@ -181,6 +188,7 @@ private struct UniversityPage: View {
                         Button {
                             setup.uniId = u.id
                             setup.query = ""
+                            setup.dropDetect()
                             setup.error = u.mfa == "saml" ? model.t("setup.saml") : nil
                         } label: {
                             LabeledContent(u.name, value: u.country)
@@ -190,6 +198,7 @@ private struct UniversityPage: View {
                     Button(model.t("setup.not_listed")) {
                         setup.uniId = "other"
                         setup.query = ""
+                        setup.dropDetect()
                         setup.error = nil
                     }
                 }
@@ -235,7 +244,7 @@ private struct UniversityPage: View {
         } else if setup.isOther && setup.host.trimmingCharacters(in: .whitespaces).isEmpty {
             setup.error = model.t("setup.enter_address")
         } else if setup.isOther && setup.otherMfa.isEmpty {
-            Task { await setup.detect(model, group: "") }
+            Task { await setup.detect(model, group: setup.showsGroups ? setup.group : "") }
         } else {
             setup.go(.signIn)
         }

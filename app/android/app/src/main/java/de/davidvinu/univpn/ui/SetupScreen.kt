@@ -410,6 +410,9 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
                     if (groups.size > 1 || ownGroup) {
                         Choice(model.t("setup.group"), groups.map { it to it }, group) { picked ->
                             group = picked
+                            // Not the last group's second factor: a check cut short (the phone
+                            // turned) leaves Next asking again.
+                            otherMfa = ""
                             detectGateway(picked)
                         }
                     }
@@ -429,7 +432,7 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
                             uniId.isEmpty() -> error = model.t("setup.choose")
                             uni?.mfa == "saml" -> error = model.t("setup.saml")
                             isOther && host.isBlank() -> error = model.t("setup.enter_address")
-                            isOther && otherMfa.isEmpty() -> detectGateway("")
+                            isOther && otherMfa.isEmpty() -> detectGateway(if (groups.size > 1 || ownGroup) group else "")
                             else -> go(SIGN_IN)
                         }
                     }) { Text(model.t("app.next")) }
