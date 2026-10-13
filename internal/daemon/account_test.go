@@ -349,3 +349,30 @@ func TestSyncDuringAnAccountChangeSendsNoHalfAccount(t *testing.T) {
 		t.Errorf("the desktop did not take the new account: %s %s", user, host)
 	}
 }
+
+// A change to a university with its own websites (Heidelberg) changes the proxy rule: the
+// browsers are told, as after an edit of the list, or they keep the old rule until a restart.
+func TestAccountChangeToOtherWebsitesRefreshesTheProxyRule(t *testing.T) {
+	h := newHarness(t)
+	a, c := setupAccounts[0], setupAccounts[2]
+	h.cfg.User, h.cfg.University, h.cfg.Host, h.cfg.MFA, h.cfg.DefaultDomains = a.user, a.university, a.host, "none", nil
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := config.WriteInitial(path, a.user, a.university, a.overrides); err != nil {
+		t.Fatal(err)
+	}
+	d := h.start(func(o *Options) { o.ConfigPath = path })
+	before, _ := d.PAC()
+	if err := d.CompleteSetup(c.user, c.password, c.token, c.university, c.overrides); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := d.PAC()
+	h.mu.Lock()
+	refreshed := append([]int(nil), h.refreshed...)
+	h.mu.Unlock()
+	if before == after || !strings.Contains(after, "sogo.uni-heidelberg.de") {
+		t.Fatalf("the rule did not change:\n%s", after)
+	}
+	if len(refreshed) != 1 || refreshed[0] != h.cfg.HTTPPort {
+		t.Fatalf("browsers told %v, want once on %d", refreshed, h.cfg.HTTPPort)
+	}
+}

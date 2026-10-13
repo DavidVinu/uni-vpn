@@ -827,7 +827,11 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 		return errors.New(pyErr(err))
 	}
 	d.mu.Lock()
+	websites := d.cfg.DefaultDomains
 	config.CopyProfile(d.cfg, &profile)
+	// Another university's websites (no list of the user's own): a new proxy rule.
+	newRule := !slices.Equal(websites, d.cfg.DefaultDomains)
+	port := d.cfg.HTTPPort
 	d.switching = false
 	d.accountGen++
 	d.wakeUp()
@@ -839,6 +843,9 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 		d.startEnrollLocked(code, profile.MFAPortalURL)
 	}
 	d.mu.Unlock()
+	if newRule {
+		d.opts.ProxyRefresh(port)
+	}
 	if quiet {
 		d.secretsSynced(teardown)
 	} else {
