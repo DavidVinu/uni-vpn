@@ -86,7 +86,7 @@ cd app/ios && xcodegen && open UniVPN.xcodeproj
 `app/ios/build/UniVPNCore.xcframework`, plus the licence texts that Settings shows. The
 extension cannot run in the simulator: the VPN needs a phone and a signed build.
 
-CI (`ios` job, macos-15) builds all of it, runs `app/ios/Tests` in the simulator (the core starts
+CI (`ios` job, macos-26) builds all of it, runs `app/ios/Tests` in the simulator (the core starts
 in the app, only the app may use the API, `proxy.pac` is open, a made-up account reaches
 Heidelberg's real gateway and is turned down, the secrets file holds no clear text) and archives
 an unsigned build for phones (`ios-app` artifact). With the signing secrets it also signs the app
