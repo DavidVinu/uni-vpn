@@ -278,8 +278,10 @@ class App(Gtk.Application):
         if kind in (WebKit2.PolicyDecisionType.NAVIGATION_ACTION, WebKit2.PolicyDecisionType.NEW_WINDOW_ACTION):
             uri = decision.get_navigation_action().get_request().get_uri()
             if not uri.startswith(self.base) and not uri.startswith("about:"):
-                # Links to anything but the page itself (MFA portal) go to the default browser.
-                Gio.AppInfo.launch_default_for_uri(uri, None)
+                # Links to anything but the page itself (MFA portal) go to the default browser;
+                # only web links: another scheme would run without the browser's question.
+                if uri.startswith(("http://", "https://")):
+                    Gio.AppInfo.launch_default_for_uri(uri, None)
                 decision.ignore()
                 return True
         return False

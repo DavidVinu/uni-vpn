@@ -36,6 +36,12 @@ static class Program
     [System.Runtime.InteropServices.DllImport("kernel32.dll")]
     static extern bool GetNamedPipeServerSessionId(Microsoft.Win32.SafeHandles.SafePipeHandle pipe, out uint session);
 
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    static extern bool GetNamedPipeServerProcessId(Microsoft.Win32.SafeHandles.SafePipeHandle pipe, out uint process);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool AllowSetForegroundWindow(uint process);
+
     [STAThread]
     static void Main(string[] args)
     {
@@ -73,6 +79,10 @@ static class Program
                             uint server;
                             if (GetNamedPipeServerSessionId(client.SafePipeHandle, out server) && server == (uint)session)
                             {
+                                // This copy was started by a click: it may hand the running one the
+                                // right to bring its window to the front (else it opens behind the browser).
+                                uint owner;
+                                if (GetNamedPipeServerProcessId(client.SafePipeHandle, out owner)) AllowSetForegroundWindow(owner);
                                 byte[] data = Encoding.UTF8.GetBytes(page);
                                 client.Write(data, 0, data.Length);
                             }
@@ -499,7 +509,8 @@ class MainWindow : Form
         settings.UserAgent = settings.UserAgent + " UniVPN";
         view.CoreWebView2.NavigationStarting += delegate(object sender, CoreWebView2NavigationStartingEventArgs e)
         {
-            if (!Local(e.Uri)) { e.Cancel = true; Process.Start(e.Uri); }
+            // Only web links: another scheme (a file, an app's own) would run without the browser's question.
+            if (!Local(e.Uri)) { e.Cancel = true; if (e.Uri.StartsWith("http://") || e.Uri.StartsWith("https://")) Process.Start(e.Uri); }
         };
         view.CoreWebView2.NewWindowRequested += delegate(object sender, CoreWebView2NewWindowRequestedEventArgs e)
         {
