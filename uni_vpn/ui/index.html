@@ -1102,6 +1102,7 @@ async function startChange(first) {
   await loadUniversities();
   if (!UNIS) return false;
   changing = true;
+  $("s-use-other").hidden = true;  // first setup only; refresh() would hide it a poll later
   setupDone = setupSent = false;
   const current = UNIS.find((u) => u.id === S.university);
   if (current) {
