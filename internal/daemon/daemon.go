@@ -559,6 +559,7 @@ func (d *Daemon) Status() (pyjson.Object, error) {
 	if cfg.University == unis.OtherID {
 		name = cfg.Host
 	}
+	shown := d.shownLocked()
 	return pyjson.O(
 		"protocol", Protocol,
 		"version", Version,
@@ -567,11 +568,11 @@ func (d *Daemon) Status() (pyjson.Object, error) {
 		"language", cfg.Language,
 		"update_pending", nullable(d.opts.Updater.Pending()),
 		"state", string(d.state),
-		"message", d.message.Text,
+		"message", shown.Text,
 		// For the app's fix button and tests, see messages. The text to show in the user's
 		// language is message_t: catalog key (uni_vpn/locales/<lang>.json) and arguments.
-		"message_id", nullable(d.message.ID),
-		"message_t", d.message.JSON(),
+		"message_id", nullable(shown.ID),
+		"message_t", shown.JSON(),
 		"action", nullable(d.actionLocked()),
 		"since", d.since,
 		"host", cfg.Host,
@@ -616,6 +617,15 @@ func (d *Daemon) actionLocked() string {
 		return ""
 	}
 	return d.message.Action
+}
+
+// shownLocked is the message for the app: while a Repair runs, the problem it fixes stays
+// "Repairing" (an attempt meanwhile, Connect or a browser's demand, fails the same way).
+func (d *Daemon) shownLocked() messages.Message {
+	if d.message.Action == "repair" && d.repairingLocked() {
+		return messages.Repairing
+	}
+	return d.message
 }
 
 // errorKindLocked: which factor the current error is about, so the page can offer the right fix.
@@ -671,13 +681,16 @@ func (d *Daemon) watchRepair(process Process) {
 	if code == messages.ReinstallNeededExit {
 		d.reinstall = true
 	}
+	// Still about what Repair fixes: an attempt meanwhile can have replaced "Repairing" with the
+	// problem itself (shownLocked).
+	fixing := d.message == messages.Repairing || d.message.Action == "repair"
 	if code == messages.ReinstallNeededExit && (d.message == messages.Repairing || d.message == messages.ProgramMissing) {
 		// A program the installer brought is gone: Repair again would fail the same way (a
 		// page may have tried again meanwhile).
 		d.set(d.state, messages.ReinstallNeeded)
-	} else if code != 0 && d.message == messages.Repairing {
+	} else if code != 0 && fixing {
 		d.set(d.state, messages.RepairFailed)
-	} else if code == 0 && d.message == messages.Repairing {
+	} else if code == 0 && fixing {
 		d.set(Idle, messages.NotConnected)
 	}
 }
