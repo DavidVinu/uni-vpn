@@ -376,3 +376,33 @@ func TestAccountChangeToOtherWebsitesRefreshesTheProxyRule(t *testing.T) {
 		t.Fatalf("browsers told %v, want once on %d", refreshed, h.cfg.HTTPPort)
 	}
 }
+
+// Another ID (a mistyped one corrected, or another account): the old one's secrets go, so that
+// an uninstall, which knows only the current ID, leaves none behind. The same ID keeps them.
+func TestAccountChangeDeletesTheOldAccountsSecrets(t *testing.T) {
+	h := newHarness(t)
+	a, c := setupAccounts[0], setupAccounts[2]
+	h.cfg.User, h.cfg.University, h.cfg.Host, h.cfg.MFA = a.user, a.university, a.host, "none"
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := config.WriteInitial(path, a.user, a.university, a.overrides); err != nil {
+		t.Fatal(err)
+	}
+	d := h.start(func(o *Options) { o.ConfigPath = path })
+	deleted := func() []string {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		return append([]string(nil), h.deletedSecrets...)
+	}
+	if err := d.CompleteSetup(a.user, a.password, a.token, a.university, a.overrides); err != nil {
+		t.Fatal(err)
+	}
+	if got := deleted(); len(got) != 0 {
+		t.Fatal("same account:", got)
+	}
+	if err := d.CompleteSetup(c.user, c.password, c.token, c.university, c.overrides); err != nil {
+		t.Fatal(err)
+	}
+	if got := deleted(); len(got) != 1 || got[0] != a.user {
+		t.Fatalf("deleted %v, want [%s]", got, a.user)
+	}
+}

@@ -110,6 +110,9 @@ type Options struct {
 	PasswordSetter func(password string) error
 	TOTPGetter     func(ctx context.Context) ([]byte, error)
 	TOTPSetter     func(token string) error
+	// SecretsDeleter removes an account's password and TOTP secret: the old account's after
+	// a switch.
+	SecretsDeleter func(user string)
 	Probe          func(ctx context.Context) bool
 	CiscoCheck     func() bool
 	TunnelFactory  func() (Tunnel, error)
@@ -258,6 +261,15 @@ func New(cfg *config.Config, log *slog.Logger, opts Options) *Daemon {
 	}
 	if opts.TOTPSetter == nil {
 		opts.TOTPSetter = func(token string) error { return credentials.StoreTotp(d.user(), token) }
+	}
+	if opts.SecretsDeleter == nil {
+		opts.SecretsDeleter = func(user string) {
+			_, perr := credentials.DeletePassword(user)
+			_, terr := credentials.DeleteTotp(user)
+			if err := errors.Join(perr, terr); err != nil {
+				d.logf(slog.LevelWarn, "The old account's secrets stay in the keyring: %s", err)
+			}
+		}
 	}
 	if opts.TokenDir == "" {
 		opts.TokenDir = platform.StateDir()
@@ -843,6 +855,11 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 		d.startEnrollLocked(code, profile.MFAPortalURL)
 	}
 	d.mu.Unlock()
+	if previousUser != "" && previousUser != user {
+		// Only this account's secrets are used, and an uninstall finds only those (also after
+		// a mistyped ID).
+		d.opts.SecretsDeleter(previousUser)
+	}
 	if newRule {
 		d.opts.ProxyRefresh(port)
 	}
