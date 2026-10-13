@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/DavidVinu/uni-vpn/internal/atomicfile"
 )
 
 // Local is the device's own settings: what the daemon has in config.toml, the website list
@@ -249,7 +251,8 @@ func (k *keys) stateKey() []byte { return derive(k.Priv, "state hash", 32) }
 
 func (e *Engine) loadState() state {
 	var st state
-	data, err := os.ReadFile(e.opts.StatePath)
+	// Windows: a file being replaced can read as missing for a moment, which is no lost state.
+	data, err := atomicfile.Read(e.opts.StatePath)
 	if err != nil || json.Unmarshal(data, &st) != nil {
 		st = state{Keyed: true, Lost: true} // nothing to carry over
 	}
@@ -261,16 +264,13 @@ func (e *Engine) loadState() state {
 
 func (e *Engine) saveState(st state) error { return writeFile(e.opts.StatePath, mustJSON(st)) }
 
-// writeFile replaces path in one step, readable by this user only.
+// writeFile replaces path in one step, readable by this user only; two writes at once (a
+// Notify next to a round) each use their own temporary file.
 func writeFile(path string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return atomicfile.Write(path, data)
 }
 
 // forget turns syncing off on this device: keys and state go, settings stay.
@@ -343,7 +343,7 @@ func (e *Engine) loadPendingLocked() {
 		return
 	}
 	e.pendingLoaded = true
-	if data, err := os.ReadFile(e.pendingPath()); err == nil {
+	if data, err := atomicfile.Read(e.pendingPath()); err == nil {
 		json.Unmarshal(data, &e.pending)
 	}
 }

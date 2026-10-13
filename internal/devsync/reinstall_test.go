@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"math/rand/v2"
 	"os"
+	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 )
@@ -215,5 +217,30 @@ func TestTakenOverValueAfterAPasswordTypedDuringTheRound(t *testing.T) {
 		if got := dv.local.get(KeyPassword); got != `"typed"` {
 			t.Errorf("%s: password %s, want the typed one", dv.opts.Name, got)
 		}
+	}
+}
+
+// Notify writes its note outside the lock, and Defaulted saves the state next to a round: two
+// writes at once must both go through and leave a whole file.
+func TestWritesAtOnceLeaveAWholeFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sync.json")
+	var failed atomic.Int32
+	var wg sync.WaitGroup
+	for i := range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 50 {
+				if writeFile(path, mustJSON(map[string]int{"writer": i})) != nil {
+					failed.Add(1)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	var got map[string]int
+	data, err := os.ReadFile(path)
+	if err != nil || json.Unmarshal(data, &got) != nil || failed.Load() != 0 {
+		t.Fatalf("%d writes failed, file %q %v", failed.Load(), data, err)
 	}
 }
