@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -127,6 +128,58 @@ func TestEnrollWhileConnectedNeedsOneCode(t *testing.T) {
 	defer p.Unlock()
 	if len(p.Tokens) != 1 {
 		t.Fatal(p.Tokens)
+	}
+}
+
+// A code typed while an attempt already reads the keyring's secret: that attempt connects
+// without it, and the unused code signs in to the portal. Left queued, a later sign-in would
+// send it stale and end refused.
+func TestEnrollUsesACodeTheConnectDidNotNeed(t *testing.T) {
+	h, _, d := enrollHarness(t)
+	reading, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	d.mu.Lock()
+	read := d.opts.TOTPGetter
+	d.opts.TOTPGetter = func(ctx context.Context) ([]byte, error) {
+		once.Do(func() { close(reading); <-release })
+		return read(ctx)
+	}
+	d.mu.Unlock()
+	d.RequestConnect()
+	<-reading
+	if err := d.Enroll("111111", false); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	waitState(t, d, Connected)
+	waitEnroll(t, d, EnrollDone)
+	d.RequestDisconnect()
+	waitState(t, d, Idle)
+	d.RequestConnect()
+	waitState(t, d, Connected)
+	if got := h.pwLines(); slices.Contains(got, "111111") {
+		t.Fatal("the portal's code signed in to the VPN", got)
+	}
+}
+
+// Disconnect while the one-code setup waits for the network: the setup ends, and its code does
+// not sign in later.
+func TestEnrollEndsOnDisconnect(t *testing.T) {
+	h, _, d := enrollHarness(t)
+	h.probeResult.Store(false)
+	if err := d.Enroll("123456", false); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, d, Offline)
+	d.RequestDisconnect()
+	if key := waitEnroll(t, d, EnrollFailed); key != "enroll.failed" {
+		t.Fatal(key)
+	}
+	h.probeResult.Store(true)
+	d.RequestConnect()
+	waitState(t, d, Connected)
+	if got := h.pwLines(); slices.Contains(got, "123456") {
+		t.Fatal("the stale code signed in", got)
 	}
 }
 

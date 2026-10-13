@@ -1293,6 +1293,7 @@ func (d *Daemon) RequestDisconnect() {
 	d.disconnects++
 	d.explicit = false
 	d.demandUntil = 0
+	d.onceCode = "" // a typed code was a "connect now" too: a later sign-in would send it stale
 	d.wakeUp()
 	if tun := d.tun; tun != nil {
 		d.set(Disconnecting, messages.Disconnecting)
