@@ -650,6 +650,31 @@ func TestDisconnectDuringASecretsRestartWins(t *testing.T) {
 	}
 }
 
+func TestDisconnectWhileThePortOpensDoesNotReconnect(t *testing.T) {
+	// openconnect may open its port while the Disconnect stops it (here SIGTERM waits for the
+	// kill): that is no connection, whose demand would sign in again once the tunnel is gone.
+	h := newHarness(t)
+	t.Setenv("FAKE_MODE", "ignore_sigterm")
+	t.Setenv("FAKE_DELAY", "1") // the port opens well after the Disconnect...
+	h.cfg.StopGrace = 4         // ...and well before the kill
+	h.cfg.ReadyTimeout = 10
+	h.cfg.DemandWindow = 60 // a demand from "connected" would outlast the stop
+	h.cfg.IdleMinutes = 15  // the idle timer must not end it first
+	h.cfg.MFA = "none"      // the fake would read the token file the stop removed
+	d := h.start(nil)
+	d.RequestConnect()
+	waitFor(10*time.Second, func() bool { return len(h.pwLines()) > 0 }) // SIGTERM is handled
+	d.RequestDisconnect()
+	waitState(t, d, Idle, 15*time.Second) // after the kill, on a slow runner too
+	time.Sleep(500 * time.Millisecond)
+	d.mu.Lock()
+	state, count := d.state, d.connectCount
+	d.mu.Unlock()
+	if state != Idle || count != 1 || d.tunnelNow() != nil {
+		t.Fatal("a new attempt after the Disconnect", state, count)
+	}
+}
+
 func TestStaleTokenFilesAreRemovedAtStart(t *testing.T) {
 	h := newHarness(t)
 	os.WriteFile(filepath.Join(h.tokenDir, "totp-old"), []byte("base32:OLD"), 0o600)
@@ -1083,6 +1108,30 @@ func TestRepairWithAMissingProgramSaysToDownloadAgain(t *testing.T) {
 	waitFor(3*time.Second, func() bool { _, m := d.snapshot(); return m != messages.Repairing })
 	if state, m := d.snapshot(); state != Error || m != messages.ReinstallNeeded ||
 		statusValue(t, d, "message_id") != "reinstall_needed" || statusValue(t, d, "action") != nil {
+		t.Fatal(state, m)
+	}
+}
+
+func TestRepairWithAMissingProgramKeepsSayingSo(t *testing.T) {
+	// Until the service restarts, each attempt finds the program missing again (one while
+	// Repair runs, Connect after it): still no Repair button.
+	h := newHarness(t)
+	h.cfg.OpenConnect = "/nonexistent/openconnect"
+	process := newFakeProcess()
+	d := h.start(func(o *Options) { o.RepairStart = func() (Process, error) { return process, nil } })
+	attempt := func() {
+		d.RequestConnect()
+		waitFor(3*time.Second, func() bool { d.mu.Lock(); defer d.mu.Unlock(); return !d.loopRunning })
+	}
+	attempt()
+	d.StartRepair()
+	attempt()
+	process.finish(messages.ReinstallNeededExit)
+	if !waitFor(3*time.Second, func() bool { _, m := d.snapshot(); return m == messages.ReinstallNeeded }) {
+		t.Fatal(d.snapshot())
+	}
+	attempt()
+	if state, m := d.snapshot(); state != Error || m != messages.ReinstallNeeded || statusValue(t, d, "action") != nil {
 		t.Fatal(state, m)
 	}
 }

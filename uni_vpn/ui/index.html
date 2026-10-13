@@ -56,13 +56,14 @@ input:focus,textarea:focus,select:focus{border-color:var(--accent);box-shadow:0 
 #toggle.text{margin-top:8px}
 .btn:disabled{opacity:.45;cursor:default}
 .btn.big{width:100%;padding:14px;font-size:16px}
+a.btn{display:inline-block;text-decoration:none}
 .row-title{display:flex;align-items:center;gap:6px}
 .info{position:relative;display:inline-grid}
 .info>button{border:0;background:none;color:var(--muted);padding:0;cursor:pointer;display:grid}
 .info svg{width:17px;height:17px}
 .pop{position:absolute;z-index:5;top:24px;left:-12px;width:min(290px,calc(100vw - 32px));background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:12px 14px;font-size:13px;color:var(--text)}
 .code{display:flex;align-items:center;gap:14px;background:var(--bg);border-radius:12px;padding:12px 14px;margin:4px 0 0}
-.code b{font:600 28px/1 ui-monospace,"SF Mono",Consolas,monospace;letter-spacing:.12em;color:var(--accent)}
+.code b{font:600 28px/1 ui-monospace,"SF Mono",Consolas,monospace;letter-spacing:.12em;color:var(--accent);white-space:nowrap}
 .ring{width:26px;height:26px;transform:rotate(-90deg)}
 .ring circle{fill:none;stroke-width:4}
 .ring .bg{stroke:var(--line)}.ring .fg{stroke:var(--accent);stroke-dasharray:62.8;transition:stroke-dashoffset 1s linear}
@@ -131,6 +132,7 @@ input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
 .list .item .remove{color:var(--bad);padding:4px 0 4px 12px}
 #devices .item>:first-child{min-width:0;overflow-wrap:anywhere}
 #devices .val{flex:none;max-width:none}
+#v-dom{flex:none}
 .list button.item.add{color:var(--accent)}
 .list button.item.add:after{display:none}
 #s-use-other{display:block;margin:16px auto 0}
@@ -195,6 +197,7 @@ input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
         <p class="error" id="a-err" role="alert" hidden></p>
         <div class="actions"><button class="btn text" type="button" id="a-back" data-t="app.back"></button><button class="btn primary" type="submit" id="a-next" data-t="app.next"></button></div>
         <button class="btn text" type="button" id="a-fix" data-t="main.repair" hidden></button>
+        <a class="btn text" id="a-download" href="https://vpn.davidvinu.de/" target="_blank" rel="noopener" data-t="main.download" hidden></a>
         <button class="btn text" type="button" id="a-guide" data-t="setup.by_hand"></button>
       </form>
 
@@ -232,6 +235,7 @@ input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
         <p class="sub" id="s3-msg" aria-live="polite">&nbsp;</p>
         <div class="actions"><button class="btn text" type="button" id="s3-back" data-t="app.back"></button><button class="btn text" type="button" id="s3-skip" data-t="setup.finish" hidden></button></div>
         <button class="btn text" type="button" id="s3-fix" data-t="main.repair" hidden></button>
+        <a class="btn text" id="s3-download" href="https://vpn.davidvinu.de/" target="_blank" rel="noopener" data-t="main.download" hidden></a>
       </div>
 
       <div id="step4" hidden class="center">
@@ -252,6 +256,8 @@ input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
       <div aria-live="polite"><p class="state" id="state">&nbsp;</p>
       <p class="msg" id="msg">&nbsp;</p></div>
       <button class="btn primary big" id="fix" type="button" hidden></button>
+      <!-- A program the installer brought is gone: the download page, in the default browser. -->
+      <a class="btn primary big" id="download" href="https://vpn.davidvinu.de/" target="_blank" rel="noopener" data-t="main.download" hidden></a>
       <button class="btn primary big" id="toggle" type="button"></button>
     </div>
   </section>
@@ -326,7 +332,7 @@ const $ = (id) => document.getElementById(id);
 const H = {"X-Uni-VPN": "1", "Content-Type": "application/json"};
 let S = null, view = null, setupDone = false, submitting = false, setupSent = false, domainsShown = false, connectRequested = 0,
   codeTimer = null, refreshing = false, autoUpdateSaving = false, changing = false, languageSaving = false,
-  domainsBase = "", removeError = "";
+  domainsBase = "", removeError = null, removeSeen = false;
 // Inside the Uni VPN app window (not a browser tab): no page title, no browser context menu.
 if (new URLSearchParams(location.search).has("app")) {
   document.body.classList.add("app");
@@ -404,6 +410,7 @@ function show(id) {
 
 function step(id, focusId) {
   if (id === "step2a" && offeredKey) id = "step2";  // a key from a link: the guide's test step
+  autoRepair = false;  // each visit of the code step starts without a Repair
   for (const s of ["step0", "step1", "step2a", "step2", "step3", "step4"]) $(s).hidden = s !== id;
   if (id === "step2a") renderAuto();
   if (id === "step2") {
@@ -440,10 +447,13 @@ function render() {
   $("fix").hidden = !fix;
   $("fix").textContent = fix || "";
   $("fix").disabled = !!S.repairing;
+  // Repair cannot bring back what the installer brought: the download is the fix then.
+  const download = S.message_id === "reinstall_needed";
+  $("download").hidden = !download;
   // With a fix offered, it is the way forward; retrying stays possible.
   const stopped = ["auth_failed", "keyring"].includes(S.state);
-  $("toggle").className = fix ? "btn text" : "btn primary big";
-  $("toggle").textContent = t(isOn() ? "main.disconnect" : fix || stopped ? "main.try_again" : "main.connect");
+  $("toggle").className = fix || download ? "btn text" : "btn primary big";
+  $("toggle").textContent = t(isOn() ? "main.disconnect" : fix || download || stopped ? "main.try_again" : "main.connect");
   $("toggle").disabled = S.state === "disconnecting";
   $("v-uni").textContent = S.university_name;
   $("v-user").textContent = S.user;
@@ -651,7 +661,7 @@ $("step1").onsubmit = (e) => {
 // --- second factor, the short way --------------------------------------------------------
 // A code from the user's app; the core signs in with it and adds its own code generator in the
 // MFA portal (status.json "enroll"). Only the Go core does this, the Python one has no "enroll".
-let autoRunning = false, autoSending = false, autoSentAt = 0, autoStage = "", autoPending = "";
+let autoRunning = false, autoSending = false, autoSentAt = 0, autoStage = "", autoPending = "", autoRepair = false;
 function autoOK() { return !!uni && uni.mfa_enroll === "linotp" && !!S && "enroll" in S; }
 
 function renderAuto(error) {
@@ -665,6 +675,7 @@ function renderAuto(error) {
   $("a-field").hidden = $("a-next").hidden = busy;
   $("a-busy").hidden = !busy;
   $("a-fix").hidden = busy || S.action !== "repair";
+  $("a-download").hidden = busy || S.message_id !== "reinstall_needed";
   if (error !== undefined) err("a-err", error);
   $("step2a").querySelector(".step").hidden = changingTotp;
   // A new question: an empty field, ready for the next code.
@@ -673,6 +684,13 @@ function renderAuto(error) {
 }
 
 function autoProgress() {
+  if (!autoRunning && autoRepair && !$("step2a").hidden) {
+    // Repair clicked here: how it goes is said here too (repairing, failed, download again).
+    err("a-err", QUIET.includes(S.message_id) ? "" : tr(S.message, S.message_t));
+    $("a-fix").hidden = S.action !== "repair";
+    $("a-fix").disabled = !!S.repairing;
+    $("a-download").hidden = S.message_id !== "reinstall_needed";
+  }
   if (!autoRunning || $("step2a").hidden) return;
   const e = S.enroll, settled = Date.now() - autoSentAt > 1500;
   if (settled && (!e || e.stage === "failed")) {
@@ -736,6 +754,7 @@ $("a-back").onclick = async () => {
 };
 for (const id of ["a-fix", "s3-fix"]) {
   $(id).onclick = async () => {
+    if (id === "a-fix") autoRepair = true;
     $(id).disabled = true;
     await send("/api/repair");  // like the main screen's Repair button
     $(id).disabled = false;
@@ -930,7 +949,7 @@ async function submitSetup() {
   clearInterval(codeTimer);
   step("step3");
   $("s3-msg").textContent = t("setup.waiting");
-  $("s3-skip").hidden = $("s3-fix").hidden = true;
+  $("s3-skip").hidden = $("s3-fix").hidden = $("s3-download").hidden = true;
   let r;
   try {
     r = await post("/api/setup", {user: $("s-user").value.trim(), password: $("s-pw").value,
@@ -983,6 +1002,7 @@ function setupProgress() {
   $("s3-skip").hidden = !stuck;
   // "Click Repair": the button is here too, not only on the main screen.
   $("s3-fix").hidden = !stuck || S.action !== "repair";
+  $("s3-download").hidden = !stuck || S.message_id !== "reinstall_needed";
 }
 
 for (const b of document.querySelectorAll("[data-back]")) b.onclick = () => { if (!submitting) { setupDone = false; step(b.dataset.back); } };
@@ -1017,7 +1037,7 @@ $("fix").onclick = async () => {
 };
 function openSettings() {
   domainsShown = false;
-  removeError = "";
+  removeError = null;
   show("settings");
   render();
   // Like Chrome sync: opening Settings picks up changes from the other devices (and finds the
@@ -1156,7 +1176,15 @@ $("language").onchange = async () => {
 };
 $("domform").onsubmit = async (e) => {
   e.preventDefault();
-  const r = await send("/api/domains", {text: $("domains").value});
+  let text = $("domains").value;
+  // Changed elsewhere while being edited (a sync round): what the other device added or removed
+  // stays added or removed, next to this edit.
+  const now = S.domains || [], before = domainsBase.split("\n").filter(Boolean);
+  if (now.join("\n") !== domainsBase) {
+    const lines = text.split("\n").filter((l) => !(before.includes(l.trim()) && !now.includes(l.trim())));
+    text = [...lines, ...now.filter((d) => !before.includes(d) && !lines.some((l) => l.trim() === d))].join("\n");
+  }
+  const r = await send("/api/domains", {text});
   if (r.ok) $("domains").value = domainsBase = r.data.domains.join("\n");
   saved("dommsg", r, t(S && S.pac_refresh === "manual" ? "app.saved_restart" : "app.saved"));
   refresh();
@@ -1168,7 +1196,10 @@ function renderDevices() {
   $("devices-group").hidden = !(sync && sync.available);
   if ($("devices-group").hidden) return;
   // Why the last sync or Remove did not go through, like Chrome's sync error under the account.
-  err("sync-err", removeError || (sync.on && sync.error ? tr("", sync.error) : ""));
+  // A failed Remove until a later round goes through (the error it left is gone again).
+  if (removeError && sync.error) removeSeen = true;
+  else if (removeError && removeSeen) removeError = null;
+  err("sync-err", (removeError && errText(removeError)) || (sync.on && sync.error ? tr("", sync.error) : ""));
   const rows = (sync.on ? sync.devices : []).map((d) => {
     const row = document.createElement("div"), name = document.createElement("span"), val = document.createElement("span");
     row.className = "item";
@@ -1179,10 +1210,11 @@ function renderDevices() {
     Object.assign(remove, {type: "button", className: "btn text remove", textContent: t("sync.remove")});
     remove.onclick = async () => {
       remove.disabled = true;
-      removeError = "";
+      removeError = null;
       const r = await send("/api/sync/remove", {device: d.id});
-      // The button stays Remove for another try; the reason goes under the list.
-      if (!r.ok) { remove.disabled = false; removeError = errText(r); }
+      // The button stays Remove for another try; the reason goes under the list, said in the
+      // language shown. Without an answer the service is away, and the banner says so.
+      if (!r.ok) { remove.disabled = false; removeError = r.data ? r : null; removeSeen = false; }
       refresh();
     };
     val.append(remove);
@@ -1197,7 +1229,7 @@ function renderDevices() {
 }
 
 // --- linking a device: one shows a code, the other scans or types it -----------------------
-let pairFrom = "settings", pairShown = null;
+let pairFrom = "settings", pairShown = null, pairListed = false;
 
 function pairPart(id) { for (const p of ["pair-show", "pair-entry", "pair-done"]) $(p).hidden = p !== id; }
 
@@ -1222,6 +1254,7 @@ async function startPair(mode, from) {
 
 function showPairing(p) {
   pairShown = p.code;
+  pairListed = false;
   // The service draws the QR code itself; nothing loads from elsewhere.
   $("pair-qr").innerHTML = p.qr;
   $("pair-code").textContent = p.code;
@@ -1229,7 +1262,14 @@ function showPairing(p) {
 
 function renderPair() {
   const p = S.sync && S.sync.pairing;
-  if (!p || p.code !== pairShown || $("pair-show").hidden) return;
+  if (!pairShown || $("pair-show").hidden) return;
+  if (p && p.code === pairShown) pairListed = true;
+  else {
+    // Gone from the status after it was there: the service restarted and took the code with it.
+    // Expired, as on the phones.
+    if (pairListed) { err("pair-err", t("sync.expired")); $("pair-new").hidden = false; }
+    return;
+  }
   // error: linked, but some settings could not be used here; or why it failed.
   if (p.state === "done") { pairPart("pair-done"); err("pair-err", tr("", p.error)); $("pair-done").querySelector("h2").focus(); pairShown = null; }
   else if (p.state === "expired" || p.state === "failed") {

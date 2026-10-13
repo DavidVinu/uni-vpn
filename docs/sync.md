@@ -81,9 +81,9 @@ passwords against the file; `"keyed": true` marks it. A `sync.json` of an older 
 plain SHA-256: the next round counts a value that still has its hash as unchanged and any other
 as changed here, then writes keyed hashes. `sync.json.pending` holds what changed here and is not
 sent yet: the keyed hash and time of each changed value, so an edit made offline keeps its time
-when another follows before the device is back online, and whether a secret changed (password
-and second factor share one time and have no hash there); secrets are read from the keyring
-only then. A value this device cannot take over (a newer version's language, say) is logged and
+when another follows before the device is back online, and when password or second factor
+changed (each with its own time, without a hash there); secrets are read from the keyring only
+then. A value this device cannot take over (a newer version's language, say) is logged and
 skipped; the rest of the round goes through, and adding or removing a device still works. A
 setting this version does not know at all is not noted in `sync.json` either: after the update
 the device takes the group's value instead of sending its own default.

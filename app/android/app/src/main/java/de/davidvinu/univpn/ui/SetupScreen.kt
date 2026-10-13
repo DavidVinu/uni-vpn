@@ -200,7 +200,9 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
     LaunchedEffect(model.setupFailure) {
         val result = model.setupFailure ?: return@LaunchedEffect
         model.setupFailure = null
-        if (!model.changingAccount) model.setupFinishing = false
+        // An account sent before already set the phone up: the page stays with the error,
+        // not Home with the old account.
+        if (!model.changingAccount && model.setupNeeded) model.setupFinishing = false
         val field = result.json?.optString("field")
         step = when {
             field in PROFILE_FIELDS -> UNIVERSITY

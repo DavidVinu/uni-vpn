@@ -191,6 +191,7 @@ type Daemon struct {
 	loopCancel    context.CancelFunc
 	loopDone      chan struct{}
 	repairProc    Process
+	reinstall     bool // Repair said reinstall_needed: it stays until the service restarts
 	http          *httpapi.Server
 	httpWaiting   *httpapi.Server // its port was taken at the start; the ticker tries again
 	// The automatic second factor (enroll.go): its run, and the code from the user's app the
@@ -659,8 +660,12 @@ func (d *Daemon) watchRepair(process Process) {
 	d.logf(slog.LevelInfo, "Repair finished with exit code %d", code)
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if code == messages.ReinstallNeededExit && d.message == messages.Repairing {
-		// A program the installer brought is gone: Repair again would fail the same way.
+	if code == messages.ReinstallNeededExit {
+		d.reinstall = true
+	}
+	if code == messages.ReinstallNeededExit && (d.message == messages.Repairing || d.message == messages.ProgramMissing) {
+		// A program the installer brought is gone: Repair again would fail the same way (a
+		// page may have tried again meanwhile).
 		d.set(d.state, messages.ReinstallNeeded)
 	} else if code != 0 && d.message == messages.Repairing {
 		d.set(d.state, messages.RepairFailed)
@@ -807,7 +812,7 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 		d.secretsChanged()
 	}
 	if !synced { // the group's values: nothing new to send it
-		d.syncChanged(true)
+		d.syncChanged(devsync.KeyPassword, devsync.KeyTOTP)
 	}
 	return nil
 }
@@ -880,7 +885,7 @@ func (d *Daemon) SetDomains(text string) ([]string, error) {
 	port := d.cfg.HTTPPort
 	d.mu.Unlock()
 	d.opts.ProxyRefresh(port)
-	d.syncChanged(false)
+	d.syncChanged()
 	return domains, nil
 }
 
@@ -905,7 +910,7 @@ func (d *Daemon) SetLanguage(code string) error {
 	d.mu.Lock()
 	d.cfg.Language = code
 	d.mu.Unlock()
-	d.syncChanged(false)
+	d.syncChanged()
 	if code == "" {
 		code = "from the system"
 	}
@@ -936,7 +941,7 @@ func (d *Daemon) SetAutoUpdate(enabled bool) error {
 		word = "on"
 	}
 	d.logf(slog.LevelInfo, "Automatic updates %s", word)
-	d.syncChanged(false)
+	d.syncChanged()
 	if enabled {
 		select {
 		case d.updateNow <- struct{}{}:
@@ -1286,7 +1291,7 @@ func (d *Daemon) SetPassword(password string) error {
 	}
 	d.logf(slog.LevelInfo, "Password stored in the keyring")
 	d.secretsChanged()
-	d.syncChanged(true)
+	d.syncChanged(devsync.KeyPassword)
 	return nil
 }
 
@@ -1298,7 +1303,7 @@ func (d *Daemon) SetTOTP(token string) error {
 	d.logf(slog.LevelInfo, "TOTP secret stored in the keyring")
 	d.NoteCodeShown() // the page shows the new check code
 	d.secretsChanged()
-	d.syncChanged(true)
+	d.syncChanged(devsync.KeyTOTP)
 	return nil
 }
 
@@ -1461,7 +1466,9 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 				d.final(AuthFailed, messages.TOTPUnusable)
 			default:
 				d.logf(slog.LevelError, "Could not start openconnect: %s", pyErr(err))
-				if errors.Is(err, fs.ErrNotExist) {
+				if errors.Is(err, fs.ErrNotExist) && d.reinstall {
+					d.final(Error, messages.ReinstallNeeded) // Repair already found that out
+				} else if errors.Is(err, fs.ErrNotExist) {
 					d.final(Error, messages.ProgramMissing)
 				} else {
 					d.final(Error, messages.StartFailed)
@@ -1486,6 +1493,20 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 		}
 		if at := tun.OTPGeneratedAt(); !at.IsZero() {
 			d.lastOTPStep = int64(math.Floor(float64(at.UnixNano()) / 1e9 / OTPStep))
+		}
+		if ready && tun.StoppedByUs() {
+			// Disconnect (or a resume) came while the port opened: the tunnel is going away, a
+			// stop while connecting, not a connection (whose demand would connect again).
+			d.unlocked(func() {
+				select {
+				case <-tun.Exited():
+				case <-ctx.Done():
+				}
+			})
+			if ctx.Err() != nil {
+				return
+			}
+			ready = false
 		}
 		if !ready && generation != d.secretsGen {
 			// The secrets changed while connecting: this result says nothing about the new ones.

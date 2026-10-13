@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -151,6 +152,29 @@ func TestSyncHiddenWithoutRelay(t *testing.T) {
 	s := statusValue(t, d, "sync").(pyjson.Object)
 	if available, _ := s.Get("available"); available != false {
 		t.Fatal(s)
+	}
+}
+
+// A second factor saved here is noted for syncing on its own: with the password's time, an older
+// password typed here would win over a newer one from another device. The other way round too.
+func TestSyncNotesOnlyTheSecretThatChanged(t *testing.T) {
+	for want, set := range map[string]func(*Daemon) error{
+		devsync.KeyTOTP:     func(d *Daemon) error { return d.SetTOTP("JBSWY3DPEHPK3PXP") },
+		devsync.KeyPassword: func(d *Daemon) error { return d.SetPassword("new") },
+	} {
+		dir := t.TempDir()
+		d := newHarness(t).start(syncOptions("http://127.0.0.1:1", dir, nil)) // not linked: the note stays
+		if err := set(d); err != nil {
+			t.Fatal(err)
+		}
+		data, _ := os.ReadFile(filepath.Join(dir, "sync.json.pending"))
+		var p struct {
+			Changes map[string]json.RawMessage `json:"changes"`
+		}
+		json.Unmarshal(data, &p)
+		if got := slices.Sorted(maps.Keys(p.Changes)); !slices.Equal(got, []string{want}) {
+			t.Errorf("noted %v, want only %s", got, want)
+		}
 	}
 }
 

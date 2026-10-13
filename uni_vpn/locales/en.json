@@ -188,6 +188,7 @@
   "msg.reinstall_needed": "Part of Uni VPN is missing. Download Uni VPN again from vpn.davidvinu.de and open it.",
   "msg.not_running": "Uni VPN is not running. Restart the computer to start it again.",
   "main.repair": "Repair",
+  "main.download": "Download Uni VPN",
   "phone.off": "Off",
   "phone.edit_websites": "Add a website",
   "phone.scan_qr": "Scan QR code",

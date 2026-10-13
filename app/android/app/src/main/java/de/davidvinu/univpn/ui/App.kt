@@ -38,10 +38,6 @@ import java.util.UUID
 
 @Composable
 fun App(model: AppModel, vpnOn: Boolean, activity: MainActivity) {
-    // The setup assistant's visit, like a screen's (AppModel.Visit) but saved: after Android ended
-    // the app during setup, setup goes on where it was. Once something else shows, what it saved
-    // is not for the next time (an account change from Settings starts at the university).
-    var setupVisit by rememberSaveable { mutableStateOf(UUID.randomUUID().toString()) }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
         // Turned sideways, the camera cutout sits at one side: nothing goes under it. The top
         // bars keep clear of it themselves and do not add it twice.
@@ -65,20 +61,20 @@ fun App(model: AppModel, vpnOn: Boolean, activity: MainActivity) {
                 model.status == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
-                model.setupNeeded || model.changingAccount || model.setupFinishing -> key(setupVisit) { SetupFlow(model, activity) }
-                else -> {
-                    LaunchedEffect(Unit) { setupVisit = UUID.randomUUID().toString() }
-                    key(model.visit) {
-                        when (val screen = model.screen) {
-                            Screen.Home -> HomeScreen(model, vpnOn, activity)
-                            Screen.Settings -> SettingsScreen(model)
-                            Screen.Websites -> WebsitesScreen(model)
-                            Screen.SecondFactor -> SecondFactorScreen(model, activity)
-                            Screen.Language -> LanguageScreen(model)
-                            Screen.Log -> LogScreen(model)
-                            Screen.Licenses -> LicensesScreen(model)
-                            is Screen.Pair -> PairScreen(model, screen.mode, activity)
-                        }
+                else -> Pages(
+                    setup = model.setupNeeded || model.changingAccount || model.setupFinishing,
+                    visit = model.visit,
+                    setupFlow = { SetupFlow(model, activity) },
+                ) {
+                    when (val screen = model.screen) {
+                        Screen.Home -> HomeScreen(model, vpnOn, activity)
+                        Screen.Settings -> SettingsScreen(model)
+                        Screen.Websites -> WebsitesScreen(model)
+                        Screen.SecondFactor -> SecondFactorScreen(model, activity)
+                        Screen.Language -> LanguageScreen(model)
+                        Screen.Log -> LogScreen(model)
+                        Screen.Licenses -> LicensesScreen(model)
+                        is Screen.Pair -> PairScreen(model, screen.mode, activity)
                     }
                 }
             }
@@ -98,5 +94,23 @@ fun App(model: AppModel, vpnOn: Boolean, activity: MainActivity) {
                 }) { Text(model.t("phone.vpn_settings")) }
             },
         )
+    }
+}
+
+/**
+ * The setup assistant, or the screen on top of the stack. What each saves for turning the phone
+ * belongs to its visit: a screen's is its stack entry ([visit], AppModel.Visit).
+ */
+@Composable
+internal fun Pages(setup: Boolean, visit: String, setupFlow: @Composable () -> Unit, screen: @Composable () -> Unit) {
+    // The setup assistant's visit, like a screen's but saved: after Android ended the app during
+    // setup, setup goes on where it was. Once something else shows, what it saved is not for the
+    // next time (an account change from Settings starts at the university).
+    var setupVisit by rememberSaveable { mutableStateOf(UUID.randomUUID().toString()) }
+    if (setup) {
+        key(setupVisit) { setupFlow() }
+    } else {
+        LaunchedEffect(Unit) { setupVisit = UUID.randomUUID().toString() }
+        key(visit) { screen() }
     }
 }

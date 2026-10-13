@@ -102,23 +102,37 @@ class AppModel(app: Application) : AndroidViewModel(app) {
      */
     var pairResultFor = ""
         private set
-    /** The account came over with [pairResult]'s code, although its answer did not. */
+    /**
+     * Linked with [pairResult]'s code although its answer did not come: the account came over
+     * (setup), or more devices sync than before (Add a device).
+     */
     var pairLinked = false
         private set
+
+    /** The devices that sync, this one among them, as the status last said; none while off. */
+    private fun syncedDevices() =
+        status?.optJSONObject("sync")?.takeIf { it.optBoolean("on") }?.optJSONArray("devices")?.length() ?: 0
 
     fun enterPairCode(code: String, owner: String, inSetup: Boolean = true) {
         if (pairBusy) return
         pairBusy = true
         val finishing = setupFinishing
         val wasNeeded = setupNeeded
+        val devices = syncedDevices()
         // The setup page stays for its last page ("All set"), also while the core already
         // counts as set up and its answer is still on the way (no Home in between).
         if (inSetup) setupFinishing = true
         viewModelScope.launch {
             val result = post("/api/sync/enter", JSONObject().put("code", code), timeoutMs = 60_000)
-            // The core took the account, then the answer went (the network dropped, or the wait
-            // ran out): linked all the same, so "All set" follows instead of Home.
-            val linked = inSetup && !result.ok && wasNeeded && !setupNeeded
+            // The core went on after the answer went (the network dropped, or the wait ran out):
+            // linked all the same. In setup the account came over, so "All set" follows instead
+            // of Home; on Add a device more devices sync than before, more than this one alone
+            // (a code sent to another device starts a group of one here).
+            val linked = when {
+                result.ok -> false
+                inSetup -> wasNeeded && !setupNeeded
+                else -> result.reply.status == 0 && syncedDevices() > maxOf(devices, 1)
+            }
             // Not linked, or linked without the account (a university this version does not
             // know yet, for example): still to be set up. An account sent before (and left with
             // the back arrow) keeps the setup page, which says why the code did not work.

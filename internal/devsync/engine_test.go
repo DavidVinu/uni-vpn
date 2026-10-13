@@ -337,7 +337,7 @@ func TestChangesTravelBothWays(t *testing.T) {
 
 	// A new password goes out only when the daemon says secrets changed.
 	desktop.local.set(KeyPassword, "new")
-	desktop.Notify(true)
+	desktop.Notify(KeyPassword)
 	if err := desktop.Sync(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -514,9 +514,9 @@ func TestLaterChangeWinsOverOfflineEdit(t *testing.T) {
 
 	// The desktop changes the language while offline, the laptop later, and syncs first.
 	desktop.local.set(KeyLanguage, "de")
-	desktop.Notify(false)
+	desktop.Notify()
 	laptop.local.set(KeyLanguage, "fr")
-	laptop.Notify(false)
+	laptop.Notify()
 	for _, d := range []device{laptop, desktop, laptop} {
 		if err := d.Sync(ctx); err != nil {
 			t.Fatal(err)
@@ -538,7 +538,7 @@ func TestPendingSecretSurvivesRestart(t *testing.T) {
 	pair(t, ctx, laptop, desktop)
 
 	laptop.local.set(KeyPassword, "changed")
-	laptop.Notify(true)
+	laptop.Notify(KeyPassword)
 	// The daemon restarts before the change went out.
 	restarted := New(laptop.opts)
 	if err := restarted.Sync(ctx); err != nil {
@@ -549,6 +549,57 @@ func TestPendingSecretSurvivesRestart(t *testing.T) {
 	}
 	if got := desktop.local.get(KeyPassword); got != `"changed"` {
 		t.Fatalf("desktop has %s", got)
+	}
+}
+
+// Password and second factor keep a time each. The desktop, offline, gets a password typed; the
+// laptop later the new one, which goes out; then the desktop, still offline, gets a new second
+// factor. The laptop's later password stays.
+func TestLaterPasswordElsewhereStaysAfterASecondFactorHere(t *testing.T) {
+	ctx := context.Background()
+	_, url := startRelay(t)
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	laptop := newDevice(t, url, "Laptop", setUpLaptop(), c)
+	desktop := newDevice(t, url, "Desktop", newLocal(false, nil), c)
+	pair(t, ctx, laptop, desktop)
+	desktop.local.set(KeyPassword, "typed earlier")
+	desktop.Notify(KeyPassword)
+	laptop.local.set(KeyPassword, "new")
+	laptop.Notify(KeyPassword)
+	syncAll(t, laptop)
+	desktop.local.set(KeyTOTP, "NEWSECRET")
+	desktop.Notify(KeyTOTP)
+	syncAll(t, desktop, laptop)
+	for _, d := range []device{laptop, desktop} {
+		if d.local.get(KeyPassword) != `"new"` || d.local.get(KeyTOTP) != `"NEWSECRET"` {
+			t.Errorf("%s: password %s, second factor %s; want the laptop's later password and the desktop's second factor",
+				d.opts.Name, d.local.get(KeyPassword), d.local.get(KeyTOTP))
+		}
+	}
+}
+
+// The other way round: a second factor set up again on the laptop is not undone by the
+// desktop's older one when a password is typed there before it is back online.
+func TestLaterSecondFactorElsewhereStaysAfterAPasswordHere(t *testing.T) {
+	ctx := context.Background()
+	_, url := startRelay(t)
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	laptop := newDevice(t, url, "Laptop", setUpLaptop(), c)
+	desktop := newDevice(t, url, "Desktop", newLocal(false, nil), c)
+	pair(t, ctx, laptop, desktop)
+	desktop.local.set(KeyTOTP, "OLDSECRET")
+	desktop.Notify(KeyTOTP)
+	laptop.local.set(KeyTOTP, "NEWSECRET")
+	laptop.Notify(KeyTOTP)
+	syncAll(t, laptop)
+	desktop.local.set(KeyPassword, "typed")
+	desktop.Notify(KeyPassword)
+	syncAll(t, desktop, laptop)
+	for _, d := range []device{laptop, desktop} {
+		if d.local.get(KeyTOTP) != `"NEWSECRET"` || d.local.get(KeyPassword) != `"typed"` {
+			t.Errorf("%s: second factor %s, password %s; want the laptop's later second factor and the desktop's password",
+				d.opts.Name, d.local.get(KeyTOTP), d.local.get(KeyPassword))
+		}
 	}
 }
 
@@ -805,7 +856,7 @@ func TestUpdateFromPlainStateHashes(t *testing.T) {
 		t.Fatal(err)
 	}
 	laptop.local.set(KeyLanguage, "fr")
-	laptop.Notify(false)
+	laptop.Notify()
 	if err := laptop.Sync(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -923,14 +974,14 @@ func TestOfflineEditKeepsItsTime(t *testing.T) {
 	// The desktop, offline, changes the language; the laptop changes it later and syncs; the
 	// desktop, still offline, then adds a website.
 	desktop.local.set(KeyLanguage, "de")
-	desktop.Notify(false)
+	desktop.Notify()
 	laptop.local.set(KeyLanguage, "fr")
-	laptop.Notify(false)
+	laptop.Notify()
 	if err := laptop.Sync(ctx); err != nil {
 		t.Fatal(err)
 	}
 	desktop.local.setDomains("sogo.uni-heidelberg.de", "heico.uni-heidelberg.de", "lsf.uni-heidelberg.de")
-	desktop.Notify(false)
+	desktop.Notify()
 	for _, d := range []device{desktop, laptop} {
 		if err := d.Sync(ctx); err != nil {
 			t.Fatal(err)
@@ -981,15 +1032,15 @@ func TestTakenOverValueIsNotSentBackAfterAConflict(t *testing.T) {
 	pair(t, ctx, laptop, desktop)
 	// The desktop sets the language to de and syncs, then to fr, not sent yet.
 	desktop.local.set(KeyLanguage, "de")
-	desktop.Notify(false)
+	desktop.Notify()
 	if err := desktop.Sync(ctx); err != nil {
 		t.Fatal(err)
 	}
 	desktop.local.set(KeyLanguage, "fr")
-	desktop.Notify(false)
+	desktop.Notify()
 	// Then automatic updates go off on the laptop; while it takes over de, fr arrives.
 	laptop.local.set(KeyAutoUpdate, false)
-	laptop.Notify(false)
+	laptop.Notify()
 	opts := laptop.opts
 	opts.Local = &hookLocal{fakeLocal: laptop.local, onApply: func() {
 		if err := desktop.Sync(ctx); err != nil {
@@ -1018,7 +1069,7 @@ func TestPasswordTypedWhileTakingOverGoesOut(t *testing.T) {
 	desktop := newDevice(t, url, "Desktop", newLocal(false, nil), c)
 	pair(t, ctx, laptop, desktop)
 	desktop.local.set(KeyLanguage, "de")
-	desktop.Notify(false)
+	desktop.Notify()
 	if err := desktop.Sync(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -1026,7 +1077,7 @@ func TestPasswordTypedWhileTakingOverGoesOut(t *testing.T) {
 	opts := laptop.opts
 	opts.Local = &hookLocal{fakeLocal: laptop.local, onApply: func() {
 		laptop.local.set(KeyPassword, "typed")
-		e.Notify(true)
+		e.Notify(KeyPassword)
 	}}
 	e = New(opts)
 	for _, run := range []func(context.Context) error{e.Sync, e.Sync, desktop.Sync} {
@@ -1053,13 +1104,13 @@ func TestLaterAddOfAWebsiteRemovedElsewhere(t *testing.T) {
 		{"sogo.uni-heidelberg.de", "heico.uni-heidelberg.de"},
 	} {
 		laptop.local.setDomains(list...)
-		laptop.Notify(false)
+		laptop.Notify()
 		if err := laptop.Sync(ctx); err != nil {
 			t.Fatal(err)
 		}
 	}
 	desktop.local.setDomains("sogo.uni-heidelberg.de", "heico.uni-heidelberg.de", "lsf.uni-heidelberg.de")
-	desktop.Notify(false)
+	desktop.Notify()
 	for _, d := range []device{desktop, laptop} {
 		if err := d.Sync(ctx); err != nil {
 			t.Fatal(err)
@@ -1129,7 +1180,7 @@ func TestRemoveWithManyWebsites(t *testing.T) {
 		hosts = append(hosts, fmt.Sprintf("journal%d.publisher-example.com", i))
 	}
 	laptop.local.setDomains(hosts...)
-	laptop.Notify(false)
+	laptop.Notify()
 	if err := laptop.Sync(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -1138,6 +1189,72 @@ func TestRemoveWithManyWebsites(t *testing.T) {
 	}
 	if got := names(laptop.Engine); !slices.Equal(got, []string{"Laptop"}) {
 		t.Fatalf("after removal %v", got)
+	}
+}
+
+// agingRelay drops a new group that no device read or wrote again after its creation, as
+// relay/worker.js's cleanup does a week later: expire is that week.
+type agingRelay struct {
+	next                http.Handler
+	mu                  sync.Mutex
+	created, used, gone map[string]bool
+}
+
+func (a *agingRelay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if id, ok := strings.CutPrefix(r.URL.Path, "/v1/group/"); ok {
+		a.mu.Lock()
+		if r.Method == "PUT" && r.Header.Get("If-None-Match") == "*" {
+			a.created[id] = true
+		} else {
+			a.used[id] = true
+		}
+		gone := a.gone[id]
+		a.mu.Unlock()
+		if gone {
+			http.Error(w, "not found", 404)
+			return
+		}
+	}
+	a.next.ServeHTTP(w, r)
+}
+
+func (a *agingRelay) expire() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for id := range a.created {
+		a.gone[id] = !a.used[id]
+	}
+}
+
+// The phone turns syncing off itself (Remove on its own row) while the laptop and the desktop
+// are switched off for more than a week. Back on, they still sync with each other.
+func TestRemovingThisDeviceKeepsTheOthersGroup(t *testing.T) {
+	ctx := context.Background()
+	_, target := startRelay(t)
+	u, err := url.Parse(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	relay := &agingRelay{next: httputil.NewSingleHostReverseProxy(u), created: map[string]bool{}, used: map[string]bool{},
+		gone: map[string]bool{}}
+	srv := httptest.NewServer(relay)
+	t.Cleanup(srv.Close)
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	laptop := newDevice(t, srv.URL, "Laptop", setUpLaptop(), c)
+	desktop := newDevice(t, srv.URL, "Desktop", newLocal(false, nil), c)
+	phone := newDevice(t, srv.URL, "Phone", newLocal(false, nil), c)
+	pair(t, ctx, laptop, desktop)
+	pair(t, ctx, laptop, phone)
+	syncAll(t, desktop, phone)
+	if err := phone.Remove(ctx, phone.Status().Devices[0].ID); err != nil || phone.Status().On {
+		t.Fatalf("still on: %v", err)
+	}
+	relay.expire()
+	syncAll(t, laptop, desktop)
+	for _, d := range []device{laptop, desktop} {
+		if got := names(d.Engine); !d.Status().On || len(got) != 2 {
+			t.Errorf("%s: syncing %v, devices %v; want laptop and desktop still linked", d.opts.Name, d.Status().On, got)
+		}
 	}
 }
 
@@ -1214,19 +1331,19 @@ func TestFailedWriteDoesNotBringBackARemovedWebsite(t *testing.T) {
 	laptop, desktop := devices[0], devices[1]
 	const lsf = "lsf.uni-heidelberg.de"
 	laptop.local.setDomains(append(laptop.local.getDomains(), lsf)...)
-	laptop.Notify(false)
+	laptop.Notify()
 	syncAll(t, laptop)
 	desktop.local.set(KeyLanguage, "de") // the desktop's round has something to write
-	desktop.Notify(false)
+	desktop.Notify()
 	relay.drop.Store(true)
 	if err := desktop.Sync(context.Background()); err == nil || !slices.Contains(desktop.local.getDomains(), lsf) {
 		t.Fatalf("want the website taken over and the write failed: %v %v", err, desktop.local.getDomains())
 	}
 	laptop.local.setDomains(without(laptop.local.getDomains(), lsf)...)
-	laptop.Notify(false)
+	laptop.Notify()
 	syncAll(t, laptop)
 	desktop.local.set(KeyAutoUpdate, false)
-	desktop.Notify(false)
+	desktop.Notify()
 	syncAll(t, desktop, laptop, desktop)
 	for _, d := range devices {
 		if slices.Contains(d.local.getDomains(), lsf) {
@@ -1240,19 +1357,19 @@ func TestFailedWriteDoesNotUndoALaterLanguage(t *testing.T) {
 	relay, devices := lossyDevices(t, "Desktop")
 	laptop, desktop := devices[0], devices[1]
 	laptop.local.set(KeyLanguage, "fr")
-	laptop.Notify(false)
+	laptop.Notify()
 	syncAll(t, laptop)
 	desktop.local.setDomains(append(desktop.local.getDomains(), "lsf.uni-heidelberg.de")...)
-	desktop.Notify(false)
+	desktop.Notify()
 	relay.drop.Store(true)
 	if err := desktop.Sync(context.Background()); err == nil || desktop.local.get(KeyLanguage) != `"fr"` {
 		t.Fatalf("want fr taken over and the write failed: %v %s", err, desktop.local.get(KeyLanguage))
 	}
 	laptop.local.set(KeyLanguage, "es")
-	laptop.Notify(false)
+	laptop.Notify()
 	syncAll(t, laptop)
 	desktop.local.set(KeyAutoUpdate, false)
-	desktop.Notify(false)
+	desktop.Notify()
 	syncAll(t, desktop, laptop, desktop)
 	for _, d := range devices {
 		if got := d.local.get(KeyLanguage); got != `"es"` {
@@ -1268,13 +1385,13 @@ func TestRemovalAfterALostAnswerGoesOut(t *testing.T) {
 	laptop, desktop := devices[0], devices[1]
 	const lsf = "lsf.uni-heidelberg.de"
 	desktop.local.setDomains(append(desktop.local.getDomains(), lsf)...)
-	desktop.Notify(false)
+	desktop.Notify()
 	relay.lose.Store(true)
 	if err := desktop.Sync(context.Background()); err == nil {
 		t.Fatal("want the answer lost")
 	}
 	desktop.local.setDomains(without(desktop.local.getDomains(), lsf)...)
-	desktop.Notify(false)
+	desktop.Notify()
 	syncAll(t, desktop, laptop, desktop)
 	for _, d := range devices {
 		if slices.Contains(d.local.getDomains(), lsf) {
@@ -1307,11 +1424,11 @@ func randomEdits(t *testing.T, seed uint64) {
 		case 0:
 			language = fmt.Sprintf("l%d", step)
 			d.local.set(KeyLanguage, language)
-			d.Notify(false)
+			d.Notify()
 		case 1:
 			host := fmt.Sprintf("site%d.example.org", step)
 			d.local.setDomains(append(d.local.getDomains(), host)...)
-			d.Notify(false)
+			d.Notify()
 			added = append(added, host)
 		case 2:
 			// A website this device has, once: whoever removes it, it is gone for good.
@@ -1324,7 +1441,7 @@ func randomEdits(t *testing.T, seed uint64) {
 			if len(listed) > 0 {
 				host := listed[rng.IntN(len(listed))]
 				d.local.setDomains(without(d.local.getDomains(), host)...)
-				d.Notify(false)
+				d.Notify()
 				removed[host] = true
 			}
 		default:
@@ -1407,7 +1524,7 @@ func TestSetUpByHandAfterALinkKeepsTheGroupsSettings(t *testing.T) {
 	pl.values[KeyAccount], pl.values[KeyPassword], pl.values[KeyTOTP] = mustJSON(other), mustJSON("typed"), mustJSON("JBSWY3DP")
 	pl.values[KeyLanguage], pl.values[KeyAutoUpdate] = mustJSON(""), mustJSON(true)
 	pl.mu.Unlock()
-	phone.Notify(true)
+	phone.Notify(KeyPassword, KeyTOTP)
 	syncAll(t, phone, laptop, phone)
 	for _, d := range []device{laptop, phone} {
 		if d.local.get(KeyLanguage) != `"de"` || d.local.get(KeyAutoUpdate) != "false" {
@@ -1428,19 +1545,19 @@ func TestRemovalAfterALostAnswerOfAWebsiteAddedAgain(t *testing.T) {
 	laptop, desktop := devices[0], devices[1]
 	const lsf = "lsf.uni-heidelberg.de"
 	desktop.local.setDomains(append(desktop.local.getDomains(), lsf)...)
-	desktop.Notify(false)
+	desktop.Notify()
 	syncAll(t, desktop, laptop)
 	desktop.local.setDomains(without(desktop.local.getDomains(), lsf)...)
-	desktop.Notify(false)
+	desktop.Notify()
 	syncAll(t, desktop, laptop) // sync.json knows lsf as removed
 	desktop.local.setDomains(append(desktop.local.getDomains(), lsf)...)
-	desktop.Notify(false)
+	desktop.Notify()
 	relay.lose.Store(true)
 	if err := desktop.Sync(context.Background()); err == nil {
 		t.Fatal("want the answer lost")
 	}
 	desktop.local.setDomains(without(desktop.local.getDomains(), lsf)...)
-	desktop.Notify(false)
+	desktop.Notify()
 	syncAll(t, desktop, laptop, desktop)
 	for _, d := range devices {
 		if slices.Contains(d.local.getDomains(), lsf) {
@@ -1455,13 +1572,13 @@ func TestChangedBackAfterALostAnswer(t *testing.T) {
 	relay, devices := lossyDevices(t, "Desktop")
 	laptop, desktop := devices[0], devices[1]
 	desktop.local.set(KeyAutoUpdate, false)
-	desktop.Notify(false)
+	desktop.Notify()
 	relay.lose.Store(true)
 	if err := desktop.Sync(context.Background()); err == nil {
 		t.Fatal("want the answer lost")
 	}
 	desktop.local.set(KeyAutoUpdate, true)
-	desktop.Notify(false)
+	desktop.Notify()
 	syncAll(t, desktop, laptop, desktop)
 	for _, d := range devices {
 		if got := d.local.get(KeyAutoUpdate); got != "true" {
@@ -1477,13 +1594,13 @@ func TestWebsiteAddedBackAfterALostAnswer(t *testing.T) {
 	const sogo = "sogo.uni-heidelberg.de"
 	all := desktop.local.getDomains()
 	desktop.local.setDomains(without(all, sogo)...)
-	desktop.Notify(false)
+	desktop.Notify()
 	relay.lose.Store(true)
 	if err := desktop.Sync(context.Background()); err == nil {
 		t.Fatal("want the answer lost")
 	}
 	desktop.local.setDomains(all...)
-	desktop.Notify(false)
+	desktop.Notify()
 	syncAll(t, desktop, laptop, desktop)
 	for _, d := range devices {
 		if !slices.Contains(d.local.getDomains(), sogo) {
@@ -1601,16 +1718,16 @@ func randomDevices(t *testing.T) (*conflictRelay, []*randomDevice) {
 func randomStep(rng *rand.Rand, relay *conflictRelay, devices []*randomDevice, i, step int, removed map[string]bool) (key, value, added, gone string) {
 	ctx := context.Background()
 	d := devices[i]
-	switch rng.IntN(9) {
+	switch rng.IntN(10) {
 	case 0:
 		value = fmt.Sprintf(`"l%d"`, step)
 		d.local.set(KeyLanguage, fmt.Sprintf("l%d", step))
-		d.Notify(false)
+		d.Notify()
 		return KeyLanguage, value, "", ""
 	case 1:
 		added = fmt.Sprintf("site%d.example.org", step)
 		d.local.setDomains(append(d.local.getDomains(), added)...)
-		d.Notify(false)
+		d.Notify()
 	case 2:
 		var listed []string
 		for _, host := range d.local.getDomains() {
@@ -1621,18 +1738,23 @@ func randomStep(rng *rand.Rand, relay *conflictRelay, devices []*randomDevice, i
 		if len(listed) > 0 {
 			gone = listed[rng.IntN(len(listed))]
 			d.local.setDomains(without(d.local.getDomains(), gone)...)
-			d.Notify(false)
+			d.Notify()
 		}
 	case 3:
 		value = fmt.Sprintf(`"pw%d"`, step)
 		d.local.set(KeyPassword, fmt.Sprintf("pw%d", step))
-		d.Notify(true)
+		d.Notify(KeyPassword)
 		return KeyPassword, value, "", ""
 	case 4:
 		account := map[string]any{"university": "heidelberg", "user": fmt.Sprintf("u%d", step), "overrides": map[string]any{}}
 		d.local.set(KeyAccount, account)
-		d.Notify(false)
+		d.Notify()
 		return KeyAccount, string(mustJSON(account)), "", ""
+	case 8:
+		value = fmt.Sprintf(`"T%d"`, step)
+		d.local.set(KeyTOTP, fmt.Sprintf("T%d", step))
+		d.Notify(KeyTOTP)
+		return KeyTOTP, value, "", ""
 	case 5:
 		d.Engine = New(d.opts)
 		d.Load(ctx) // as the daemon does at start
@@ -1657,10 +1779,10 @@ func randomStep(rng *rand.Rand, relay *conflictRelay, devices []*randomDevice, i
 	return "", "", added, gone
 }
 
-// Three devices change settings, password and account, restart and sync at random while
-// reads, writes and answers get lost, other devices write in between and settings are
-// refused for a moment. Once the network is back they agree on the latest of each value and on
-// every website added and not removed since.
+// Three devices change settings, password, second factor and account, restart and sync at
+// random while reads, writes and answers get lost, other devices write in between and settings
+// are refused for a moment. Once the network is back they agree on the latest of each value and
+// on every website added and not removed since.
 func TestRandomEditsWithConflictsAndRestarts(t *testing.T) {
 	for seed := range uint64(12) {
 		t.Run(fmt.Sprint(seed), func(t *testing.T) {
@@ -1853,10 +1975,10 @@ func TestSettingOfANewerVersionWaitsForTheUpdate(t *testing.T) {
 	desktop := device{New(opts), local.fakeLocal, opts.Store.(*memStore)}
 	pair(t, ctx, laptop, desktop)
 	laptop.local.set("theme", "dark")
-	laptop.Notify(false)
+	laptop.Notify()
 	syncAll(t, laptop)
 	desktop.local.set(KeyLanguage, "de")
-	desktop.Notify(false)
+	desktop.Notify()
 	syncAll(t, desktop, laptop) // no ApplyError: no note for a newer version's setting
 	if _, ok := desktop.loadState().Hashes["theme"]; ok || laptop.local.get(KeyLanguage) != `"de"` {
 		t.Fatalf("theme noted as synced %v, laptop language %s", ok, laptop.local.get(KeyLanguage))
@@ -1893,12 +2015,81 @@ func TestChangesOnANewDeviceAfterItsFirstWriteFailed(t *testing.T) {
 	const lsf = "lsf.uni-heidelberg.de"
 	desktop.local.set(KeyPassword, "typed")
 	desktop.local.setDomains(append(desktop.local.getDomains(), lsf)...)
-	desktop.Notify(true)
+	desktop.Notify(KeyPassword)
 	syncAll(t, desktop, laptop)
 	for _, d := range []device{desktop, laptop} {
 		if d.local.get(KeyPassword) != `"typed"` || !slices.Contains(d.local.getDomains(), lsf) {
 			t.Errorf("%s: password %s, websites %v; want what was changed on the desktop", d.opts.Name,
 				d.local.get(KeyPassword), d.local.getDomains())
+		}
+	}
+}
+
+// A desktop set up by hand enters the laptop's code; its first round takes the password over,
+// but the write fails. The laptop then turns automatic updates off and removes a website both
+// had, and the desktop changes its language before its next round: all three changes stay.
+func TestChangesElsewhereStayAfterASetUpDevicesFirstWriteFailed(t *testing.T) {
+	ctx := context.Background()
+	relay, devices := lossyDevices(t)
+	laptop := devices[0]
+	local := setUpLaptop()
+	local.set(KeyPassword, "own")
+	opts := newDevice(t, laptop.opts.Relay, "Desktop", local, &clock{}).opts
+	opts.Now = laptop.opts.Now
+	desktop := device{New(opts), local, opts.Store.(*memStore)}
+	p, err := laptop.Offer(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	relay.drop.Store(true)
+	if err := desktop.Enter(ctx, p.Code); err == nil || desktop.local.get(KeyPassword) != `"secret"` {
+		t.Fatalf("want the password taken over and the write failed: %v", err)
+	}
+	laptop.CancelPairing()
+	const sogo = "sogo.uni-heidelberg.de"
+	laptop.local.set(KeyAutoUpdate, false)
+	laptop.local.setDomains(without(laptop.local.getDomains(), sogo)...)
+	laptop.Notify()
+	syncAll(t, laptop)
+	desktop.local.set(KeyLanguage, "de")
+	desktop.Notify()
+	syncAll(t, desktop, laptop, desktop)
+	for _, d := range []device{laptop, desktop} {
+		if d.local.get(KeyAutoUpdate) != "false" || slices.Contains(d.local.getDomains(), sogo) || d.local.get(KeyLanguage) != `"de"` {
+			t.Errorf("%s: automatic updates %s, websites %v, language %s; want off, without %s, de", d.opts.Name,
+				d.local.get(KeyAutoUpdate), d.local.getDomains(), d.local.get(KeyLanguage), sogo)
+		}
+	}
+}
+
+// sync.json is gone (its folder deleted, the keyring kept the sync keys) and the desktop is set
+// up by hand before its first round. The new config.toml's defaults do not replace the group's
+// language and automatic updates; the password typed goes out.
+func TestSetUpByHandAfterSyncStateWasLost(t *testing.T) {
+	ctx := context.Background()
+	_, url := startRelay(t)
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	laptop := newDevice(t, url, "Laptop", setUpLaptop(), c)
+	desktop := newDevice(t, url, "Desktop", newLocal(false, nil), c)
+	pair(t, ctx, laptop, desktop)
+	laptop.local.set(KeyLanguage, "de")
+	laptop.local.set(KeyAutoUpdate, false)
+	laptop.Notify()
+	syncAll(t, laptop, desktop)
+	os.Remove(desktop.opts.StatePath)
+	os.Remove(desktop.opts.StatePath + ".pending")
+	local := setUpLaptop() // the new config.toml
+	local.set(KeyPassword, "typed")
+	opts := desktop.opts
+	opts.Local = local
+	again := device{New(opts), local, desktop.store}
+	again.Load(ctx)
+	again.Notify(KeyPassword, KeyTOTP)
+	syncAll(t, again, laptop, again)
+	for _, d := range []device{laptop, again} {
+		if d.local.get(KeyLanguage) != `"de"` || d.local.get(KeyAutoUpdate) != "false" || d.local.get(KeyPassword) != `"typed"` {
+			t.Errorf("%s: language %s, automatic updates %s, password %s; want the group's de and off, the typed password",
+				d.opts.Name, d.local.get(KeyLanguage), d.local.get(KeyAutoUpdate), d.local.get(KeyPassword))
 		}
 	}
 }
@@ -1914,7 +2105,7 @@ func TestLanguageChosenAfterALostFirstWrite(t *testing.T) {
 		t.Fatal("want the answer lost")
 	}
 	laptop.local.set(KeyLanguage, "fr")
-	laptop.Notify(false)
+	laptop.Notify()
 	syncAll(t, laptop)
 	desktop := newDevice(t, laptop.opts.Relay, "Desktop", newLocal(false, nil), &clock{t: time.Unix(1_800_000_000, 0)})
 	pair(t, ctx, laptop, desktop)
@@ -1937,10 +2128,10 @@ func TestUpdateFromPlainStateKeepsAWebsiteAddedAgainElsewhere(t *testing.T) {
 	pair(t, ctx, laptop, desktop)
 	const lsf = "lsf.uni-heidelberg.de"
 	desktop.local.setDomains(append(desktop.local.getDomains(), lsf)...)
-	desktop.Notify(false)
+	desktop.Notify()
 	syncAll(t, desktop, laptop)
 	desktop.local.setDomains(without(desktop.local.getDomains(), lsf)...)
-	desktop.Notify(false)
+	desktop.Notify()
 	syncAll(t, desktop, laptop)
 	k, _ := desktop.loadKeys(ctx)
 	remote, version, err := desktop.fetch(ctx, k.group())
@@ -1955,12 +2146,12 @@ func TestUpdateFromPlainStateKeepsAWebsiteAddedAgainElsewhere(t *testing.T) {
 		t.Fatal(err)
 	}
 	laptop.local.setDomains(append(laptop.local.getDomains(), lsf)...)
-	laptop.Notify(false)
+	laptop.Notify()
 	syncAll(t, laptop)
 	updated := device{New(desktop.opts), desktop.local, desktop.store}
 	updated.Load(ctx)
 	desktop.local.set(KeyLanguage, "de")
-	updated.Notify(false)
+	updated.Notify()
 	syncAll(t, updated, laptop, updated)
 	for _, d := range []device{laptop, updated} {
 		if !slices.Contains(d.local.getDomains(), lsf) || d.local.get(KeyLanguage) != `"de"` {
@@ -2004,16 +2195,16 @@ func randomLinking(t *testing.T, seed uint64) {
 		switch rng.IntN(3) {
 		case 0:
 			d.local.set(KeyLanguage, fmt.Sprintf("l%d", step))
-			d.Notify(false)
+			d.Notify()
 			latest[KeyLanguage] = fmt.Sprintf(`"l%d"`, step)
 		case 1:
 			host := fmt.Sprintf("site%d.example.org", step)
 			d.local.setDomains(append(d.local.getDomains(), host)...)
-			d.Notify(false)
+			d.Notify()
 			added = append(added, host)
 		default:
 			d.local.set(KeyPassword, fmt.Sprintf("pw%d", step))
-			d.Notify(true)
+			d.Notify(KeyPassword)
 			latest[KeyPassword] = fmt.Sprintf(`"pw%d"`, step)
 		}
 	}

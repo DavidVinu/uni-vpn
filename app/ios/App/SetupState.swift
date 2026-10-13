@@ -201,7 +201,9 @@ final class SetupState {
     }
 
     func failed(_ model: AppModel, _ result: PostResult) {
-        if !model.changingAccount { model.setupFinishing = false }
+        // An account sent before (its sign-in failed, or left with the back arrow) keeps the
+        // setup page, which says why this one was not taken: no Home with the old account.
+        if !model.changingAccount && model.setupNeeded { model.setupFinishing = false }
         let field = result.json?.string("field") ?? ""
         if SetupState.profileFields.contains(field) {
             step = .university

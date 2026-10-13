@@ -46,8 +46,10 @@ On macOS /Applications belongs to root, so the update puts the app next to the c
 
 The app windows restart themselves: when their program file changed (the same new file in two
 status polls in a row) and their window is closed, they start the new version without a window
-(`--hidden --after <pid>`, the new one waits for the old one to quit) and quit; on macOS also
-when the copy in /Applications sees the updated one. They say so with `shell=1` in their status
+(`--hidden --after <pid>`, the new one waits for the old one to quit) and quit (on Linux the new
+version takes the old one's process instead, exec, so that it stays in the systemd unit it ran
+in); on macOS also when the copy in /Applications sees the updated one. They say so with
+`shell=1` in their status
 request (`status.json?menu=...&shell=1`). An app window of an earlier version, which asks
 without it, is switched by the service: once the updates have installed the app, it ends it and
 starts the new one without a window (`desktop.RestartApp`; on Linux in the desktop session of the

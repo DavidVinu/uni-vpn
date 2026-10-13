@@ -63,6 +63,9 @@ android {
         compose = true
         buildConfig = true
     }
+    // Compose runs in the unit tests (PagesTest): the Android calls it makes (Trace, Log) do
+    // nothing there instead of failing.
+    testOptions { unitTests.isReturnDefaultValues = true }
     lint {
         abortOnError = true
         warningsAsErrors = false

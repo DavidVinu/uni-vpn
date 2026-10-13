@@ -173,7 +173,7 @@ settings. `uni-vpn doctor` prints it.
 | Heidelberg University | vpn-ac.uni-heidelberg.de | one-time code | tested end to end |
 | ETH Zurich | sslvpn.ethz.ch | one-time code | profile only |
 | University of Bremen | vpn.uni-bremen.de | one-time code | profile only |
-| University of Muenster | vpn.uni-muenster.de | one-time code | profile only |
+| University of Münster | vpn.uni-muenster.de | one-time code | profile only |
 | Harvard FAS Research Computing | vpn.rc.fas.harvard.edu | one-time code | profile only |
 | University of Marburg | vpn.uni-marburg.de | one-time code after the password | profile only |
 | Stanford University | su-vpn.stanford.edu | Duo push | profile only |
@@ -205,11 +205,11 @@ settings. `uni-vpn doctor` prints it.
 | University of Hamburg | vpn.rrz.uni-hamburg.de | none | profile only |
 | Friedrich-Alexander University Erlangen-Nuremberg | vpn.fau.de | none | profile only |
 | Friedrich Schiller University Jena | vpn.uni-jena.de | none | profile only |
-| Bauhaus-Universitaet Weimar | vpngate.uni-weimar.de | none | profile only |
-| TH Koeln | vpn.th-koeln.de | none | profile only |
+| Bauhaus-Universität Weimar | vpngate.uni-weimar.de | none | profile only |
+| TH Köln | vpn.th-koeln.de | none | profile only |
 | Technische Hochschule Ulm | vpn.thu.de | none | profile only |
 | TU Braunschweig | vpngate.tu-bs.de | none | profile only |
-| Freie Universitaet Berlin | vpn.fu-berlin.de | sign-in on a web page (SAML) | not supported yet |
+| Freie Universität Berlin | vpn.fu-berlin.de | sign-in on a web page (SAML) | not supported yet |
 | University of Oxford | vpn.ox.ac.uk | sign-in on a web page (SAML) | not supported yet |
 
 "Profile only" means the values come from the university's documentation, for some also from a
