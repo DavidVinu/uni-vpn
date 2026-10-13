@@ -257,7 +257,7 @@ jobs:
           echo "$sdk"
           otool -L runtime/arm64/bin/* runtime/arm64/lib/*.dylib | awk '/^\t\/(usr\/lib|System)/ {print $1}' | sort -u
           python3 packaging/macos/tbdsyms.py "$sdk/usr/lib" > syms.txt
-          for f in CoreFoundation Security SystemConfiguration Foundation IOKit CFNetwork; do
+          for f in CoreFoundation CoreServices Security SystemConfiguration Foundation IOKit CFNetwork PCSC Kerberos GSS; do
             python3 packaging/macos/tbdsyms.py "$sdk/System/Library/Frameworks/$f.framework" >> syms.txt
           done
           wc -l syms.txt
