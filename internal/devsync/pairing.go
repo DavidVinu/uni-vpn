@@ -188,7 +188,9 @@ func (e *Engine) await(ctx context.Context, cancel context.CancelFunc, shown *Pa
 		case shown.Mode == "offer" && m.Kind == "joined":
 			e.logf(slog.LevelInfo, "Another device now syncs with this one")
 			finish("done", nil)
+			e.bg.Add(1)
 			go func() {
+				defer e.bg.Done()
 				if err := e.Sync(context.Background()); err != nil {
 					e.logf(slog.LevelWarn, "Sync failed: %s", err)
 				}

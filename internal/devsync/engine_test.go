@@ -170,6 +170,7 @@ func newDevice(t *testing.T, url, name string, local *fakeLocal, c *clock) devic
 	store := &memStore{}
 	e := New(Options{Relay: url, StatePath: filepath.Join(t.TempDir(), "sync.json"), Store: store, Local: local,
 		Name: name, Platform: "linux", Now: c.now, PollEvery: 20 * time.Millisecond, CodeLifetime: 5 * time.Second})
+	t.Cleanup(e.bg.Wait) // before the folder goes: the sync after a device joined writes sync.json
 	return device{e, local, store}
 }
 

@@ -129,6 +129,7 @@ type Engine struct {
 	pairSlot      string // slot A of the code on screen
 	cancelPair    context.CancelFunc
 	wake          chan struct{}
+	bg            sync.WaitGroup // the sync after a device joined (tests wait for it)
 }
 
 // New builds an engine; Run starts its background loop.
