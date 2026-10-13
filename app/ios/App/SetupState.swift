@@ -201,7 +201,9 @@ final class SetupState {
     }
 
     func failed(_ model: AppModel, _ result: PostResult) {
-        if !model.changingAccount { model.setupFinishing = false }
+        // An account sent before (its sign-in failed, or left with the back arrow) keeps the
+        // setup page, which says why this one was not taken: no Home with the old account.
+        if !model.changingAccount && model.setupNeeded { model.setupFinishing = false }
         let field = result.json?.string("field") ?? ""
         if SetupState.profileFields.contains(field) {
             step = .university
@@ -276,7 +278,8 @@ final class SetupState {
             error = result.error
             return
         }
-        if d.has("error") {
+        // The core always sends "error", empty when the gateway answered (as the page reads it).
+        if !d.string("error").isEmpty {
             error = model.strings.message(d.string("error"), d.object("error_t"))
             return
         }

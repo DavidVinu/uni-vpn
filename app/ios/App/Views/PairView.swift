@@ -137,14 +137,24 @@ struct PairView: View {
 
     private func enter(_ code: String) async {
         busy = true
+        let before = others()
         let result = await model.post("/api/sync/enter", ["code": code], timeout: 60)
         busy = false
-        if !result.ok {
+        // No answer in time (a slow relay), but a device syncs with this phone that did not before
+        // (a code sent to another device starts a group of this phone alone; joining another
+        // group can keep the count): linked all the same, not "not running".
+        if !result.ok && !(result.reply.status == 0 && !others().subtracting(before).isEmpty) {
             error = result.error
             return
         }
         done = true
         error = result.json.map { model.strings.message($0.string("error"), $0.object("error_t")) }
+    }
+
+    /// The other devices that sync with this phone; none while syncing is off here.
+    private func others() -> Set<String> {
+        guard let sync = model.status?.object("sync"), sync.bool("on") else { return [] }
+        return Set(sync.objects("devices").filter { !$0.bool("this") }.map { $0.string("id") })
     }
 
     /// Black modules on white with the standard quiet zone, error correction M (docs/sync.md).

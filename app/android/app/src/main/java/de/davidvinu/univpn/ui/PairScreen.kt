@@ -132,7 +132,8 @@ fun PairScreen(model: AppModel, mode: String, activity: MainActivity) {
     LaunchedEffect(model.pairResult) {
         val result = model.pairResult?.takeIf { model.pairResultFor == pairOwner } ?: return@LaunchedEffect
         model.pairResult = null
-        if (!result.ok) {
+        // Linked although the answer did not come (AppModel.pairLinked): the check mark all the same.
+        if (!result.ok && !model.pairLinked) {
             error = result.error
             return@LaunchedEffect
         }

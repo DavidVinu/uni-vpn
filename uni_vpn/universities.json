@@ -49,11 +49,11 @@
     },
     {
       "id": "muenster",
-      "name": "University of Muenster",
+      "name": "University of Münster",
       "country": "DE",
       "host": "vpn.uni-muenster.de",
       "mfa": "totp_field",
-      "aliases": ["Universitaet Muenster", "WWU"]
+      "aliases": ["University of Muenster", "Universitaet Muenster", "WWU"]
     },
     {
       "id": "marburg",
@@ -131,12 +131,12 @@
     },
     {
       "id": "fu-berlin",
-      "name": "Freie Universitaet Berlin",
+      "name": "Freie Universität Berlin",
       "country": "DE",
       "host": "vpn.fu-berlin.de",
       "useragent": "AnyConnectLinux",
       "mfa": "saml",
-      "aliases": ["FU Berlin"]
+      "aliases": ["Freie Universitaet Berlin", "FU Berlin"]
     },
     {
       "id": "oxford",
@@ -367,20 +367,20 @@
     },
     {
       "id": "uni-weimar",
-      "name": "Bauhaus-Universitaet Weimar",
+      "name": "Bauhaus-Universität Weimar",
       "country": "DE",
       "host": "vpngate.uni-weimar.de",
       "mfa": "none",
-      "aliases": ["Bauhaus University Weimar"],
+      "aliases": ["Bauhaus-Universitaet Weimar", "Bauhaus University Weimar"],
       "notes": "Profile from the university's documentation, not tested. No second factor is mentioned in its documentation. "
     },
     {
       "id": "th-koeln",
-      "name": "TH Koeln",
+      "name": "TH Köln",
       "country": "DE",
       "host": "vpn.th-koeln.de",
       "mfa": "none",
-      "aliases": ["Technische Hochschule Koeln", "Cologne University of Applied Sciences"],
+      "aliases": ["TH Koeln", "Technische Hochschule Koeln", "Cologne University of Applied Sciences"],
       "notes": "Profile from the university's documentation, not tested. No second factor is mentioned in its documentation. Gummersbach campus: vpn-gm.th-koeln.de."
     },
     {

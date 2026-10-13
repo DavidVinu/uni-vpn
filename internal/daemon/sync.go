@@ -77,8 +77,8 @@ func (d *Daemon) newSync() *devsync.Engine {
 		Local: syncLocal{d}, Name: deviceName(), Platform: platformName(), Log: d.log})
 }
 
-// syncChanged: a setting changed here; secrets when password or second factor did.
-func (d *Daemon) syncChanged(secrets bool) { d.sync.Notify(secrets) }
+// syncChanged: a setting changed here; secrets names the password or second factor when one did.
+func (d *Daemon) syncChanged(secrets ...string) { d.sync.Notify(secrets...) }
 
 // syncLocal is this device's side of syncing: config.toml, the website list and the keyring.
 type syncLocal struct{ d *Daemon }

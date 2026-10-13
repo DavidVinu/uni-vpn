@@ -188,6 +188,7 @@
   "msg.reinstall_needed": "Uni VPN 缺少一部分。请从 vpn.davidvinu.de 重新下载 Uni VPN 并打开它。",
   "msg.not_running": "Uni VPN 未运行。请重启电脑以重新启动它。",
   "main.repair": "修复",
+  "main.download": "下载 Uni VPN",
   "uni.heidelberg.mfa.1": "打开{portal}，用你的 Uni-ID 登录。",
   "uni.heidelberg.mfa.2": "在“Soft-Token (zeitbasiert)”下点击“Einrichten”。",
   "uni.heidelberg.mfa.3": "输入一个名称（例如“笔记本”），然后点击“Weiter”。",

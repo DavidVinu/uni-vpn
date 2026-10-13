@@ -188,6 +188,7 @@
   "msg.reinstall_needed": "Falta una parte de Uni VPN. Descarga Uni VPN de nuevo desde vpn.davidvinu.de y ábrelo.",
   "msg.not_running": "Uni VPN no está en marcha. Reinicia el ordenador para volver a iniciarlo.",
   "main.repair": "Reparar",
+  "main.download": "Descargar Uni VPN",
   "uni.heidelberg.mfa.1": "Abre la {portal} e inicia sesión con tu Uni-ID.",
   "uni.heidelberg.mfa.2": "Pulsa «Einrichten» bajo «Soft-Token (zeitbasiert)».",
   "uni.heidelberg.mfa.3": "Escribe un nombre, por ejemplo Portátil, y pulsa «Weiter».",

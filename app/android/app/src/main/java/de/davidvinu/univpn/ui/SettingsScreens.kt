@@ -66,8 +66,9 @@ fun SettingsScreen(model: AppModel) {
     val status = model.status ?: return
     val scope = rememberCoroutineScope()
     val sync = status.optJSONObject("sync")
-    // A Remove that did not go through.
+    // A Remove that did not go through, and the device it was for.
     var removeError by remember { mutableStateOf<String?>(null) }
+    var removeFor by remember { mutableStateOf("") }
     LaunchedEffect(Unit) {
         // Like the desktop: opening Settings brings in changes from the other devices.
         if (sync?.optBoolean("on") == true) model.post("/api/sync/refresh", timeoutMs = 30_000)
@@ -89,15 +90,18 @@ fun SettingsScreen(model: AppModel) {
                 SettingRow(model.t("settings.through"), model.strings.plural("settings.domain_count", count), { model.open(Screen.Websites) })
             }
             if (sync?.optBoolean("available") == true) {
+                val devices = sync.optJSONArray("devices")
+                val rows = if (sync.optBoolean("on") && devices != null) (0 until devices.length()).map { devices.getJSONObject(it) } else emptyList()
                 item {
                     Section(model.t("settings.devices"))
                     // Why the last sync or Remove did not go through, like Chrome's sync error under
                     // the account.
                     val problem = sync.optJSONObject("error")?.takeIf { sync.optBoolean("on") }?.let { model.strings.t(it) }
-                    Column(Modifier.padding(horizontal = 16.dp)) { ErrorText(removeError ?: problem) }
+                    // The core goes on after the app stopped waiting (a slow network): once the
+                    // device is gone, so is the error.
+                    val failed = removeError?.takeIf { rows.any { it.optString("id") == removeFor } }
+                    Column(Modifier.padding(horizontal = 16.dp)) { ErrorText(failed ?: problem) }
                 }
-                val devices = sync.optJSONArray("devices")
-                val rows = if (sync.optBoolean("on") && devices != null) (0 until devices.length()).map { devices.getJSONObject(it) } else emptyList()
                 items(rows) { device ->
                     ListItem(
                         headlineContent = { Text(device.optString("name")) },
@@ -105,8 +109,11 @@ fun SettingsScreen(model: AppModel) {
                         // On every row, this phone's too (turns syncing off here), as on the desktop.
                         trailingContent = {
                             TextButton(onClick = {
+                                val id = device.optString("id")
                                 scope.launch {
-                                    removeError = model.post("/api/sync/remove", JSONObject().put("device", device.optString("id")), 30_000).error
+                                    val error = model.post("/api/sync/remove", JSONObject().put("device", id), 30_000).error
+                                    removeFor = id
+                                    removeError = error
                                 }
                             }) { Text(model.t("sync.remove"), color = MaterialTheme.colorScheme.error) }
                         },
@@ -328,6 +335,8 @@ fun LicensesScreen(model: AppModel) {
         }
     }
     var open by rememberSaveable { mutableStateOf<String?>(null) }
+    // Android's back closes the text first, like the arrow.
+    BackHandler(enabled = open != null) { open = null }
     Column(Modifier.fillMaxSize()) {
         Bar(model, open ?: model.t("phone.licenses"), onBack = { if (open != null) open = null else model.back() })
         val shown = texts.firstOrNull { it.first == open }

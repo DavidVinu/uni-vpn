@@ -201,13 +201,12 @@ class App(Gtk.Application):
             return
         self.restarting = True
         try:
-            subprocess.Popen([sys.executable, SCRIPT, "--port", self.port, "--hidden", "--after", str(os.getpid())],
-                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                             start_new_session=True)
+            # In this process's place: a copy started next to it would go with it when it runs as
+            # a systemd service of its own (the Repair button starts it so), which ends with its
+            # first process. The bus connection closes on exec, which frees the app's name.
+            os.execv(sys.executable, [sys.executable, SCRIPT, "--port", self.port, "--hidden"])
         except OSError:
             self.program, self.restarting = now, False  # stays as it is; tried again after the next update
-            return
-        self.quit()
 
     def render(self, data):
         self.reachable = data is not None

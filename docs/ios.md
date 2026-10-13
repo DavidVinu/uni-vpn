@@ -133,6 +133,12 @@ and sends it to TestFlight from main.
    statically: the app's full source and build scripts are public, which lets anyone relink it;
    OpenSSL (Apache 2.0) and the Go modules (BSD, MIT, Apache) only need their notices, which
    Settings, Open source licenses shows.
+8. **The phone's own name in the device list.** Since iOS 16 an app reads only "iPhone" as the
+   phone's name unless Apple grants it the entitlement
+   `com.apple.developer.device-information.user-assigned-device-name` (requested in the
+   developer account). Without it every iPhone shows as "iPhone" in the sync device list. Once
+   granted, add it to the App and Tunnel entitlements in `project.yml` (both pass the name to
+   the core); before that, signing would fail.
 
 ## Not proven yet
 

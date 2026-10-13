@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 )
 
@@ -52,12 +53,33 @@ func Write(path string, data []byte) error {
 	return err
 }
 
-// Read is os.ReadFile, waiting out a Write on Windows.
+// Read is os.ReadFile, waiting out a Write on Windows. There a file being replaced can also
+// read as missing for a moment (Go's cmd/go robustio knows it too): that waits while a Write's
+// temporary file is there, so a missing file costs one pause only.
 func Read(path string) ([]byte, error) {
 	data, err := os.ReadFile(path)
-	for try := 0; err != nil && runtime.GOOS == "windows" && !errors.Is(err, fs.ErrNotExist) && try < tries; try++ {
+	for try := 0; err != nil && runtime.GOOS == "windows" && try < tries; try++ {
+		if errors.Is(err, fs.ErrNotExist) && try > 0 && !writing(path) {
+			break
+		}
 		time.Sleep(pause)
 		data, err = os.ReadFile(path)
 	}
 	return data, err
+}
+
+// writing: a Write's temporary file (os.CreateTemp: the name, a dot, digits) is next to path.
+func writing(path string) bool {
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		return false
+	}
+	prefix := filepath.Base(path) + "."
+	for _, e := range entries {
+		rest, ok := strings.CutPrefix(e.Name(), prefix)
+		if ok && rest != "" && strings.Trim(rest, "0123456789") == "" {
+			return true
+		}
+	}
+	return false
 }

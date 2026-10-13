@@ -38,7 +38,9 @@ struct SetupView: View {
     private func title(_ setup: SetupState) -> String {
         let n = setup.step.rawValue
         guard n >= 0 && n < SetupState.Step.done.rawValue else { return "" }
-        return model.t("setup.step", ["n": n + 1, "total": setup.total])
+        // Without a second factor its step is skipped: connecting is the last one (Android).
+        let shown = setup.step == .connecting && !setup.needsTotp ? setup.total : n + 1
+        return model.t("setup.step", ["n": shown, "total": setup.total])
     }
 
     private func back(_ setup: SetupState) -> (() -> Void)? {

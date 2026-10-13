@@ -5,7 +5,8 @@ struct SettingsView: View {
     @Bindable var model: AppModel
     @State private var password = ""
     @State private var passwordError: String?
-    @State private var removeError: String?
+    /// Why Remove did not go through, with the device it was for.
+    @State private var removeError: (device: String, text: String)?
 
     var body: some View {
         let status = model.status ?? JSON([:])
@@ -41,7 +42,9 @@ struct SettingsView: View {
                                 }
                                 Button(model.t("sync.remove"), role: .destructive) {
                                     Task {
-                                        removeError = await model.post("/api/sync/remove", ["device": device.string("id")], timeout: 30).error
+                                        let id = device.string("id")
+                                        let result = await model.post("/api/sync/remove", ["device": id], timeout: 30)
+                                        removeError = result.error.map { (device: id, text: $0) }
                                     }
                                 }
                                 .buttonStyle(.borderless)
@@ -58,7 +61,11 @@ struct SettingsView: View {
                 } footer: {
                     // Why a removal or the last sync did not go through, as on the desktop.
                     let problem = sync.bool("on") ? sync.object("error") : nil
-                    ErrorText(text: removeError ?? problem.map { model.strings.t($0) })
+                    // An answer that came too late (a slow relay) while the device went all the
+                    // same is no error: only while it is still listed.
+                    let listed: [String] = sync.bool("on") ? sync.objects("devices").map { $0.string("id") } : []
+                    let removal: String? = removeError.flatMap { listed.contains($0.device) ? $0.text : nil }
+                    ErrorText(text: removal ?? problem.map { model.strings.t($0) })
                 }
             }
             Section(model.t("settings.general")) {
