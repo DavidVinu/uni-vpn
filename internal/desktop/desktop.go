@@ -671,11 +671,7 @@ func (d *Desktop) installLinux(port int, dry, keep bool, created func(string)) b
 			created(login)
 		}
 		command := []string{python, d.linuxScript(), "--port", strconv.Itoa(port), "--hidden"}
-		if keep {
-			// Repair runs in a systemd-run unit of its own, which systemd ends with its processes.
-			command = d.ownScope(command)
-		}
-		if !running {
+		if !running && !(keep && d.ownService(command)) {
 			d.Spawn(command)
 		}
 		d.say("Panel icon starts at login")
@@ -854,6 +850,21 @@ func (d *Desktop) ownScope(command []string) []string {
 		}
 	}
 	return command
+}
+
+// ownService starts command as a user service of its own and returns once it runs. Repair
+// runs in a systemd-run unit, which systemd ends with every process in it as soon as setup
+// exits: a program spawned from there, even one on its way into a scope, would go with it.
+// False when this program runs in no systemd unit or systemd-run is missing or failed.
+func (d *Desktop) ownService(command []string) bool {
+	if d.Getenv("INVOCATION_ID") == "" {
+		return false
+	}
+	run, err := exec.LookPath("systemd-run")
+	if err != nil {
+		return false
+	}
+	return d.quiet(append([]string{run, "--user", "--quiet", "--collect", "--"}, command...)...)
 }
 
 // Running lists the processes whose command line has the argument arg; Linux only.

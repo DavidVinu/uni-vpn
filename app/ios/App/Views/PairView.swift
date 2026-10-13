@@ -109,8 +109,9 @@ struct PairView: View {
             }
         }
         .onChange(of: pairingState) { old, state in
-            // Typing a code: the one shown before is not on screen, only its "done" counts.
-            if typing && state != "done" { return }
+            // Typing a code: the one shown before is not on screen, only its "done" counts. Linked
+            // (also by a scanned code): what becomes of the code on screen no longer matters.
+            if done || (typing && state != "done") { return }
             switch state {
             case "done":
                 done = true
@@ -123,9 +124,9 @@ struct PairView: View {
             default: break
             }
         }
-        // The phone stays awake while its code shows: locked, the app stops its core (VPN off)
-        // and the code goes while the other device is still typing it.
-        .onChange(of: shown != nil && !done && !typing, initial: true) { _, showing in
+        // The phone stays awake while its code waits: locked, the app stops its core (VPN off)
+        // and the code goes while the other device is still typing it. Expired, it locks again.
+        .onChange(of: pairingState == "waiting" && !done && !typing, initial: true) { _, showing in
             UIApplication.shared.isIdleTimerDisabled = showing
         }
         .onDisappear {

@@ -208,10 +208,15 @@ func (l syncLocal) Apply(ctx context.Context, all map[string]devsync.Entry, keys
 			fail(err, devsync.KeyAutoUpdate)
 		}
 	}
+	known := []string{devsync.KeyAccount, devsync.KeyPassword, devsync.KeyTOTP, devsync.KeyLanguage, devsync.KeyAutoUpdate}
 	var domainKeys []string
 	for _, key := range keys {
-		if strings.HasPrefix(key, devsync.DomainPrefix) {
+		switch {
+		case strings.HasPrefix(key, devsync.DomainPrefix):
 			domainKeys = append(domainKeys, key)
+		case !slices.Contains(known, key):
+			// A newer version's setting: taken over once this device has that version.
+			fail(devsync.ErrNotKnown, key)
 		}
 	}
 	if len(domainKeys) > 0 {

@@ -510,13 +510,26 @@ func TestLinuxApp(t *testing.T) {
 }
 
 // The Repair button: a running panel icon (and its window) stays; one that is not running is
-// started outside the repair's systemd-run unit, which systemd ends with everything in it.
+// started as a user service of its own before setup ends, since systemd ends the repair's
+// systemd-run unit with everything still in it. Without one of them it is started directly.
 func TestLinuxRepair(t *testing.T) {
 	posixOnly(t)
 	bin := t.TempDir()
-	touch(t, filepath.Join(bin, "systemd-run"), "#!/bin/sh\n")
-	t.Setenv("PATH", bin)
-	for _, running := range []bool{true, false} {
+	run := filepath.Join(bin, "systemd-run")
+	touch(t, run, "#!/bin/sh\n")
+	for _, tc := range []struct {
+		name                   string
+		running, unit, failing bool
+		path                   string
+		service, spawned       bool
+	}{
+		{name: "running", running: true, unit: true, path: bin},
+		{name: "not running", unit: true, path: bin, service: true},
+		{name: "systemd-run fails", unit: true, failing: true, path: bin, service: true, spawned: true},
+		{name: "no systemd-run", unit: true, path: t.TempDir(), spawned: true},
+		{name: "no systemd unit", path: bin, spawned: true},
+	} {
+		t.Setenv("PATH", tc.path)
 		h := newHarness(t, "linux")
 		python := filepath.Join(h.home, "python3")
 		touch(t, python, "#!/bin/sh\n")
@@ -527,31 +540,40 @@ func TestLinuxRepair(t *testing.T) {
 			if arg != script {
 				t.Fatal(arg)
 			}
-			if running {
+			if tc.running {
 				return []Process{{PID: 42, Args: []string{python, script, "--port", "1081"}}}
 			}
 			return nil
 		}
 		getenv := h.d.Getenv
 		h.d.Getenv = func(key string) string {
-			if key == "INVOCATION_ID" {
+			if key == "INVOCATION_ID" && tc.unit {
 				return "repair"
 			}
 			return getenv(key)
 		}
+		h.reply = func(args []string) service.Result {
+			if args[0] == run && tc.failing {
+				return service.Result{Code: 1}
+			}
+			return service.Result{}
+		}
 		if !h.d.Repair(1081, func(path string) { h.created = append(h.created, path) }) || h.ran("pkill", "-f", script) {
-			t.Fatal(h.commands)
+			t.Fatal(tc.name, h.commands)
 		}
 		if !slices.Contains(h.created, h.d.LoginPath()) {
-			t.Fatal(h.created)
+			t.Fatal(tc.name, h.created)
+		}
+		command := []string{python, script, "--port", "1081", "--hidden"}
+		if h.ran(append([]string{run, "--user", "--quiet", "--collect", "--"}, command...)...) != tc.service {
+			t.Fatal(tc.name, h.commands)
 		}
 		var want [][]string
-		if !running {
-			want = [][]string{{filepath.Join(bin, "systemd-run"), "--user", "--scope", "--quiet", "--collect",
-				python, script, "--port", "1081", "--hidden"}}
+		if tc.spawned {
+			want = [][]string{command}
 		}
 		if !reflect.DeepEqual(h.spawns, want) {
-			t.Fatal(running, h.spawns)
+			t.Fatal(tc.name, h.spawns)
 		}
 	}
 }

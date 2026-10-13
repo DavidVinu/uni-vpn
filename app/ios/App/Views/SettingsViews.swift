@@ -12,8 +12,8 @@ struct SettingsView: View {
         let sync = status.object("sync")
         List {
             Section(model.t("settings.account")) {
-                row(model.t("app.university"), status.string("university_name")) { model.changingAccount = true }
-                row(model.t("app.username"), status.string("user")) { model.changingAccount = true }
+                row(model.t("app.university"), status.string("university_name")) { changeAccount() }
+                row(model.t("app.username"), status.string("user")) { changeAccount() }
                 row(model.t("app.password"), "••••••••") {
                     passwordError = nil
                     model.passwordDialog = true
@@ -31,20 +31,20 @@ struct SettingsView: View {
             if let sync, sync.bool("available") {
                 Section {
                     if sync.bool("on") {
+                        // Remove on every row, this phone's too (turns syncing off here), as on the desktop.
                         ForEach(sync.objects("devices"), id: \.deviceID) { device in
-                            if device.bool("this") {
-                                LabeledContent(device.string("name"), value: model.t("sync.this"))
-                            } else {
-                                HStack {
-                                    Text(device.string("name"))
-                                    Spacer()
-                                    Button(model.t("sync.remove"), role: .destructive) {
-                                        Task {
-                                            removeError = await model.post("/api/sync/remove", ["device": device.string("id")], timeout: 30).error
-                                        }
-                                    }
-                                    .buttonStyle(.borderless)
+                            HStack {
+                                Text(device.string("name"))
+                                Spacer()
+                                if device.bool("this") {
+                                    Text(model.t("sync.this")).foregroundStyle(.secondary)
                                 }
+                                Button(model.t("sync.remove"), role: .destructive) {
+                                    Task {
+                                        removeError = await model.post("/api/sync/remove", ["device": device.string("id")], timeout: 30).error
+                                    }
+                                }
+                                .buttonStyle(.borderless)
                             }
                         }
                     }
@@ -93,6 +93,13 @@ struct SettingsView: View {
             LabeledContent(title, value: value)
         }
         .foregroundStyle(.primary)
+    }
+
+    /// Setup again from the account as it is, with a fresh run: one that ended without its last
+    /// page (an answer that came too late) would open on its old page.
+    private func changeAccount() {
+        model.setup = SetupState()
+        model.changingAccount = true
     }
 
     private func savePassword() {

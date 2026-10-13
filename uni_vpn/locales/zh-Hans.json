@@ -185,6 +185,7 @@
   "msg.settings_broken": "无法读取你的设置。请重新设置 Uni VPN。",
   "msg.repairing": "正在修复。如果电脑询问，请允许。",
   "msg.repair_failed": "修复未完成。请再次点击“修复”，或重启电脑。",
+  "msg.reinstall_needed": "Uni VPN 缺少一部分。请从 vpn.davidvinu.de 重新下载 Uni VPN 并打开它。",
   "msg.not_running": "Uni VPN 未运行。请重启电脑以重新启动它。",
   "main.repair": "修复",
   "uni.heidelberg.mfa.1": "打开{portal}，用你的 Uni-ID 登录。",

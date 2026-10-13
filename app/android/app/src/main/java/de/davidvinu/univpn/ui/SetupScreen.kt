@@ -216,11 +216,17 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
     LaunchedEffect(model.pairResult) {
         val result = model.pairResult?.takeIf { model.pairResultFor == pairOwner } ?: return@LaunchedEffect
         model.pairResult = null
-        if (!result.ok) {
+        if (!result.ok && !model.pairLinked) {
             error = result.error
             return@LaunchedEffect
         }
-        val note = result.json?.let { model.strings.message(it.optString("error"), it.optJSONObject("error_t")) }?.ifEmpty { null }
+        // Linked without an answer: what went wrong is the note, none when the core did not
+        // answer at all ("not running" would be wrong, it took the account).
+        val note = if (!result.ok) {
+            result.error.takeIf { result.reply.status != 0 }
+        } else {
+            result.json?.let { model.strings.message(it.optString("error"), it.optJSONObject("error_t")) }?.ifEmpty { null }
+        }
         go(if (model.setupNeeded) UNIVERSITY else DONE)
         error = note
     }

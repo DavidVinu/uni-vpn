@@ -1809,3 +1809,263 @@ func TestRandomRemovalOverALossyNetwork(t *testing.T) {
 		})
 	}
 }
+
+// olderLocal is a device of a version without the setting "theme": its Apply answers
+// ErrNotKnown for it, as the daemon's does, until the update.
+type olderLocal struct {
+	*fakeLocal
+	older atomic.Bool
+}
+
+func (l *olderLocal) Snapshot(ctx context.Context, withSecrets bool) (map[string]json.RawMessage, error) {
+	snap, err := l.fakeLocal.Snapshot(ctx, withSecrets)
+	if l.older.Load() {
+		delete(snap, "theme")
+	}
+	return snap, err
+}
+
+func (l *olderLocal) Apply(ctx context.Context, all map[string]Entry, keys []string) map[string]error {
+	if !l.older.Load() {
+		return l.fakeLocal.Apply(ctx, all, keys)
+	}
+	known := slices.DeleteFunc(slices.Clone(keys), func(k string) bool { return k == "theme" })
+	failed := l.fakeLocal.Apply(ctx, all, known)
+	if len(known) < len(keys) {
+		failed["theme"] = ErrNotKnown
+	}
+	return failed
+}
+
+// The laptop runs a newer version with a setting this one does not know and picks dark. The
+// desktop syncs on without a note and its own changes go out; once updated (its config has the
+// default light) it takes dark instead of sending light as a change of its own.
+func TestSettingOfANewerVersionWaitsForTheUpdate(t *testing.T) {
+	ctx := context.Background()
+	_, url := startRelay(t)
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	laptop := newDevice(t, url, "Laptop", setUpLaptop(), c)
+	laptop.local.set("theme", "light")
+	local := &olderLocal{fakeLocal: newLocal(false, nil)}
+	local.older.Store(true)
+	opts := newDevice(t, url, "Desktop", local.fakeLocal, c).opts
+	opts.Local = local
+	desktop := device{New(opts), local.fakeLocal, opts.Store.(*memStore)}
+	pair(t, ctx, laptop, desktop)
+	laptop.local.set("theme", "dark")
+	laptop.Notify(false)
+	syncAll(t, laptop)
+	desktop.local.set(KeyLanguage, "de")
+	desktop.Notify(false)
+	syncAll(t, desktop, laptop) // no ApplyError: no note for a newer version's setting
+	if _, ok := desktop.loadState().Hashes["theme"]; ok || laptop.local.get(KeyLanguage) != `"de"` {
+		t.Fatalf("theme noted as synced %v, laptop language %s", ok, laptop.local.get(KeyLanguage))
+	}
+	desktop.local.set("theme", "light")
+	local.older.Store(false)
+	desktop.Engine = New(opts)
+	syncAll(t, desktop, laptop, desktop)
+	for _, d := range []device{laptop, desktop} {
+		if got := d.local.get("theme"); got != `"dark"` {
+			t.Errorf("%s: theme %s, want the laptop's dark", d.opts.Name, got)
+		}
+	}
+}
+
+// A new device takes everything over in its first round, but the write fails (no network for
+// a moment). A password typed and a website added there next stay: the following round does
+// not take the group's settings over again.
+func TestChangesOnANewDeviceAfterItsFirstWriteFailed(t *testing.T) {
+	ctx := context.Background()
+	relay, devices := lossyDevices(t)
+	laptop := devices[0]
+	opts := newDevice(t, laptop.opts.Relay, "Desktop", newLocal(false, nil), &clock{}).opts
+	opts.Now = laptop.opts.Now
+	desktop := device{New(opts), opts.Local.(*fakeLocal), opts.Store.(*memStore)}
+	p, err := laptop.Offer(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	relay.drop.Store(true)
+	if err := desktop.Enter(ctx, p.Code); err == nil || !desktop.local.SetupDone() {
+		t.Fatalf("want set up and the write failed: %v", err)
+	}
+	const lsf = "lsf.uni-heidelberg.de"
+	desktop.local.set(KeyPassword, "typed")
+	desktop.local.setDomains(append(desktop.local.getDomains(), lsf)...)
+	desktop.Notify(true)
+	syncAll(t, desktop, laptop)
+	for _, d := range []device{desktop, laptop} {
+		if d.local.get(KeyPassword) != `"typed"` || !slices.Contains(d.local.getDomains(), lsf) {
+			t.Errorf("%s: password %s, websites %v; want what was changed on the desktop", d.opts.Name,
+				d.local.get(KeyPassword), d.local.getDomains())
+		}
+	}
+}
+
+// "Add a device": the relay takes the new group but its answer gets lost. The language chosen
+// next stays, and reaches the device linked later.
+func TestLanguageChosenAfterALostFirstWrite(t *testing.T) {
+	ctx := context.Background()
+	relay, devices := lossyDevices(t)
+	laptop := devices[0]
+	relay.lose.Store(true)
+	if _, err := laptop.Offer(ctx); err == nil {
+		t.Fatal("want the answer lost")
+	}
+	laptop.local.set(KeyLanguage, "fr")
+	laptop.Notify(false)
+	syncAll(t, laptop)
+	desktop := newDevice(t, laptop.opts.Relay, "Desktop", newLocal(false, nil), &clock{t: time.Unix(1_800_000_000, 0)})
+	pair(t, ctx, laptop, desktop)
+	for _, d := range []device{laptop, desktop} {
+		if got := d.local.get(KeyLanguage); got != `"fr"` {
+			t.Errorf("%s: language %s, want the fr chosen on the laptop", d.opts.Name, got)
+		}
+	}
+}
+
+// The desktop removed a website on an older version (plain hashes in sync.json); the laptop
+// adds it again. After the update the desktop changes its language before its first round: the
+// laptop's later addition stays.
+func TestUpdateFromPlainStateKeepsAWebsiteAddedAgainElsewhere(t *testing.T) {
+	ctx := context.Background()
+	_, url := startRelay(t)
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	laptop := newDevice(t, url, "Laptop", setUpLaptop(), c)
+	desktop := newDevice(t, url, "Desktop", newLocal(false, nil), c)
+	pair(t, ctx, laptop, desktop)
+	const lsf = "lsf.uni-heidelberg.de"
+	desktop.local.setDomains(append(desktop.local.getDomains(), lsf)...)
+	desktop.Notify(false)
+	syncAll(t, desktop, laptop)
+	desktop.local.setDomains(without(desktop.local.getDomains(), lsf)...)
+	desktop.Notify(false)
+	syncAll(t, desktop, laptop)
+	k, _ := desktop.loadKeys(ctx)
+	remote, version, err := desktop.fetch(ctx, k.group())
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := state{Version: version, Hashes: map[string]savedHash{}}
+	for key, ent := range remote.Entries {
+		old.Hashes[key] = savedHash{H: hash(ent.V), T: ent.T, D: ent.D}
+	}
+	if err := writeFile(desktop.opts.StatePath, mustJSON(old)); err != nil {
+		t.Fatal(err)
+	}
+	laptop.local.setDomains(append(laptop.local.getDomains(), lsf)...)
+	laptop.Notify(false)
+	syncAll(t, laptop)
+	updated := device{New(desktop.opts), desktop.local, desktop.store}
+	updated.Load(ctx)
+	desktop.local.set(KeyLanguage, "de")
+	updated.Notify(false)
+	syncAll(t, updated, laptop, updated)
+	for _, d := range []device{laptop, updated} {
+		if !slices.Contains(d.local.getDomains(), lsf) || d.local.get(KeyLanguage) != `"de"` {
+			t.Errorf("%s: websites %v, language %s; want %s added again and de", d.opts.Name,
+				d.local.getDomains(), d.local.get(KeyLanguage), lsf)
+		}
+	}
+}
+
+// Devices link over a lossy network, trying again with a new code until it works, and change
+// settings between the tries; then they change and sync at random. Once the network is back
+// they agree on the latest of each value and on every website added. Seeds 3, 14 and 47 found
+// a new device taking the group's settings over again after its first write failed.
+func TestRandomLinkingOverALossyNetwork(t *testing.T) {
+	for _, seed := range []uint64{3, 14, 47, 0, 1, 2} {
+		t.Run(fmt.Sprint(seed), func(t *testing.T) { randomLinking(t, seed) })
+	}
+}
+
+func randomLinking(t *testing.T, seed uint64) {
+	ctx := context.Background()
+	_, target := startRelay(t)
+	u, err := url.Parse(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	relay := &lossyRelay{next: httputil.NewSingleHostReverseProxy(u)}
+	srv := httptest.NewServer(relay)
+	t.Cleanup(srv.Close)
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	rng := rand.New(rand.NewPCG(seed, 3))
+	relay.mu.Lock()
+	relay.rng, relay.odds = rand.New(rand.NewPCG(seed, 4)), 0.25
+	relay.mu.Unlock()
+	latest := map[string]string{}
+	var added []string
+	change := func(d device, step int) {
+		if !d.local.SetupDone() {
+			return
+		}
+		switch rng.IntN(3) {
+		case 0:
+			d.local.set(KeyLanguage, fmt.Sprintf("l%d", step))
+			d.Notify(false)
+			latest[KeyLanguage] = fmt.Sprintf(`"l%d"`, step)
+		case 1:
+			host := fmt.Sprintf("site%d.example.org", step)
+			d.local.setDomains(append(d.local.getDomains(), host)...)
+			d.Notify(false)
+			added = append(added, host)
+		default:
+			d.local.set(KeyPassword, fmt.Sprintf("pw%d", step))
+			d.Notify(true)
+			latest[KeyPassword] = fmt.Sprintf(`"pw%d"`, step)
+		}
+	}
+	devices := []device{newDevice(t, srv.URL, "Laptop", setUpLaptop(), c)}
+	step := 0
+	for _, name := range []string{"Desktop", "Phone"} {
+		d := newDevice(t, srv.URL, name, newLocal(false, nil), c)
+		devices = append(devices, d)
+		for tries := 0; ; tries++ {
+			if tries > 200 {
+				t.Fatal("could not link")
+			}
+			step++
+			if rng.IntN(3) == 0 {
+				change(devices[rng.IntN(len(devices))], step)
+			}
+			p, err := devices[0].Offer(ctx)
+			if err != nil {
+				continue
+			}
+			err = d.Enter(ctx, p.Code)
+			devices[0].CancelPairing()
+			if err == nil || partly(err) {
+				break
+			}
+		}
+	}
+	for ; step < 200; step++ {
+		d := devices[rng.IntN(len(devices))]
+		if rng.IntN(2) == 0 {
+			change(d, step+1000)
+		} else {
+			d.Sync(ctx) // fails now and then
+		}
+	}
+	relay.mu.Lock()
+	relay.rng = nil
+	relay.mu.Unlock()
+	for range 3 {
+		syncAll(t, devices...)
+	}
+	slices.Sort(added)
+	for _, d := range devices {
+		got := slices.DeleteFunc(d.local.getDomains(), func(h string) bool { return !strings.HasPrefix(h, "site") })
+		slices.Sort(got)
+		if !slices.Equal(got, added) {
+			t.Fatalf("%s: websites %v, want %v", d.opts.Name, got, added)
+		}
+		for key, value := range latest {
+			if got := d.local.get(key); got != value {
+				t.Fatalf("%s: %s %s, want %s", d.opts.Name, key, got, value)
+			}
+		}
+	}
+}

@@ -87,6 +87,7 @@ NOT_ELEVATED = _m("not_elevated", "repair")
 SETTINGS_BROKEN = _m("settings_broken", "setup")
 REPAIRING = _m("repairing")
 REPAIR_FAILED = _m("repair_failed", "repair")
+REINSTALL_NEEDED = _m("reinstall_needed")  # the Go core's Repair, when a program is missing
 
 # --- The app, when the service does not answer ---------------------------------------
 NOT_RUNNING = _m("not_running")

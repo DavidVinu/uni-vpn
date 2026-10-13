@@ -589,7 +589,8 @@ func (s *Setup) setup(a Args, created func(string)) (int, error) {
 	if len(missing) > 0 {
 		if !dry {
 			s.printf("Missing: %s. To install it, start the installer again.", strings.Join(missing, ", "))
-			return 1, nil
+			// Its own code: the Repair button runs this, and clicking it again would not help.
+			return messages.ReinstallNeededExit, nil
 		}
 		s.say("would require: %s (start the installer again)", strings.Join(missing, ", "))
 	} else {

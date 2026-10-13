@@ -659,7 +659,10 @@ func (d *Daemon) watchRepair(process Process) {
 	d.logf(slog.LevelInfo, "Repair finished with exit code %d", code)
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if code != 0 && d.message == messages.Repairing {
+	if code == messages.ReinstallNeededExit && d.message == messages.Repairing {
+		// A program the installer brought is gone: Repair again would fail the same way.
+		d.set(d.state, messages.ReinstallNeeded)
+	} else if code != 0 && d.message == messages.Repairing {
 		d.set(d.state, messages.RepairFailed)
 	} else if code == 0 && d.message == messages.Repairing {
 		d.set(Idle, messages.NotConnected)

@@ -15,6 +15,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.util.Locale
+import java.util.UUID
 
 /** Stages of status.json "enroll" while the setup with one code runs (internal/daemon/enroll.go). */
 private val ENROLL_RUNNING = setOf("connecting", "code", "working")
@@ -30,6 +31,16 @@ sealed interface Screen {
     data object Licenses : Screen
     data class Pair(val mode: String) : Screen
 }
+
+/**
+ * One screen of the stack. Its id keys what the screen saves for turning the phone (App.kt), so
+ * after Android ended the app (it opens on Home again) the next visit does not get the fields of
+ * the screen that was open then: Add a device would show the code of a core that is gone.
+ */
+class Visit(val screen: Screen, val id: String = UUID.randomUUID().toString())
+
+/** Home is one visit throughout: the app opens on it again after Android ended it. */
+private const val HOME = "home"
 
 class AppModel(app: Application) : AndroidViewModel(app) {
     val core = app.core
@@ -48,8 +59,9 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     private var locales: JSONObject? = null
     private var stringsFor = ""
 
-    val stack = mutableStateListOf<Screen>(Screen.Home)
-    val screen get() = stack.last()
+    val stack = mutableStateListOf(Visit(Screen.Home, HOME))
+    val screen get() = stack.last().screen
+    val visit get() = stack.last().id
 
     /** Setup shows: needed, or the user changes university or username from Settings. */
     var changingAccount by mutableStateOf(false)
@@ -90,22 +102,30 @@ class AppModel(app: Application) : AndroidViewModel(app) {
      */
     var pairResultFor = ""
         private set
+    /** The account came over with [pairResult]'s code, although its answer did not. */
+    var pairLinked = false
+        private set
 
     fun enterPairCode(code: String, owner: String, inSetup: Boolean = true) {
         if (pairBusy) return
         pairBusy = true
         val finishing = setupFinishing
+        val wasNeeded = setupNeeded
         // The setup page stays for its last page ("All set"), also while the core already
         // counts as set up and its answer is still on the way (no Home in between).
         if (inSetup) setupFinishing = true
         viewModelScope.launch {
             val result = post("/api/sync/enter", JSONObject().put("code", code), timeoutMs = 60_000)
+            // The core took the account, then the answer went (the network dropped, or the wait
+            // ran out): linked all the same, so "All set" follows instead of Home.
+            val linked = inSetup && !result.ok && wasNeeded && !setupNeeded
             // Not linked, or linked without the account (a university this version does not
             // know yet, for example): still to be set up. An account sent before (and left with
             // the back arrow) keeps the setup page, which says why the code did not work.
-            if (inSetup && (!result.ok || setupNeeded)) setupFinishing = finishing && !setupNeeded
+            if (inSetup && !linked && (!result.ok || setupNeeded)) setupFinishing = finishing && !setupNeeded
             pairBusy = false
             pairResultFor = owner
+            pairLinked = linked
             pairResult = result
         }
     }
@@ -157,7 +177,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun open(screen: Screen) {
-        stack.add(screen)
+        stack.add(Visit(screen))
     }
 
     fun back(): Boolean {
@@ -168,7 +188,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
 
     fun home() {
         stack.clear()
-        stack.add(Screen.Home)
+        stack.add(Visit(Screen.Home, HOME))
     }
 
     val setupNeeded get() = status?.optBoolean("setup_needed", false) == true

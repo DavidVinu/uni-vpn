@@ -80,14 +80,15 @@ input:focus,textarea:focus,select:focus{border-color:var(--accent);box-shadow:0 
 .list{background:var(--card);border-radius:14px;box-shadow:var(--shadow);margin-bottom:20px}
 .list details,.list .item{border-top:1px solid var(--line)}
 .list>:first-child{border-top:0}
-.list summary,.list .item{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;cursor:pointer;list-style:none}
+.list summary,.list .item{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;list-style:none}
 .list summary::-webkit-details-marker{display:none}
 .list .val{color:var(--muted);max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-left:auto}
-.list summary:after{content:"";width:8px;height:8px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(-45deg);margin-left:10px;transition:transform .2s}
+.list summary:after{content:"";width:8px;height:8px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(-45deg);transition:transform .2s}
 .list details[open] summary:after{transform:rotate(45deg)}
 .list .item{cursor:default}
 .list button.item{width:100%;font:inherit;color:inherit;background:none;border-left:0;border-right:0;border-bottom:0;text-align:left;cursor:pointer}
-.list button.item:after{content:"";flex:none;width:8px;height:8px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(-45deg);margin-left:10px}
+.list button.item>:first-child{flex:none}
+.list button.item:after{content:"";flex:none;width:8px;height:8px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(-45deg)}
 body.app{-webkit-user-select:none;user-select:none;cursor:default}
 body.app input,body.app textarea,body.app pre{-webkit-user-select:text;user-select:text}
 body.app .brand{visibility:hidden}
@@ -128,6 +129,8 @@ input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
 .pair-code{font:600 22px/1.2 ui-monospace,"SF Mono",Consolas,monospace;letter-spacing:.08em;margin:0 0 6px}
 #pair-entry input{text-transform:uppercase;font-family:ui-monospace,"SF Mono",Consolas,monospace;letter-spacing:.08em;text-align:center}
 .list .item .remove{color:var(--bad);padding:4px 0 4px 12px}
+#devices .item>:first-child{min-width:0;overflow-wrap:anywhere}
+#devices .val{flex:none;max-width:none}
 .list button.item.add{color:var(--accent)}
 .list button.item.add:after{display:none}
 #s-use-other{display:block;margin:16px auto 0}
@@ -322,7 +325,8 @@ input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
 const $ = (id) => document.getElementById(id);
 const H = {"X-Uni-VPN": "1", "Content-Type": "application/json"};
 let S = null, view = null, setupDone = false, submitting = false, setupSent = false, domainsShown = false, connectRequested = 0,
-  codeTimer = null, refreshing = false, autoUpdateSaving = false, changing = false, languageSaving = false;
+  codeTimer = null, refreshing = false, autoUpdateSaving = false, changing = false, languageSaving = false,
+  domainsBase = "", removeError = "";
 // Inside the Uni VPN app window (not a browser tab): no page title, no browser context menu.
 if (new URLSearchParams(location.search).has("app")) {
   document.body.classList.add("app");
@@ -451,7 +455,13 @@ function render() {
   // Only on change, so a selection in the log survives the next poll.
   const log = (S.log_tail || []).join("\n");
   if ($("log").textContent !== log) $("log").textContent = log;
-  if (!domainsShown) { $("domains").value = (S.domains || []).join("\n"); domainsShown = true; }
+  // A list changed elsewhere (a website added on the phone, synced when Settings opens) replaces
+  // the one shown, unless it is being edited: saving the old one would remove it everywhere.
+  const domains = (S.domains || []).join("\n");
+  if (!domainsShown || ($("domains").value === domainsBase && domains !== domainsBase)) {
+    $("domains").value = domainsBase = domains;
+    domainsShown = true;
+  }
   renderDevices();
 }
 
@@ -1007,6 +1017,7 @@ $("fix").onclick = async () => {
 };
 function openSettings() {
   domainsShown = false;
+  removeError = "";
   show("settings");
   render();
   // Like Chrome sync: opening Settings picks up changes from the other devices (and finds the
@@ -1146,7 +1157,7 @@ $("language").onchange = async () => {
 $("domform").onsubmit = async (e) => {
   e.preventDefault();
   const r = await send("/api/domains", {text: $("domains").value});
-  if (r.ok) $("domains").value = r.data.domains.join("\n");
+  if (r.ok) $("domains").value = domainsBase = r.data.domains.join("\n");
   saved("dommsg", r, t(S && S.pac_refresh === "manual" ? "app.saved_restart" : "app.saved"));
   refresh();
 };
@@ -1156,8 +1167,8 @@ function renderDevices() {
   const sync = S.sync;
   $("devices-group").hidden = !(sync && sync.available);
   if ($("devices-group").hidden) return;
-  // Why the last sync did not go through, like Chrome's sync error under the account.
-  err("sync-err", sync.on && sync.error ? tr("", sync.error) : "");
+  // Why the last sync or Remove did not go through, like Chrome's sync error under the account.
+  err("sync-err", removeError || (sync.on && sync.error ? tr("", sync.error) : ""));
   const rows = (sync.on ? sync.devices : []).map((d) => {
     const row = document.createElement("div"), name = document.createElement("span"), val = document.createElement("span");
     row.className = "item";
@@ -1168,8 +1179,10 @@ function renderDevices() {
     Object.assign(remove, {type: "button", className: "btn text remove", textContent: t("sync.remove")});
     remove.onclick = async () => {
       remove.disabled = true;
+      removeError = "";
       const r = await send("/api/sync/remove", {device: d.id});
-      if (!r.ok) { remove.disabled = false; remove.textContent = errText(r); }
+      // The button stays Remove for another try; the reason goes under the list.
+      if (!r.ok) { remove.disabled = false; removeError = errText(r); }
       refresh();
     };
     val.append(remove);

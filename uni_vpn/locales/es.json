@@ -185,6 +185,7 @@
   "msg.settings_broken": "No se pudieron leer tus ajustes. Vuelve a configurar Uni VPN.",
   "msg.repairing": "Reparando. Permítelo si el ordenador lo pide.",
   "msg.repair_failed": "La reparación no terminó. Pulsa Reparar para intentarlo de nuevo o reinicia el ordenador.",
+  "msg.reinstall_needed": "Falta una parte de Uni VPN. Descarga Uni VPN de nuevo desde vpn.davidvinu.de y ábrelo.",
   "msg.not_running": "Uni VPN no está en marcha. Reinicia el ordenador para volver a iniciarlo.",
   "main.repair": "Reparar",
   "uni.heidelberg.mfa.1": "Abre la {portal} e inicia sesión con tu Uni-ID.",

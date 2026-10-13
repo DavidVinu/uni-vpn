@@ -47,6 +47,9 @@ var (
 	ErrSetupFirst = errors.New("set up uni-vpn first")
 	// ErrOffline: the relay could not be reached.
 	ErrOffline = errors.New("the sync service could not be reached")
+	// ErrNotKnown: Local.Apply's answer for a setting of a newer version. It is not taken over
+	// and not noted as synced: after the update the device takes the group's value.
+	ErrNotKnown = errors.New("a setting of a newer version")
 )
 
 // Options configure an Engine; zero values are the defaults.
@@ -391,11 +394,12 @@ func (e *Engine) Notify(secrets bool) {
 			if isSecret(key) || last(key) == h {
 				continue
 			}
-			// A value sync.json never had (linked while the account could not be used here, then
-			// set up by hand) is not a change made here: the new config.toml's defaults must not
-			// replace the group's language. The account typed by hand is one.
+			// A value sync.json never had after a round went through (linked while the account could
+			// not be used here, then set up by hand) is not a change made here: the new config.toml's
+			// defaults must not replace the group's language. The account typed by hand is one.
+			// Before the first round went through (its answer lost), every change is one.
 			_, known := st.Hashes[key]
-			if _, noted := p.Changes[key]; st.Keyed && !known && !noted && key != KeyAccount && !strings.HasPrefix(key, DomainPrefix) {
+			if _, noted := p.Changes[key]; st.Keyed && st.Version > 0 && !known && !noted && key != KeyAccount && !strings.HasPrefix(key, DomainPrefix) {
 				continue
 			}
 			note(key, h)
@@ -570,6 +574,9 @@ func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, s
 	me, now := k.Device, e.nowMS()
 	sk := k.stateKey()
 	h := func(v json.RawMessage) string { return keyedHash(sk, v) }
+	// With an older version's sync.json, Notify noted every website not listed here as removed,
+	// also those it knew as removed before.
+	keyed := st.Keyed
 	if !st.Keyed {
 		// sync.json of an older version: a value that still has the hash it was synced with is
 		// unchanged here, any other one changed here. So an update sends nothing stale as new.
@@ -648,7 +655,7 @@ func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, s
 			_, present := snap[key]
 			old, known := st.Hashes[key]
 			r, listed := remote.Entries[key]
-			if strings.HasPrefix(key, DomainPrefix) && c.H == removed && !present && (!known || old.H == removed) && listed && h(r.V) != removed {
+			if strings.HasPrefix(key, DomainPrefix) && c.H == removed && !present && (!known || keyed && old.H == removed) && listed && h(r.V) != removed {
 				stamp(key, jsonFalse, when(key, removed))
 			}
 		}
@@ -675,7 +682,9 @@ func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, s
 			incoming = append(incoming, key)
 		}
 	}
-	var failed map[string]error
+	// failed: what Apply could not take over; refused: those but a newer version's settings,
+	// which wait for an update without a note.
+	var failed, refused map[string]error
 	if len(incoming) > 0 {
 		e.mu.Lock()
 		e.applying = true
@@ -684,7 +693,18 @@ func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, s
 		e.mu.Lock()
 		e.applying = false
 		e.mu.Unlock()
-		var applied []string
+		var applied, newer []string
+		refused = map[string]error{}
+		for key, err := range failed {
+			if errors.Is(err, ErrNotKnown) {
+				newer = append(newer, key)
+			} else {
+				refused[key] = err
+			}
+		}
+		if len(newer) > 0 {
+			e.logf(slog.LevelInfo, "Not known to this version, left for an update: %s", strings.Join(sorted(newer), ", "))
+		}
 		for _, key := range incoming {
 			if failed[key] == nil {
 				applied = append(applied, key)
@@ -700,6 +720,11 @@ func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, s
 				st.Hashes[key] = savedHash{H: h(ent.V), T: ent.T, D: ent.D}
 			}
 			st.Keyed = true // the hashes were carried over above
+			if len(refused) == 0 {
+				// Taken over: from now on a change made here is this device's own, also when the write
+				// below fails; the next round must not take the group's settings over again.
+				st.Adopt = false
+			}
 			if err := e.saveState(st); err != nil {
 				return false, err
 			}
@@ -732,12 +757,12 @@ func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, s
 		return false, err
 	}
 	e.setDevices(merged, me)
-	if len(failed) > 0 {
+	if len(refused) > 0 {
 		ae := &ApplyError{}
-		for _, key := range sorted(slices.Collect(maps.Keys(failed))) {
+		for _, key := range sorted(slices.Collect(maps.Keys(refused))) {
 			ae.Keys = append(ae.Keys, key)
 			if ae.Err == nil {
-				ae.Err = failed[key]
+				ae.Err = refused[key]
 			}
 		}
 		e.logf(slog.LevelWarn, "%s", ae)

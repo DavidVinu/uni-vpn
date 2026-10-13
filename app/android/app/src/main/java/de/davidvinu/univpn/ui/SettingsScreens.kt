@@ -102,15 +102,14 @@ fun SettingsScreen(model: AppModel) {
                     ListItem(
                         headlineContent = { Text(device.optString("name")) },
                         supportingContent = if (device.optBoolean("this")) { { Text(model.t("sync.this")) } } else null,
-                        trailingContent = if (!device.optBoolean("this")) {
-                            {
-                                TextButton(onClick = {
-                                    scope.launch {
-                                        removeError = model.post("/api/sync/remove", JSONObject().put("device", device.optString("id")), 30_000).error
-                                    }
-                                }) { Text(model.t("sync.remove"), color = MaterialTheme.colorScheme.error) }
-                            }
-                        } else null,
+                        // On every row, this phone's too (turns syncing off here), as on the desktop.
+                        trailingContent = {
+                            TextButton(onClick = {
+                                scope.launch {
+                                    removeError = model.post("/api/sync/remove", JSONObject().put("device", device.optString("id")), 30_000).error
+                                }
+                            }) { Text(model.t("sync.remove"), color = MaterialTheme.colorScheme.error) }
+                        },
                     )
                 }
                 item {
