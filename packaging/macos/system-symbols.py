@@ -77,7 +77,7 @@ def list_sdk(sdk, folder):
             sys.exit(f"{stub} is not the stub of {name}")
         print("# " + name)
         for s in sorted(tbd_symbols(text)):
-            if s.startswith("_"):  # not the linker's $ld$ and R...$ entries
+            if not s.startswith("$ld$"):  # the static linker's, not dyld's
                 print(s)
 
 
