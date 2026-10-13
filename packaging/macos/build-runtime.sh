@@ -19,10 +19,9 @@ chmod u+w "$out/bin/"*
 # Copies every Homebrew library they load next to them and points them there.
 dylibbundler -cd -of -b -s "$prefix/lib" -x "$out/bin/openconnect" -x "$out/bin/ocproxy" -d "$out/lib" -p @executable_path/../lib/
 
-# The .pkg installs on macOS from its distribution.xml minimum on. What Homebrew has no bottle
-# for (on Intel: gmp and others) it builds for the runner's newer macOS, and dyld on the older
-# one refuses such a library. Marked for the minimum instead; the macos-pkg job (ci.yml) runs the
-# Intel programs on that macOS, so a library that really needs the newer one fails there.
+# The .pkg installs on macOS from its distribution.xml minimum on. Homebrew's bottles and what it
+# builds itself are for the runner's newer macOS, and dyld on the older one refuses such a library.
+# Marked for the minimum instead; below, a library that really needs the newer macOS fails.
 minimum=$(sed -n 's/.*<os-version min="\([0-9.]*\)".*/\1/p' "$(dirname "$0")/distribution.xml")
 newer() { awk -v a="$1" -v b="$2" 'BEGIN { split(a, x, "."); split(b, y, "."); exit !(x[1] > y[1] || (x[1] == y[1] && x[2] + 0 > y[2] + 0)) }'; }
 find "$out" -type f \( -perm -u+x -o -name '*.dylib' -o -name '*.so' \) -print0 |
@@ -37,6 +36,12 @@ find "$out" -type f \( -perm -u+x -o -name '*.dylib' -o -name '*.so' \) -print0 
     mv "$f.new" "$f"
     echo "built for macOS $minos, marked for $minimum: ${f#"$out/"}"
   done
+
+# dyld on the minimum also refuses a library it lacks or a symbol its libraries lack. The runner
+# has a newer macOS: the check goes by a list made from the minimum's SDK (system-symbols.py).
+symbols="$(dirname "$0")/macos${minimum%.0}-symbols.txt.gz"
+if [ ! -e "$symbols" ]; then echo "no list of what macOS $minimum has: make $symbols"; exit 1; fi
+python3 "$(dirname "$0")/system-symbols.py" check "$symbols" "$out"
 
 # Every changed file needs a signature again; ad hoc unless the release signs it later.
 find "$out" -type f \( -perm -u+x -o -name '*.dylib' -o -name '*.so' \) -print0 |
