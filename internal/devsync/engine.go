@@ -440,25 +440,46 @@ func (e *Engine) Notify(typed ...string) {
 	e.Wake()
 }
 
-// Defaulted: a new config.toml is set up by hand (the app installed again, the old file
-// unreadable), so keys are at their defaults there, not chosen here: as for a value never synced
-// here, the group's is taken over. Not under run, so setup never waits for a round: only one that
-// read sync.json before this and the settings after it, with no request in between, still sends
-// the defaults.
+// Defaulted: a new config.toml was just set up by hand (the app installed again, the old file
+// unreadable), so keys are at their defaults there, not chosen here: the group's values are
+// taken over, and a change made here from now on is one. A change of them not sent yet went
+// with the old file.
 func (e *Engine) Defaulted(keys ...string) {
 	if e.relay == nil {
 		return
 	}
+	e.mu.Lock()
+	e.loadPendingLocked()
+	if n := len(e.pending.Changes); n > 0 {
+		for _, key := range keys {
+			delete(e.pending.Changes, key)
+		}
+		if len(e.pending.Changes) != n {
+			if err := writeFile(e.pendingPath(), mustJSON(e.pending)); err != nil {
+				e.logf(slog.LevelWarn, "Could not note a settings change for syncing: %s", err)
+			}
+		}
+	}
+	k := e.keys
+	e.mu.Unlock()
 	st := e.loadState()
-	n := len(st.Hashes)
-	if n == 0 { // nothing known (sync.json lost): only what was typed is a change already
+	if len(st.Hashes) == 0 { // nothing known (sync.json lost): only what was typed is a change already
 		return
+	}
+	var snap map[string]json.RawMessage
+	if k != nil {
+		snap, _ = e.opts.Local.Snapshot(context.Background(), false)
 	}
 	for _, key := range keys {
-		delete(st.Hashes, key)
-	}
-	if len(st.Hashes) == n {
-		return
+		v, ok := snap[key]
+		switch {
+		case !ok: // the keys not read yet: as a value never synced here
+			delete(st.Hashes, key)
+		case st.Keyed:
+			st.Hashes[key] = savedHash{H: keyedHash(k.stateKey(), v)}
+		default:
+			st.Hashes[key] = savedHash{H: hash(v)}
+		}
 	}
 	if err := e.saveState(st); err != nil {
 		e.logf(slog.LevelWarn, "Could not write the sync state: %s", err)
@@ -476,17 +497,20 @@ func (e *Engine) donePending(gen int) {
 	os.Remove(e.pendingPath())
 }
 
-// replacedPending drops keys from what was pending at gen, unless something changed since:
-// the group's values replaced them here.
-func (e *Engine) replacedPending(gen int, keys []string) {
+// replacedPending drops keys from what was pending in p (at the round's start), unless noted
+// again since: the group's values replaced them here.
+func (e *Engine) replacedPending(p pending, keys []string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	n := len(e.pending.Changes)
-	if e.pendingGen != gen || n == 0 {
+	if n == 0 {
 		return
 	}
 	for _, key := range keys {
-		delete(e.pending.Changes, key)
+		// Only a note from before the round: one made since (a password typed meanwhile) stays.
+		if c, ok := e.pending.Changes[key]; ok && c == p.Changes[key] {
+			delete(e.pending.Changes, key)
+		}
 	}
 	if len(e.pending.Changes) == n {
 		return
@@ -801,7 +825,7 @@ func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, s
 			// A change made here that the group's later one replaced is no change any more: after a
 			// failed write, the next Notify must not take the value taken over for one, sent with
 			// its time once sync.json got lost.
-			e.replacedPending(gen, applied)
+			e.replacedPending(p, applied)
 		}
 	}
 	if !sameEntries(merged, remote.Entries) {

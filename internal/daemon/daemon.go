@@ -763,6 +763,7 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 		ports = append(ports, config.Setting{Key: "http_port", Value: d.cfg.HTTPPort})
 	}
 	d.mu.Unlock()
+	fresh := false
 	err = func() error {
 		if err := d.opts.PasswordSetter(password); err != nil {
 			return d.keyringFailed(err)
@@ -798,14 +799,10 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 			values := append([]config.Setting{{Key: "user", Value: user}, {Key: "university", Value: university}}, checked...)
 			return config.SetValues(path, values)
 		}
-		if !synced {
-			// Its language and automatic updates are defaults, not chosen here (the app was
-			// installed again): the group's stay.
-			d.sync.Defaulted(devsync.KeyLanguage, devsync.KeyAutoUpdate)
-		}
 		if err := config.WriteInitial(path, user, university, checked); err != nil {
 			return err
 		}
+		fresh = true
 		// Ports the old file set stay: the system's proxy rule and this daemon use them.
 		if broken && len(ports) > 0 {
 			return config.SetValues(path, ports)
@@ -848,6 +845,11 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 		d.secretsChanged()
 	}
 	if !synced { // the group's values: nothing new to send it
+		if fresh {
+			// Its language and automatic updates are defaults, not chosen here (the app was
+			// installed again): the group's stay.
+			d.sync.Defaulted(devsync.KeyLanguage, devsync.KeyAutoUpdate)
+		}
 		d.syncChanged(devsync.KeyAccount, devsync.KeyPassword, devsync.KeyTOTP)
 	}
 	return nil
