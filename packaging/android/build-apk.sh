@@ -39,7 +39,9 @@ for abi in arm64-v8a x86_64; do
     go build -trimpath -ldflags "-s -w -X github.com/DavidVinu/uni-vpn/internal/daemon.Commit=$commit${UNI_VPN_VERSION:+ -X github.com/DavidVinu/uni-vpn/internal/daemon.Version=$UNI_VPN_VERSION}" \
     -o "$libs/libunivpn.so" ./cmd/uni-vpn)
 done
-# And every Go module in the core, as on the iPhone (packaging/ios/build-core.sh).
+# And Go itself (its runtime and standard library are in the core) and every Go module in the
+# core, as on the iPhone (packaging/ios/build-core.sh).
+cp "$(cd "$root" && go env GOROOT)/LICENSE" "$licenses/go-LICENSE"
 (cd "$root" && CGO_ENABLED=1 GOOS=android GOARCH=arm64 go list -deps \
   -f '{{with .Module}}{{if not .Main}}{{.Path}}|{{.Dir}}{{end}}{{end}}' ./cmd/uni-vpn) | sort -u |
   while IFS='|' read -r path dir; do

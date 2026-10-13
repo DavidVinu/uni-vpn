@@ -20,9 +20,10 @@ import (
 
 // What UniVPNStart returns.
 const (
-	startOK     = 0
-	startLocked = 1
-	startError  = 2
+	startOK         = 0
+	startLocked     = 1
+	startError      = 2
+	startPortsTaken = 3
 )
 
 // memoryLimit: a packet tunnel extension may use about 50 MB.
@@ -76,7 +77,15 @@ func start(configHome, stateHome, apiToken, keyHex, deviceName string, lockWait 
 	var now func()
 	go func() {
 		result <- coremain.Run(ctx, coremain.Options{APIToken: apiToken, LockWait: lockWait,
-			Extend: extend, Release: func(f func()) { now = f }, Started: func() { close(started) }})
+			Extend: func(log *slog.Logger, o *daemon.Options) {
+				// Any app can listen on 127.0.0.1 before the core does: the app and the tunnel
+				// talk to the core only while the ready file exists, as on Android.
+				o.ReadyFile = platform.ReadyFile()
+				if extend != nil {
+					extend(log, o)
+				}
+			},
+			Release: func(f func()) { now = f }, Started: func() { close(started) }})
 		close(done)
 	}()
 	select {
@@ -87,6 +96,9 @@ func start(configHome, stateHome, apiToken, keyHex, deviceName string, lockWait 
 		stop()
 		if errors.Is(err, coremain.ErrLocked) {
 			return startLocked
+		}
+		if errors.Is(err, coremain.ErrPortsTaken) {
+			return startPortsTaken
 		}
 		return startError
 	}

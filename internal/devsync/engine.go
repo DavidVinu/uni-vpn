@@ -630,6 +630,16 @@ func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, s
 			}
 			stamp(key, jsonFalse, when(key, removed)) // removed here
 		}
+		// Added and removed again here while the answer to the addition got lost: sync.json
+		// never knew the website, the group lists it.
+		for key, c := range p.Changes {
+			_, present := snap[key]
+			_, known := st.Hashes[key]
+			r, listed := remote.Entries[key]
+			if strings.HasPrefix(key, DomainPrefix) && c.H == removed && !present && !known && listed && h(r.V) != removed {
+				stamp(key, jsonFalse, when(key, removed))
+			}
+		}
 	}
 	// What the group has that this device does not.
 	local := func(key string) (string, bool) {
@@ -670,23 +680,22 @@ func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, s
 		}
 		if len(applied) > 0 {
 			e.logf(slog.LevelInfo, "Synced from other devices: %s", strings.Join(sorted(applied), ", "))
-		}
-	}
-	if !sameEntries(merged, remote.Entries) {
-		next, err := e.store(ctx, k.group(), version, Doc{Format: Format, Entries: merged}, false)
-		if errors.Is(err, errConflict) {
-			// What Apply took over is the group's now, not a change made here: the next attempt
-			// must not send it back with this round's time over a newer one from elsewhere.
-			for _, key := range incoming {
-				if failed[key] == nil {
-					ent := merged[key]
-					st.Hashes[key] = savedHash{H: h(ent.V), T: ent.T, D: ent.D}
-				}
+			// What Apply took over is the group's now, not a change made here, also when the
+			// write below fails or the app is closed first: the next round must not send it
+			// back with a later time over a newer one from elsewhere.
+			for _, key := range applied {
+				ent := merged[key]
+				st.Hashes[key] = savedHash{H: h(ent.V), T: ent.T, D: ent.D}
 			}
 			st.Keyed = true // the hashes were carried over above
 			if err := e.saveState(st); err != nil {
 				return false, err
 			}
+		}
+	}
+	if !sameEntries(merged, remote.Entries) {
+		next, err := e.store(ctx, k.group(), version, Doc{Format: Format, Entries: merged}, false)
+		if errors.Is(err, errConflict) {
 			return false, nil
 		}
 		if err != nil {

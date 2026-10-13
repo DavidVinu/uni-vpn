@@ -57,6 +57,12 @@ func container(t *testing.T) (configHome, stateHome string, httpPort int) {
 	return configHome, stateHome, httpPort
 }
 
+// readyExists: the core vouches that both ports are its own (daemon.Options.ReadyFile).
+func readyExists(stateHome string) bool {
+	_, err := os.Stat(filepath.Join(stateHome, "uni-vpn", "api-ready"))
+	return err == nil
+}
+
 func status(t *testing.T, port int, token string) int {
 	t.Helper()
 	req, _ := http.NewRequest("GET", fmt.Sprintf("http://127.0.0.1:%d/status.json", port), nil)
@@ -84,6 +90,9 @@ func TestStartStopStart(t *testing.T) {
 		if got := status(t, port, "t0ken"); got != 200 {
 			t.Fatal(got)
 		}
+		if !readyExists(stateHome) {
+			t.Fatal("no ready file")
+		}
 		if got := status(t, port, "wrong"); got != 403 {
 			t.Fatal(got)
 		}
@@ -91,9 +100,32 @@ func TestStartStopStart(t *testing.T) {
 			t.Fatal("a running core counts as started", got)
 		}
 		stop()
-		if running() {
+		if running() || readyExists(stateHome) {
 			t.Fatal("still running")
 		}
+	}
+}
+
+// Another app listens on the core's port first: the core ends with its own code, so the app
+// says so, and no ready file (not even one left by a killed core) sends the app's token there.
+func TestAnotherAppHoldsThePort(t *testing.T) {
+	configHome, stateHome, httpPort := container(t)
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", httpPort))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	if err := os.MkdirAll(filepath.Join(stateHome, "uni-vpn"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stateHome, "uni-vpn", "api-ready"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := start(configHome, stateHome, "t0ken", key, "", 0); got != startPortsTaken {
+		t.Fatal(got)
+	}
+	if running() || readyExists(stateHome) {
+		t.Fatal("ready without the port")
 	}
 }
 
@@ -176,12 +208,19 @@ func TestStopIsBounded(t *testing.T) {
 		t.Fatal("status port still held:", err)
 	}
 	ln.Close()
-	// A new core starts while the old one is still ending.
+	if readyExists(stateHome) {
+		t.Fatal("ready file kept after the lock was let go")
+	}
+	// A new core starts while the old one is still ending; the old one ending later leaves the
+	// new one's ready file alone.
 	extend = nil
 	if got := start(configHome, stateHome, "", key, "", 0); got != startOK {
 		t.Fatal(got)
 	}
-	stop()
 	close(store.release)
 	<-core
+	if !readyExists(stateHome) {
+		t.Fatal("the old core removed the new one's ready file")
+	}
+	stop()
 }

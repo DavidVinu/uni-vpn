@@ -215,6 +215,8 @@ func freePort(t *testing.T) int {
 }
 
 func setup(t *testing.T) *env {
+	refuseLocal = func(string) bool { return false } // the echo server stands in for the VPN
+	t.Cleanup(func() { refuseLocal = thisComputer }) // after the server's Stop
 	e := &env{dns: startFakeDNS(t, map[string]string{"intra.example": "127.0.0.1"})}
 	echo, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -328,6 +330,45 @@ func TestRefused(t *testing.T) {
 	e := setup(t)
 	if _, code := e.connect(t, 1, []byte{127, 0, 0, 1}, freePort(t)); code != RepRefused {
 		t.Fatal(code)
+	}
+}
+
+func TestThisComputerIsRefused(t *testing.T) {
+	// Another account's program would reach the app's API (127.0.0.1:<http_port>) this way.
+	api, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+	reached := make(chan struct{}, 1)
+	go func() {
+		if c, err := api.Accept(); err == nil {
+			c.Close()
+			reached <- struct{}{}
+		}
+	}()
+	port := api.Addr().(*net.TCPAddr).Port
+	dns := startFakeDNS(t, map[string]string{"local.example": "127.0.0.1"})
+	e := &env{dns: dns, server: NewServer(freePort(t), "127.0.0.1", []string{"127.0.0.1"}, nil)}
+	e.server.DNSPort = dns.port()
+	if err := e.server.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(e.server.Stop)
+	name := func(s string) []byte { return append([]byte{byte(len(s))}, s...) }
+	for _, c := range []struct {
+		atyp    byte
+		address []byte
+	}{{1, []byte{127, 0, 0, 1}}, {1, []byte{127, 1, 2, 3}}, {1, []byte{0, 0, 0, 0}},
+		{3, name("127.0.0.1")}, {3, name("0.0.0.0")}, {3, name("local.example")}} {
+		if _, code := e.connect(t, c.atyp, c.address, port); code != RepNotAllowed {
+			t.Error(c.address, code)
+		}
+	}
+	select {
+	case <-reached:
+		t.Fatal("reached this computer")
+	case <-time.After(100 * time.Millisecond):
 	}
 }
 

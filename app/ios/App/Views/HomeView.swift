@@ -36,6 +36,7 @@ struct HomeView: View {
                     Spacer(minLength: 8)
                     Toggle("Uni VPN", isOn: $model.vpnSwitch)
                         .labelsHidden()
+                        .disabled(model.switching)
                 }
                 .padding(.vertical, 8)
                 if vpnOn && (fix != nil || stopped) {

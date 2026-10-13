@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -1137,5 +1138,217 @@ func TestRemoveWithManyWebsites(t *testing.T) {
 	}
 	if got := names(laptop.Engine); !slices.Equal(got, []string{"Laptop"}) {
 		t.Fatalf("after removal %v", got)
+	}
+}
+
+// lossyRelay loses group writes: dropped on the way (no network for a moment, a relay error),
+// or written with the answer lost on the way back. drop and lose take the next write; with
+// odds set, every read and write fails or loses its answer at random.
+type lossyRelay struct {
+	next       http.Handler
+	drop, lose atomic.Bool
+	mu         sync.Mutex
+	rng        *rand.Rand
+	odds       float64
+}
+
+func (f *lossyRelay) chance() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.rng != nil && f.rng.Float64() < f.odds
+}
+
+func (f *lossyRelay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/v1/group/") {
+		switch {
+		case r.Method == "GET" && f.chance(), r.Method == "PUT" && (f.drop.CompareAndSwap(true, false) || f.chance()):
+			http.Error(w, "unavailable", 503)
+			return
+		case r.Method == "PUT" && (f.lose.CompareAndSwap(true, false) || f.chance()):
+			f.next.ServeHTTP(httptest.NewRecorder(), r)
+			http.Error(w, "gateway timeout", 504)
+			return
+		}
+	}
+	f.next.ServeHTTP(w, r)
+}
+
+// lossyDevices is the set-up laptop and new devices linked to it, all through a lossyRelay.
+func lossyDevices(t *testing.T, names ...string) (*lossyRelay, []device) {
+	t.Helper()
+	_, target := startRelay(t)
+	u, err := url.Parse(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	relay := &lossyRelay{next: httputil.NewSingleHostReverseProxy(u)}
+	srv := httptest.NewServer(relay)
+	t.Cleanup(srv.Close)
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	devices := []device{newDevice(t, srv.URL, "Laptop", setUpLaptop(), c)}
+	for _, name := range names {
+		d := newDevice(t, srv.URL, name, newLocal(false, nil), c)
+		pair(t, context.Background(), devices[0], d)
+		devices = append(devices, d)
+	}
+	return relay, devices
+}
+
+func syncAll(t *testing.T, devices ...device) {
+	t.Helper()
+	for _, d := range devices {
+		if err := d.Sync(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func without(list []string, host string) []string {
+	return slices.DeleteFunc(slices.Clone(list), func(h string) bool { return h == host })
+}
+
+// A round takes over a website and cannot write (no network for a moment). Then the website
+// is removed on the laptop and something else changed on the desktop: the removal stays.
+func TestFailedWriteDoesNotBringBackARemovedWebsite(t *testing.T) {
+	relay, devices := lossyDevices(t, "Desktop")
+	laptop, desktop := devices[0], devices[1]
+	const lsf = "lsf.uni-heidelberg.de"
+	laptop.local.setDomains(append(laptop.local.getDomains(), lsf)...)
+	laptop.Notify(false)
+	syncAll(t, laptop)
+	desktop.local.set(KeyLanguage, "de") // the desktop's round has something to write
+	desktop.Notify(false)
+	relay.drop.Store(true)
+	if err := desktop.Sync(context.Background()); err == nil || !slices.Contains(desktop.local.getDomains(), lsf) {
+		t.Fatalf("want the website taken over and the write failed: %v %v", err, desktop.local.getDomains())
+	}
+	laptop.local.setDomains(without(laptop.local.getDomains(), lsf)...)
+	laptop.Notify(false)
+	syncAll(t, laptop)
+	desktop.local.set(KeyAutoUpdate, false)
+	desktop.Notify(false)
+	syncAll(t, desktop, laptop, desktop)
+	for _, d := range devices {
+		if slices.Contains(d.local.getDomains(), lsf) {
+			t.Fatalf("%s: the removed website is back: %v", d.opts.Name, d.local.getDomains())
+		}
+	}
+}
+
+// The same with a value: the laptop's later language stays.
+func TestFailedWriteDoesNotUndoALaterLanguage(t *testing.T) {
+	relay, devices := lossyDevices(t, "Desktop")
+	laptop, desktop := devices[0], devices[1]
+	laptop.local.set(KeyLanguage, "fr")
+	laptop.Notify(false)
+	syncAll(t, laptop)
+	desktop.local.setDomains(append(desktop.local.getDomains(), "lsf.uni-heidelberg.de")...)
+	desktop.Notify(false)
+	relay.drop.Store(true)
+	if err := desktop.Sync(context.Background()); err == nil || desktop.local.get(KeyLanguage) != `"fr"` {
+		t.Fatalf("want fr taken over and the write failed: %v %s", err, desktop.local.get(KeyLanguage))
+	}
+	laptop.local.set(KeyLanguage, "es")
+	laptop.Notify(false)
+	syncAll(t, laptop)
+	desktop.local.set(KeyAutoUpdate, false)
+	desktop.Notify(false)
+	syncAll(t, desktop, laptop, desktop)
+	for _, d := range devices {
+		if got := d.local.get(KeyLanguage); got != `"es"` {
+			t.Fatalf("%s: language %s, want the later es", d.opts.Name, got)
+		}
+	}
+}
+
+// The relay took a new website but its answer got lost; the website is removed again before
+// the next round. The removal reaches the group.
+func TestRemovalAfterALostAnswerGoesOut(t *testing.T) {
+	relay, devices := lossyDevices(t, "Desktop")
+	laptop, desktop := devices[0], devices[1]
+	const lsf = "lsf.uni-heidelberg.de"
+	desktop.local.setDomains(append(desktop.local.getDomains(), lsf)...)
+	desktop.Notify(false)
+	relay.lose.Store(true)
+	if err := desktop.Sync(context.Background()); err == nil {
+		t.Fatal("want the answer lost")
+	}
+	desktop.local.setDomains(without(desktop.local.getDomains(), lsf)...)
+	desktop.Notify(false)
+	syncAll(t, desktop, laptop, desktop)
+	for _, d := range devices {
+		if slices.Contains(d.local.getDomains(), lsf) {
+			t.Fatalf("%s: the removed website is back: %v", d.opts.Name, d.local.getDomains())
+		}
+	}
+}
+
+// Three devices edit and sync at random while reads, writes and answers get lost. Once the
+// network is back they agree on the latest language and on every website added and not
+// removed since. The seeds found undone changes and lost removals before.
+func TestRandomEditsOverALossyNetwork(t *testing.T) {
+	for _, seed := range []uint64{1, 2, 3, 4} {
+		t.Run(fmt.Sprint(seed), func(t *testing.T) { randomEdits(t, seed) })
+	}
+}
+
+func randomEdits(t *testing.T, seed uint64) {
+	relay, devices := lossyDevices(t, "Desktop", "Phone")
+	syncAll(t, devices...)
+	rng := rand.New(rand.NewPCG(seed, 0))
+	relay.mu.Lock()
+	relay.rng, relay.odds = rand.New(rand.NewPCG(seed, 1)), 0.15
+	relay.mu.Unlock()
+	language, removed := "", map[string]bool{}
+	var added []string
+	for step := range 120 {
+		d := devices[rng.IntN(len(devices))]
+		switch rng.IntN(4) {
+		case 0:
+			language = fmt.Sprintf("l%d", step)
+			d.local.set(KeyLanguage, language)
+			d.Notify(false)
+		case 1:
+			host := fmt.Sprintf("site%d.example.org", step)
+			d.local.setDomains(append(d.local.getDomains(), host)...)
+			d.Notify(false)
+			added = append(added, host)
+		case 2:
+			// A website this device has, once: whoever removes it, it is gone for good.
+			var listed []string
+			for _, host := range d.local.getDomains() {
+				if strings.HasPrefix(host, "site") && !removed[host] {
+					listed = append(listed, host)
+				}
+			}
+			if len(listed) > 0 {
+				host := listed[rng.IntN(len(listed))]
+				d.local.setDomains(without(d.local.getDomains(), host)...)
+				d.Notify(false)
+				removed[host] = true
+			}
+		default:
+			d.Sync(context.Background()) // fails now and then
+		}
+	}
+	relay.mu.Lock()
+	relay.rng = nil
+	relay.mu.Unlock()
+	for range 3 {
+		syncAll(t, devices...)
+	}
+	var want []string
+	for _, host := range added {
+		if !removed[host] {
+			want = append(want, host)
+		}
+	}
+	slices.Sort(want)
+	for _, d := range devices {
+		got := slices.DeleteFunc(d.local.getDomains(), func(h string) bool { return !strings.HasPrefix(h, "site") })
+		slices.Sort(got)
+		if language != "" && d.local.get(KeyLanguage) != `"`+language+`"` || !slices.Equal(got, want) {
+			t.Fatalf("%s: language %s, want %s; websites %v, want %v", d.opts.Name, d.local.get(KeyLanguage), language, got, want)
+		}
 	}
 }

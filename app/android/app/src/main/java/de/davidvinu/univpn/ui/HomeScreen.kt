@@ -22,7 +22,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -163,19 +162,6 @@ fun HomeScreen(model: AppModel, vpnOn: Boolean, activity: MainActivity) {
                 )
             }
         }
-    }
-    if (model.vpnRefused) {
-        AlertDialog(
-            onDismissRequest = { model.vpnRefused = false },
-            text = { Text(model.t("phone.vpn_refused")) },
-            dismissButton = { TextButton(onClick = { model.vpnRefused = false }) { Text(model.t("app.back")) } },
-            confirmButton = {
-                TextButton(onClick = {
-                    model.vpnRefused = false
-                    activity.openVpnSettings()
-                }) { Text(model.t("phone.vpn_settings")) }
-            },
-        )
     }
 }
 

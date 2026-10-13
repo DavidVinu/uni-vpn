@@ -125,6 +125,66 @@ func TestDisconnectWhileConnectingDoesNotRestart(t *testing.T) {
 	}
 }
 
+// stopped: Disconnect ended the loop for good, the page that waited for a tunnel is dropped.
+func stopped(t *testing.T, d *Daemon, c net.Conn) {
+	t.Helper()
+	time.Sleep(500 * time.Millisecond)
+	s, m := d.snapshot()
+	d.mu.Lock()
+	running := d.loopRunning
+	d.mu.Unlock()
+	if s != Idle || running {
+		t.Fatal(s, m, running)
+	}
+	readEOF(t, c, time.Second)
+}
+
+func TestDisconnectWhileWaitingForTheNextCodeDoesNotRestart(t *testing.T) {
+	// "Waiting for the next code" has no tunnel yet; the page that asked for it is still waiting.
+	h := newHarness(t)
+	h.cfg.ClientWait = 5
+	d := h.start(nil, func(d *Daemon) { d.otpWait = func(float64) float64 { return 3 } })
+	c := h.client()
+	if !waitFor(3*time.Second, func() bool { _, m := d.snapshot(); return m == messages.WaitingForCode }) {
+		t.Fatal(d.snapshot())
+	}
+	d.RequestDisconnect()
+	stopped(t, d, c)
+	if h.pwLines() != nil {
+		t.Fatal(h.pwLines())
+	}
+}
+
+func TestDisconnectWhileOfflineDoesNotRestart(t *testing.T) {
+	// A page load looks for the network again (slow while Wi-Fi comes back), then Disconnect.
+	h := newHarness(t)
+	h.cfg.RetryInterval, h.cfg.ClientWait = 30, 5
+	var probes atomic.Int64
+	d := h.start(func(o *Options) {
+		o.Probe = func(ctx context.Context) bool {
+			if probes.Add(1) > 1 {
+				select {
+				case <-time.After(2 * time.Second):
+				case <-ctx.Done():
+				}
+			}
+			return false
+		}
+	}, func(d *Daemon) { d.offlineRecheck = 0.2 })
+	d.RequestConnect()
+	waitState(t, d, Offline)
+	time.Sleep(300 * time.Millisecond)
+	c := h.client()
+	if !waitFor(2*time.Second, func() bool { return probes.Load() == 2 }) {
+		t.Fatal(probes.Load())
+	}
+	d.RequestDisconnect()
+	stopped(t, d, c)
+	if probes.Load() != 2 {
+		t.Fatal(probes.Load())
+	}
+}
+
 func TestExplicitConnectWithoutClient(t *testing.T) {
 	h := newHarness(t)
 	d := h.start(nil)

@@ -13,7 +13,7 @@ import (
 )
 
 // UniVPNStart starts the core in the background: 0 started, 1 another core holds the lock
-// for longer than lockWaitMs, 2 error.
+// for longer than lockWaitMs, 2 error, 3 another app holds one of its ports.
 //
 //export UniVPNStart
 func UniVPNStart(configHome, stateHome, apiToken, secretsKeyHex, deviceName, lockWaitMs *C.char) C.int {

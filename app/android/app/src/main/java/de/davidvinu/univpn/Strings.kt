@@ -15,6 +15,8 @@ class Strings(private val locales: JSONObject?, setting: String, systemLocales: 
     } ?: listOf("en" to "English")
 
     private val catalogs = locales?.optJSONObject("catalogs")
+    /** The core's texts arrived: before the core first answers there are none (App.kt). */
+    val loaded: Boolean get() = catalogs != null
     val lang: String = if (setting.isNotEmpty() && catalogs?.has(setting) == true) setting else systemLanguage(systemLocales)
 
     /** Like the status page: the first system language uni-vpn has, else English. */

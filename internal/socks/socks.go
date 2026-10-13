@@ -34,6 +34,7 @@ const (
 
 	RepOK              = 0
 	RepFailure         = 1
+	RepNotAllowed      = 2
 	RepNetUnreachable  = 3
 	RepHostUnreachable = 4
 	RepRefused         = 5
@@ -305,6 +306,10 @@ func (s *Server) negotiate(c net.Conn) (net.Conn, error) {
 		s.Log.Info(fmt.Sprintf("SOCKS: %s", err))
 		return nil, reply(c, RepHostUnreachable, nil, 0)
 	}
+	if refuseLocal(address) {
+		s.Log.Info(fmt.Sprintf("SOCKS: %s is this computer, not the VPN", host))
+		return nil, reply(c, RepNotAllowed, nil, 0)
+	}
 	upstream, err := s.dial(source, address, port)
 	if err != nil {
 		if s.ctx.Err() != nil {
@@ -332,6 +337,16 @@ func (s *Server) negotiate(c net.Conn) (net.Conn, error) {
 	}
 	return upstream, nil
 }
+
+// thisComputer: an address of this computer itself, never one on the VPN. Through this port,
+// which every program may use (another account's too), it would reach the app's own API.
+func thisComputer(address string) bool {
+	a, err := netip.ParseAddr(address)
+	return err == nil && a.Is4() && (a.IsLoopback() || a.As4()[0] == 0)
+}
+
+// refuseLocal is thisComputer; the tests, whose servers listen on 127.0.0.1, turn it off.
+var refuseLocal = thisComputer
 
 func (s *Server) dial(source, address string, port int) (net.Conn, error) {
 	target := net.JoinHostPort(address, strconv.Itoa(port))

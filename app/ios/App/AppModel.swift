@@ -40,6 +40,12 @@ final class AppModel {
     var setupFinishing = false
     /// iOS did not add the VPN ("Don't Allow"): Home says so until the switch is tapped again.
     private(set) var vpnRefused = false
+    /// Another app holds the core's port, so the core ended (CoreHost.Start.portsTaken): the
+    /// app says so instead of waiting for an answer that cannot come, as on Android.
+    private(set) var portTaken = false
+    /// Turning the VPN on or off: the core changes hands, the app must not start its own. The
+    /// switch waits meanwhile: a second tap would ask iOS for a second configuration.
+    private(set) var switching = false
     var setup = SetupState()
     /// The second factor from one code, in setup or Settings.
     let auto = AutoEnroll()
@@ -49,8 +55,6 @@ final class AppModel {
     /// The core kept running in the background for a sign-in (wentToBackground).
     @ObservationIgnored private var keepAlive: Task<Void, Never>?
     @ObservationIgnored private var lastStart = Date.distantPast
-    /// Turning the VPN on or off: the core changes hands, the app must not start its own.
-    @ObservationIgnored private var switching = false
     /// The VPN was just started: the app leaves the lock to the extension until then.
     @ObservationIgnored private var handOverUntil = Date.distantPast
 
@@ -145,10 +149,12 @@ final class AppModel {
         guard vpn.idle, !switching, Date() >= handOverUntil,
               UIApplication.shared.applicationState != .background else { return }
         // A core that just failed to start (another one holds the lock) is not retried in a
-        // tight loop.
-        guard Date().timeIntervalSince(lastStart) > 1 else { return }
+        // tight loop. Another app may hold the port all day: then only every half minute, which
+        // still finds the port once that app lets go (Android's Core.kt).
+        guard Date().timeIntervalSince(lastStart) > (portTaken ? 30 : 1) else { return }
         lastStart = Date()
-        _ = await CoreHost.shared.start(lockWaitMs: 2_000)
+        let started = await CoreHost.shared.start(lockWaitMs: 2_000)
+        if started != .busy { portTaken = started == .portsTaken }
     }
 
     private func vpnChanged(_ status: NEVPNStatus) async {
@@ -177,6 +183,7 @@ final class AppModel {
 
     /// The switch: on asks iOS once to allow the VPN configuration (as in Tailscale).
     func turnOn() async {
+        guard !switching else { return }
         switching = true
         vpnRefused = false
         await CoreHost.shared.stop()
@@ -193,6 +200,7 @@ final class AppModel {
     }
 
     func turnOff() async {
+        guard !switching else { return }
         switching = true
         await vpn.disable()
         switching = false
@@ -218,6 +226,7 @@ final class AppModel {
             return
         }
         unreachable = false
+        portTaken = false
         status = json
         // The Control Center button reads it without asking the core.
         UserDefaults(suiteName: CoreHost.appGroup)?.set(!json.bool("setup_needed"), forKey: "setup_done")

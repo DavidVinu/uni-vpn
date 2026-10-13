@@ -205,11 +205,16 @@ final class SetupState {
         error = nil
         let result = await model.post("/api/sync/enter", ["code": pairCode], timeout: 60)
         busy = false
-        if result.ok {
+        if !result.ok {
+            error = result.error
+        } else if model.setupNeeded {
+            // Linked, but the account did not come over (the core says so in a note): setup
+            // goes on by hand with that note, not with an "All set" that would bring it back.
+            go(.university)
+            error = result.json.map { model.strings.message($0.string("error"), $0.object("error_t")) }
+        } else {
             model.setupFinishing = true
             go(.done)
-        } else {
-            error = result.error
         }
     }
 

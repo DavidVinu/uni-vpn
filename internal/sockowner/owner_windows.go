@@ -37,15 +37,7 @@ func OtherAccount(c net.Conn) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	ours, ok := sessions[self]
-	if !ok || ours == 0 {
-		return false, errNoSession
-	}
-	theirs, ok := sessions[r.owner]
-	if !ok {
-		return false, errors.New("the client's program has ended")
-	}
-	return theirs != ours, nil
+	return otherSession(sessions, self, r.owner)
 }
 
 // clientEnd finds the client's end of c in the TCP tables; a dual-stack client (an IPv6

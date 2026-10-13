@@ -24,8 +24,9 @@ struct SetVPN: SetValueIntent {
         guard setupDone, let manager = try await NETunnelProviderManager.loadAllFromPreferences().first else {
             return .result()
         }
-        // The same as the app's switch: on demand keeps the VPN up.
-        manager.isEnabled = true
+        // The same as the app's switch: on demand keeps the VPN up. Only turning on takes the
+        // one VPN slot back from another VPN app; off leaves that app as it is.
+        if value { manager.isEnabled = true }
         manager.isOnDemandEnabled = value
         try await manager.saveToPreferences()
         try await manager.loadFromPreferences()

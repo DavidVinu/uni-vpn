@@ -66,6 +66,8 @@ fun SettingsScreen(model: AppModel) {
     val status = model.status ?: return
     val scope = rememberCoroutineScope()
     val sync = status.optJSONObject("sync")
+    // A Remove that did not go through.
+    var removeError by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
         // Like the desktop: opening Settings brings in changes from the other devices.
         if (sync?.optBoolean("on") == true) model.post("/api/sync/refresh", timeoutMs = 30_000)
@@ -87,7 +89,13 @@ fun SettingsScreen(model: AppModel) {
                 SettingRow(model.t("settings.through"), model.strings.plural("settings.domain_count", count), { model.open(Screen.Websites) })
             }
             if (sync?.optBoolean("available") == true) {
-                item { Section(model.t("settings.devices")) }
+                item {
+                    Section(model.t("settings.devices"))
+                    // Why the last sync or Remove did not go through, like Chrome's sync error under
+                    // the account.
+                    val problem = sync.optJSONObject("error")?.takeIf { sync.optBoolean("on") }?.let { model.strings.t(it) }
+                    Column(Modifier.padding(horizontal = 16.dp)) { ErrorText(removeError ?: problem) }
+                }
                 val devices = sync.optJSONArray("devices")
                 val rows = if (sync.optBoolean("on") && devices != null) (0 until devices.length()).map { devices.getJSONObject(it) } else emptyList()
                 items(rows) { device ->
@@ -97,7 +105,9 @@ fun SettingsScreen(model: AppModel) {
                         trailingContent = if (!device.optBoolean("this")) {
                             {
                                 TextButton(onClick = {
-                                    scope.launch { model.post("/api/sync/remove", JSONObject().put("device", device.optString("id")), 30_000) }
+                                    scope.launch {
+                                        removeError = model.post("/api/sync/remove", JSONObject().put("device", device.optString("id")), 30_000).error
+                                    }
                                 }) { Text(model.t("sync.remove"), color = MaterialTheme.colorScheme.error) }
                             }
                         } else null,

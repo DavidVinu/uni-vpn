@@ -5,6 +5,7 @@ struct SettingsView: View {
     @Bindable var model: AppModel
     @State private var password = ""
     @State private var passwordError: String?
+    @State private var removeError: String?
 
     var body: some View {
         let status = model.status ?? JSON([:])
@@ -28,7 +29,7 @@ struct SettingsView: View {
                 }
             }
             if let sync, sync.bool("available") {
-                Section(model.t("settings.devices")) {
+                Section {
                     if sync.bool("on") {
                         ForEach(sync.objects("devices"), id: \.deviceID) { device in
                             if device.bool("this") {
@@ -38,7 +39,9 @@ struct SettingsView: View {
                                     Text(device.string("name"))
                                     Spacer()
                                     Button(model.t("sync.remove"), role: .destructive) {
-                                        Task { _ = await model.post("/api/sync/remove", ["device": device.string("id")], timeout: 30) }
+                                        Task {
+                                            removeError = await model.post("/api/sync/remove", ["device": device.string("id")], timeout: 30).error
+                                        }
                                     }
                                     .buttonStyle(.borderless)
                                 }
@@ -50,6 +53,12 @@ struct SettingsView: View {
                     } label: {
                         Label(model.t("sync.add"), systemImage: "plus")
                     }
+                } header: {
+                    Text(model.t("settings.devices"))
+                } footer: {
+                    // Why a removal or the last sync did not go through, as on the desktop.
+                    let problem = sync.bool("on") ? sync.object("error") : nil
+                    ErrorText(text: removeError ?? problem.map { model.strings.t($0) })
                 }
             }
             Section(model.t("settings.general")) {

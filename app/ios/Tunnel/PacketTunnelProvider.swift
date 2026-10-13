@@ -13,7 +13,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         Task { @MainActor in
             // The app stops its own core before it starts the VPN; give it time to let go.
             let started = await CoreHost.shared.start(lockWaitMs: 10_000)
-            guard started == .started else {
+            // Without the ready file the core does not hold both ports (another app listens
+            // there): the proxy rule would hand that app the browsers' university traffic.
+            guard started == .started, CoreHost.ready else {
+                if started == .started { await CoreHost.shared.stop() }
                 completionHandler(NEVPNError(.connectionFailed))
                 return
             }

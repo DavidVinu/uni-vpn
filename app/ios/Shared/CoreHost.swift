@@ -16,6 +16,8 @@ final class CoreHost: @unchecked Sendable {
         case started = 0
         case busy = 1
         case failed = 2
+        /// Another app listens on one of the core's ports: the core ended.
+        case portsTaken = 3
     }
 
     // Start and Stop block (Stop until the lock and ports are free): one at a time, off the
@@ -34,6 +36,12 @@ final class CoreHost: @unchecked Sendable {
     static var configHome: URL { home.appendingPathComponent("config") }
     static var stateHome: URL { home.appendingPathComponent("state") }
     static var secretsFile: URL { configHome.appendingPathComponent("uni-vpn/secrets.json") }
+    /// Exists while a core of the app or the extension holds both ports (daemon.Options.ReadyFile).
+    static var readyFile: URL { stateHome.appendingPathComponent("uni-vpn/api-ready") }
+
+    /// Any app can listen on 127.0.0.1 first, and requests carry the token and the password:
+    /// they go only to a core that holds its ports, like Android's Core.ready.
+    static var ready: Bool { FileManager.default.fileExists(atPath: readyFile.path) }
 
     var running: Bool { UniVPNRunning() == 1 }
 

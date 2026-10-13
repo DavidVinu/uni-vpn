@@ -182,7 +182,8 @@ func StateDir() string {
 func LogFile() string  { return filepath.Join(StateDir(), "daemon.log") }
 func LockFile() string { return filepath.Join(ConfigDir(), "daemon.lock") }
 
-// ReadyFile exists while the Android app's core serves its ports (app/android Core.kt).
+// ReadyFile exists while a phone app's core serves its ports (app/android Core.kt, app/ios
+// CoreHost.swift).
 func ReadyFile() string { return filepath.Join(StateDir(), "api-ready") }
 
 // AdminOnly reports whether path lies inside Program Files, which only administrators can
