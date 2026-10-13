@@ -226,7 +226,7 @@ func TestIdleDisconnectsAndClosesClients(t *testing.T) {
 	d := h.start(nil)
 	c := h.client()
 	echo(t, c, "x")
-	waitState(t, d, Idle, 4*time.Second)
+	waitState(t, d, Idle, 10*time.Second) // the harness's 3 s idle timer, on a slow runner too
 	if d.tunnelNow() != nil {
 		t.Fatal("tunnel left")
 	}
@@ -241,7 +241,7 @@ func TestIgnoreSigtermIsKilled(t *testing.T) {
 	c := h.client()
 	echo(t, c, "x")
 	c.Close()
-	waitState(t, d, Idle, 5*time.Second)
+	waitState(t, d, Idle, 10*time.Second)
 	if d.tunnelNow() != nil {
 		t.Fatal("tunnel left")
 	}
@@ -1470,7 +1470,7 @@ func TestStatusKeyOrderLikePython(t *testing.T) {
 	}
 	text := string(pyjson.Marshal(s))
 	for _, part := range []string{`"commit": null`, `"update_pending": null`, `"message_id": "not_connected"`,
-		`"action": null`, `"idle_minutes": 0.01`, `"last_error": null`, `"error_kind": null`, `"elevated": null`} {
+		`"action": null`, `"idle_minutes": 0.05`, `"last_error": null`, `"error_kind": null`, `"elevated": null`} {
 		if !strings.Contains(text, part) {
 			t.Fatal(part, text)
 		}
