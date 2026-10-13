@@ -17,27 +17,50 @@ minimum=$(sed -n 's/.*<os-version min="\([0-9.]*\)".*/\1/p' "$(dirname "$0")/dis
 
 brew install --quiet openconnect ocproxy dylibbundler
 prefix=$(brew --prefix)
+cellar=$(brew --cellar)
 # Homebrew pours its bottles for the runner's newer macOS, which can need what the minimum lacks
 # (openconnect's for Apple Silicon calls strchrnul, new in macOS 15.4). Where Homebrew still has
-# bottles for the minimum, their programs and libraries replace those. Only bottles made for this
-# Cellar or for none: a bottle for any Cellar names libraries by a placeholder until poured.
+# bottles for the minimum, their programs and libraries replace those, placed as pouring places
+# them. Only bottles made for this Cellar or for any.
 case "${minimum%.0}" in
   14) os=sonoma ;;
   *) echo "which Homebrew bottles are for macOS $minimum?"; exit 1 ;;
 esac
 if [ "$(uname -m)" = arm64 ]; then tag="arm64_$os"; else tag="$os"; fi
-cellar=$(brew --cellar)
+placed() { sed -e "s|@@HOMEBREW_PREFIX@@|$prefix|g" -e "s|@@HOMEBREW_CELLAR@@|$cellar|g" <<<"$1"; }
+# A bottle names its libraries (and itself) by placeholders for Homebrew's folders.
+place() {
+  local args=() name
+  name=$(otool -D "$1" | sed -n 2p)
+  case "$name" in @@HOMEBREW_*) args+=(-id "$(placed "$name")") ;; esac
+  while IFS= read -r name; do
+    args+=(-change "$name" "$(placed "$name")")
+  done < <(otool -L "$1" | sed -n 's/^[[:space:]]*\(@@HOMEBREW_[^ ]*\) (compatibility .*/\1/p')
+  while IFS= read -r name; do
+    args+=(-rpath "$name" "$(placed "$name")")
+  done < <(otool -l "$1" | awk '$1 == "path" && $2 ~ /^@@HOMEBREW_/ { print $2 }')
+  chmod u+w "$1"
+  if [ ${#args[@]} -gt 0 ]; then install_name_tool "${args[@]}" "$1"; fi
+  codesign --force -s - "$1"
+}
 bottles=$(mktemp -d)
 for f in openconnect ocproxy $(brew deps --union openconnect ocproxy); do
-  brew info --json=v2 "$f" | jq -e --arg t "$tag" --arg c "$cellar" \
-    '.formulae[0].bottle.stable.files[$t].cellar | . == $c or . == ":any_skip_relocation"' >/dev/null || continue
-  brew fetch --quiet --bottle-tag="$tag" "$f"
+  # The runner's Homebrew knows only the bottles for its own macOS, Homebrew's website all.
+  bottle=$(curl -fsSL "https://formulae.brew.sh/api/formula/$f.json" | jq -c --arg t "$tag" --arg c "$cellar" \
+    '.bottle.stable.files[$t] // empty | select(.cellar == $c or .cellar == ":any" or .cellar == ":any_skip_relocation")')
+  if [ -z "$bottle" ]; then continue; fi
+  curl -fsSL -H "Authorization: Bearer QQ==" -o "$bottles/$f.tar.gz" "$(jq -r .url <<<"$bottle")"
+  if ! echo "$(jq -r .sha256 <<<"$bottle")  $bottles/$f.tar.gz" | shasum -a 256 -c --status; then
+    echo "the bottle of $f for macOS $minimum is not the one Homebrew names"
+    exit 1
+  fi
   mkdir "$bottles/$f"
-  tar -xzf "$(brew --cache --bottle-tag="$tag" "$f")" -C "$bottles/$f"
+  tar -xzf "$bottles/$f.tar.gz" -C "$bottles/$f"
   (cd "$bottles/$f" && find . -type f) | while IFS= read -r p; do
     # The same version as the one installed, or nothing is replaced (and the check below tells).
     if [ -e "$cellar/$p" ] && file -b "$bottles/$f/$p" | grep -q Mach-O; then
       cp -f "$bottles/$f/$p" "$cellar/$p"
+      place "$cellar/$p"
       echo "from the bottle for macOS $minimum: ${p#./}"
     fi
   done
