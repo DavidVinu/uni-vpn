@@ -110,7 +110,13 @@ fun PairScreen(model: AppModel, mode: String, activity: MainActivity) {
     LaunchedEffect(model.pairResult) {
         val result = model.pairResult ?: return@LaunchedEffect
         model.pairResult = null
-        if (result.ok) done = true else error = result.error
+        if (!result.ok) {
+            error = result.error
+            return@LaunchedEffect
+        }
+        done = true
+        // Linked, but some settings could not be used here: said under the check mark.
+        error = result.json?.let { model.strings.message(it.optString("error"), it.optJSONObject("error_t")) }?.ifEmpty { null }
     }
 
     Column(Modifier.fillMaxSize().navigationBarsPadding().imePadding().verticalScroll(rememberScrollState())) {

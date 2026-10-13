@@ -240,3 +240,27 @@ func TestParseTCPTable(t *testing.T) {
 		}
 	}
 }
+
+func TestOtherSession(t *testing.T) {
+	// Windows: uni-vpn is process 100 in session 1.
+	sessions := map[uint32]uint32{100: 1, 200: 1, 300: 2, 400: 0}
+	for _, c := range []struct {
+		name  string
+		self  uint32
+		owner uint32
+		other bool
+		fails bool
+	}{
+		{"same session", 100, 200, false, false},
+		{"another account's session", 100, 300, true, false},
+		// An antivirus that passes the app's or browser's traffic through itself.
+		{"a service", 100, 400, false, true},
+		{"the client's program ended", 100, 500, false, true},
+		{"uni-vpn outside a session", 400, 300, false, true},
+	} {
+		other, err := otherSession(sessions, c.self, c.owner)
+		if other != c.other || (err != nil) != c.fails {
+			t.Error(c.name, other, err)
+		}
+	}
+}

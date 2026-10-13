@@ -16,6 +16,11 @@ import (
 // service), so there is no session to compare with.
 var errNoSession = errors.New("no sign-in session to compare")
 
+// errServiceClient: on Windows, the client is a service (session 0), say an antivirus that
+// passes web traffic through itself. Another signed-in account's programs run in its own
+// session, so this tells nothing about the account.
+var errServiceClient = errors.New("the client is a service, outside any sign-in session")
+
 // row is one end of a TCP connection in the system's table.
 type row struct {
 	local, remote netip.AddrPort
@@ -61,3 +66,20 @@ func find(rows []row, client, server netip.AddrPort, self uint32) (row, error) {
 // otherOwner: an end without owner counts as another account's. Nobody can read the answer,
 // and another account must not get a request through by closing before the lookup.
 func otherOwner(r row, self uint32) bool { return !r.known || r.owner != self }
+
+// otherSession compares the sign-in sessions (by process id) of the client, owner, and of
+// uni-vpn, self: Windows names processes in its table, not accounts.
+func otherSession(sessions map[uint32]uint32, self, owner uint32) (bool, error) {
+	ours, ok := sessions[self]
+	if !ok || ours == 0 {
+		return false, errNoSession
+	}
+	theirs, ok := sessions[owner]
+	if !ok {
+		return false, errors.New("the client's program has ended")
+	}
+	if theirs == 0 {
+		return false, errServiceClient
+	}
+	return theirs != ours, nil
+}

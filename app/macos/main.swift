@@ -299,9 +299,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         var request = URLRequest(url: parts.url!)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.timeoutInterval = 3
-        URLSession.shared.dataTask(with: request) { [weak self] data, _, _ in
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, _ in
             var next = Status()
-            if let data = data, let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
+            // Only a 200: the uni-vpn of another account on this Mac answers 403 (with JSON).
+            if (response as? HTTPURLResponse)?.statusCode == 200, let data = data,
+               let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
                 next.state = json["state"] as? String ?? "unknown"
                 next.busy = json["busy"] as? Bool ?? false
                 next.menu = json["menu"] as? [String: String] ?? [:]

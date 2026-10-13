@@ -25,9 +25,18 @@ final class VPN {
     /// The extension neither runs nor starts, so the app may run the core itself.
     var idle: Bool { status == .disconnected || status == .invalid }
 
-    func load() async {
-        let managers = (try? await NETunnelProviderManager.loadAllFromPreferences()) ?? []
-        manager = managers.first
+    /// Reads the configuration from iOS. False when iOS did not answer: what the app had stays.
+    @discardableResult
+    func load() async -> Bool {
+        let managers = try? await NETunnelProviderManager.loadAllFromPreferences()
+        if let managers {
+            // The enabled one is what iOS runs. Further copies (two saves at once) would show
+            // up as a second "Uni VPN" in Settings: they go.
+            manager = managers.first(where: \.isEnabled) ?? managers.first
+            for extra in managers where extra !== manager {
+                try? await extra.removeFromPreferences()
+            }
+        }
         update()
         if observer == nil {
             observer = NotificationCenter.default.addObserver(forName: .NEVPNStatusDidChange, object: nil, queue: .main) { [weak self] _ in
@@ -39,6 +48,7 @@ final class VPN {
                 Task { @MainActor in await self?.load() }
             }
         }
+        return managers != nil
     }
 
     private func update() {
@@ -59,6 +69,9 @@ final class VPN {
     /// Saves the configuration with on demand on. The first time iOS asks the user to allow it
     /// (the Tailscale moment); false when they did not.
     func enable() async -> Bool {
+        // A new configuration only when iOS has none: switched on before the first load
+        // finished, the app would add a second one.
+        if manager == nil, !(await load()) { return false }
         let m = manager ?? NETunnelProviderManager()
         let proto = (m.protocolConfiguration as? NETunnelProviderProtocol) ?? NETunnelProviderProtocol()
         proto.providerBundleIdentifier = VPN.tunnelBundle

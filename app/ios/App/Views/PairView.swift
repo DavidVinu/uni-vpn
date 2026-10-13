@@ -27,6 +27,8 @@ struct PairView: View {
                             .font(.system(size: 64))
                             .foregroundStyle(.green)
                         Text(model.t("sync.done")).font(.title3.weight(.semibold))
+                        // Linked, but some settings could not be used here.
+                        ErrorText(text: error)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 24)
@@ -120,7 +122,12 @@ struct PairView: View {
         busy = true
         let result = await model.post("/api/sync/enter", ["code": code], timeout: 60)
         busy = false
-        if result.ok { done = true } else { error = result.error }
+        if !result.ok {
+            error = result.error
+            return
+        }
+        done = true
+        error = result.json.map { model.strings.message($0.string("error"), $0.object("error_t")) }
     }
 
     /// Black modules on white with the standard quiet zone, error correction M (docs/sync.md).

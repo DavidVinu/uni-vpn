@@ -180,6 +180,10 @@ func TestPortHeldByAnotherProgramEndsThePhoneCore(t *testing.T) {
 			}
 			defer ln.Close()
 			ready := filepath.Join(t.TempDir(), "api-ready")
+			// Left by a core that was killed: it must not vouch for whoever holds the port now.
+			if err := os.WriteFile(ready, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
 			done := make(chan error, 1)
 			go func() {
 				done <- Run(context.Background(), Options{APIToken: "t0ken",
@@ -203,5 +207,45 @@ func TestPortHeldByAnotherProgramEndsThePhoneCore(t *testing.T) {
 				t.Fatal("port still open", other)
 			}
 		})
+	}
+}
+
+// blockingStore keeps the daemon's sync from ending, so the daemon is slow to stop.
+type blockingStore struct{ release chan struct{} }
+
+func (s blockingStore) Load(context.Context) (string, error) { <-s.release; return "", nil }
+func (blockingStore) Save(string) error                      { return nil }
+func (blockingStore) Delete() error                          { return nil }
+
+// The iPhone's app and tunnel hand the lock over while the old daemon may still be ending
+// (Options.Release): the ready file then belongs to the next core, and the old daemon ending
+// later must not remove it.
+func TestReadyFileStaysWithTheNextCore(t *testing.T) {
+	home(t)
+	ready := filepath.Join(t.TempDir(), "api-ready")
+	store := blockingStore{make(chan struct{})}
+	var release func()
+	first := start(t, Options{APIToken: "t0ken", Release: func(f func()) { release = f },
+		Extend: func(_ *slog.Logger, o *daemon.Options) { o.ReadyFile, o.SyncStore = ready, store }})
+	release()
+	if _, err := os.Stat(ready); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal("ready file kept after the lock was let go", err)
+	}
+	second := start(t, Options{APIToken: "t0ken", Extend: func(_ *slog.Logger, o *daemon.Options) { o.ReadyFile = ready }})
+	close(store.release)
+	select {
+	case err := <-first.done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("the first daemon did not end")
+	}
+	if _, err := os.Stat(ready); err != nil {
+		t.Fatal("the old daemon removed the next core's ready file:", err)
+	}
+	second.stop(t)
+	if _, err := os.Stat(ready); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal("ready file left behind", err)
 	}
 }

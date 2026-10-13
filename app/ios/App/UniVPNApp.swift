@@ -25,7 +25,9 @@ struct RootView: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        if model.status == nil {
+        if model.portTaken {
+            PortTakenView(model: model)
+        } else if model.status == nil {
             ProgressView()
         } else if model.setupNeeded || model.changingAccount || model.setupFinishing {
             SetupView(model: model)
@@ -45,5 +47,28 @@ struct RootView: View {
                     }
             }
         }
+    }
+}
+
+/// Instead of a spinner that never ends, like the Android app. The core's texts need the core:
+/// this one comes with the app. The switch stays, so Uni VPN can still be turned off here.
+private struct PortTakenView: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        let setupDone = UserDefaults(suiteName: CoreHost.appGroup)?.bool(forKey: "setup_done") ?? false
+        VStack(spacing: 24) {
+            Text(Strings.portTaken(Locale.preferredLanguages))
+                .multilineTextAlignment(.center)
+            if model.vpn.isOn || setupDone {
+                HStack(spacing: 16) {
+                    Text(verbatim: "Uni VPN").font(.headline)
+                    Toggle("Uni VPN", isOn: $model.vpnSwitch)
+                        .labelsHidden()
+                        .disabled(model.switching)
+                }
+            }
+        }
+        .padding(24)
     }
 }

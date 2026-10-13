@@ -37,7 +37,13 @@ thin SwiftUI shell around the core.
   that wait for the website domains (`NEOnDemandRuleEvaluateConnection`) would add nothing, as
   the core inside idles until a browser asks, and iOS uses only the first rule that matches.
 - **Local API.** Every app can reach 127.0.0.1, so the core answers only requests with the
-  app's token (`X-Uni-VPN-Token`). `proxy.pac` stays open for the browsers.
+  app's token (`X-Uni-VPN-Token`). `proxy.pac` stays open for the browsers. Any app can also
+  listen on the core's ports first and collect the token and the password, as on Android: the
+  core ends (`UniVPNStart` returns 3) when it cannot have both ports, and creates `api-ready` in
+  its state folder once it has them. It removes the file before it lets go of the lock, so a
+  core still ending after the handover never removes the next one's. The app and the extension
+  send requests, and the extension hands iOS the proxy rule, only while the file exists; when
+  another app is in the way, the app says so.
 - **Known gap: the proxy port**, as on Android: the SOCKS port is open to every app on the phone
   while the VPN is on, since browsers cannot send a token.
 - **Secrets.** The core keeps the password and the setup key in `secrets.json`, sealed with
@@ -111,8 +117,8 @@ and sends it to TestFlight from main.
    `UniVPN.ipa` is also in the `ios-app` artifact.
 4. **App Store Connect**: a new app "Uni VPN", bundle ID `de.davidvinu.univpn`, primary language
    English, the encryption question (standard encryption only, exempt), the privacy answers (no
-   data collected; the password stays on the phone) and the privacy policy URL of the download
-   page.
+   data collected; the password stays on the phone, as the `PrivacyInfo.xcprivacy` of each
+   target says) and the privacy policy URL of the download page.
 5. **TestFlight**: the first build of each version waits for a short beta review; then add
    testers by e-mail. Real tests need a real university account (see below).
 6. **App Review**: VPN apps are reviewed by hand. The notes should say that the app sets up the

@@ -27,6 +27,9 @@ targets:
     type: application
     platform: iOS
     sources:
+      # Each target's folder brings its PrivacyInfo.xcprivacy as a resource (App, Tunnel,
+      # Control): the reasons App Store Connect asks for, for the core's stat and clock and the
+      # App Group's settings.
       - path: App
       - path: Shared
       # The Control Center button's intent runs in the app's process (Control/SetVPN.swift).

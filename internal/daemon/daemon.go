@@ -143,7 +143,8 @@ type Options struct {
 	PortalClient PortalClient
 	// ReadyFile, when set, is created once both ports are ours, and without either port the
 	// daemon ends (PortsTaken) instead of running without it. On a phone any app can listen
-	// on 127.0.0.1 first: the Android app talks to its core only while this file exists.
+	// on 127.0.0.1 first: the Android and iPhone apps talk to their core only while this file
+	// exists.
 	ReadyFile string
 }
 
@@ -223,6 +224,7 @@ type Daemon struct {
 	stop      chan struct{}
 	stopOnce  sync.Once
 	started   chan struct{}
+	readyOnce sync.Once
 }
 
 // New builds the daemon; Run starts it.
@@ -981,6 +983,9 @@ func (d *Daemon) Run() {
 	d.mu.Unlock()
 	d.bindForwarder()
 	if ready := d.opts.ReadyFile; ready != "" {
+		// Left by a core that was killed (the iPhone ends an extension over its memory limit):
+		// the lock is ours, so it is no other core's file.
+		os.Remove(ready)
 		if server == nil || d.forwarder.Addr() == nil {
 			d.PortsTaken = true
 			d.forwarder.Stop()
@@ -992,7 +997,7 @@ func (d *Daemon) Run() {
 		if err := os.WriteFile(ready, nil, 0o600); err != nil {
 			d.logf(slog.LevelError, "Could not write %s: %s", ready, err)
 		}
-		defer os.Remove(ready)
+		defer d.dropReady()
 	}
 	tickerDone := make(chan struct{})
 	go func() { d.ticker(); close(tickerDone) }()
@@ -1034,13 +1039,26 @@ func (d *Daemon) Run() {
 // Stop ends Run.
 func (d *Daemon) Stop() { d.stopOnce.Do(func() { close(d.stop) }) }
 
-// Unbind frees the SOCKS and status ports at once, for a caller that will not wait for Run to
-// end (cmd/uni-vpn-ios). Call it after Stop, so the ticker no longer binds the SOCKS port again.
+// Unbind frees the SOCKS and status ports and the ready file at once, for a caller that will
+// not wait for Run to end (cmd/uni-vpn-ios). Call it after Stop, so the ticker no longer binds
+// the SOCKS port again.
 func (d *Daemon) Unbind() {
 	d.forwarder.Unbind()
 	if server := d.HTTP(); server != nil {
 		server.Unbind()
 	}
+	d.dropReady()
+}
+
+// dropReady removes the ready file once: in Unbind, while the lock is still ours, or when Run
+// ends. A daemon still ending after Unbind must not remove the file of the core that has the
+// ports by then (the iPhone's app and its tunnel hand them over).
+func (d *Daemon) dropReady() {
+	d.readyOnce.Do(func() {
+		if d.opts.ReadyFile != "" {
+			os.Remove(d.opts.ReadyFile)
+		}
+	})
 }
 
 // bindForwarder opens the browser's port. If another program holds it, the ticker tries again
@@ -1140,6 +1158,10 @@ func (d *Daemon) acquire(ctx context.Context) (int, bool) {
 			return 0, false
 		}
 		d.mu.Lock()
+		if ctx.Err() != nil { // dropped by CloseAll while waking up
+			d.mu.Unlock()
+			return 0, false
+		}
 	}
 }
 
@@ -1234,6 +1256,9 @@ func (d *Daemon) RequestDisconnect() {
 		<-done
 		d.mu.Lock()
 	}
+	// No tunnel yet (probing, waiting for the next code): a page still waiting for one would
+	// start the loop again at the state change below.
+	d.unlocked(d.closeAll)
 	if !d.state.final() {
 		d.set(Idle, messages.NotConnected)
 	}

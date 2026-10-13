@@ -68,9 +68,11 @@ xcodebuild -create-xcframework \
   -library "$work/iphonesimulator/libunivpn.a" \
   -output "$build/UniVPNCore.xcframework"
 
-# Settings, Open source licenses shows these: Uni VPN, openconnect, OpenSSL and every Go module
-# in the core. libxml2 and zlib are part of iOS.
+# Settings, Open source licenses shows these: Uni VPN, openconnect, OpenSSL, Go (its runtime and
+# standard library are in the core) and every Go module in the core. libxml2 and zlib are part
+# of iOS.
 cp "$root/LICENSE" "$build/licenses/uni-vpn-LICENSE"
+cp "$(cd "$root" && go env GOROOT)/LICENSE" "$build/licenses/go-LICENSE"
 cp "$native_dir/iphoneos-arm64/licenses/"* "$build/licenses/"
 (cd "$root" && CGO_ENABLED=1 GOOS=ios GOARCH=arm64 go list -tags libopenconnect -deps \
   -f '{{with .Module}}{{if not .Main}}{{.Path}}|{{.Dir}}{{end}}{{end}}' ./cmd/uni-vpn-ios) | sort -u |

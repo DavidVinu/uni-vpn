@@ -5,7 +5,8 @@
 #define UNIVPN_CORE_H
 
 // Starts the daemon in this process: 0 started, 1 another process holds the lock (after
-// waiting lockWaitMs), 2 error. All arguments are C strings; the core copies them.
+// waiting lockWaitMs), 2 error, 3 another app holds one of its ports. All arguments are C
+// strings; the core copies them.
 int UniVPNStart(char *configHome, char *stateHome, char *apiToken, char *secretsKeyHex, char *deviceName, char *lockWaitMs);
 
 // Stops the daemon. Returns within about 5 seconds with the lock and the ports released, so

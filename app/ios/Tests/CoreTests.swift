@@ -35,6 +35,13 @@ final class CoreTests: XCTestCase {
         let locales = await API.get("/locales.json")
         XCTAssertTrue(locales.ok)
         XCTAssertNotNil(locales.json?.object("catalogs")?.object("de"))
+        // The core says it holds its ports; the text the app shows when it does not is the
+        // core's own.
+        XCTAssertTrue(CoreHost.ready)
+        for code in ["en", "de", "fr", "es", "zh-Hans", "zh-Hant"] {
+            let core = locales.json?.object("catalogs")?.object(code)?.string("phone.msg.port_in_use")
+            XCTAssertEqual(Strings.portTaken([code]), core, code)
+        }
     }
 
     @MainActor

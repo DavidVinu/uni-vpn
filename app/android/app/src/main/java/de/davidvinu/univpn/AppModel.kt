@@ -88,10 +88,14 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     fun enterPairCode(code: String, inSetup: Boolean = true) {
         if (pairBusy) return
         pairBusy = true
+        // The setup page stays for its last page ("All set"), also while the core already
+        // counts as set up and its answer is still on the way (no Home in between).
+        if (inSetup) setupFinishing = true
         viewModelScope.launch {
             val result = post("/api/sync/enter", JSONObject().put("code", code), timeoutMs = 60_000)
-            // Set up now: the setup page stays for its last page ("All set").
-            if (result.ok && inSetup) setupFinishing = true
+            // Not linked, or linked without the account (a university this version does not
+            // know yet, for example): still to be set up.
+            if (inSetup && (!result.ok || setupNeeded)) setupFinishing = false
             pairBusy = false
             pairResult = result
         }

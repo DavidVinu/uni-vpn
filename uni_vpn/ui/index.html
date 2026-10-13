@@ -463,7 +463,10 @@ async function refresh() {
   if (refreshing) return;  // a slow answer must not overwrite a newer one
   refreshing = true;
   try {
-    S = await (await fetch("/status.json", {cache: "no-store"})).json();
+    const res = await fetch("/status.json", {cache: "no-store"});
+    // Another account's uni-vpn has the port now (fast user switching): its page says so.
+    if (res.status === 403) { location.reload(); return; }
+    S = await res.json();
     $("offline").hidden = true;
   } catch (e) {
     $("offline").hidden = false;
@@ -476,6 +479,7 @@ async function refresh() {
   if (view === "pair") { renderPair(); return; }
   if (S.setup_needed && !setupDone) {
     if (view !== "setup") { show("setup"); await loadUniversities(); step(uni ? "step1" : "step0", uni && $("s-user").value ? "s-pw" : null); }
+    else if (!UNIS) loadUniversities();  // the core was away at the first try
     return;
   }
   if (view === "setup" && !setupSent && !changing) {
@@ -506,9 +510,10 @@ if (givenUser && USER_RE.test(givenUser)) $("s-user").value = givenUser;
 
 async function loadUniversities() {
   if (UNIS) return;
-  try { UNIS = (await (await fetch("/universities.json", {cache: "no-store"})).json()).universities; } catch (e) { UNIS = []; }
-  const given = UNIS.find((u) => u.id === params.get("university"));
-  if (given && given.mfa !== "saml") pick(given);
+  // Not kept when it fails: an empty list would make every university "Not listed".
+  try { UNIS = (await (await fetch("/universities.json", {cache: "no-store"})).json()).universities; } catch (e) { /* next time */ }
+  const given = (UNIS || []).find((u) => u.id === params.get("university"));
+  if (given && given.mfa !== "saml" && !uni) pick(given);
   numberSteps();
 }
 
@@ -593,6 +598,8 @@ async function detect(group) {
   $("s-mfa").value = d.suggestion.mfa;
   numberSteps();
 }
+// Another address (a typo fixed, a new gateway): Next asks it for its groups and second factor.
+$("s-host").oninput = () => { detectSeq++; $("s-detect").disabled = false; $("s-mfa-row").hidden = $("s-group-row").hidden = true; };
 $("s-detect").onclick = () => detect("");
 $("s-group").onchange = () => detect($("s-group").value);
 $("s-mfa").onchange = numberSteps;
@@ -1040,9 +1047,12 @@ window.addEventListener("hashchange", () => {
 // Account rows: the assistant again, prefilled, back to Settings when done. Role model: macOS
 // System Settings (a row opens its page, the back arrow returns without saving).
 async function startChange(first) {
+  // Without the list the university would look "Not listed": the row waits for the core (the
+  // banner says it is away).
+  await loadUniversities();
+  if (!UNIS) return false;
   changing = true;
   setupDone = setupSent = false;
-  await loadUniversities();
   const current = UNIS.find((u) => u.id === S.university);
   if (current) {
     pick(current);
@@ -1068,9 +1078,10 @@ async function startChange(first) {
   err("a-err", "");
   show("setup");
   step(changingTotp && autoOK() ? "step2a" : first);
+  return true;
 }
 async function resumeAuto() {
-  await startChange("step2");
+  if (!await startChange("step2")) return;
   autoRunning = setupSent = true;
   autoSentAt = 0;
 }

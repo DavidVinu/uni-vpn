@@ -194,11 +194,19 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
         error = result.error
     }
 
-    // Another device's code, the same way.
+    // Another device's code, the same way. Linked, but some settings could not be used here:
+    // the answer says so, and if the account was one of them this phone is set up by hand (as
+    // on the desktop).
     LaunchedEffect(model.pairResult) {
         val result = model.pairResult ?: return@LaunchedEffect
         model.pairResult = null
-        if (result.ok) go(DONE) else error = result.error
+        if (!result.ok) {
+            error = result.error
+            return@LaunchedEffect
+        }
+        val note = result.json?.let { model.strings.message(it.optString("error"), it.optJSONObject("error_t")) }?.ifEmpty { null }
+        go(if (model.setupNeeded) UNIVERSITY else DONE)
+        error = note
     }
 
     // While connecting: the first sign-in tells whether everything was right (setupProgress).
@@ -480,6 +488,8 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // Settings another device has that could not be used here.
+                ErrorText(error)
                 Spacer(Modifier.height(24.dp))
                 // Tailscale: the system's VPN prompt follows the sign-in.
                 Button(onClick = {

@@ -15,6 +15,8 @@ using System.Drawing.Drawing2D;
 using System.IO;
 using System.IO.Pipes;
 using System.Net;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using System.Threading;
 using System.Web.Script.Serialization;
@@ -31,6 +33,9 @@ static class Program
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     static extern bool SetProcessDPIAware();
 
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    static extern bool GetNamedPipeServerSessionId(Microsoft.Win32.SafeHandles.SafePipeHandle pipe, out uint session);
+
     [STAThread]
     static void Main(string[] args)
     {
@@ -43,7 +48,11 @@ static class Program
             catch (Exception) { }
         }
         bool first;
-        string pipe = "uni-vpn-app-" + Environment.UserName;
+        // Every account on the computer sees the same pipe names (fast user switching): this
+        // one is this account's in this sign-in session.
+        int session = Process.GetCurrentProcess().SessionId;
+        string pipe;
+        using (WindowsIdentity me = WindowsIdentity.GetCurrent()) pipe = "uni-vpn-app-" + me.User.Value + "-" + session;
         using (Mutex mutex = new Mutex(true, "Local\\uni-vpn-app", out first))
         {
             if (!first)
@@ -51,16 +60,27 @@ static class Program
                 // Already running: hand over what to show and quit, like a second click on the icon.
                 string page = Options.Page(args);
                 if (page == null) return;
-                try
+                // This version's name, then an earlier version's: that one runs until it restarts after an update.
+                foreach (string name in new string[] { pipe, "uni-vpn-app-" + Environment.UserName })
                 {
-                    using (NamedPipeClientStream client = new NamedPipeClientStream(".", pipe, PipeDirection.Out))
+                    try
                     {
-                        client.Connect(3000);
-                        byte[] data = Encoding.UTF8.GetBytes(page);
-                        client.Write(data, 0, data.Length);
+                        using (NamedPipeClientStream client = new NamedPipeClientStream(".", name, PipeDirection.Out))
+                        {
+                            client.Connect(name == pipe ? 3000 : 1000);
+                            // Another account can open a pipe of this name first: it must not get the
+                            // page (an otpauth link carries the key). Its programs run in its own session.
+                            uint server;
+                            if (GetNamedPipeServerSessionId(client.SafePipeHandle, out server) && server == (uint)session)
+                            {
+                                byte[] data = Encoding.UTF8.GetBytes(page);
+                                client.Write(data, 0, data.Length);
+                            }
+                            return;
+                        }
                     }
+                    catch (Exception) { }
                 }
-                catch (Exception) { }
                 return;
             }
             Application.EnableVisualStyles();
@@ -182,7 +202,13 @@ class TrayApp : ApplicationContext
         {
             try
             {
-                using (NamedPipeServerStream server = new NamedPipeServerStream(pipe, PipeDirection.In))
+                // Only this account may open it or make another instance of it (by default every
+                // account may read).
+                PipeSecurity security = new PipeSecurity();
+                using (WindowsIdentity me = WindowsIdentity.GetCurrent())
+                    security.AddAccessRule(new PipeAccessRule(me.User, PipeAccessRights.FullControl, AccessControlType.Allow));
+                using (NamedPipeServerStream server = new NamedPipeServerStream(pipe, PipeDirection.In, 1,
+                    PipeTransmissionMode.Byte, PipeOptions.None, 0, 0, security))
                 {
                     server.WaitForConnection();
                     using (StreamReader reader = new StreamReader(server, Encoding.UTF8))

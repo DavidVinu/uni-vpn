@@ -64,6 +64,7 @@ enum API {
 
     static func call(_ method: String, _ path: String, body: [String: Any]? = nil, timeout: TimeInterval = 10,
                      token: Bool = true) async -> Reply {
+        guard CoreHost.ready else { return Reply(status: 0, json: nil, text: "the core is not ready") }
         guard let url = URL(string: base + path) else { return Reply(status: 0, json: nil, text: "bad path") }
         var request = URLRequest(url: url, timeoutInterval: timeout)
         request.httpMethod = method
