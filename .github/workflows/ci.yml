@@ -832,6 +832,7 @@ jobs:
           $web = @(Get-CimInstance Win32_Process -Filter "Name = 'msedgewebview2.exe'" | Where-Object { $_.CommandLine -like "*uni-vpn\WebView2*" })
           $browser = @(Get-CimInstance Win32_Process -Filter "Name = 'msedge.exe' OR Name = 'chrome.exe' OR Name = 'firefox.exe'" | Where-Object { $_.CommandLine -like "*127.0.0.1:1081*" })
           Write-Host "app window WebView2 processes: $($web.Count); browser with the page: $($browser.Count)"
+          Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\app.log" -ErrorAction SilentlyContinue
           $desktop = "$env:ProgramFiles\uni-vpn\desktop"
           $env:PATH = "$desktop;$env:PATH"
           try {

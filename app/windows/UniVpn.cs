@@ -470,11 +470,14 @@ class MainWindow : Form
         {
             await view.EnsureCoreWebView2Async(null);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             // No WebView2 runtime (Windows 10 without a current Edge): the page asked for in the
-            // browser. This can happen before the constructor returns; Close then disposes the window.
+            // browser, but not an otpauth link's key (the browser's history would keep it). This
+            // can happen before the constructor returns; Close then disposes the window.
+            Note("WebView2 did not start: " + ex.GetType().FullName + " (0x" + ex.HResult.ToString("X8") + "): " + ex.Message);
             string page = pending ?? "";
+            if (page.StartsWith("#otpauth=")) page = "";
             try { Process.Start(baseUrl + (page.StartsWith("&") ? "?" + page.Substring(1) : page)); }
             catch (Exception) { }
             quitting = true;
@@ -519,6 +522,18 @@ class MainWindow : Form
         };
         ready = true;
         ShowPage(pending ?? "");
+    }
+
+    // Why the window did not open, for a bug report: the latest line only, next to the service's log.
+    static void Note(string text)
+    {
+        try
+        {
+            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "uni-vpn", "logs");
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(Path.Combine(dir, "app.log"), DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + " " + text + Environment.NewLine);
+        }
+        catch (Exception) { }
     }
 
     bool Local(string uri)
