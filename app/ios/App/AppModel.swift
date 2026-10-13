@@ -273,6 +273,8 @@ final class AppModel {
         setupFinishing = false
         setup = SetupState()
         auto.cancel()
+        // Another university can bring other websites: the proxy rule follows now, not at the next poll.
+        domainsChanged()
         home()
     }
 }

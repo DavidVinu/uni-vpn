@@ -65,6 +65,7 @@ import de.davidvinu.univpn.MainActivity
 import de.davidvinu.univpn.R
 import de.davidvinu.univpn.Scanner
 import de.davidvinu.univpn.Strings
+import de.davidvinu.univpn.UniVpnService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -194,6 +195,8 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
     fun finishChange() {
         model.changingAccount = false
         model.setupFinishing = false
+        // Another university can bring other websites: the proxy rule follows now, not at the next poll.
+        UniVpnService.refresh(context)
         model.home()
     }
 
