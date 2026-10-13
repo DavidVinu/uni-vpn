@@ -270,6 +270,25 @@ jobs:
           path: runtime-tar
           merge-multiple: true
       - run: mkdir runtime && for f in runtime-tar/*.tar.gz; do tar -xzf "$f" -C runtime; done && ls -l runtime/*/bin/openconnect
+      # The Intel programs on the oldest macOS the .pkg installs on (distribution.xml), which this
+      # runner has: dyld refuses a library built for a newer one or one that needs a symbol it lacks.
+      # build-runtime.sh marks libraries Homebrew built on the newer runner for that macOS.
+      - name: The Intel openconnect and ocproxy start on macOS 14
+        run: |
+          sw_vers -productVersion
+          if ! arch -x86_64 /usr/bin/true 2>/dev/null; then
+            sudo softwareupdate --install-rosetta --agree-to-license
+          fi
+          test -x runtime/x86_64/bin/openconnect && test -x runtime/x86_64/bin/ocproxy
+          arch -x86_64 runtime/x86_64/bin/openconnect --version
+          # ocproxy has no --version; it refuses -h and stops. dyld aborts it with a signal instead.
+          code=0
+          out=$(arch -x86_64 runtime/x86_64/bin/ocproxy -h </dev/null 2>&1) || code=$?
+          echo "$out"
+          if [ "$code" -ge 128 ] || grep -q dyld <<<"$out"; then
+            echo "::error::the Intel ocproxy does not start on macOS 14"
+            exit 1
+          fi
       # The Go core for both processors (packaging/stage-app.sh --go darwin/universal).
       - uses: actions/setup-go@v5
         with:
@@ -555,6 +574,16 @@ jobs:
             dir=$(find build/UniVPN.xcarchive/Products -name "$bundle" -type d | head -n 1)
             if [ -z "$dir" ] || [ ! -f "$dir/PrivacyInfo.xcprivacy" ]; then
               echo "::error::$bundle has no PrivacyInfo.xcprivacy"
+              exit 1
+            fi
+          done
+          # Nor one that calls a disk space API (statfs and the like) its manifest does not
+          # declare: the core needs none (openconnect is built without, build-native.sh).
+          app=$(find build/UniVPN.xcarchive/Products -name UniVPN.app -type d | head -n 1)
+          for binary in "$app/UniVPN" "$app/PlugIns/Tunnel.appex/Tunnel"; do
+            symbols=$(nm -u -j "$binary")
+            if disk=$(grep -E '(^|[[:space:]])_(f?statv?fs(64)?|f?getattrlist|getattrlistat)$' <<<"$symbols"); then
+              echo "::error::$(basename "$binary") calls a disk space API: $(echo $disk)"
               exit 1
             fi
           done

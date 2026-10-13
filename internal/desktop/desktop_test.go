@@ -196,6 +196,24 @@ func TestMacOSRegistersTheReadyApp(t *testing.T) {
 	}
 }
 
+// The Repair button runs setup from the app window: the menu bar item stays as it is, a login
+// item that is not loaded is loaded.
+func TestMacOSRepairLeavesTheRunningAppAlone(t *testing.T) {
+	h := newHarness(t, "darwin")
+	touch(t, filepath.Join(h.d.PackageDir, "app", "bin", "uni-vpn-core"), "")
+	app := filepath.Dir(filepath.Dir(h.d.PackageDir))
+	touch(t, filepath.Join(app, "Contents", "MacOS", AppName), "")
+	login := h.d.LoginPath()
+	if !h.d.Repair(1081, func(path string) { h.created = append(h.created, path) }) ||
+		!reflect.DeepEqual(h.created, []string{login}) {
+		t.Fatal(h.created, h.out.String())
+	}
+	if !h.ran("launchctl", "bootstrap", "gui/501", login) || h.ran("launchctl", "bootout", "gui/501", login) ||
+		h.ran("pkill", "-x", AppName) {
+		t.Fatal(h.commands)
+	}
+}
+
 func TestMacOSAppBuiltForAnotherPortIsNotUsed(t *testing.T) {
 	h := newHarness(t, "darwin")
 	app := filepath.Join(h.home, "Applications", "Uni VPN.app")
@@ -411,6 +429,18 @@ func TestWindowsRegistersTheShippedApp(t *testing.T) {
 	}
 }
 
+func TestWindowsRepairLeavesTheRunningAppAlone(t *testing.T) {
+	h := newHarness(t, "windows")
+	touch(t, h.d.WindowsExe(), "")
+	if !h.d.Repair(1081, func(string) {}) || h.ran("taskkill", "/F", "/IM", "Uni VPN.exe") {
+		t.Fatal(h.commands)
+	}
+	// The shortcuts again; the login item's start quits at once when a copy runs.
+	if !slices.ContainsFunc(h.commands, func(c []string) bool { return c[0] == "powershell.exe" }) {
+		t.Fatal(h.commands)
+	}
+}
+
 // --- Linux ---
 
 func TestDesktopEntryQuotesAndNamesTheWindowClass(t *testing.T) {
@@ -475,6 +505,53 @@ func TestLinuxApp(t *testing.T) {
 		if !reflect.DeepEqual(got, []string{python, filepath.Join(h.d.Root, "app", "linux", "uni-vpn-app.py"),
 			"--port", "1081", "--page", "#settings"}) {
 			t.Fatal(got)
+		}
+	}
+}
+
+// The Repair button: a running panel icon (and its window) stays; one that is not running is
+// started outside the repair's systemd-run unit, which systemd ends with everything in it.
+func TestLinuxRepair(t *testing.T) {
+	posixOnly(t)
+	bin := t.TempDir()
+	touch(t, filepath.Join(bin, "systemd-run"), "#!/bin/sh\n")
+	t.Setenv("PATH", bin)
+	for _, running := range []bool{true, false} {
+		h := newHarness(t, "linux")
+		python := filepath.Join(h.home, "python3")
+		touch(t, python, "#!/bin/sh\n")
+		h.d.Candidates = []string{python}
+		script := filepath.Join(h.d.Root, "app", "linux", "uni-vpn-app.py")
+		touch(t, script, "")
+		h.d.Running = func(arg string) []Process {
+			if arg != script {
+				t.Fatal(arg)
+			}
+			if running {
+				return []Process{{PID: 42, Args: []string{python, script, "--port", "1081"}}}
+			}
+			return nil
+		}
+		getenv := h.d.Getenv
+		h.d.Getenv = func(key string) string {
+			if key == "INVOCATION_ID" {
+				return "repair"
+			}
+			return getenv(key)
+		}
+		if !h.d.Repair(1081, func(path string) { h.created = append(h.created, path) }) || h.ran("pkill", "-f", script) {
+			t.Fatal(h.commands)
+		}
+		if !slices.Contains(h.created, h.d.LoginPath()) {
+			t.Fatal(h.created)
+		}
+		var want [][]string
+		if !running {
+			want = [][]string{{filepath.Join(bin, "systemd-run"), "--user", "--scope", "--quiet", "--collect",
+				python, script, "--port", "1081", "--hidden"}}
+		}
+		if !reflect.DeepEqual(h.spawns, want) {
+			t.Fatal(running, h.spawns)
 		}
 	}
 }

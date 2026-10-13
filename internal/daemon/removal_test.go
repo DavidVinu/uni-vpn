@@ -115,8 +115,9 @@ func TestRepairRunsSetupWithoutTheInstallerScripts(t *testing.T) {
 	}
 	cmd := RepairCommand()
 	exe, _ := os.Executable()
-	tail := cmd[len(cmd)-3:]
-	if tail[0] != exe || tail[1] != "setup" || tail[2] != "--no-browser" {
+	// --repair: the app window the user clicked Repair in stays open.
+	tail := cmd[len(cmd)-4:]
+	if tail[0] != exe || tail[1] != "setup" || tail[2] != "--no-browser" || tail[3] != "--repair" {
 		t.Fatal(cmd)
 	}
 }

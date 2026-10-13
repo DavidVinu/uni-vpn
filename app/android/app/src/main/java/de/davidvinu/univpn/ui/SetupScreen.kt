@@ -64,9 +64,11 @@ import de.davidvinu.univpn.AppModel
 import de.davidvinu.univpn.MainActivity
 import de.davidvinu.univpn.R
 import de.davidvinu.univpn.Scanner
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.text.Normalizer
+import java.util.UUID
 
 private const val WELCOME = -1
 private const val CODE = -2
@@ -116,10 +118,17 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
     var universities by remember { mutableStateOf<List<University>>(emptyList()) }
     var uniId by rememberSaveable { mutableStateOf(if (model.changingAccount) status.optString("university") else "") }
     var query by rememberSaveable { mutableStateOf("") }
-    var host by rememberSaveable { mutableStateOf("") }
-    var groups by rememberSaveable { mutableStateOf<List<String>>(emptyList()) }
-    var group by rememberSaveable { mutableStateOf("") }
-    var otherMfa by rememberSaveable { mutableStateOf("") }
+    // Not listed: its gateway settings as they are (as on the desktop), or changing only the
+    // username would ask for the VPN address again.
+    val current = status.takeIf { model.changingAccount && it.optString("university") == "other" }
+    var host by rememberSaveable {
+        mutableStateOf(current?.let { it.optString("host") + it.optString("usergroup").let { g -> if (g.isEmpty()) "" else "/$g" } } ?: "")
+    }
+    var groups by rememberSaveable { mutableStateOf(listOfNotNull(current?.optString("authgroup")?.ifEmpty { null })) }
+    var group by rememberSaveable { mutableStateOf(groups.firstOrNull() ?: "") }
+    // The account's own group: shown and kept, also when it is the only one.
+    var ownGroup by rememberSaveable { mutableStateOf(groups.isNotEmpty()) }
+    var otherMfa by rememberSaveable { mutableStateOf(current?.optString("mfa")?.ifEmpty { "none" } ?: "") }
     var detecting by remember { mutableStateOf(false) }
     var user by rememberSaveable { mutableStateOf(if (model.changingAccount) status.optString("user") else "") }
     var password by rememberSaveable { mutableStateOf("") }
@@ -128,11 +137,18 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
     // "Set it up by hand instead" on the page for one code.
     var byHand by rememberSaveable { mutableStateOf(false) }
     var pairCode by rememberSaveable { mutableStateOf("") }
+    // Whose answer model.pairResult is (it survives turning the phone, like the page).
+    val pairOwner = rememberSaveable { UUID.randomUUID().toString() }
     var error by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
-        val list = model.get("/universities.json")?.optJSONArray("universities")
-        universities = list?.let { a -> (0 until a.length()).map { University(a.getJSONObject(it)) } } ?: emptyList()
+        // Again until it arrives: without it every university would look "Not listed" (the core
+        // was away at the first try, restarting after Repair for example).
+        while (universities.isEmpty()) {
+            val list = model.get("/universities.json")?.optJSONArray("universities")
+            if (list != null) universities = (0 until list.length()).map { University(list.getJSONObject(it)) }
+            if (universities.isEmpty()) delay(1000)
+        }
     }
     val uni = universities.firstOrNull { it.id == uniId }
     val isOther = uniId == "other"
@@ -159,7 +175,7 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
             val parts = host.trim().replace(Regex("^https?://", RegexOption.IGNORE_CASE), "").split("/", limit = 2)
             profile.put("host", parts[0]).put("mfa", otherMfa)
             if (parts.size > 1 && parts[1].isNotEmpty()) profile.put("usergroup", parts[1])
-            if (groups.size > 1 && group.isNotEmpty()) profile.put("authgroup", group)
+            if ((groups.size > 1 || ownGroup) && group.isNotEmpty()) profile.put("authgroup", group)
         }
         return JSONObject().put("user", user.trim()).put("password", password).put("university", uniId).put("profile", profile)
     }
@@ -198,7 +214,7 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
     // the answer says so, and if the account was one of them this phone is set up by hand (as
     // on the desktop).
     LaunchedEffect(model.pairResult) {
-        val result = model.pairResult ?: return@LaunchedEffect
+        val result = model.pairResult?.takeIf { model.pairResultFor == pairOwner } ?: return@LaunchedEffect
         model.pairResult = null
         if (!result.ok) {
             error = result.error
@@ -276,7 +292,7 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
                             pairCode = code
                             go(CODE)
                             // Scanned codes go on by themselves.
-                            model.enterPairCode(code)
+                            model.enterPairCode(code, pairOwner)
                         }
                     }
                 }, modifier = Modifier.fillMaxWidth()) {
@@ -305,12 +321,16 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
                 Actions {
                     Button(enabled = !model.pairBusy && pairCode.isNotBlank(), onClick = {
                         error = null
-                        model.enterPairCode(pairCode)
+                        model.enterPairCode(pairCode, pairOwner)
                     }) { Text(model.t("app.next")) }
                 }
             }
 
-            UNIVERSITY -> Page {
+            // Changing the account waits for the list: without it the account's university would
+            // look "Not listed".
+            UNIVERSITY -> if (model.changingAccount && universities.isEmpty()) Page {
+                CircularProgressIndicator()
+            } else Page {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(model.t("app.university"), style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
                     Info(model, model.t("setup.find_help"))
@@ -343,17 +363,17 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
                 if (isOther) {
                     OutlinedTextField(
                         value = host,
-                        onValueChange = { host = it; otherMfa = ""; groups = emptyList() },
+                        onValueChange = { host = it; otherMfa = ""; groups = emptyList(); ownGroup = false },
                         label = { Text(model.t("setup.vpn_address")) },
                         placeholder = { Text("vpn.example.edu") },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false),
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    if (groups.size > 1) {
+                    if (groups.size > 1 || ownGroup) {
                         Choice(model.t("setup.group"), groups.map { it to it }, group) { picked ->
                             group = picked
-                            scope.launch { detect(model, host, picked, { detecting = it }, { error = it }) { g, gs, m -> group = g; groups = gs; otherMfa = m } }
+                            scope.launch { detect(model, host, picked, { detecting = it }, { error = it }) { g, gs, m -> group = g; groups = gs; otherMfa = m; ownGroup = false } }
                         }
                     }
                     if (otherMfa.isNotEmpty()) {
@@ -373,7 +393,7 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
                             uni?.mfa == "saml" -> error = model.t("setup.saml")
                             isOther && host.isBlank() -> error = model.t("setup.enter_address")
                             isOther && otherMfa.isEmpty() -> scope.launch {
-                                detect(model, host, "", { detecting = it }, { error = it }) { g, gs, m -> group = g; groups = gs; otherMfa = m }
+                                detect(model, host, "", { detecting = it }, { error = it }) { g, gs, m -> group = g; groups = gs; otherMfa = m; ownGroup = false }
                                 // Like the desktop page: whatever the check found, the choice
                                 // shows, so a gateway that does not answer can still be set up.
                                 if (otherMfa.isEmpty()) otherMfa = "totp_field"

@@ -34,6 +34,9 @@ final class SetupState {
     var host = ""
     var groups: [String] = []
     var group = ""
+    /// The account's own group (an account change): it shows, also as the only choice, until the
+    /// gateway is asked again.
+    private(set) var keptGroup = false
     var otherMfa = ""
     var detecting = false
     var user = ""
@@ -75,6 +78,7 @@ final class SetupState {
             host = newValue
             otherMfa = ""
             groups = []
+            keptGroup = false
         }
     }
 
@@ -88,6 +92,7 @@ final class SetupState {
         }
     }
     var isOther: Bool { uniId == "other" }
+    var showsGroups: Bool { groups.count > 1 || keptGroup }
     var mfa: String { isOther ? otherMfa : (uni?.mfa ?? "totp_field") }
     var needsTotp: Bool { SetupState.totpModes.contains(mfa) }
     /// One code from the user's app sets up the second factor (the desktop's "enroll").
@@ -108,14 +113,42 @@ final class SetupState {
         } else {
             step = .welcome
         }
-        if model.changingAccount {
-            uniId = status.string("university")
-            user = status.string("user")
-        }
-        Task {
+        // The university once the list is there (loadUniversities).
+        if model.changingAccount { user = status.string("user") }
+    }
+
+    /// The list, again until it comes: a core that is still starting or away for a moment must
+    /// not leave setup with "Not listed" alone. Runs while setup shows (SetupView's task).
+    func loadUniversities(_ model: AppModel) async {
+        while universities.isEmpty && !Task.isCancelled {
             let list = await model.get("/universities.json")?.objects("universities") ?? []
+            if list.isEmpty {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                continue
+            }
             universities = list.map(University.init)
+            // Only now: without the list every account would look "Not listed" (the desktop's
+            // startChange).
+            if model.changingAccount, let status = model.status { takeAccount(status) }
         }
+    }
+
+    /// An account change starts from the account as it is. Not listed: with its gateway settings
+    /// too, or Next would set the account up without them.
+    func takeAccount(_ status: JSON) {
+        let current = status.string("university")
+        if universities.contains(where: { $0.id == current }) {
+            uniId = current
+            return
+        }
+        uniId = "other"
+        let usergroup = status.string("usergroup")
+        host = status.string("host") + (usergroup.isEmpty ? "" : "/" + usergroup)
+        let factor = status.string("mfa")
+        otherMfa = factor.isEmpty ? "none" : factor
+        group = status.string("authgroup")
+        groups = group.isEmpty ? [] : [group]
+        keptGroup = !group.isEmpty
     }
 
     func go(_ next: Step) {
@@ -154,7 +187,7 @@ final class SetupState {
             profile["host"] = parts[0]
             profile["mfa"] = otherMfa
             if parts.count > 1 && !parts[1].isEmpty { profile["usergroup"] = parts[1] }
-            if groups.count > 1 && !group.isEmpty { profile["authgroup"] = group }
+            if showsGroups && !group.isEmpty { profile["authgroup"] = group }
         }
         var body: [String: Any] = [
             "user": user.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -203,18 +236,25 @@ final class SetupState {
     func enterCode(_ model: AppModel) async {
         busy = true
         error = nil
+        // Setup stays for its last page ("All set"), also while the core already counts as set
+        // up and its answer is still on the way: no Home in between (Android's enterPairCode).
+        model.setupFinishing = true
         let result = await model.post("/api/sync/enter", ["code": pairCode], timeout: 60)
         busy = false
+        if !result.ok || model.setupNeeded { model.setupFinishing = false }
+        // Linked, but some settings could not be used here: the core says so in a note.
+        let note: String? = result.json.map { model.strings.message($0.string("error"), $0.object("error_t")) }
+            .flatMap { $0.isEmpty ? nil : $0 }
         if !result.ok {
             error = result.error
         } else if model.setupNeeded {
-            // Linked, but the account did not come over (the core says so in a note): setup
-            // goes on by hand with that note, not with an "All set" that would bring it back.
+            // The account did not come over: setup goes on by hand with that note, not with an
+            // "All set" that would bring it back.
             go(.university)
-            error = result.json.map { model.strings.message($0.string("error"), $0.object("error_t")) }
+            error = note
         } else {
-            model.setupFinishing = true
             go(.done)
+            error = note
         }
     }
 
@@ -236,6 +276,7 @@ final class SetupState {
             error = model.t("setup.saml")
             return
         }
+        keptGroup = false
         group = d.string("group")
         groups = d.strings("groups")
         let suggested = d.object("suggestion")?.string("mfa") ?? ""

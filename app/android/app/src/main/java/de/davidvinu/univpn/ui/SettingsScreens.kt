@@ -348,11 +348,11 @@ fun LicensesScreen(model: AppModel) {
 }
 
 /** Scans the code another device shows ("Use settings from another device" on a computer). */
-fun scanPairing(context: android.content.Context, model: AppModel, onError: (String?) -> Unit) {
+fun scanPairing(context: android.content.Context, model: AppModel, owner: String, onError: (String?) -> Unit) {
     Scanner.scanQr(context, { onError(model.t("phone.scan_failed")) }) { value ->
         if (value == null || !value.startsWith("UNIVPN:")) return@scanQr
         // The answer comes as model.pairResult (PairScreen).
         onError(null)
-        model.enterPairCode(value.removePrefix("UNIVPN:"), inSetup = false)
+        model.enterPairCode(value.removePrefix("UNIVPN:"), owner, inSetup = false)
     }
 }

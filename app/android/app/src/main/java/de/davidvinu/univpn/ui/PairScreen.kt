@@ -55,6 +55,7 @@ import de.davidvinu.univpn.AppModel
 import de.davidvinu.univpn.MainActivity
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
+import java.util.UUID
 
 /**
  * Add a device. Role models: Signal "Link a device" and WhatsApp linked devices: one device
@@ -74,6 +75,8 @@ fun PairScreen(model: AppModel, mode: String, activity: MainActivity) {
     var attempt by rememberSaveable { mutableIntStateOf(0) }
     // The attempt whose code shows.
     var offered by rememberSaveable { mutableIntStateOf(-1) }
+    // Whose answer model.pairResult is: one that comes after the user left is not for this visit.
+    val pairOwner = rememberSaveable { UUID.randomUUID().toString() }
 
     LaunchedEffect(attempt) {
         if (offered == attempt && shown != null) return@LaunchedEffect
@@ -108,7 +111,7 @@ fun PairScreen(model: AppModel, mode: String, activity: MainActivity) {
     }
     // A typed or scanned code: its answer comes through the model, also after turning the phone.
     LaunchedEffect(model.pairResult) {
-        val result = model.pairResult ?: return@LaunchedEffect
+        val result = model.pairResult?.takeIf { model.pairResultFor == pairOwner } ?: return@LaunchedEffect
         model.pairResult = null
         if (!result.ok) {
             error = result.error
@@ -145,7 +148,7 @@ fun PairScreen(model: AppModel, mode: String, activity: MainActivity) {
                     if (model.pairBusy) CircularProgressIndicator()
                     Button(enabled = !model.pairBusy && typed.isNotBlank(), onClick = {
                         error = null
-                        model.enterPairCode(typed, inSetup = false)
+                        model.enterPairCode(typed, pairOwner, inSetup = false)
                     }) { Text(model.t("app.next")) }
                 }
                 else -> {
@@ -168,7 +171,7 @@ fun PairScreen(model: AppModel, mode: String, activity: MainActivity) {
                         )
                     }
                     TextButton(onClick = {
-                        scanPairing(context, model) { error = it }
+                        scanPairing(context, model, pairOwner) { error = it }
                     }) {
                         Icon(Icons.Outlined.QrCodeScanner, contentDescription = null)
                         Text("  " + model.t("phone.scan_code"))

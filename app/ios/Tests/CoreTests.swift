@@ -40,7 +40,9 @@ final class CoreTests: XCTestCase {
         XCTAssertTrue(CoreHost.ready)
         for code in ["en", "de", "fr", "es", "zh-Hans", "zh-Hant"] {
             let core = locales.json?.object("catalogs")?.object(code)?.string("phone.msg.port_in_use")
-            XCTAssertEqual(Strings.portTaken([code]), core, code)
+            XCTAssertEqual(Strings.portTaken("", [code]), core, code)
+            // The language chosen in Settings comes first.
+            XCTAssertEqual(Strings.portTaken(code, ["pt-BR"]), core, code)
         }
     }
 
@@ -96,5 +98,31 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(Strings.systemLanguage(["zh-Hans-CN"], codes: ["en"]), "zh-Hans")
         XCTAssertEqual(Strings.systemLanguage(["pt-BR"], codes: ["en", "de"]), "en")
         XCTAssertEqual(Strings.fill("{a} {b} {}", { $0 == "a" ? "x" : nil }), "x {b} {}")
+    }
+
+    /// Changing a "Not listed" account keeps its gateway: the address with its group path, the
+    /// second factor and the one group it has (the desktop's startChange).
+    @MainActor
+    func testANotListedAccountKeepsItsGateway() {
+        let setup = SetupState()
+        setup.universities = [University(json: JSON(["id": "tum", "mfa": "totp_field"]))]
+        setup.takeAccount(JSON(["university": "other", "host": "vpn.example.edu", "usergroup": "staff",
+                                "mfa": "duo_push", "authgroup": "Employees"]))
+        XCTAssertTrue(setup.isOther)
+        XCTAssertTrue(setup.showsGroups)
+        let profile = setup.request(secret: "")["profile"] as? [String: Any] ?? [:]
+        XCTAssertEqual(profile["host"] as? String, "vpn.example.edu")
+        XCTAssertEqual(profile["usergroup"] as? String, "staff")
+        XCTAssertEqual(profile["mfa"] as? String, "duo_push")
+        XCTAssertEqual(profile["authgroup"] as? String, "Employees")
+        // A new address asks the gateway again: no group until it answers.
+        setup.hostText = "vpn2.example.edu"
+        XCTAssertNil((setup.request(secret: "")["profile"] as? [String: Any])?["authgroup"])
+        // A listed one stays itself.
+        let listed = SetupState()
+        listed.universities = setup.universities
+        listed.takeAccount(JSON(["university": "tum", "host": "vpn.tum.de"]))
+        XCTAssertEqual(listed.uniId, "tum")
+        XCTAssertTrue((listed.request(secret: "")["profile"] as? [String: Any])?.isEmpty ?? false)
     }
 }

@@ -28,8 +28,11 @@ struct SetupView: View {
                     }
                 }
         }
-        // Once per setup run, also when a finished run hands over a fresh state.
-        .task(id: ObjectIdentifier(setup)) { setup.prepare(model) }
+        // Once per setup run, also when a finished run hands over a fresh state; then the list.
+        .task(id: ObjectIdentifier(setup)) {
+            setup.prepare(model)
+            await setup.loadUniversities(model)
+        }
     }
 
     private func title(_ setup: SetupState) -> String {
@@ -75,7 +78,13 @@ struct SetupView: View {
         switch setup.step {
         case .welcome: WelcomePage(model: model, setup: setup)
         case .code: CodePage(model: model, setup: setup)
-        case .university: UniversityPage(model: model, setup: setup)
+        case .university:
+            // An account change waits for the list, as on the desktop page.
+            if model.changingAccount && setup.universities.isEmpty {
+                ProgressView()
+            } else {
+                UniversityPage(model: model, setup: setup)
+            }
         case .signIn: SignInPage(model: model, setup: setup)
         case .secondFactor: SecondFactorPage(model: model, setup: setup)
         case .connecting: ConnectingPage(model: model, setup: setup)
@@ -189,7 +198,7 @@ private struct UniversityPage: View {
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                    if setup.groups.count > 1 {
+                    if setup.showsGroups {
                         Picker(model.t("setup.group"), selection: $setup.pickedGroup) {
                             ForEach(setup.groups, id: \.self) { Text($0).tag($0) }
                         }
@@ -358,6 +367,9 @@ private struct DonePage: View {
             Text(model.t(hasDomains ? "setup.all_set_sub" : "setup.all_set_no_domains"))
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
+            // Settings another device has that could not be used here (SetupState.enterCode).
+            ErrorText(text: model.setup.error)
+                .multilineTextAlignment(.center)
             Spacer()
             // Tailscale: the system's VPN prompt follows the sign-in.
             BottomButton(title: model.t("app.done")) {

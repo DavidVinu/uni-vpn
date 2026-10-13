@@ -229,8 +229,11 @@ final class AppModel {
         portTaken = false
         status = json
         // The Control Center button reads it without asking the core.
-        UserDefaults(suiteName: CoreHost.appGroup)?.set(!json.bool("setup_needed"), forKey: "setup_done")
+        let defaults = UserDefaults(suiteName: CoreHost.appGroup)
+        defaults?.set(!json.bool("setup_needed"), forKey: "setup_done")
         let setting = json.string("language")
+        // For the one text without the core (Strings.portTaken).
+        defaults?.set(setting, forKey: "language")
         let preferred = Locale.preferredLanguages
         let key = setting + "|" + preferred.joined(separator: ",")
         if locales == nil {

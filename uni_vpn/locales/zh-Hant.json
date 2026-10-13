@@ -212,6 +212,7 @@
   "phone.msg.repairing": "正在修復。",
   "phone.msg.repair_failed": "修復未完成。請再次輕觸「修復」，或重新啟動手機。",
   "phone.msg.not_running": "Uni VPN 未在執行。請關閉 App 後重新開啟。",
+  "phone.msg.keyring_locked": "無法在這支手機上儲存你的密碼。請釋放一些儲存空間，然後再試一次。",
   "phone.msg.hostscan_required": "你所在的大學會在連線前檢查裝置。Uni VPN 目前還無法做到。",
   "phone.enroll.clock": "請檢查手機時間是否正確，然後用新的驗證碼再試。",
   "phone.camera_use": "Uni VPN 使用相機掃描 QR 碼。",

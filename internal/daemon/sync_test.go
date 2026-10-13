@@ -412,3 +412,119 @@ func TestSyncEnterLinksWithANote(t *testing.T) {
 		t.Fatalf("status error %v after a good sync", problem)
 	}
 }
+
+// linkedWithoutAccount is a set-up laptop with the language de and automatic updates off, and a
+// desktop linked to it whose keyring refused the second factor: linked, still to be set up.
+// Both keyrings give back what was stored. groupReads counts the relay's group reads.
+func linkedWithoutAccount(t *testing.T) (laptop *Daemon, laptopH *harness, desktop *Daemon, desktopH *harness, groupReads *atomic.Int64) {
+	t.Helper()
+	ctx := context.Background()
+	relay, _ := relaytest.Start(t)
+	groupReads = &atomic.Int64{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/v1/group/") {
+			groupReads.Add(1)
+		}
+		relay.ServeHTTP(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	keyring := func(h *harness) func(*Options) {
+		return func(o *Options) {
+			o.PasswordSetter = func(pw string) error {
+				h.mu.Lock()
+				defer h.mu.Unlock()
+				h.stored, h.password = append(h.stored, pw), []byte(pw)
+				return nil
+			}
+		}
+	}
+	laptopH = newHarness(t)
+	laptopH.cfg.User = "ab123"
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := config.WriteInitial(path, "ab123", "heidelberg", nil); err != nil {
+		t.Fatal(err)
+	}
+	laptop = laptopH.start(syncOptions(srv.URL, dir, func(o *Options) { o.ConfigPath = path; keyring(laptopH)(o) }))
+	if err := laptop.SetLanguage("de"); err != nil {
+		t.Fatal(err)
+	}
+	if err := laptop.SetAutoUpdate(false); err != nil {
+		t.Fatal(err)
+	}
+	if err := laptop.sync.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	desktopH = newHarness(t)
+	desktopH.totpSetter = func(string) error { return errors.New("keyring locked") }
+	desktopDir := t.TempDir()
+	desktop = desktopH.start(syncOptions(srv.URL, desktopDir, func(o *Options) {
+		o.NeedsSetup, o.ConfigPath = true, filepath.Join(desktopDir, "config.toml")
+		keyring(desktopH)(o)
+	}))
+	offer, err := laptop.Sync("offer", pyjson.O())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pairing, _ := offer.Get("pairing")
+	code, _ := pairing.(pyjson.Object).Get("code")
+	if _, err := desktop.Sync("enter", pyjson.O("code", code)); err != nil {
+		t.Fatal(err)
+	}
+	if statusValue(t, desktop, "setup_needed") != true {
+		t.Fatal("want the desktop still to be set up")
+	}
+	return laptop, laptopH, desktop, desktopH, groupReads
+}
+
+// Waiting for setup by hand, the desktop does not sync over and over: each round took over the
+// websites again and woke the next.
+func TestLinkedWithoutTheAccountWaitsQuietly(t *testing.T) {
+	_, _, _, desktopH, groupReads := linkedWithoutAccount(t)
+	before := groupReads.Load()
+	desktopH.mu.Lock()
+	stored := len(desktopH.stored)
+	desktopH.mu.Unlock()
+	time.Sleep(time.Second)
+	desktopH.mu.Lock()
+	stored = len(desktopH.stored) - stored
+	desktopH.mu.Unlock()
+	if n := groupReads.Load() - before; n > 3 {
+		t.Fatalf("%d group reads and %d passwords stored in a second", n, stored)
+	}
+}
+
+// Then set up by hand: the laptop's language and automatic updates stay, the password typed
+// on the desktop reaches the laptop.
+func TestSetUpByHandAfterALinkKeepsTheGroupsSettings(t *testing.T) {
+	ctx := context.Background()
+	laptop, laptopH, desktop, desktopH, _ := linkedWithoutAccount(t)
+	time.Sleep(200 * time.Millisecond) // the round the link woke is over (the user reads the note)
+	desktop.sync.Sync(ctx)
+	desktopH.mu.Lock()
+	desktopH.totpSetter = nil
+	desktopH.mu.Unlock()
+	if err := desktop.CompleteSetup("ab123", "typed-by-hand", "base32:GEZDGNBVGY3TQOJQ", "heidelberg", nil); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		for _, d := range []*Daemon{desktop, laptop} {
+			if err := d.sync.Sync(ctx); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for name, d := range map[string]*Daemon{"laptop": laptop, "desktop": desktop} {
+		if lang, auto := statusValue(t, d, "language"), statusValue(t, d, "auto_update"); lang != "de" || auto != false {
+			t.Errorf("%s: language %v, automatic updates %v; want the laptop's de and off", name, lang, auto)
+		}
+	}
+	for name, h := range map[string]*harness{"laptop": laptopH, "desktop": desktopH} {
+		h.mu.Lock()
+		stored := slices.Clone(h.stored)
+		h.mu.Unlock()
+		if len(stored) == 0 || stored[len(stored)-1] != "typed-by-hand" {
+			t.Errorf("%s stored %v, want the password typed by hand last", name, stored)
+		}
+	}
+}

@@ -120,11 +120,14 @@ export PKG_CONFIG="pkg-config --static"
 # no net/if_utun.h, so tun.c builds without its own tun device; the tunnel goes to a socket
 # the core hands over (openconnect_setup_tun_fd). No external browser (configure would find the
 # build Mac's /usr/bin/open) and no iconv (it lives in a separate library on iOS; login forms
-# are UTF-8).
+# are UTF-8). No statfs: only the command line's key password from the file system ID uses it,
+# and App Store Connect refuses a build that calls a disk space API without a reason (CI checks
+# the binaries).
 run ./configure --host="$host" --prefix="$out" --disable-shared --enable-static --with-pic \
   --with-openssl --without-gnutls --disable-nls --disable-docs --without-libpskc --without-stoken \
   --without-libpcsclite --without-gssapi --without-libproxy --without-lz4 --with-builtin-json \
-  --with-vpnc-script=/dev/null --without-java --without-external-browser am_cv_func_iconv=no
+  --with-vpnc-script=/dev/null --without-java --without-external-browser am_cv_func_iconv=no \
+  ac_cv_func_statfs=no
 run make -j"$jobs" libopenconnect.la
 run make install-libLTLIBRARIES install-includeHEADERS install-pkgconfigDATA
 unset CC CFLAGS CPPFLAGS LDFLAGS PKG_CONFIG_LIBDIR PKG_CONFIG_PATH PKG_CONFIG

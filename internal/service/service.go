@@ -207,12 +207,17 @@ func (m *Manager) port() int {
 	return 1081
 }
 
+// statusTimeout bounds each status request (tests shorten it).
+var statusTimeout = 3 * time.Second
+
 // disconnectDaemon asks a running daemon to log out of the VPN. Ending the task kills it
 // outright, and the session would stay open on the server until it times out.
 func (m *Manager) disconnectDaemon(timeout time.Duration) {
 	base := fmt.Sprintf("http://127.0.0.1:%d", m.port())
 	// Never through a proxy: HTTP_PROXY or the Windows registry proxy would swallow the request.
-	client := &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{Proxy: nil}}
+	// The disconnect is answered once openconnect logged out: with a slow gateway that takes
+	// longer than a status request may.
+	client := &http.Client{Timeout: timeout, Transport: &http.Transport{Proxy: nil}}
 	defer client.CloseIdleConnections()
 	req, err := http.NewRequest("POST", base+"/api/disconnect", strings.NewReader("{}"))
 	if err != nil {
@@ -220,6 +225,7 @@ func (m *Manager) disconnectDaemon(timeout time.Duration) {
 	}
 	req.Header.Set("X-Uni-VPN", "1")
 	req.Header.Set("Content-Type", "application/json")
+	deadline := time.Now().Add(timeout)
 	resp, err := client.Do(req)
 	if err != nil {
 		return // not running
@@ -228,7 +234,7 @@ func (m *Manager) disconnectDaemon(timeout time.Duration) {
 	if resp.StatusCode >= 400 {
 		return // an older daemon without the API
 	}
-	deadline := time.Now().Add(timeout)
+	client.Timeout = statusTimeout
 	for time.Now().Before(deadline) {
 		resp, err := client.Get(base + "/status.json")
 		if err != nil {

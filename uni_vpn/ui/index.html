@@ -82,13 +82,12 @@ input:focus,textarea:focus,select:focus{border-color:var(--accent);box-shadow:0 
 .list>:first-child{border-top:0}
 .list summary,.list .item{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;cursor:pointer;list-style:none}
 .list summary::-webkit-details-marker{display:none}
-.list .val{color:var(--muted);max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.list .val{color:var(--muted);max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-left:auto}
 .list summary:after{content:"";width:8px;height:8px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(-45deg);margin-left:10px;transition:transform .2s}
 .list details[open] summary:after{transform:rotate(45deg)}
 .list .item{cursor:default}
 .list button.item{width:100%;font:inherit;color:inherit;background:none;border-left:0;border-right:0;border-bottom:0;text-align:left;cursor:pointer}
-.list button.item .val{display:flex;align-items:center}
-.list button.item .val:after{content:"";flex:none;width:8px;height:8px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(-45deg);margin-left:10px}
+.list button.item:after{content:"";flex:none;width:8px;height:8px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(-45deg);margin-left:10px}
 body.app{-webkit-user-select:none;user-select:none;cursor:default}
 body.app input,body.app textarea,body.app pre{-webkit-user-select:text;user-select:text}
 body.app .brand{visibility:hidden}
@@ -130,7 +129,7 @@ input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
 #pair-entry input{text-transform:uppercase;font-family:ui-monospace,"SF Mono",Consolas,monospace;letter-spacing:.08em;text-align:center}
 .list .item .remove{color:var(--bad);padding:4px 0 4px 12px}
 .list button.item.add{color:var(--accent)}
-.list button.item.add .val:after{display:none}
+.list button.item.add:after{display:none}
 #s-use-other{display:block;margin:16px auto 0}
 .offline{background:var(--bad);color:var(--on-color);border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:14px}
 </style>
@@ -512,6 +511,7 @@ async function loadUniversities() {
   if (UNIS) return;
   // Not kept when it fails: an empty list would make every university "Not listed".
   try { UNIS = (await (await fetch("/universities.json", {cache: "no-store"})).json()).universities; } catch (e) { /* next time */ }
+  if (UNIS && !$("s-uni-list").hidden) renderList();  // opened meanwhile with "Not listed" alone
   const given = (UNIS || []).find((u) => u.id === params.get("university"));
   if (given && given.mfa !== "saml" && !uni) pick(given);
   numberSteps();
@@ -559,6 +559,9 @@ function renderList() {
 
 function pick(u) {
   uni = u;
+  // A detection still running was for the address before (startChange fills it in after this).
+  detectSeq++;
+  $("s-detect").disabled = false;
   $("s-uni").value = u.name;
   closeList();
   $("s-other").hidden = u.id !== "other";
@@ -567,7 +570,7 @@ function pick(u) {
   if (u.id === "other") $("s-host").focus();
 }
 
-$("s-uni").oninput = () => { uni = null; $("s-other").hidden = true; err("s0-err", ""); active = -1; renderList(); };
+$("s-uni").oninput = () => { uni = null; detectSeq++; $("s-detect").disabled = false; $("s-other").hidden = true; err("s0-err", ""); active = -1; renderList(); };
 $("s-uni").onfocus = () => { if (!uni) renderList(); };
 $("s-uni").onblur = closeList;
 $("s-uni").onkeydown = (e) => {
@@ -594,7 +597,8 @@ async function detect(group) {
   if (d.error) { err("s0-err", tr(d.error, d.error_t)); return; }
   $("s-group").replaceChildren(...d.groups.map((g) => new Option(g, g, false, g === d.group)));
   $("s-group-row").hidden = d.groups.length < 2;
-  if (d.saml) { err("s0-err", t("setup.saml")); return; }
+  // No way on with this group: Next asks again, another group may do without a web page.
+  if (d.saml) { $("s-mfa-row").hidden = true; err("s0-err", t("setup.saml")); return; }
   $("s-mfa").value = d.suggestion.mfa;
   numberSteps();
 }

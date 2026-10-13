@@ -54,7 +54,7 @@ options:
   --no-gui              Ask in the terminal instead of opening the setup
                         assistant`,
 		options: []option{{"--dry-run", false}, {"--user", true}, {"--university", true}, {"--no-gui", false},
-			{"--no-browser", false}}}
+			{"--no-browser", false}, {"--repair", false}}}
 	uninstallCommand = command{name: "uninstall", usage: "usage: uni-vpn uninstall [-h] [--yes] [--dry-run]",
 		help: `
 options:
@@ -151,7 +151,8 @@ func cmdSetup(_ string, args []string) int {
 		return code
 	}
 	a := setup.Args{DryRun: values["--dry-run"] != "", NoGUI: values["--no-gui"] != "",
-		NoBrowser: values["--no-browser"] != "", User: values["--user"], University: values["--university"]}
+		NoBrowser: values["--no-browser"] != "", Repair: values["--repair"] != "", User: values["--user"],
+		University: values["--university"]}
 	code, err := setup.New(setup.Root()).Setup(a)
 	if err != nil {
 		return report(err)
