@@ -46,9 +46,16 @@ func (h *holdRelay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (h *holdRelay) fillers() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.puts
+}
+
 // A request code runs out while the other device is still on its way with the answer, and the
-// user takes the code off the screen while the engine closes it: the two closes together still
-// leave slot b filled, so the late answer is refused.
+// user takes the code off the screen while the engine closes it. Only one close runs: two read
+// each other's filler away, and an answer landing in between stays in slot b with the group's
+// key.
 func TestTwoClosesOfARequestCodeLeaveNoKey(t *testing.T) {
 	ctx := context.Background()
 	_, target := startRelay(t)
@@ -75,17 +82,24 @@ func TestTwoClosesOfARequestCodeLeaveNoKey(t *testing.T) {
 	if st := desktop.Status().Pairing.State; st != "waiting" {
 		t.Fatalf("state %s", st)
 	}
-	desktop.CancelPairing() // the back arrow, "Enter a code instead", a new code
+	canceled := make(chan struct{})
+	go func() {
+		desktop.CancelPairing() // the back arrow, "Enter a code instead", a new code
+		close(canceled)
+	}()
+	select {
+	case <-canceled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the cancel waits for the expiry's close")
+	}
 	close(h.release)
-	// Both closes are through: the cancel's filler, the expiry's, and the expiry's second one.
-	for range 3 {
-		select {
-		case <-h.done:
-		case <-time.After(5 * time.Second):
-		}
+	<-h.done
+	time.Sleep(200 * time.Millisecond)
+	if got := h.fillers(); got != 1 {
+		t.Fatalf("%d fillers, want 1: the code was closed twice", got)
 	}
 	k, _ := laptop.ensureGroup(ctx)
 	if err := laptop.putSlot(ctx, pairingFor(n), "b", pairMessage{Kind: "root", Root: k.Root}); err == nil {
-		t.Fatal("the late answer was accepted after both closes")
+		t.Fatal("the late answer was accepted")
 	}
 }
