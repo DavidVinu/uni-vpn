@@ -207,6 +207,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         NSApp.setActivationPolicy(.accessory)
     }
 
+    // Open, also when minimized or hidden with Cmd+H (isVisible is false then): the Dock icon
+    // shows exactly while the window is open.
+    var windowOpen: Bool { NSApp.activationPolicy() == .regular }
+
     func applicationShouldHandleReopen(_ app: NSApplication, hasVisibleWindows: Bool) -> Bool {
         show("")
         return true
@@ -269,7 +273,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     @objc(webView:didFailProvisionalNavigation:withError:)
     func webView(_ view: WKWebView, didFailProvisionalNavigation nav: WKNavigation!, withError error: Error) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            guard let self = self, let win = self.window, win.isVisible else { return }
+            guard let self = self, self.windowOpen else { return }
             view.load(URLRequest(url: self.target))  // the page asked for (Settings), not the main one
         }
     }
@@ -330,8 +334,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         let me = resolved(Bundle.main.bundlePath)
         let changed = now != nil && (app != me || now != program) && now == seen
         seen = now
-        // A hidden app (Cmd+H) reports its window as not visible: it is still open.
-        guard changed, !restarting, !(window?.isVisible ?? false), !(window?.isMiniaturized ?? false), !NSApp.isHidden else { return }
+        guard changed, !restarting, !windowOpen else { return }
         restarting = true
         let config = NSWorkspace.OpenConfiguration()
         config.createsNewApplicationInstance = true
