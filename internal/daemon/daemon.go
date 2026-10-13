@@ -838,6 +838,23 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 		}
 		return errors.New(pyErr(err))
 	}
+	if previousUser != "" && previousUser != user {
+		// Only this account's secrets are used, and an uninstall finds only those (also after
+		// a mistyped ID). While switching: no attempt reads the secrets in between.
+		d.opts.SecretsDeleter(previousUser)
+		if strings.EqualFold(previousUser, user) {
+			// Only case changed: a store that ignores it (Windows' Credential Manager) took the
+			// new entries along.
+			perr := d.opts.PasswordSetter(password)
+			var terr error
+			if profile.NeedsTOTP() && !once {
+				terr = d.opts.TOTPSetter(token)
+			}
+			if err := errors.Join(perr, terr); err != nil {
+				d.logf(slog.LevelWarn, "The secrets could not be saved again: %s", err)
+			}
+		}
+	}
 	d.mu.Lock()
 	websites := d.cfg.DefaultDomains
 	config.CopyProfile(d.cfg, &profile)
@@ -855,12 +872,6 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 		d.startEnrollLocked(code, profile.MFAPortalURL)
 	}
 	d.mu.Unlock()
-	// Only case changed: Windows' Credential Manager reads the new entries as the old ones.
-	if previousUser != "" && !strings.EqualFold(previousUser, user) {
-		// Only this account's secrets are used, and an uninstall finds only those (also after
-		// a mistyped ID).
-		d.opts.SecretsDeleter(previousUser)
-	}
 	if newRule {
 		d.opts.ProxyRefresh(port)
 	}
