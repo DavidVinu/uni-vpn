@@ -799,6 +799,23 @@ func TestUninstallRemovesRecordedFiles(t *testing.T) {
 	}
 }
 
+// Linking stores the sync keys before the account is set up, which can fail: --yes deletes them
+// without an account too.
+func TestUninstallYesDeletesSyncKeysWithoutAnAccount(t *testing.T) {
+	h := newHarness(t)
+	h.setup(Args{})
+	h.s.DeleteSync = func() (bool, error) { h.deleted = append(h.deleted, "sync"); return true, nil }
+	if err := os.Remove(h.cfgPath()); err != nil {
+		t.Fatal(err)
+	}
+	if code := h.uninstall(Args{Yes: true}); code != 0 {
+		t.Fatal(code, h.out.String())
+	}
+	if !reflect.DeepEqual(h.deleted, []string{"sync"}) {
+		t.Fatal(h.deleted)
+	}
+}
+
 // The app window starts a stopped service again (Windows tray): it is stopped first.
 type orderApp struct {
 	recordingApp
