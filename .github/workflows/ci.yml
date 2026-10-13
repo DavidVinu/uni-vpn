@@ -249,6 +249,24 @@ jobs:
           echo "$out" | tail -n 5
           if echo "$out" | grep -qi "certificate.*fail\|verify failed"; then exit 1; fi
           echo "$out" | grep -q "Connected to" || { echo "openconnect did not reach the gateway"; exit 1; }
+      - name: macOS 14 SDK symbols (scratch)
+        if: matrix.runner == 'macos-14'
+        run: |
+          sw_vers
+          sdk=$(xcrun --show-sdk-path)
+          echo "$sdk"
+          otool -L runtime/arm64/bin/* runtime/arm64/lib/*.dylib | awk '/^\t\/(usr\/lib|System)/ {print $1}' | sort -u
+          python3 packaging/macos/tbdsyms.py "$sdk/usr/lib" > syms.txt
+          for f in CoreFoundation Security SystemConfiguration Foundation IOKit CFNetwork; do
+            python3 packaging/macos/tbdsyms.py "$sdk/System/Library/Frameworks/$f.framework" >> syms.txt
+          done
+          wc -l syms.txt
+          cut -d' ' -f1 syms.txt | sort | uniq -c
+          gzip -9 -c syms.txt | base64 > syms.b64
+          wc -c syms.b64
+          echo "SYMS-BEGIN"
+          cat syms.b64
+          echo "SYMS-END"
       # As a tar: artifacts lose the executable flag and links otherwise.
       - run: tar -czf runtime-$(uname -m).tar.gz -C runtime .
       - uses: actions/upload-artifact@v4
