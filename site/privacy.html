@@ -134,8 +134,11 @@ aufnimmt</h3>
 <li><strong>VPN-Server Ihrer Universität.</strong> Beim Anmelden sendet
 die App Ihren Benutzernamen, Ihr Passwort und gegebenenfalls einen
 Einmalcode an den VPN-Server Ihrer Universität. Der Datenverkehr zu den
-eingetragenen Websites läuft dann über die Universität. Dafür ist Ihre
-Universität verantwortlich. Es gilt deren Datenschutzerklärung.</li>
+eingetragenen Websites läuft dann über die Universität. Richten Sie den
+zweiten Faktor in der App mit einem Code ein, meldet sich die App
+außerdem mit denselben Daten im MFA-Portal Ihrer Universität an und legt
+dort einen Code-Generator mit dem Namen Ihres Computers an. Dafür ist
+Ihre Universität verantwortlich. Es gilt deren Datenschutzerklärung.</li>
 <li><strong>Einrichtung einer nicht gelisteten Universität.</strong>
 Wenn Sie eine VPN-Adresse selbst eingeben, fragt die App diesen Server
 einmal nach seinem Anmeldeformular. Dabei werden keine Zugangsdaten
@@ -157,7 +160,7 @@ können die Daten nicht lesen. Gespeichert werden zufällige Kennungen und
 die verschlüsselten Daten. Cloudflare sieht dabei Ihre IP-Adresse. Die
 App fragt beim Start, etwa alle 30 Minuten und beim Öffnen der
 Einstellungen nach Änderungen. Ein Code zum Verbinden zweier Geräte
-wird nach spätestens 10 Minuten gelöscht, die Daten Ihrer Geräte 400
+gilt 10 Minuten und wird spätestens eine Stunde danach gelöscht, die Daten Ihrer Geräte 400
 Tage nach der letzten Nutzung. Zweck: Ihre Einstellungen auf Ihre
 anderen Geräte bringen. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO,
 weil Sie die Funktion selbst nutzen. Wenn Sie in den Einstellungen alle
@@ -281,8 +284,11 @@ and log files.</p>
 <li><strong>Your university's VPN server.</strong> When signing in, the
 app sends your user name, your password and, if needed, a one-time code
 to your university's VPN server. Traffic to the listed websites then
-goes through the university. Your university is responsible for this,
-and its privacy policy applies.</li>
+goes through the university. If you set up the second factor in the app
+with a code, the app also signs in to your university's MFA portal with
+the same details and adds a code generator there named after your
+computer. Your university is responsible for this, and its privacy
+policy applies.</li>
 <li><strong>Setting up a university that is not listed.</strong> If you
 enter a VPN address yourself, the app asks that server once for its
 login form. No credentials are sent; the server only sees your IP
@@ -301,8 +307,8 @@ device before they leave it. Only your devices have the key; neither I
 nor Cloudflare can read the data. Random identifiers and the encrypted
 data are stored. Cloudflare sees your IP address. The app asks for
 changes when it starts, about every 30 minutes and when Settings is
-opened. A code for linking two devices is deleted after 10 minutes at
-the latest, your devices' data 400 days after it was last used.
+opened. A code for linking two devices is valid for 10 minutes and is
+deleted at most an hour later, your devices' data 400 days after it was last used.
 Purpose: bringing your settings to your other devices. The legal basis
 is Art. 6(1)(b) GDPR, because you use the feature yourself. If you
 remove all devices in Settings, the data is no longer read and is then
