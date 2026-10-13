@@ -675,6 +675,61 @@ func TestDisconnectWhileThePortOpensDoesNotReconnect(t *testing.T) {
 	}
 }
 
+func TestBytesDuringADisconnectAreNoDemand(t *testing.T) {
+	// A download passes its last bytes while the Disconnect closes the connections: no new
+	// use, which would sign in again (a new Duo push) right after the Disconnect.
+	h := newHarness(t)
+	h.cfg.DemandWindow = 60
+	h.cfg.IdleMinutes = 15
+	d := h.start(nil, func(d *Daemon) {
+		closeAll := d.closeAll
+		d.closeAll = func() {
+			d.noteActivity() // what the forwarder does for a chunk in flight
+			closeAll()
+		}
+	})
+	echo(t, h.client(), "x")
+	d.RequestDisconnect()
+	waitState(t, d, Idle)
+	time.Sleep(time.Second)
+	d.mu.Lock()
+	state, count := d.state, d.connectCount
+	d.mu.Unlock()
+	if state != Idle || count != 1 {
+		t.Fatal("signed in again after the Disconnect", state, count)
+	}
+}
+
+func TestDisconnectWhileThePortOpensBeforeTheStopDoesNotReconnect(t *testing.T) {
+	// The port opens after the Disconnect said "disconnecting" but before it stops the tunnel
+	// (it closes the connections first): still no connection.
+	h := newHarness(t)
+	t.Setenv("FAKE_DELAY", "0.5")
+	h.cfg.StopGrace = 4
+	h.cfg.ReadyTimeout = 10
+	h.cfg.DemandWindow = 60
+	h.cfg.IdleMinutes = 15
+	h.cfg.MFA = "none"
+	d := h.start(nil, func(d *Daemon) {
+		closeAll := d.closeAll
+		d.closeAll = func() {
+			time.Sleep(1200 * time.Millisecond) // the port opens meanwhile
+			closeAll()
+		}
+	})
+	d.RequestConnect()
+	waitFor(10*time.Second, func() bool { return len(h.pwLines()) > 0 })
+	d.RequestDisconnect()
+	waitState(t, d, Idle, 15*time.Second)
+	time.Sleep(1500 * time.Millisecond)
+	d.mu.Lock()
+	state, count := d.state, d.connectCount
+	d.mu.Unlock()
+	if state != Idle || count != 1 {
+		t.Fatal("a new attempt after the Disconnect", state, count)
+	}
+}
+
 func TestStaleTokenFilesAreRemovedAtStart(t *testing.T) {
 	h := newHarness(t)
 	os.WriteFile(filepath.Join(h.tokenDir, "totp-old"), []byte("base32:OLD"), 0o600)
