@@ -379,61 +379,6 @@ jobs:
           path: uni-vpn.pkg
           retention-days: 7
 
-  macos14-start:
-    # Scratch: the programs built on macOS 15 on a real macOS 14, and the list against its SDK.
-    needs: macos-runtime
-    runs-on: macos-14
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: macos-runtime-*
-          path: runtime-tar
-          merge-multiple: true
-      - run: mkdir runtime && for f in runtime-tar/*.tar.gz; do tar -xzf "$f" -C runtime; done
-      - name: start on macOS 14
-        run: |
-          sw_vers -productVersion
-          if ! arch -x86_64 /usr/bin/true 2>/dev/null; then
-            sudo softwareupdate --install-rosetta --agree-to-license
-          fi
-          for a in arm64 x86_64; do
-            arch -$a runtime/$a/bin/openconnect --version
-            code=0
-            out=$(arch -$a runtime/$a/bin/ocproxy -h </dev/null 2>&1) || code=$?
-            echo "$out"
-            if [ "$code" -ge 128 ] || grep -q dyld <<<"$out"; then echo "::error::$a ocproxy"; exit 1; fi
-          done
-      - name: the list against this SDK
-        run: |
-          python3 packaging/macos/system-symbols.py list "$(xcrun --show-sdk-path)" runtime > sdk.txt
-          gzip -dc packaging/macos/macos14-symbols.txt.gz > committed.txt
-          grep '^# ' sdk.txt
-          python3 - <<'PY'
-          def read(p):
-              d, cur = {}, None
-              for l in open(p):
-                  l = l.rstrip("\n")
-                  if l.startswith("# "): cur = d.setdefault(l[2:], set())
-                  elif l: cur.add(l)
-              return d
-          sdk, com = read("sdk.txt"), read("committed.txt")
-          bad = 0
-          for lib, syms in sdk.items():
-              if lib not in com: print("not in the committed list:", lib); bad = 1; continue
-              print(lib, len(syms), "only in sdk:", len(syms - com[lib]), "only committed:", len(com[lib] - syms))
-              bad |= syms != com[lib]
-          print("differs" if bad else "same")
-          PY
-          gzip -9 -n -c sdk.txt > sdk.txt.gz
-          python3 packaging/macos/system-symbols.py check sdk.txt.gz runtime
-      - uses: actions/upload-artifact@v4
-        with:
-          name: macos14-symbols
-          path: sdk.txt.gz
-          retention-days: 3
-
   linux-packages:
     runs-on: ubuntu-latest
     timeout-minutes: 20
