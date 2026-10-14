@@ -382,7 +382,8 @@ def build_windows_app(run=subprocess.run, download=_download) -> str | None:
         shutil.copy2(sdk / name, build / name)
     shutil.rmtree(sdk, ignore_errors=True)
     source = source_dir() / "windows"
-    command = [str(csc), "/nologo", "/target:winexe", "/optimize+", f"/win32icon:{source / 'uni-vpn.ico'}",
+    # x64 also on ARM processors (Windows runs it emulated): WebView2Loader.dll is the x64 one.
+    command = [str(csc), "/nologo", "/target:winexe", "/platform:x64", "/optimize+", f"/win32icon:{source / 'uni-vpn.ico'}",
                f"/out:{exe}", f"/lib:{build}", "/r:Microsoft.Web.WebView2.Core.dll",
                "/r:Microsoft.Web.WebView2.WinForms.dll", "/r:System.Windows.Forms.dll", "/r:System.Drawing.dll",
                "/r:System.Web.Extensions.dll", str(source / "UniVpn.cs")]

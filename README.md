@@ -233,7 +233,7 @@ username_suffix = "@student-net.ethz.ch"
 | Ubuntu 24.04 (GNOME), Chrome and Firefox | tested end to end with a real login, see `docs/e2e.md` |
 | Other Linux (Debian, Fedora, openSUSE, Arch; GNOME or KDE) | installer and unit tests only, no real login yet |
 | macOS 14+ (Apple Silicon and Intel) | CI only (unit tests, keychain, installer dry run), checklist in `docs/macos-test.md` |
-| Windows 10 and 11 (64-bit, Intel or AMD) | CI only (unit tests, Credential Manager, registry, Task Scheduler, installer dry run), checklist in `docs/windows-test.md` |
+| Windows 10 and 11 (64-bit, Intel or AMD), Windows 11 on ARM | CI only (unit tests, Credential Manager, registry, Task Scheduler, installer dry run, install on an ARM runner), checklist in `docs/windows-test.md` |
 | Android 10+ (64-bit) | CI only (build, lint, unit tests, emulator test against a real gateway), not in a store yet, see `docs/android.md` |
 | iPhone, iOS 17+ | CI only (build, simulator tests against a real gateway), not in the App Store yet, see `docs/ios.md` |
 

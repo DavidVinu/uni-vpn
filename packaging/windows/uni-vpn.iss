@@ -27,9 +27,11 @@ UninstallDisplayName=Uni VPN
 OutputDir={#OutputDir}
 OutputBaseFilename=uni-vpn-setup
 PrivilegesRequired=admin
-; OpenConnect has no build for ARM processors.
-ArchitecturesAllowed=x64os
-ArchitecturesInstallIn64BitMode=x64os
+; Also ARM processors with Windows 11: the core is built for them (bin\arm64 in SourceDir),
+; OpenConnect and the app window run as x64 programs (Windows emulates them), and the x64
+; wintun.dll installs Wintun's ARM driver itself.
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
 DisableWelcomePage=yes
 DisableDirPage=yes
 DisableProgramGroupPage=yes
@@ -77,7 +79,9 @@ zhtw.SetupFailed=無法設定 Uni VPN。請重新啟動電腦，然後重新開�
 #endif
 
 [Files]
-Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "{#SourceDir}\*"; DestDir: "{app}"; Excludes: "\bin\uni-vpn-core.exe,\bin\arm64"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "{#SourceDir}\bin\uni-vpn-core.exe"; DestDir: "{app}\bin"; Check: not IsArm64; Flags: ignoreversion
+Source: "{#SourceDir}\bin\arm64\uni-vpn-core.exe"; DestDir: "{app}\bin"; Check: IsArm64; Flags: ignoreversion
 
 [InstallDelete]
 ; What the Python version had here: Python, its program and the install scripts.

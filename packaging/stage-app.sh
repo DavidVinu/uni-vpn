@@ -3,8 +3,9 @@
 # updates when GITHUB_SHA is set.
 # Usage: packaging/stage-app.sh [--go TARGET] DIR
 # --go: the Go core without Python (docs/go-switch.md): bin/uni-vpn-core built for TARGET
-# (linux/amd64, linux/arm64, windows/amd64, or darwin/universal for both Mac processors in one
-# file), its helpers in bin, the app windows' sources and icons in app. Needs Go.
+# (linux/amd64, linux/arm64, windows/amd64, darwin/universal for both Mac processors in one
+# file, or windows/both: amd64 in bin and arm64 in bin/arm64, the installer picks one), its
+# helpers in bin, the app windows' sources and icons in app. Needs Go.
 # Without --go: the Python program (uni_vpn/updater.py).
 set -eu
 repo=$(cd "$(dirname "$0")/.." && pwd)
@@ -40,6 +41,10 @@ else
       rm -rf "$tmp"
       # Ad hoc, like openconnect and ocproxy; the release signs it again when it can.
       codesign --force -s - "$out/bin/uni-vpn-core"
+      ;;
+    windows/both)
+      build windows amd64 "$out/bin/uni-vpn-core.exe"
+      build windows arm64 "$out/bin/arm64/uni-vpn-core.exe"
       ;;
     windows/*) build windows "${target#*/}" "$out/bin/uni-vpn-core.exe" ;;
     */*) build "${target%/*}" "${target#*/}" "$out/bin/uni-vpn-core" ;;
