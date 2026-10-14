@@ -31,11 +31,14 @@ and the app window:
     uni-vpn-core-darwin-arm64.zip    bin/uni-vpn-core, desktop/Uni VPN.app (both processors)
     uni-vpn-core-darwin-amd64.zip    bin/uni-vpn-core, desktop/Uni VPN.app (both processors)
     uni-vpn-core-windows-amd64.zip   bin/uni-vpn-core.exe, desktop/ (Uni VPN.exe, WebView2)
+    uni-vpn-core-windows-arm64.zip   bin/uni-vpn-core.exe, desktop/ (the same x64 app window)
 
 The two Mac zips are the same: core and app run on both processors, as the installer's do, so
 that a Mac moved from Intel to Apple Silicon still starts the core it updated to
-(`packaging/lipo` joins the two cores on Linux). openconnect comes with the installers and is
-not part of these updates.
+(`packaging/lipo` joins the two cores on Linux). uni-vpn-setup.exe holds both Windows cores and
+installs the one for the processor; on ARM, openconnect and the app window are the x64 ones,
+which Windows 11 emulates. openconnect comes with the installers and is not part of these
+updates.
 
 ## The app window after an update
 
