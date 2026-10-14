@@ -333,7 +333,7 @@ const $ = (id) => document.getElementById(id);
 const H = {"X-Uni-VPN": "1", "Content-Type": "application/json"};
 let S = null, view = null, setupDone = false, submitting = false, setupSent = false, domainsShown = false, connectRequested = 0,
   codeTimer = null, refreshing = false, autoUpdateSaving = false, changing = false, languageSaving = false,
-  domainsBase = "", removeError = null, removeSeen = false, changeWebsites = "";
+  domainsBase = "", removeError = null, removeSeen = false, changeWebsites = "", pageCore;
 // Inside the Uni VPN app window (not a browser tab): no page title, no browser context menu.
 if (new URLSearchParams(location.search).has("app")) {
   document.body.classList.add("app");
@@ -350,10 +350,13 @@ async function post(path, body) {
 
 // --- language ----------------------------------------------------------------
 // Like macOS and Windows apps: the system's language unless chosen in Settings, else English.
-let L = {languages: [["en", "English"]], catalogs: {en: {}}}, lang = "en";
+let L = {languages: [["en", "English"]], catalogs: {en: {}}}, lang = "en", localesLoaded = false;
 
 async function loadLocales() {
-  try { L = await (await fetch("/locales.json", {cache: "no-store"})).json(); } catch (e) { /* English keys stay */ }
+  try {
+    L = await (await fetch("/locales.json", {cache: "no-store"})).json();
+    localesLoaded = true;
+  } catch (e) { /* keys until the core answers again (refresh) */ }
 }
 
 function systemLanguage() {
@@ -498,6 +501,19 @@ async function refresh() {
     return;
   } finally {
     refreshing = false;
+  }
+  // An update brings its page with the new core. The app windows keep theirs while hidden: a
+  // hidden one on the main screen takes the new page (also its texts).
+  const core = S.version + " " + S.commit;
+  if (pageCore === undefined) pageCore = core;
+  else if (core !== pageCore && document.visibilityState === "hidden" && view === "main" && !changing) {
+    location.reload();
+    return;
+  }
+  // The core was away when the page asked for its texts (a restart just then).
+  if (!localesLoaded) {
+    await loadLocales();
+    if (localesLoaded) delete document.documentElement.dataset.ready;
   }
   if (!languageSaving) applyLanguage(S.language);
   $("s-use-other").hidden = !(S.sync && S.sync.available) || changing;

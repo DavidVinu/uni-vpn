@@ -707,8 +707,8 @@ func TestClosedRequestLeavesNoKey(t *testing.T) {
 	if err := laptop.putSlot(ctx, pairingFor(n), "b", pairMessage{Kind: "root", Root: make([]byte, 32)}); !errors.Is(err, errConflict) {
 		t.Fatalf("an answer after the close: %v", err)
 	}
-	// The code ran out while the answer waited.
-	desktop.opts.CodeLifetime = 200 * time.Millisecond
+	// The code ran out while the answer waited (long enough for a slow runner to answer first).
+	desktop.opts.CodeLifetime = 2 * time.Second
 	if p, err = desktop.Request(ctx); err != nil {
 		t.Fatal(err)
 	}

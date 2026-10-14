@@ -150,7 +150,9 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         writer.close()
 
     async def test_refused(self):
-        _reader, writer, code = await self.socks_connect(1, socket.inet_aton("127.0.0.1"), free_port())
+        # A port below the ephemeral range: a just freed one can become the outgoing connection's
+        # own port, and Linux then connects it to itself.
+        _reader, writer, code = await self.socks_connect(1, socket.inet_aton("127.0.0.1"), 1)
         self.assertEqual(code, socks.REP_REFUSED)
         writer.close()
 

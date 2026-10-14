@@ -13,35 +13,51 @@ import (
 	"github.com/DavidVinu/uni-vpn/internal/credentials"
 )
 
-// ciCred is Credential Manager: target names compare without case.
-type ciCred struct {
-	mu sync.Mutex
-	m  map[string][]byte
+// memCred is a credential store; with fold, Credential Manager: target names compare without case.
+type memCred struct {
+	fold bool
+	mu   sync.Mutex
+	m    map[string][]byte
 }
 
-func (c *ciCred) Read(target string) ([]byte, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.m[strings.ToLower(target)], nil
+func (c *memCred) key(target string) string {
+	if c.fold {
+		return strings.ToLower(target)
+	}
+	return target
 }
-func (c *ciCred) Write(target, _ string, secret []byte, _ string) error {
+func (c *memCred) Read(target string) ([]byte, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.m[strings.ToLower(target)] = secret
+	return c.m[c.key(target)], nil
+}
+func (c *memCred) Write(target, _ string, secret []byte, _ string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.m[c.key(target)] = secret
 	return nil
 }
-func (c *ciCred) Delete(target string) bool {
+func (c *memCred) Delete(target string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	_, ok := c.m[strings.ToLower(target)]
-	delete(c.m, strings.ToLower(target))
+	_, ok := c.m[c.key(target)]
+	delete(c.m, c.key(target))
 	return ok
 }
 
-// A corrected ID that differs only in case ("AA111" typed, "aa111" meant) on Windows: the
-// new account's secrets must stay.
+// A corrected ID that differs only in case ("AA111" typed, "aa111" meant): the new account's
+// secrets stay, also where the store ignores case (Windows), and the old ones go, also where it
+// does not (the phones' secrets.json, secret-tool).
 func TestACaseOnlyChangeOfTheIDKeepsTheSecrets(t *testing.T) {
-	store := &ciCred{m: map[string][]byte{}}
+	for _, fold := range []bool{true, false} {
+		t.Run(map[bool]string{true: "without case", false: "with case"}[fold], func(t *testing.T) {
+			caseOnlyChange(t, fold)
+		})
+	}
+}
+
+func caseOnlyChange(t *testing.T, fold bool) {
+	store := &memCred{fold: fold, m: map[string][]byte{}}
 	old := credentials.Default
 	credentials.Default = &credentials.Keyring{GOOS: "windows", Cred: store}
 	t.Cleanup(func() { credentials.Default = old })
@@ -72,4 +88,11 @@ func TestACaseOnlyChangeOfTheIDKeepsTheSecrets(t *testing.T) {
 	if err != nil || string(tok) != a.token {
 		t.Fatalf("TOTP of %s after the case correction: %q %v", a.user, tok, err)
 	}
+	store.mu.Lock()
+	for target := range store.m {
+		if strings.Contains(target, upper) {
+			t.Errorf("the old ID's %s stays", target)
+		}
+	}
+	store.mu.Unlock()
 }
