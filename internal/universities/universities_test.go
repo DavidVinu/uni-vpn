@@ -104,7 +104,8 @@ func TestSAMLUniversitiesAreMarked(t *testing.T) {
 		}
 	}
 	sort.Strings(saml)
-	if !slices.Equal(saml, []string{"fu-berlin", "oxford"}) {
+	want := []string{"asu", "carleton", "fu-berlin", "hs-offenburg", "oxford", "th-koeln", "ucf", "uga", "unc", "uni-hamburg", "utexas"}
+	if !slices.Equal(saml, want) {
 		t.Fatalf("saml = %v", saml)
 	}
 }
@@ -117,6 +118,9 @@ func TestProfilesFromTheProbes(t *testing.T) {
 		{"stanford", "mfa", mustGet(t, "stanford").MFA, "duo_push"},
 		{"ethz", "username_suffix", mustGet(t, "ethz").UsernameSuffix, "@staff-net.ethz.ch"},
 		{"kassel", "os", mustGet(t, "kassel").OS, "win"},
+		{"umn", "host", mustGet(t, "umn").Host, "tc-vpn-1.vpn.umn.edu"},
+		{"umn", "authgroup", mustGet(t, "umn").Authgroup, "AnyConnect-UofMSplit"},
+		{"ugr", "mfa", mustGet(t, "ugr").MFA, "totp_field"},
 	}
 	for _, tt := range tests {
 		if tt.got != tt.want {

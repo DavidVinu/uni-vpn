@@ -40,7 +40,9 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual([p.id for p in unis.registry().values() if p.verified], ["heidelberg"])
 
     def test_saml_universities_are_marked(self):
-        self.assertEqual(sorted(p.id for p in unis.registry().values() if p.mfa == "saml"), ["fu-berlin", "oxford"])
+        self.assertEqual(sorted(p.id for p in unis.registry().values() if p.mfa == "saml"),
+                         ["asu", "carleton", "fu-berlin", "hs-offenburg", "oxford", "th-koeln", "ucf", "uga", "unc",
+                          "uni-hamburg", "utexas"])
 
     def test_profiles_from_the_probes(self):
         self.assertEqual(unis.get("marburg").authgroup, "unimr-vpn-staff-Passwort+2FA")
@@ -49,6 +51,9 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(unis.get("stanford").mfa, "duo_push")
         self.assertEqual(unis.get("ethz").username_suffix, "@staff-net.ethz.ch")
         self.assertEqual(unis.get("kassel").os, "win")
+        self.assertEqual(unis.get("umn").host, "tc-vpn-1.vpn.umn.edu")
+        self.assertEqual(unis.get("umn").authgroup, "AnyConnect-UofMSplit")
+        self.assertEqual(unis.get("ugr").mfa, "totp_field")
 
     def test_new_entries_default_to_no_external_auth(self):
         self.assertTrue(unis.get("bonn").no_external_auth)

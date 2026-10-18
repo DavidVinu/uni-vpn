@@ -161,9 +161,9 @@
       "country": "US",
       "host": "secure.vpn.ucf.edu",
       "authgroup": "UCF Students",
-      "mfa": "duo_push",
+      "mfa": "saml",
       "aliases": ["UCF"],
-      "notes": "Profile from the university's documentation, not tested. Duo push or call only."
+      "notes": "Profile from the university's documentation. Checked 2026-10-18: the gateway signs in only through a web page (SAML). A client without web sign-in only gets the group UCF_StartBeforeLogon. Duo push or call only."
     },
     {
       "id": "osu",
@@ -180,9 +180,9 @@
       "name": "University of Texas at Austin",
       "country": "US",
       "host": "vpn.utexas.edu",
-      "mfa": "duo_push",
+      "mfa": "saml",
       "aliases": ["UT Austin"],
-      "notes": "Profile from the university's documentation, not tested. "
+      "notes": "Profile from the university's documentation. Checked 2026-10-18: the gateway signs in only through a web page (SAML)."
     },
     {
       "id": "asu",
@@ -190,9 +190,9 @@
       "country": "US",
       "host": "sslvpn.asu.edu",
       "usergroup": "2fa",
-      "mfa": "duo_push",
+      "mfa": "saml",
       "aliases": ["ASU"],
-      "notes": "Profile from the university's documentation, not tested. "
+      "notes": "Profile from the university's documentation. Checked 2026-10-18: the gateway signs in only through a web page (SAML)."
     },
     {
       "id": "ufl",
@@ -208,11 +208,11 @@
       "id": "umn",
       "name": "University of Minnesota",
       "country": "US",
-      "host": "vpn.umn.edu",
-      "authgroup": "UMN - Split Tunnel - General Access VPN Pool",
+      "host": "tc-vpn-1.vpn.umn.edu",
+      "authgroup": "AnyConnect-UofMSplit",
       "mfa": "duo_push",
       "aliases": ["UMN"],
-      "notes": "Profile from the university's documentation, not tested. Full tunnel group: AnyConnect-UofMvpnFull."
+      "notes": "Profile from the university's documentation (it.umn.edu/node/131921), not tested. vpn.umn.edu has no address; the Linux setup names tc-vpn-1.vpn.umn.edu, whose group list calls the split tunnel AnyConnect-UofMSplit (\"UMN - Split Tunnel - General Access VPN Pool\" is the Cisco client's profile name). Full tunnel group: AnyConnect-UofMvpnFull."
     },
     {
       "id": "uiuc",
@@ -231,9 +231,9 @@
       "host": "remote.uga.edu",
       "authgroup": "01 Default",
       "username_suffix": "@uga.edu",
-      "mfa": "duo_push",
+      "mfa": "saml",
       "aliases": ["UGA"],
-      "notes": "Profile from the university's documentation, not tested. "
+      "notes": "Profile from the university's documentation. Checked 2026-10-18: the gateway signs in only through a web page (SAML). A client without web sign-in only gets its default group DefaultWEBVPNGroup, without a group list."
     },
     {
       "id": "unc",
@@ -241,9 +241,9 @@
       "country": "US",
       "host": "vpn.unc.edu",
       "authgroup": "UNCCampus",
-      "mfa": "duo_push",
+      "mfa": "saml",
       "aliases": ["UNC"],
-      "notes": "Profile from the university's documentation, not tested. "
+      "notes": "Profile from the university's documentation. Checked 2026-10-18: the gateway signs in only through a web page (SAML). A client without web sign-in only gets the group UNCCampus-SBL."
     },
     {
       "id": "ncsu",
@@ -280,8 +280,8 @@
       "country": "CA",
       "host": "cuvpn.carleton.ca",
       "usergroup": "mfa",
-      "mfa": "duo_push",
-      "notes": "Profile from the university's documentation, not tested. Microsoft Authenticator push."
+      "mfa": "saml",
+      "notes": "Profile from the university's documentation. Checked 2026-10-18: the gateway signs in only through a web page (SAML). Microsoft Authenticator push."
     },
     {
       "id": "hku",
@@ -297,9 +297,10 @@
       "name": "University of Granada",
       "country": "ES",
       "host": "vpn.ugr.es",
-      "mfa": "none",
+      "mfa": "totp_field",
+      "mfa_portal_url": "https://oficinavirtual.ugr.es/",
       "aliases": ["Universidad de Granada", "UGR"],
-      "notes": "Profile from the university's documentation, not tested. User name is the full address cuenta@ugr.es."
+      "notes": "Profile from the university's documentation, not tested. User name is the full address cuenta@ugr.es. Checked 2026-10-18: the gateway asks for a one-time code in its own field; the code generator is added under \"Doble Factor Autenticación para Servicios TIC UGR\" in the Oficina Virtual."
     },
     {
       "id": "uni-halle",
@@ -334,18 +335,18 @@
       "name": "Offenburg University of Applied Sciences",
       "country": "DE",
       "host": "vpn.hs-offenburg.de",
-      "mfa": "none",
+      "mfa": "saml",
       "aliases": ["Hochschule Offenburg"],
-      "notes": "Profile from the university's documentation, not tested. No second factor is mentioned in its documentation. "
+      "notes": "Profile from the university's documentation. Checked 2026-10-18: the gateway signs in only through a web page (SAML). A client without web sign-in only gets the group 4. RZ intern. No second factor is mentioned in its documentation."
     },
     {
       "id": "uni-hamburg",
       "name": "University of Hamburg",
       "country": "DE",
       "host": "vpn.rrz.uni-hamburg.de",
-      "mfa": "none",
+      "mfa": "saml",
       "aliases": ["Universitaet Hamburg", "UHH", "RRZ"],
-      "notes": "Profile from the university's documentation, not tested. No second factor is mentioned in its documentation. "
+      "notes": "Profile from the university's documentation. Checked 2026-10-18: the gateway signs in only through a web page (SAML). No second factor is mentioned in its documentation."
     },
     {
       "id": "fau",
@@ -379,9 +380,9 @@
       "name": "TH Köln",
       "country": "DE",
       "host": "vpn.th-koeln.de",
-      "mfa": "none",
+      "mfa": "saml",
       "aliases": ["TH Koeln", "Technische Hochschule Koeln", "Cologne University of Applied Sciences"],
-      "notes": "Profile from the university's documentation, not tested. No second factor is mentioned in its documentation. Gummersbach campus: vpn-gm.th-koeln.de."
+      "notes": "Profile from the university's documentation. Checked 2026-10-18: the gateway signs in only through a web page (SAML). No second factor is mentioned in its documentation. Gummersbach campus: vpn-gm.th-koeln.de."
     },
     {
       "id": "thu",
