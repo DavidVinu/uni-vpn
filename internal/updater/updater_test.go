@@ -548,3 +548,25 @@ func TestTheUpdateBringsOpenConnectAlong(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+// A release without openconnect (a revert, a core built alone) leaves the installed one: on
+// Windows it would otherwise be gone.
+func TestAReleaseWithoutOpenConnectLeavesIt(t *testing.T) {
+	f := newFixture(t, makeZip(t, coreZip...))
+	keep := []string{"openconnect/openconnect.exe", "runtime/arm64/bin/openconnect"}
+	for _, rel := range keep {
+		write(t, filepath.Join(f.root, filepath.FromSlash(rel)), "installed")
+	}
+	write(t, filepath.Join(f.root, FilesList), "bin/uni-vpn-core\n"+strings.Join(keep, "\n")+"\n")
+	if _, err := f.u.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.u.Apply(); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range keep {
+		if read(t, filepath.Join(f.root, filepath.FromSlash(rel))) != "installed" {
+			t.Fatal(rel)
+		}
+	}
+}

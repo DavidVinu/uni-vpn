@@ -499,3 +499,20 @@ func TestOpenconnectSpeaksEnglish(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenconnectKeepsTheCharacterSet(t *testing.T) {
+	t.Setenv("LANG", "de_DE.UTF-8")
+	t.Setenv("LC_CTYPE", "de_DE.ISO-8859-1")
+	t.Setenv("LC_ALL", "") // restored after the test
+	os.Unsetenv("LC_ALL")
+	env := newFlow(t).make().env(1)
+	var ctype []string
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "LC_CTYPE=") {
+			ctype = append(ctype, kv)
+		}
+	}
+	if len(ctype) != 1 || ctype[0] != "LC_CTYPE=de_DE.ISO-8859-1" {
+		t.Fatal(ctype)
+	}
+}

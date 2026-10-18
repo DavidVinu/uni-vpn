@@ -18,7 +18,7 @@ import (
 
 // PackageMarker is the file in the user's copy of the program that names the installer
 // folder it was copied from (packaging/uni-vpn-open).
-const PackageMarker = ".package"
+const PackageMarker = platform.PackageMarker
 
 // DefaultRemoveSelf is what the watcher runs once the package is gone (setup.Remove); the
 // command line sets it, so that this package does not depend on setup.

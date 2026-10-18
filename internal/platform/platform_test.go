@@ -83,6 +83,14 @@ func TestTheUpdatesOpenConnectComesFirstOnMacOS(t *testing.T) {
 	if err := os.WriteFile(openconnect, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	for _, got := range BundledBinDirs() {
+		if got == dir {
+			t.Fatal("a copy that is not from the .pkg")
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, PackageMarker), []byte("/Applications/Uni VPN.app/Contents/Resources\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if got := BundledBinDirs(); len(got) == 0 || got[0] != dir {
 		t.Fatalf("bundled folders %q", got)
 	}

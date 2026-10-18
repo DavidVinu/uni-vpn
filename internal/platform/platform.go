@@ -69,6 +69,10 @@ func PackageDir() string {
 // /Applications belongs to root, the user's copy of the program does not.
 const RuntimeDir = "runtime"
 
+// PackageMarker is the file in the user's copy of the program that names the installer
+// folder it was copied from (packaging/uni-vpn-open).
+const PackageMarker = ".package"
+
 // coreRoot is the folder of the running core's installation: the parent of its bin folder, ""
 // when it runs from anywhere else.
 var coreRoot = func() string {
@@ -90,7 +94,9 @@ func bundledBases() []string {
 	}
 	var out []string
 	if IsMacOS {
-		if root := coreRoot(); root != "" {
+		// Only a copy of the .pkg's program: the updates' openconnect needs what the .pkg needs
+		// (its macOS version), a copy from elsewhere keeps the one it found.
+		if root := coreRoot(); root != "" && isFile(filepath.Join(root, PackageMarker)) {
 			out = append(out, filepath.Join(root, RuntimeDir))
 		}
 	}

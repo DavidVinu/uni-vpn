@@ -39,8 +39,10 @@ that a Mac moved from Intel to Apple Silicon still starts the core it updated to
 installs the one for the processor; on ARM, openconnect and the app window are the x64 ones,
 which Windows 11 emulates. On Windows openconnect/ replaces the installer's copy; on macOS
 /Applications belongs to root, so runtime/ (openconnect and ocproxy with their libraries, one
-folder per processor as in the .pkg) goes next to the core, and the core runs that one before the
-.pkg's (`internal/platform`). On Linux openconnect comes from the distribution.
+folder per processor as in the .pkg) goes next to the core, and a copy of the .pkg's program
+(`.package`) runs that one before the .pkg's (`internal/platform`). The updates replace these
+files but never delete them, so a release without them leaves the installed openconnect. On
+Linux openconnect comes from the distribution.
 
 ## The app window after an update
 
