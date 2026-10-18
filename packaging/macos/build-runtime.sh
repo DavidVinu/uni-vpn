@@ -78,10 +78,14 @@ if ! echo "$sum  $src/openconnect.tar.gz" | shasum -a 256 -c --status; then
   exit 1
 fi
 tar -xzf "$src/openconnect.tar.gz" -C "$src" --strip-components 1
-pc=
+# Only its dependencies' pkg-config files, and macOS's zlib and libxml2 as Homebrew uses them.
+pc=$(mktemp -d)
+printf 'Name: zlib\nDescription: macOS zlib\nVersion: 1.2.12\nLibs: -lz\n' >"$pc/zlib.pc"
+printf 'Name: libXML\nDescription: macOS libxml2\nVersion: 2.9.13\nLibs: -lxml2\nCflags: -I%s/usr/include/libxml2\n' \
+  "$(xcrun --show-sdk-path)" >"$pc/libxml-2.0.pc"
 for f in $(brew deps openconnect); do
   for d in lib/pkgconfig share/pkgconfig; do
-    if [ -d "$prefix/opt/$f/$d" ]; then pc="$pc${pc:+:}$prefix/opt/$f/$d"; fi
+    if [ -d "$prefix/opt/$f/$d" ]; then pc="$pc:$prefix/opt/$f/$d"; fi
   done
 done
 keg="$prefix/opt/openconnect"
@@ -90,10 +94,9 @@ chmod -R u+w "$(cd "$keg" && pwd -P)"
   cd "$src"
   export MACOSX_DEPLOYMENT_TARGET="$minimum" PKG_CONFIG_LIBDIR="$pc"
   export CPPFLAGS="-I$prefix/opt/gettext/include" LDFLAGS="-L$prefix/opt/gettext/lib"
-  export LIBXML2_CFLAGS="-I$(xcrun --show-sdk-path)/usr/include/libxml2" LIBXML2_LIBS="-lxml2"
   ./configure --quiet --prefix="$keg" --sbindir="$keg/bin" --localstatedir="$prefix/var" \
     --with-vpnc-script="$prefix/etc/vpnc/vpnc-script" --disable-dependency-tracking \
-    ac_cv_func_strchrnul=no || { tail -n 40 config.log; exit 1; }
+    ac_cv_func_strchrnul=no || { grep -E "No package|not found|error" config.log | tail -n 20; exit 1; }
   make -j"$(sysctl -n hw.ncpu)" >/dev/null
   make install >/dev/null
 )
