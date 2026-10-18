@@ -282,6 +282,15 @@ func (t *Tunnel) TokenFile() string {
 
 func (t *Tunnel) env(port int) []string {
 	env := os.Environ()
+	if !platform.IsWindows {
+		// A distribution's openconnect (and Homebrew's) prints its messages in the system
+		// language; the classifier reads the English ones. LC_CTYPE keeps the character set,
+		// which openconnect uses to read passwords outside ASCII.
+		if all := os.Getenv("LC_ALL"); all != "" {
+			env = SetEnv(env, "LC_CTYPE", all)
+		}
+		env = SetEnv(SetEnv(SetEnv(env, "LC_ALL", ""), "LANGUAGE", ""), "LC_MESSAGES", "C")
+	}
 	if t.OCProxy != "" {
 		env = SetEnv(env, "OCPROXY", t.OCProxy)
 	}

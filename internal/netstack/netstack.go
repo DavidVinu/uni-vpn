@@ -99,6 +99,12 @@ func build(addr netip.Addr, mtu int) (*Stack, error) {
 	if err := s.stack.SetTransportProtocolOption(tcp.ProtocolNumber, &sack); err != nil {
 		return fail("SACK", err)
 	}
+	// gVisor's RACK loss detection (on by default) can leave a sender with lost data and no
+	// timer after a burst of drops, so the connection hangs; classic SACK recovery resends.
+	rack := tcpip.TCPRecovery(0)
+	if err := s.stack.SetTransportProtocolOption(tcp.ProtocolNumber, &rack); err != nil {
+		return fail("loss detection", err)
+	}
 	recv := tcpip.TCPReceiveBufferSizeRangeOption{Min: bufferMin, Default: bufferDefault, Max: bufferMax}
 	if err := s.stack.SetTransportProtocolOption(tcp.ProtocolNumber, &recv); err != nil {
 		return fail("receive buffer", err)

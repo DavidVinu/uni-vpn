@@ -228,7 +228,9 @@
   "setup.show_secret": "Afficher la clé",
   "setup.totp_help": "Pas de ligne commençant par otpauth:// ? Copiez plutôt les lettres après « secret= ». Les codes sur votre téléphone continuent de fonctionner.",
   "phone.setup.generic_step.3": "Collez-la ci-dessous.",
+  "phone.uni.heidelberg.mfa.2": "Touchez « Einrichten » sous « Soft-Token (zeitbasiert) ».",
   "phone.uni.heidelberg.mfa.3": "Saisissez un nom, par exemple Téléphone, puis touchez « Weiter ».",
   "phone.uni.heidelberg.mfa.4": "Touchez « Tokendetails einblenden », copiez la ligne qui commence par otpauth:// et collez-la ci-dessous.",
-  "phone.uni.heidelberg.mfa.5": "Touchez « Weiter », puis « Testen ». Saisissez le code affiché ici et touchez « Absenden »."
+  "phone.uni.heidelberg.mfa.5": "Touchez « Weiter », puis « Testen ». Saisissez le code affiché ici et touchez « Absenden ».",
+  "phone.uni.heidelberg.mfa.6": "Pour terminer, touchez « Abschließen »."
 }

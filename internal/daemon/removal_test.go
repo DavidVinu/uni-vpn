@@ -3,6 +3,7 @@
 package daemon
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -105,6 +106,46 @@ func TestANewVersionBeingInstalledIsNotARemoval(t *testing.T) {
 	}
 	if removed.Load() != 0 {
 		t.Fatal(removed.Load())
+	}
+}
+
+// The first update check came at the same moment as the removal (both 10 minutes after the
+// start): the update put the program back or restarted it halfway through the removal.
+func TestNoUpdateForARemovedApp(t *testing.T) {
+	h := newHarness(t)
+	copyDir, marker := installerCopy(t, true)
+	os.Remove(marker)
+	fake := &fakeUpdater{commit: commitB}
+	h.start(func(o *Options) {
+		o.Updater = fake
+		o.PackageWatch = PackageWatch{Root: copyDir, Check: time.Hour, RemoveSelf: func() int { return 0 }}
+	}, timing(50*time.Millisecond, 50*time.Millisecond, 0))
+	time.Sleep(300 * time.Millisecond)
+	if checks, _, _ := fake.counts(); checks != 0 {
+		t.Fatal("checked for an update of a removed app", checks)
+	}
+	os.WriteFile(marker, nil, 0o755) // a new version installed over it
+	h.waitDone()
+	if _, applied, _ := fake.counts(); applied != 1 {
+		t.Fatal(applied)
+	}
+}
+
+func TestAnUpdateWaitingDuringTheRemovalIsDropped(t *testing.T) {
+	h := newHarness(t)
+	fake := &fakeUpdater{commit: commitB}
+	d := h.start(withUpdater(fake), timing(time.Hour, time.Hour, 0))
+	if _, err := fake.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	d.mu.Lock()
+	d.removing = true
+	d.mu.Unlock()
+	if d.installWhenIdle(commitB) {
+		t.Fatal("installed during the removal")
+	}
+	if _, applied, discarded := fake.counts(); applied != 0 || discarded != 1 {
+		t.Fatal(applied, discarded)
 	}
 }
 

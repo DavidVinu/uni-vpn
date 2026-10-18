@@ -228,7 +228,9 @@
   "setup.show_secret": "Schlüssel anzeigen",
   "setup.totp_help": "Keine Zeile mit otpauth://? Kopiere stattdessen die Zeichen nach „secret=“. Die Codes auf deinem Handy funktionieren weiter.",
   "phone.setup.generic_step.3": "Füge sie unten ein.",
+  "phone.uni.heidelberg.mfa.2": "Tippe unter „Soft-Token (zeitbasiert)“ auf „Einrichten“.",
   "phone.uni.heidelberg.mfa.3": "Gib einen Namen ein, zum Beispiel Handy, und tippe auf „Weiter“.",
   "phone.uni.heidelberg.mfa.4": "Tippe auf „Tokendetails einblenden“, kopiere die Zeile, die mit otpauth:// beginnt, und füge sie unten ein.",
-  "phone.uni.heidelberg.mfa.5": "Tippe auf „Weiter“, dann auf „Testen“. Gib den hier angezeigten Code ein und tippe auf „Absenden“."
+  "phone.uni.heidelberg.mfa.5": "Tippe auf „Weiter“, dann auf „Testen“. Gib den hier angezeigten Code ein und tippe auf „Absenden“.",
+  "phone.uni.heidelberg.mfa.6": "Tippe zum Schluss auf „Abschließen“."
 }

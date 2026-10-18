@@ -383,7 +383,7 @@ jobs:
   # a second copy of the app started (one shield in the menu bar), and the app dragged to the Trash.
   macos-trash:
     needs: macos-pkg
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 30
     steps:
       - uses: actions/download-artifact@v4
@@ -421,6 +421,13 @@ jobs:
       - name: Drag it to the Trash
         run: |
           app="$HOME/Library/Application Support/uni-vpn/app"
+          fail() {
+            echo "::error::$1"
+            tail -n 40 "$HOME/Library/Logs/uni-vpn/launchd.log" "$HOME/Library/Logs/uni-vpn/daemon.log" || true
+            ls -la "$app" || true
+            launchctl print "gui/$(id -u)/de.davidvinu.uni-vpn" 2>&1 | head -n 20 || true
+            exit 1
+          }
           scutil --proxy | grep -i proxyautoconfig || true
           sudo mv "/Applications/Uni VPN.app" "$HOME/.Trash/"
           # The service checks every 5 minutes and removes itself on the second miss.
@@ -429,16 +436,14 @@ jobs:
             sleep 1
           done
           if curl -fsS http://127.0.0.1:1081/status.json >/dev/null 2>&1; then
-            echo "::error::the service still runs 15 minutes after the app went to the Trash"
-            tail -n 20 "$HOME/Library/Logs/uni-vpn/daemon.log" || true
-            exit 1
+            fail "the service still runs 15 minutes after the app went to the Trash"
           fi
           sleep 5
-          test ! -e "$HOME/Library/LaunchAgents/de.davidvinu.uni-vpn.plist"
-          test ! -e "$HOME/Library/LaunchAgents/de.davidvinu.uni-vpn.app.plist"
-          test ! -e "$app" || { echo "::error::$app is still there"; exit 1; }
-          if scutil --proxy | grep -q "127.0.0.1:1081"; then echo "::error::the proxy setting still points to uni-vpn"; exit 1; fi
-          if pgrep -x "Uni VPN" >/dev/null; then echo "::error::the shield is still in the menu bar"; exit 1; fi
+          test ! -e "$HOME/Library/LaunchAgents/de.davidvinu.uni-vpn.plist" || fail "the service's login entry is still there"
+          test ! -e "$HOME/Library/LaunchAgents/de.davidvinu.uni-vpn.app.plist" || fail "the app's login entry is still there"
+          test ! -e "$app" || fail "$app is still there"
+          if scutil --proxy | grep -q "127.0.0.1:1081"; then fail "the proxy setting still points to uni-vpn"; fi
+          if pgrep -x "Uni VPN" >/dev/null; then fail "the shield is still in the menu bar"; fi
 
   linux-packages:
     runs-on: ubuntu-latest
@@ -729,7 +734,8 @@ jobs:
   windows-openconnect:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    container: fedora:42
+    # A Fedora that still gets updates: its GnuTLS goes into every Windows install.
+    container: fedora:44
     steps:
       - uses: actions/checkout@v4
       - run: packaging/windows/build-openconnect.sh openconnect-win64
@@ -810,9 +816,10 @@ jobs:
       - name: Build uni-vpn-setup.exe
         shell: powershell
         run: |
-          # The app window alone, for the updates (core-files).
+          # The app window and OpenConnect alone, for the updates (core-files).
           New-Item -ItemType Directory -Force app-update\windows | Out-Null
           Copy-Item -Recurse stage\desktop app-update\windows\desktop
+          Copy-Item -Recurse stage\openconnect app-update\windows\openconnect
           # Signed, the core goes along: build-core.sh then puts this one into the update instead of its own.
           if ($env:AZURE_CLIENT_ID) {
             New-Item -ItemType Directory -Force app-update\windows\bin, app-update\windows-arm64\bin | Out-Null

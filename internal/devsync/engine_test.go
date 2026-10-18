@@ -2386,11 +2386,16 @@ func TestAccountTypedBeforeTheKeysCouldBeRead(t *testing.T) {
 				syncAll(t, laptop)
 				wantAccount, wantPassword = string(mustJSON(other)), `"laptop"`
 			}
+			// Under the lock, as everywhere: the last rounds' requests may still come in.
+			relay.mu.Lock()
 			relay.rng, relay.odds = rand.New(rand.NewPCG(1, 2)), 1
+			relay.mu.Unlock()
 			if err := again.Refresh(ctx); err == nil { // Settings opens: the keyring answers now
 				t.Fatal("want the round to fail offline")
 			}
+			relay.mu.Lock()
 			relay.rng = nil
+			relay.mu.Unlock()
 			local.setDomains(append(local.getDomains(), "lsf.uni-heidelberg.de")...)
 			again.Notify()
 			syncAll(t, again, laptop, again)

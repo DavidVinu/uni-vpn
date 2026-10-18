@@ -481,3 +481,38 @@ func TestOCProxyIsPassedInTheEnvironment(t *testing.T) {
 		t.Fatal(env)
 	}
 }
+
+func TestOpenconnectSpeaksEnglish(t *testing.T) {
+	t.Setenv("LANG", "de_DE.UTF-8")
+	t.Setenv("LANGUAGE", "de:en")
+	t.Setenv("LC_ALL", "de_DE.UTF-8")
+	t.Setenv("LC_MESSAGES", "de_DE.UTF-8")
+	env := newFlow(t).make().env(1)
+	for _, want := range []string{"LANG=de_DE.UTF-8", "LC_CTYPE=de_DE.UTF-8", "LC_ALL=", "LANGUAGE=", "LC_MESSAGES=C"} {
+		if !slices.Contains(env, want) {
+			t.Fatal(want, env)
+		}
+	}
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "LC_ALL=de") || strings.HasPrefix(kv, "LANGUAGE=de") || strings.HasPrefix(kv, "LC_MESSAGES=de") {
+			t.Fatal(kv)
+		}
+	}
+}
+
+func TestOpenconnectKeepsTheCharacterSet(t *testing.T) {
+	t.Setenv("LANG", "de_DE.UTF-8")
+	t.Setenv("LC_CTYPE", "de_DE.ISO-8859-1")
+	t.Setenv("LC_ALL", "") // restored after the test
+	os.Unsetenv("LC_ALL")
+	env := newFlow(t).make().env(1)
+	var ctype []string
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "LC_CTYPE=") {
+			ctype = append(ctype, kv)
+		}
+	}
+	if len(ctype) != 1 || ctype[0] != "LC_CTYPE=de_DE.ISO-8859-1" {
+		t.Fatal(ctype)
+	}
+}

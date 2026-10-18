@@ -228,7 +228,9 @@
   "setup.show_secret": "显示密钥",
   "setup.totp_help": "没有以 otpauth:// 开头的行？请复制“secret=”后面的字母。手机上的验证码仍可继续使用。",
   "phone.setup.generic_step.3": "粘贴到下方。",
+  "phone.uni.heidelberg.mfa.2": "在“Soft-Token (zeitbasiert)”下点按“Einrichten”。",
   "phone.uni.heidelberg.mfa.3": "输入一个名称（例如“手机”），然后点按“Weiter”。",
   "phone.uni.heidelberg.mfa.4": "点按“Tokendetails einblenden”，复制以 otpauth:// 开头的那一行，并粘贴到下方。",
-  "phone.uni.heidelberg.mfa.5": "点按“Weiter”，再点按“Testen”。输入这里显示的验证码并点按“Absenden”。"
+  "phone.uni.heidelberg.mfa.5": "点按“Weiter”，再点按“Testen”。输入这里显示的验证码并点按“Absenden”。",
+  "phone.uni.heidelberg.mfa.6": "最后点按“Abschließen”。"
 }

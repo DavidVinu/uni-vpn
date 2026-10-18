@@ -459,8 +459,12 @@ func (u *Updater) install(s *staged) error {
 			return err
 		}
 	}
-	// Files an earlier version installed that this one no longer has.
+	// Files an earlier version installed that this one no longer has. openconnect stays: the
+	// installers put it there first, and a release without it must not leave none.
 	for _, rel := range previous {
+		if installersOwn(rel) {
+			continue
+		}
 		if !slices.ContainsFunc(s.files, func(f string) bool { return fold(f) == fold(rel) }) {
 			if st, err := os.Lstat(u.path(rel)); err == nil && st.Mode().IsRegular() {
 				_ = u.Files.Remove(u.path(rel))
@@ -471,6 +475,12 @@ func (u *Updater) install(s *staged) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(u.Root, CommitFile), []byte(s.commit+"\n"), 0o644)
+}
+
+// installersOwn: the folders with openconnect from the installers, which the updates replace
+// (openconnect/ on Windows, runtime/ next to the core on macOS) but never remove.
+func installersOwn(rel string) bool {
+	return strings.HasPrefix(fold(rel), "openconnect/") || strings.HasPrefix(fold(rel), "runtime/")
 }
 
 // same reports whether dest is a regular file with the content and permissions of src.

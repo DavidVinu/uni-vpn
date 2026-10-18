@@ -69,15 +69,18 @@ func TestTwoClosesOfARequestCodeLeaveNoKey(t *testing.T) {
 	desktop := newDevice(t, srv.URL, "Desktop", newLocal(false, nil), c)
 	desktop.opts.PollEvery = time.Minute
 	desktop.opts.CodeLifetime = 300 * time.Millisecond
-	p, err := desktop.Request(ctx)
-	if err != nil {
+	var release sync.Once
+	t.Cleanup(func() { release.Do(func() { close(h.release) }) }) // before srv.Close, also after a failure
+	// Request, with the laptop's read before the lifetime starts: the code is read just before it
+	// runs out, also on a slow runner.
+	n := newCode()
+	if err := desktop.putSlot(ctx, pairingFor(n), "a", pairMessage{Kind: "request"}); err != nil {
 		t.Fatal(err)
 	}
-	n, _ := NormalizeCode(p.Code)
-	// The laptop read the code just before it ran out and is busy with its group.
 	if _, err := laptop.takeSlot(ctx, pairingFor(n), "a"); err != nil {
 		t.Fatal(err)
 	}
+	desktop.show("request", n, pairingFor(n))
 	<-h.arrived // the expiry's close is on its way
 	if st := desktop.Status().Pairing.State; st != "waiting" {
 		t.Fatalf("state %s", st)
@@ -92,7 +95,7 @@ func TestTwoClosesOfARequestCodeLeaveNoKey(t *testing.T) {
 		t.Fatal("the cancel returned before the expiry's close was through")
 	case <-time.After(300 * time.Millisecond):
 	}
-	close(h.release)
+	release.Do(func() { close(h.release) })
 	<-h.done
 	<-canceled
 	time.Sleep(200 * time.Millisecond)
@@ -158,15 +161,16 @@ func TestStopDuringTheExpirysCloseLeavesNoKey(t *testing.T) {
 	stop := make(chan struct{})
 	ran := make(chan struct{})
 	go func() { desktop.Run(stop); close(ran) }()
-	p, err := desktop.Request(ctx)
-	if err != nil {
+	var exit sync.Once
+	t.Cleanup(func() { exit.Do(func() { close(h.exited) }) }) // before srv.Close, also after a failure
+	n := newCode()
+	if err := desktop.putSlot(ctx, pairingFor(n), "a", pairMessage{Kind: "request"}); err != nil {
 		t.Fatal(err)
 	}
-	n, _ := NormalizeCode(p.Code)
-	// The laptop read the code just before it ran out and is busy with its group.
 	if _, err := laptop.takeSlot(ctx, pairingFor(n), "a"); err != nil {
 		t.Fatal(err)
 	}
+	desktop.show("request", n, pairingFor(n))
 	<-h.arrived // the expiry's close is on its way
 	close(stop)
 	select {
@@ -178,7 +182,7 @@ func TestStopDuringTheExpirysCloseLeavesNoKey(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		// Run waits for the close: it goes on.
 	}
-	close(h.exited)
+	exit.Do(func() { close(h.exited) })
 	<-ran
 	k, _ := laptop.ensureGroup(ctx)
 	if err := laptop.putSlot(ctx, pairingFor(n), "b", pairMessage{Kind: "root", Root: k.Root}); err == nil {
