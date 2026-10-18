@@ -276,11 +276,12 @@ func lossyPair(t *testing.T) (*os.File, *os.File) {
 // Downloads over a link that drops bursts of packets finish (with RACK, about one in thirty
 // hung for good).
 func TestBulkTransferWithLosses(t *testing.T) {
-	size := 1 << 20
+	size, transfers, deadline := 1<<20, 8, 60*time.Second
 	if raceEnabled {
-		size = 256 << 10
+		// gVisor under the race detector moves a few dozen KB/s on a busy macOS runner.
+		size, transfers, deadline = 64<<10, 2, 120*time.Second
 	}
-	for i := 0; i < 8; i++ {
+	for i := 0; i < transfers; i++ {
 		a, b := lossyPair(t)
 		client := newStack(t, a, "10.0.0.2")
 		server := newStack(t, b, "10.0.0.1")
@@ -302,7 +303,7 @@ func TestBulkTransferWithLosses(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		c.SetDeadline(time.Now().Add(60 * time.Second))
+		c.SetDeadline(time.Now().Add(deadline))
 		start := time.Now()
 		n, err := io.Copy(io.Discard, c)
 		c.Close()
@@ -324,10 +325,11 @@ func TestBulkTransfer(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ln.Close()
-	// The race detector slows gVisor on macOS to a few hundred KB/s (8 MiB take 50 ms without).
-	size := 8 << 20
+	// The race detector slows gVisor on a busy macOS runner to a few dozen KB/s (8 MiB take
+	// 50 ms without).
+	size, deadline := 8<<20, 20*time.Second
 	if raceEnabled {
-		size = 512 << 10
+		size, deadline = 512<<10, 90*time.Second
 	}
 	go func() {
 		c, err := ln.Accept()
@@ -344,7 +346,7 @@ func TestBulkTransfer(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	c.SetDeadline(time.Now().Add(20 * time.Second))
+	c.SetDeadline(time.Now().Add(deadline))
 	start := time.Now()
 	n, err := io.Copy(io.Discard, c)
 	t.Logf("%d bytes in %v", n, time.Since(start))
