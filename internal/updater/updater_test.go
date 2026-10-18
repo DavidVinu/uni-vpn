@@ -516,3 +516,35 @@ func TestUnchangedFilesStay(t *testing.T) {
 		t.Fatal(read(t, filepath.Join(f.root, FilesList)))
 	}
 }
+
+// The Mac zips carry openconnect and ocproxy for both processors (packaging/build-core.sh); the
+// programs stay executable, their libraries do not need to be.
+func TestTheUpdateBringsOpenConnectAlong(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no executable bit")
+	}
+	f := newFixture(t, makeZip(t, append([]file{
+		{name: "runtime/arm64/bin/openconnect", body: "new openconnect", mode: 0o755},
+		{name: "runtime/arm64/lib/libgnutls.30.dylib", body: "new gnutls", mode: 0o644},
+	}, coreZip...)...))
+	old := filepath.Join(f.root, "runtime", "arm64", "lib", "libgnutls.30.dylib")
+	write(t, old, "old gnutls")
+	if _, err := f.u.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.u.Apply(); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]os.FileMode{"bin/openconnect": 0o755, "lib/libgnutls.30.dylib": 0o644} {
+		path := filepath.Join(f.root, "runtime", "arm64", filepath.FromSlash(name))
+		if st, err := os.Stat(path); err != nil || st.Mode().Perm() != want {
+			t.Fatal(name, st, err)
+		}
+	}
+	if read(t, old) != "new gnutls" {
+		t.Fatal("the library stayed old")
+	}
+	if got := read(t, filepath.Join(f.root, FilesList)); !strings.Contains(got, "runtime/arm64/bin/openconnect\n") {
+		t.Fatal(got)
+	}
+}

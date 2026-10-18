@@ -2,8 +2,8 @@
 # Builds uni-vpn.pkg from the per-processor folders of build-runtime.sh and the Go core.
 # Needs Go and Python 3 (only here, for the Info.plist; the Macs it installs on need neither).
 # Usage: packaging/macos/build-pkg.sh RUNTIME-DIR VERSION OUT.pkg [APP-DIR]
-# APP-DIR: also the app window alone, as the updates install it next to the core:
-# APP-DIR/desktop/Uni VPN.app (packaging/build-core.sh).
+# APP-DIR: also the app window alone and openconnect with ocproxy, as the updates install them
+# next to the core: APP-DIR/desktop/Uni VPN.app and APP-DIR/runtime/<arch> (packaging/build-core.sh).
 # Signs and notarizes when MACOS_APP_IDENTITY, MACOS_INSTALLER_IDENTITY and
 # MACOS_NOTARY_PROFILE are set (see .github/workflows/ci.yml); unsigned otherwise.
 set -euo pipefail
@@ -67,6 +67,13 @@ if [ -n "${MACOS_APP_IDENTITY:-}" ]; then
     done
   codesign --force --timestamp --options runtime -s "$MACOS_APP_IDENTITY" "$app"
   if [ -n "$alone" ]; then codesign --force --timestamp --options runtime -s "$MACOS_APP_IDENTITY" "$alone"; fi
+fi
+# openconnect and ocproxy, signed as above, go along with the updates too (next to the core in
+# runtime/, internal/platform): /Applications belongs to root.
+if [ -n "$alone" ]; then
+  rm -rf "$4/runtime"
+  mkdir -p "$4/runtime"
+  for arch in arm64 x86_64; do cp -R "$resources/$arch" "$4/runtime/"; done
 fi
 
 # Installed where it was built for, also when someone moved an older copy elsewhere.

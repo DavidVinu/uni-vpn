@@ -3,9 +3,11 @@
 # (docs/go-switch.md), with the app window, so that updates bring it along (internal/desktop).
 # Usage: packaging/build-core.sh COMMIT OUT-DIR [APP-DIR]
 # APP-DIR holds the app windows built on their own systems, as the update installs them:
-# darwin/desktop/Uni VPN.app and windows/desktop/, and the signed cores windows/bin and
-# windows-arm64/bin when there are signing secrets (CI: macos-pkg, windows-installer). Without
-# it the macOS and Windows zips have the core alone. Linux's is a script from the repository.
+# darwin/desktop/Uni VPN.app and windows/desktop/, the installers' openconnect
+# (darwin/runtime/<arch> with ocproxy, windows/openconnect), and the signed cores windows/bin
+# and windows-arm64/bin when there are signing secrets (CI: macos-pkg, windows-installer).
+# Without it the macOS and Windows zips have the core alone. Linux's app window is a script from
+# the repository, and its openconnect comes from the distribution.
 set -euo pipefail
 commit="$1"
 repo=$(cd "$(dirname "$0")/.." && pwd)
@@ -13,8 +15,11 @@ out=$(mkdir -p "$2" && cd "$2" && pwd)
 apps=""
 if [ -n "${3:-}" ]; then
   apps=$(cd "$3" && pwd)
-  for f in "darwin/desktop/Uni VPN.app/Contents/MacOS/Uni VPN" "windows/desktop/Uni VPN.exe"; do
-    # A release without them would remove the app the last one installed.
+  for f in "darwin/desktop/Uni VPN.app/Contents/MacOS/Uni VPN" "windows/desktop/Uni VPN.exe" \
+    darwin/runtime/arm64/bin/openconnect darwin/runtime/arm64/bin/ocproxy \
+    darwin/runtime/x86_64/bin/openconnect darwin/runtime/x86_64/bin/ocproxy \
+    windows/openconnect/openconnect.exe; do
+    # A release without them would remove what the last one installed.
     [ -f "$apps/$f" ] || { echo "missing $apps/$f" >&2; exit 1; }
   done
 fi
@@ -45,10 +50,11 @@ for target in linux/amd64 linux/arm64 darwin/arm64 darwin/amd64 windows/amd64 wi
   fi
   case "$target" in
     linux/*) mkdir -p "$stage/app/linux" && cp app/linux/uni-vpn-app.py "$stage/app/linux/" ;;
-    # The same x64 app window as windows/amd64; the signed ARM core is in windows-arm64/bin.
+    # The same x64 app window and openconnect as windows/amd64; the signed ARM core is in
+    # windows-arm64/bin.
     windows/arm64)
       if [ -n "$apps" ]; then
-        cp -R "$apps/windows/desktop" "$stage/"
+        cp -R "$apps/windows/desktop" "$apps/windows/openconnect" "$stage/"
         if [ -d "$apps/windows-arm64" ]; then cp -R "$apps/windows-arm64/." "$stage/"; fi
       fi
       ;;

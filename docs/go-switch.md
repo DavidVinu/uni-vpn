@@ -23,22 +23,24 @@ switches back. Go setup registers the service with `bin/uni-vpn-core daemon` dir
 
 ## Release files
 
-CI builds (`packaging/build-core.sh`), on every push, one zip per platform holding the binary
-and the app window:
+CI builds (`packaging/build-core.sh`), on every push, one zip per platform holding the binary,
+the app window and, on macOS and Windows, the installers' openconnect:
 
     uni-vpn-core-linux-amd64.zip     bin/uni-vpn-core, app/linux/uni-vpn-app.py
     uni-vpn-core-linux-arm64.zip     bin/uni-vpn-core, app/linux/uni-vpn-app.py
-    uni-vpn-core-darwin-arm64.zip    bin/uni-vpn-core, desktop/Uni VPN.app (both processors)
-    uni-vpn-core-darwin-amd64.zip    bin/uni-vpn-core, desktop/Uni VPN.app (both processors)
-    uni-vpn-core-windows-amd64.zip   bin/uni-vpn-core.exe, desktop/ (Uni VPN.exe, WebView2)
-    uni-vpn-core-windows-arm64.zip   bin/uni-vpn-core.exe, desktop/ (the same x64 app window)
+    uni-vpn-core-darwin-arm64.zip    bin/uni-vpn-core, desktop/Uni VPN.app, runtime/ (both processors)
+    uni-vpn-core-darwin-amd64.zip    bin/uni-vpn-core, desktop/Uni VPN.app, runtime/ (both processors)
+    uni-vpn-core-windows-amd64.zip   bin/uni-vpn-core.exe, desktop/ (Uni VPN.exe, WebView2), openconnect/
+    uni-vpn-core-windows-arm64.zip   bin/uni-vpn-core.exe, desktop/, openconnect/ (the same x64 ones)
 
 The two Mac zips are the same: core and app run on both processors, as the installer's do, so
 that a Mac moved from Intel to Apple Silicon still starts the core it updated to
 (`packaging/lipo` joins the two cores on Linux). uni-vpn-setup.exe holds both Windows cores and
 installs the one for the processor; on ARM, openconnect and the app window are the x64 ones,
-which Windows 11 emulates. openconnect comes with the installers and is not part of these
-updates.
+which Windows 11 emulates. On Windows openconnect/ replaces the installer's copy; on macOS
+/Applications belongs to root, so runtime/ (openconnect and ocproxy with their libraries, one
+folder per processor as in the .pkg) goes next to the core, and the core runs that one before the
+.pkg's (`internal/platform`). On Linux openconnect comes from the distribution.
 
 ## The app window after an update
 

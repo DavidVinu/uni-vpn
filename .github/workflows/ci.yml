@@ -385,10 +385,6 @@ jobs:
     needs: macos-pkg
     runs-on: macos-15
     timeout-minutes: 30
-    strategy:  # TEMPORARY: three tries to catch a rare failure
-      fail-fast: false
-      matrix:
-        try: [1, 2, 3]
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -448,7 +444,6 @@ jobs:
           test ! -e "$app" || fail "$app is still there"
           if scutil --proxy | grep -q "127.0.0.1:1081"; then fail "the proxy setting still points to uni-vpn"; fi
           if pgrep -x "Uni VPN" >/dev/null; then fail "the shield is still in the menu bar"; fi
-          tail -n 15 "$HOME/Library/Logs/uni-vpn/daemon.log"  # TEMPORARY
 
   linux-packages:
     runs-on: ubuntu-latest
@@ -739,7 +734,8 @@ jobs:
   windows-openconnect:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    container: fedora:42
+    # A Fedora that still gets updates: its GnuTLS goes into every Windows install.
+    container: fedora:44
     steps:
       - uses: actions/checkout@v4
       - run: packaging/windows/build-openconnect.sh openconnect-win64
@@ -820,9 +816,10 @@ jobs:
       - name: Build uni-vpn-setup.exe
         shell: powershell
         run: |
-          # The app window alone, for the updates (core-files).
+          # The app window and OpenConnect alone, for the updates (core-files).
           New-Item -ItemType Directory -Force app-update\windows | Out-Null
           Copy-Item -Recurse stage\desktop app-update\windows\desktop
+          Copy-Item -Recurse stage\openconnect app-update\windows\openconnect
           # Signed, the core goes along: build-core.sh then puts this one into the update instead of its own.
           if ($env:AZURE_CLIENT_ID) {
             New-Item -ItemType Directory -Force app-update\windows\bin, app-update\windows-arm64\bin | Out-Null

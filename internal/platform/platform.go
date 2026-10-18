@@ -64,27 +64,65 @@ func PackageDir() string {
 	return "/usr/share/uni-vpn"
 }
 
-// BundledBinDir is, on macOS, the folder with openconnect and ocproxy from the .pkg, built for
-// this processor. Empty elsewhere or when it does not exist.
-func BundledBinDir() string {
-	if !IsMacOS {
+// RuntimeDir is the folder next to the core's bin folder where the updates put openconnect and
+// ocproxy on macOS, one folder per processor as in PackageDir (packaging/build-core.sh):
+// /Applications belongs to root, the user's copy of the program does not.
+const RuntimeDir = "runtime"
+
+// coreRoot is the folder of the running core's installation: the parent of its bin folder, ""
+// when it runs from anywhere else.
+var coreRoot = func() string {
+	exe, err := os.Executable()
+	if err == nil {
+		exe, err = filepath.EvalSymlinks(exe)
+	}
+	if err != nil || filepath.Base(filepath.Dir(exe)) != "bin" {
 		return ""
 	}
-	machine := map[string]string{"amd64": "x86_64", "arm64": "arm64"}[runtime.GOARCH]
-	dir := filepath.Join(PackageDir(), machine, "bin")
-	if st, err := os.Stat(dir); err != nil || !st.IsDir() || machine == "" {
-		return ""
-	}
-	return dir
+	return filepath.Dir(filepath.Dir(exe))
 }
 
-// IsBundled reports whether path lies inside PackageDir.
-func IsBundled(path string) bool {
-	pkg := PackageDir()
-	if pkg == "" || IsWindows {
-		return false
+// bundledBases are the folders with programs from the installers: on macOS the updates' copy of
+// openconnect and ocproxy first, then the .pkg's (one folder per processor in each).
+func bundledBases() []string {
+	if IsWindows {
+		return nil
 	}
-	return strings.HasPrefix(realpath(path), realpath(pkg)+string(os.PathSeparator))
+	var out []string
+	if IsMacOS {
+		if root := coreRoot(); root != "" {
+			out = append(out, filepath.Join(root, RuntimeDir))
+		}
+	}
+	return append(out, PackageDir())
+}
+
+// BundledBinDirs are, on macOS, the folders with openconnect and ocproxy built for this
+// processor that exist: the one the updates installed, then the one from the .pkg.
+func BundledBinDirs() []string {
+	machine := map[string]string{"amd64": "x86_64", "arm64": "arm64"}[runtime.GOARCH]
+	if !IsMacOS || machine == "" {
+		return nil
+	}
+	var out []string
+	for _, base := range bundledBases() {
+		dir := filepath.Join(base, machine, "bin")
+		if st, err := os.Stat(dir); err == nil && st.IsDir() {
+			out = append(out, dir)
+		}
+	}
+	return out
+}
+
+// IsBundled reports whether path lies inside PackageDir or, on macOS, the updates' RuntimeDir.
+func IsBundled(path string) bool {
+	full := realpath(path)
+	for _, base := range bundledBases() {
+		if strings.HasPrefix(full, realpath(base)+string(os.PathSeparator)) {
+			return true
+		}
+	}
+	return false
 }
 
 // realpath resolves symlinks as far as the path exists, like os.path.realpath.
@@ -219,8 +257,8 @@ func executable(p string) bool {
 	return IsWindows || st.Mode().Perm()&0o111 != 0
 }
 
-// FindBinary looks up a program: the override from config.toml, then the macOS package, then
-// PATH, then SearchDirs.
+// FindBinary looks up a program: the override from config.toml, then the macOS programs from the
+// updates and the package, then PATH, then SearchDirs.
 func FindBinary(name, override string) string {
 	if IsWindows && override != "" && !AdminOnly(override) {
 		// Neither PATH nor config.toml (both writable by the user) for the elevated service.
@@ -232,7 +270,7 @@ func FindBinary(name, override string) string {
 		}
 		return ""
 	}
-	if dir := BundledBinDir(); dir != "" {
+	for _, dir := range BundledBinDirs() {
 		if c := filepath.Join(dir, name); executable(c) {
 			return c
 		}
