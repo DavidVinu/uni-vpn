@@ -86,6 +86,17 @@ class UniVpnService : VpnService() {
         // VPN" on or off: Home's warning follows it here, not only when the VPN starts.
         if (tun != null) blocking.value = isLockdownEnabled
         val status = core.get("/status.json").json
+        if (status == null && core.portTaken) {
+            // Our core ended and another app took its port (Core.ready): the rule would hand that
+            // app the browsers. It comes back with the next answer from our own core.
+            synchronized(tunLock) {
+                tun?.close()
+                tun = null
+                pacVersion = null
+            }
+            blocking.value = false
+            return
+        }
         // Without an answer the list is unknown: keep the rule as it is (the first start still
         // hands Android the address, which answers once the core listens).
         if (status == null && !force) return
