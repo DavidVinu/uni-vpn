@@ -354,8 +354,10 @@ let L = {languages: [["en", "English"]], catalogs: {en: {}}}, lang = "en", local
 
 async function loadLocales() {
   try {
-    L = await (await fetch("/locales.json", {cache: "no-store"})).json();
-    localesLoaded = true;
+    const r = await fetch("/locales.json", {cache: "no-store"});
+    // Only our core's texts: another account's uni-vpn answers 403 with an error in JSON.
+    const next = r.ok ? await r.json() : null;
+    if (next && next.catalogs && next.languages) { L = next; localesLoaded = true; }
   } catch (e) { /* keys until the core answers again (refresh) */ }
 }
 
@@ -1282,7 +1284,7 @@ function renderDevices() {
   const add = document.createElement("button");
   Object.assign(add, {type: "button", className: "item add", textContent: t("sync.add")});
   add.onclick = () => startPair("offer", "settings");
-  const key = JSON.stringify([sync.on, sync.devices, lang]);
+  const key = JSON.stringify([sync.on, sync.devices, lang, localesLoaded]);
   if ($("devices").dataset.key !== key) { $("devices").replaceChildren(...rows, add); $("devices").dataset.key = key; }
 }
 

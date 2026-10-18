@@ -230,6 +230,90 @@ func TestSmallTCPBuffers(t *testing.T) {
 	}
 }
 
+func TestNoRACK(t *testing.T) {
+	a, _ := pair(t)
+	s := newStack(t, a, "10.0.0.2")
+	var rack tcpip.TCPRecovery
+	if err := s.stack.TransportProtocolOption(tcp.ProtocolNumber, &rack); err != nil {
+		t.Fatal(err)
+	}
+	if rack != 0 {
+		t.Fatal(rack)
+	}
+}
+
+// lossyPair is pair with a short queue on each way that drops what does not fit, as Darwin
+// drops packets (ENOBUFS) when the other end's socket queue is full.
+func lossyPair(t *testing.T) (*os.File, *os.File) {
+	a, ra := pair(t)
+	b, rb := pair(t)
+	relay := func(from, to *os.File) {
+		queue := make(chan []byte, 4)
+		defer close(queue)
+		go func() {
+			for p := range queue {
+				to.Write(p)
+			}
+		}()
+		buf := make([]byte, maxPacket)
+		for {
+			n, err := from.Read(buf)
+			if err != nil {
+				return
+			}
+			select {
+			case queue <- append([]byte(nil), buf[:n]...):
+			default:
+			}
+		}
+	}
+	go relay(ra, rb)
+	go relay(rb, ra)
+	t.Cleanup(func() { ra.Close(); rb.Close() })
+	return a, b
+}
+
+// Downloads over a link that drops bursts of packets finish (with RACK, about one in thirty
+// hung for good).
+func TestBulkTransferWithLosses(t *testing.T) {
+	size := 1 << 20
+	if raceEnabled {
+		size = 256 << 10
+	}
+	for i := 0; i < 8; i++ {
+		a, b := lossyPair(t)
+		client := newStack(t, a, "10.0.0.2")
+		server := newStack(t, b, "10.0.0.1")
+		ln, err := server.listenTCP(8080)
+		if err != nil {
+			t.Fatal(err)
+		}
+		go func() {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			defer c.Close()
+			c.Write(make([]byte, size))
+		}()
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		c, err := client.DialContext(ctx, "tcp", "10.0.0.1:8080")
+		cancel()
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.SetDeadline(time.Now().Add(60 * time.Second))
+		start := time.Now()
+		n, err := io.Copy(io.Discard, c)
+		c.Close()
+		ln.Close()
+		if n != int64(size) || err != nil {
+			t.Fatal(i, n, err)
+		}
+		t.Logf("%d bytes in %v, %d retransmits", n, time.Since(start), server.stack.Stats().TCP.Retransmits.Value())
+	}
+}
+
 // Small buffers still carry a download much larger than themselves.
 func TestBulkTransfer(t *testing.T) {
 	a, b := pair(t)
