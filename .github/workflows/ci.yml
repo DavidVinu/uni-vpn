@@ -376,6 +376,67 @@ jobs:
           path: uni-vpn.pkg
           retention-days: 7
 
+  # What a Mac user does that the steps above skip: the .pkg as a browser download (Gatekeeper),
+  # a second copy of the app started (one shield in the menu bar), and the app dragged to the Trash.
+  macos-trash:
+    needs: macos-pkg
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: installer-macos
+          path: out
+      - name: Gatekeeper on the downloaded file
+        run: |
+          # Safari marks every download like this; Gatekeeper then checks the file on first open.
+          xattr -w com.apple.quarantine "0083;$(printf %x "$(date +%s)");Safari;" out/uni-vpn.pkg
+          pkgutil --check-signature out/uni-vpn.pkg || true
+          if spctl --assess --type install -vv out/uni-vpn.pkg; then
+            echo "Gatekeeper opens it without a warning"
+          elif pkgutil --check-signature out/uni-vpn.pkg | grep -q "Developer ID Installer"; then
+            echo "::error::signed, but Gatekeeper still refuses it (not notarized?)"
+            exit 1
+          else
+            echo "::notice::not signed yet: Gatekeeper refuses it on first open, the user needs Open Anyway"
+          fi
+      - name: Install it like a user would
+        run: |
+          sudo installer -pkg out/uni-vpn.pkg -target / </dev/null
+          for i in $(seq 30); do curl -fsS http://127.0.0.1:1081/status.json >/dev/null && break; sleep 1; done
+          curl -fsS http://127.0.0.1:1081/status.json >/dev/null
+          for i in $(seq 15); do pgrep -x "Uni VPN" >/dev/null && break; sleep 1; done
+          sleep 5
+          test "$(pgrep -x "Uni VPN" | wc -l)" -eq 1 || { echo "::error::more than one shield in the menu bar"; pgrep -lx "Uni VPN"; exit 1; }
+      - name: A second copy hands over and quits
+        run: |
+          before=$(pgrep -x "Uni VPN")
+          open -n "/Applications/Uni VPN.app"
+          open "uni-vpn://settings"
+          sleep 8
+          test "$(pgrep -x "Uni VPN")" = "$before" || { echo "::error::a second copy stayed open"; pgrep -lx "Uni VPN"; exit 1; }
+      - name: Drag it to the Trash
+        run: |
+          app="$HOME/Library/Application Support/uni-vpn/app"
+          scutil --proxy | grep -i proxyautoconfig || true
+          sudo mv "/Applications/Uni VPN.app" "$HOME/.Trash/"
+          # The service checks every 5 minutes and removes itself on the second miss.
+          for i in $(seq 900); do
+            curl -fsS http://127.0.0.1:1081/status.json >/dev/null 2>&1 || break
+            sleep 1
+          done
+          if curl -fsS http://127.0.0.1:1081/status.json >/dev/null 2>&1; then
+            echo "::error::the service still runs 15 minutes after the app went to the Trash"
+            tail -n 20 "$HOME/Library/Logs/uni-vpn/daemon.log" || true
+            exit 1
+          fi
+          sleep 5
+          test ! -e "$HOME/Library/LaunchAgents/de.davidvinu.uni-vpn.plist"
+          test ! -e "$HOME/Library/LaunchAgents/de.davidvinu.uni-vpn.app.plist"
+          test ! -e "$app" || { echo "::error::$app is still there"; exit 1; }
+          if scutil --proxy | grep -q "127.0.0.1:1081"; then echo "::error::the proxy setting still points to uni-vpn"; exit 1; fi
+          if pgrep -x "Uni VPN" >/dev/null; then echo "::error::the shield is still in the menu bar"; exit 1; fi
+
   linux-packages:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -834,7 +895,7 @@ jobs:
 
   publish:
     # relay tests what "go" cannot: the sync client against the real relay code.
-    needs: [promote, macos-pkg, linux-packages, windows-installer, windows-arm-install, core-files, relay]
+    needs: [promote, macos-pkg, macos-trash, linux-packages, windows-installer, windows-arm-install, core-files, relay]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
