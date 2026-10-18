@@ -47,8 +47,10 @@ place() {
 bottles=$(mktemp -d)
 for f in ocproxy $(brew deps --union openconnect ocproxy); do
   # The runner's Homebrew knows only the bottles for its own macOS, Homebrew's website all.
-  bottle=$(curl -fsSL --retry 5 --retry-all-errors "https://formulae.brew.sh/api/formula/$f.json" | jq -c --arg t "$tag" --arg c "$cellar" \
-    '.bottle.stable.files[$t] // empty | select(.cellar == $c or .cellar == ":any" or .cellar == ":any_skip_relocation")')
+  # Into a file: a retry after a cut-off download starts it over, in a pipe jq would get both.
+  curl -fsSL --retry 5 --retry-all-errors -o "$bottles/$f.json" "https://formulae.brew.sh/api/formula/$f.json"
+  bottle=$(jq -c --arg t "$tag" --arg c "$cellar" \
+    '.bottle.stable.files[$t] // empty | select(.cellar == $c or .cellar == ":any" or .cellar == ":any_skip_relocation")' "$bottles/$f.json")
   if [ -z "$bottle" ]; then continue; fi
   curl -fsSL --retry 5 --retry-all-errors -H "Authorization: Bearer QQ==" -o "$bottles/$f.tar.gz" "$(jq -r .url <<<"$bottle")"
   if ! echo "$(jq -r .sha256 <<<"$bottle")  $bottles/$f.tar.gz" | shasum -a 256 -c --status; then
