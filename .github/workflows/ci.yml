@@ -383,7 +383,7 @@ jobs:
   # a second copy of the app started (one shield in the menu bar), and the app dragged to the Trash.
   macos-trash:
     needs: macos-pkg
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 30
     steps:
       - uses: actions/download-artifact@v4
@@ -439,6 +439,77 @@ jobs:
           test ! -e "$app" || { echo "::error::$app is still there"; exit 1; }
           if scutil --proxy | grep -q "127.0.0.1:1081"; then echo "::error::the proxy setting still points to uni-vpn"; exit 1; fi
           if pgrep -x "Uni VPN" >/dev/null; then echo "::error::the shield is still in the menu bar"; exit 1; fi
+
+  macos14-scratch:
+    # Scratch: the programs built on macOS 15 on a real macOS 14, and the list from the 14.0 SDK.
+    needs: macos-runtime
+    runs-on: macos-14
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: macos-runtime-*
+          path: runtime-tar
+          merge-multiple: true
+      - run: mkdir runtime && for f in runtime-tar/*.tar.gz; do tar -xzf "$f" -C runtime; done
+      - name: start on macOS 14
+        run: |
+          sw_vers -productVersion
+          if ! arch -x86_64 /usr/bin/true 2>/dev/null; then
+            sudo softwareupdate --install-rosetta --agree-to-license
+          fi
+          for a in arm64 x86_64; do
+            arch -$a runtime/$a/bin/openconnect --version
+            code=0
+            out=$(arch -$a runtime/$a/bin/ocproxy -h </dev/null 2>&1) || code=$?
+            echo "$out"
+            if [ "$code" -ge 128 ] || grep -q dyld <<<"$out"; then echo "::error::$a ocproxy"; exit 1; fi
+            out=$(arch -$a runtime/$a/bin/openconnect --cafile=/etc/ssl/cert.pem --non-inter --authenticate --protocol=anyconnect vpn-ac.uni-heidelberg.de </dev/null 2>&1 || true)
+            echo "$out" | tail -n 3
+            echo "$out" | grep -q "Connected to" || { echo "::error::$a openconnect did not reach the gateway"; exit 1; }
+          done
+      - name: the list from the 14.0 SDK
+        run: |
+          ls -d /Applications/Xcode*.app
+          ls /Applications/Xcode*.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/ || true
+          sdk=""
+          for x in /Applications/Xcode*.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX14.0.sdk; do
+            if [ -e "$x/SDKSettings.json" ]; then sdk=$x; break; fi
+          done
+          test -n "$sdk" || { echo "::error::no macOS 14.0 SDK"; exit 1; }
+          echo "$sdk"; grep -o '"Version":"[^"]*"' "$sdk/SDKSettings.json" || true
+          extra=$(gzip -dc packaging/macos/macos14-symbols.txt.gz | sed -n 's/^# //p')
+          python3 packaging/macos/system-symbols.py list "$sdk" runtime $extra \
+            /usr/lib/libc++.1.dylib /usr/lib/libc++abi.dylib /usr/lib/libobjc.A.dylib \
+            /usr/lib/libbz2.1.0.dylib /usr/lib/libcurl.4.dylib /usr/lib/libexpat.1.dylib \
+            /usr/lib/libsqlite3.dylib /usr/lib/libncurses.5.4.dylib /usr/lib/libedit.3.dylib \
+            /usr/lib/libpam.2.dylib /usr/lib/libcompression.dylib \
+            /System/Library/Frameworks/IOKit.framework/Versions/A/IOKit \
+            /System/Library/Frameworks/CFNetwork.framework/Versions/A/CFNetwork > sdk.txt
+          grep '^# ' sdk.txt
+          gzip -dc packaging/macos/macos14-symbols.txt.gz > committed.txt
+          python3 - <<'PY'
+          def read(p):
+              d, cur = {}, None
+              for l in open(p):
+                  l = l.rstrip("\n")
+                  if l.startswith("# "): cur = d.setdefault(l[2:], set())
+                  elif l: cur.add(l)
+              return d
+          sdk, com = read("sdk.txt"), read("committed.txt")
+          for lib, syms in sorted(sdk.items()):
+              old = com.get(lib)
+              if old is None: print("new:", lib, len(syms)); continue
+              print(lib, len(syms), "not in 14.0:", sorted(old - syms)[:30], "only in 14.0:", len(syms - old))
+          PY
+          gzip -9 -n -c sdk.txt > macos14-symbols.txt.gz
+          python3 packaging/macos/system-symbols.py check macos14-symbols.txt.gz runtime
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos14-symbols
+          path: macos14-symbols.txt.gz
+          retention-days: 3
 
   linux-packages:
     runs-on: ubuntu-latest

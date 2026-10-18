@@ -2,7 +2,9 @@
 The runners have a newer macOS than the oldest one the .pkg installs on, so the check goes by a
 list made from the older macOS's SDK: one "# <install name>" line per library, then its symbols.
 
-  system-symbols.py list SDK FOLDER > LIST    what that SDK's libraries, linked in FOLDER, have
+  system-symbols.py list SDK FOLDER [NAME...] > LIST
+                                              what that SDK's libraries, linked in FOLDER or
+                                              named by their install names, have
   system-symbols.py check LIST.gz FOLDER      fails if FOLDER needs a library or symbol LIST lacks
 
 Weak imports count too: the code calls them without checking that they exist."""
@@ -66,8 +68,8 @@ def tbd_symbols(text):
     return syms
 
 
-def list_sdk(sdk, folder):
-    names = sorted({n for p in machos(folder) for n in linked(p).values() if system(n)})
+def list_sdk(sdk, folder, extra):
+    names = sorted({n for p in machos(folder) for n in linked(p).values() if system(n)} | set(extra))
     for name in names:
         stub = os.path.join(sdk, name.lstrip("/"))
         stub = os.path.splitext(stub)[0] + ".tbd" if stub.endswith(".dylib") else stub + ".tbd"
@@ -114,8 +116,8 @@ def check(listing, folder):
     return 1 if problems else 0
 
 
-if len(sys.argv) == 4 and sys.argv[1] == "list":
-    list_sdk(sys.argv[2], sys.argv[3])
+if len(sys.argv) >= 4 and sys.argv[1] == "list":
+    list_sdk(sys.argv[2], sys.argv[3], sys.argv[4:])
 elif len(sys.argv) == 4 and sys.argv[1] == "check":
     sys.exit(check(sys.argv[2], sys.argv[3]))
 else:

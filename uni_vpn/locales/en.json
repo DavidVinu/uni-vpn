@@ -222,7 +222,9 @@
   "setup.show_secret": "Show key",
   "setup.totp_help": "No line starting with otpauth://? Copy the letters after \"secret=\" instead. Codes on your phone keep working.",
   "phone.setup.generic_step.3": "Paste it below.",
+  "phone.uni.heidelberg.mfa.2": "Tap \"Einrichten\" under \"Soft-Token (zeitbasiert)\".",
   "phone.uni.heidelberg.mfa.3": "Type a name, for example Phone, and tap \"Weiter\".",
   "phone.uni.heidelberg.mfa.4": "Tap \"Tokendetails einblenden\", copy the line starting with otpauth:// and paste it below.",
-  "phone.uni.heidelberg.mfa.5": "Tap \"Weiter\", then \"Testen\". Type the code shown here and tap \"Absenden\"."
+  "phone.uni.heidelberg.mfa.5": "Tap \"Weiter\", then \"Testen\". Type the code shown here and tap \"Absenden\".",
+  "phone.uni.heidelberg.mfa.6": "Tap \"Abschließen\" to finish."
 }

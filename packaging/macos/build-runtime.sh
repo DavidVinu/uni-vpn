@@ -15,13 +15,14 @@ mkdir -p "$out/bin" "$out/lib"
 # The .pkg installs on macOS from its distribution.xml minimum on.
 minimum=$(sed -n 's/.*<os-version min="\([0-9.]*\)".*/\1/p' "$(dirname "$0")/distribution.xml")
 
-brew install --quiet openconnect ocproxy dylibbundler
+brew install --quiet openconnect ocproxy dylibbundler pkgconf
 prefix=$(brew --prefix)
 cellar=$(brew --cellar)
-# Homebrew pours its bottles for the runner's newer macOS, which can need what the minimum lacks
-# (openconnect's for Apple Silicon calls strchrnul, new in macOS 15.4). Where Homebrew still has
-# bottles for the minimum, their programs and libraries replace those, placed as pouring places
-# them. Only bottles made for this Cellar or for any.
+# What Homebrew's own openconnect can do; the one built below for the minimum must do the same.
+features=$("$prefix/bin/openconnect" --version)
+# Homebrew pours its bottles for the runner's newer macOS, which can need what the minimum lacks.
+# Where Homebrew still has bottles for the minimum, their programs and libraries replace those,
+# placed as pouring places them. Only bottles made for this Cellar or for any.
 case "${minimum%.0}" in
   14) os=sonoma ;;
   *) echo "which Homebrew bottles are for macOS $minimum?"; exit 1 ;;
@@ -44,7 +45,7 @@ place() {
   codesign --force -s - "$1"
 }
 bottles=$(mktemp -d)
-for f in openconnect ocproxy $(brew deps --union openconnect ocproxy); do
+for f in ocproxy $(brew deps --union openconnect ocproxy); do
   # The runner's Homebrew knows only the bottles for its own macOS, Homebrew's website all.
   bottle=$(curl -fsSL "https://formulae.brew.sh/api/formula/$f.json" | jq -c --arg t "$tag" --arg c "$cellar" \
     '.bottle.stable.files[$t] // empty | select(.cellar == $c or .cellar == ":any" or .cellar == ":any_skip_relocation")')
@@ -65,6 +66,43 @@ for f in openconnect ocproxy $(brew deps --union openconnect ocproxy); do
     fi
   done
 done
+# openconnect itself is built here for the minimum, from the source Homebrew builds it from and
+# with its dependencies only. Homebrew makes no new bottles for older macOS, so the next rebuild
+# of openconnect leaves none for the minimum, and its newer ones call strchrnul (macOS 15.4).
+src=$(mktemp -d)
+url=$(brew info --json=v2 openconnect | jq -r '.formulae[0].urls.stable.url')
+sum=$(brew info --json=v2 openconnect | jq -r '.formulae[0].urls.stable.checksum')
+curl -fsSL -o "$src/openconnect.tar.gz" "$url"
+if ! echo "$sum  $src/openconnect.tar.gz" | shasum -a 256 -c --status; then
+  echo "$url is not the source Homebrew names"
+  exit 1
+fi
+tar -xzf "$src/openconnect.tar.gz" -C "$src" --strip-components 1
+pc=
+for f in $(brew deps openconnect); do
+  for d in lib/pkgconfig share/pkgconfig; do
+    if [ -d "$prefix/opt/$f/$d" ]; then pc="$pc${pc:+:}$prefix/opt/$f/$d"; fi
+  done
+done
+keg="$prefix/opt/openconnect"
+chmod -R u+w "$(cd "$keg" && pwd -P)"
+(
+  cd "$src"
+  export MACOSX_DEPLOYMENT_TARGET="$minimum" PKG_CONFIG_LIBDIR="$pc"
+  export CPPFLAGS="-I$prefix/opt/gettext/include" LDFLAGS="-L$prefix/opt/gettext/lib"
+  export LIBXML2_CFLAGS="-I$(xcrun --show-sdk-path)/usr/include/libxml2" LIBXML2_LIBS="-lxml2"
+  ./configure --quiet --prefix="$keg" --sbindir="$keg/bin" --localstatedir="$prefix/var" \
+    --with-vpnc-script="$prefix/etc/vpnc/vpnc-script" --disable-dependency-tracking \
+    ac_cv_func_strchrnul=no || { tail -n 40 config.log; exit 1; }
+  make -j"$(sysctl -n hw.ncpu)" >/dev/null
+  make install >/dev/null
+)
+if [ "$("$prefix/bin/openconnect" --version)" != "$features" ]; then
+  echo "openconnect built for macOS $minimum differs from Homebrew's:"
+  diff <(echo "$features") <("$prefix/bin/openconnect" --version) || true
+  exit 1
+fi
+otool -L "$keg/lib/libopenconnect.5.dylib"
 cp "$prefix/bin/openconnect" "$prefix/bin/ocproxy" "$out/bin/"
 chmod u+w "$out/bin/"*
 # Copies every Homebrew library they load next to them and points them there.
