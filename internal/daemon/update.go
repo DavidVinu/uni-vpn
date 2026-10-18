@@ -78,7 +78,8 @@ func (d *Daemon) autoUpdate() {
 		d.mu.Lock()
 		enabled := d.cfg.AutoUpdate
 		d.mu.Unlock()
-		if !enabled {
+		// An app moved to the Trash is not updated: its service removes itself (removal.go).
+		if !enabled || PackageGone(d.opts.PackageWatch.root()) {
 			continue
 		}
 		commit, err, crashed := d.check(ctx)
@@ -117,7 +118,7 @@ func (d *Daemon) autoUpdate() {
 func (d *Daemon) installWhenIdle(commit string) bool {
 	for {
 		d.mu.Lock()
-		if !d.cfg.AutoUpdate {
+		if !d.cfg.AutoUpdate || d.removing {
 			d.mu.Unlock()
 			d.opts.Updater.Discard()
 			return false

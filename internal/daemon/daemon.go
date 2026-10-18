@@ -198,6 +198,7 @@ type Daemon struct {
 	loopDone      chan struct{}
 	repairProc    Process
 	reinstall     bool // Repair said reinstall_needed: it stays until the service restarts
+	removing      bool // the app was removed and this program removes itself: no update now
 	http          *httpapi.Server
 	httpWaiting   *httpapi.Server // its port was taken at the start; the ticker tries again
 	// The automatic second factor (enroll.go): its run, and the code from the user's app the

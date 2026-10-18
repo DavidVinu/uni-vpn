@@ -59,12 +59,17 @@ func PackageGone(root string) bool {
 		!isFile(filepath.Join(pkg, "app", "bin", "uni-vpn-core"))
 }
 
+func (w PackageWatch) root() string {
+	if w.Root == "" {
+		return RepoRoot()
+	}
+	return w.Root
+}
+
 // watchPackage uninstalls once the package is gone on two checks in a row, so that installing
 // a new version over it does not count.
 func (d *Daemon) watchPackage(w PackageWatch) {
-	if w.Root == "" {
-		w.Root = RepoRoot()
-	}
+	w.Root = w.root()
 	if w.Check <= 0 {
 		w.Check = 5 * time.Minute
 	}
@@ -87,6 +92,13 @@ func (d *Daemon) watchPackage(w PackageWatch) {
 			missing = 0
 		}
 		if missing >= 2 {
+			// An update must not put files back or restart the program halfway through.
+			d.mu.Lock()
+			d.removing = true
+			d.mu.Unlock()
+			if d.stopping() {
+				return // an update installed just now restarts the service; the new one removes it
+			}
 			d.logf(slog.LevelInfo, "The app was removed, uninstalling")
 			d.RequestDisconnect()
 			w.RemoveSelf()

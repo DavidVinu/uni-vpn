@@ -448,6 +448,7 @@ jobs:
           test ! -e "$app" || fail "$app is still there"
           if scutil --proxy | grep -q "127.0.0.1:1081"; then fail "the proxy setting still points to uni-vpn"; fi
           if pgrep -x "Uni VPN" >/dev/null; then fail "the shield is still in the menu bar"; fi
+          tail -n 15 "$HOME/Library/Logs/uni-vpn/daemon.log"  # TEMPORARY
 
   linux-packages:
     runs-on: ubuntu-latest
