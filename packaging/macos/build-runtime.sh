@@ -47,10 +47,10 @@ place() {
 bottles=$(mktemp -d)
 for f in ocproxy $(brew deps --union openconnect ocproxy); do
   # The runner's Homebrew knows only the bottles for its own macOS, Homebrew's website all.
-  bottle=$(curl -fsSL "https://formulae.brew.sh/api/formula/$f.json" | jq -c --arg t "$tag" --arg c "$cellar" \
+  bottle=$(curl -fsSL --retry 5 --retry-all-errors "https://formulae.brew.sh/api/formula/$f.json" | jq -c --arg t "$tag" --arg c "$cellar" \
     '.bottle.stable.files[$t] // empty | select(.cellar == $c or .cellar == ":any" or .cellar == ":any_skip_relocation")')
   if [ -z "$bottle" ]; then continue; fi
-  curl -fsSL -H "Authorization: Bearer QQ==" -o "$bottles/$f.tar.gz" "$(jq -r .url <<<"$bottle")"
+  curl -fsSL --retry 5 --retry-all-errors -H "Authorization: Bearer QQ==" -o "$bottles/$f.tar.gz" "$(jq -r .url <<<"$bottle")"
   if ! echo "$(jq -r .sha256 <<<"$bottle")  $bottles/$f.tar.gz" | shasum -a 256 -c --status; then
     echo "the bottle of $f for macOS $minimum is not the one Homebrew names"
     exit 1
@@ -69,15 +69,10 @@ done
 # openconnect itself is built here for the minimum, from the source Homebrew builds it from and
 # with its dependencies only. Homebrew makes no new bottles for older macOS, so the next rebuild
 # of openconnect leaves none for the minimum, and its newer ones call strchrnul (macOS 15.4).
+# brew fetch tries the formula's mirrors and checks the source against its sha256.
+brew fetch --quiet --build-from-source openconnect
 src=$(mktemp -d)
-url=$(brew info --json=v2 openconnect | jq -r '.formulae[0].urls.stable.url')
-sum=$(brew info --json=v2 openconnect | jq -r '.formulae[0].urls.stable.checksum')
-curl -fsSL -o "$src/openconnect.tar.gz" "$url"
-if ! echo "$sum  $src/openconnect.tar.gz" | shasum -a 256 -c --status; then
-  echo "$url is not the source Homebrew names"
-  exit 1
-fi
-tar -xzf "$src/openconnect.tar.gz" -C "$src" --strip-components 1
+tar -xzf "$(brew --cache --build-from-source openconnect)" -C "$src" --strip-components 1
 # Only its dependencies' pkg-config files, and macOS's zlib and libxml2 as Homebrew uses them.
 pc=$(mktemp -d)
 printf 'Name: zlib\nDescription: macOS zlib\nVersion: 1.2.12\nLibs: -lz\n' >"$pc/zlib.pc"
