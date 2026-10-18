@@ -74,7 +74,7 @@ jobs:
         run: |
           python -c "import pathlib, urllib.request; from uni_vpn import desktop; desktop.extract_webview2(urllib.request.urlopen(desktop.WEBVIEW2_URL).read(), pathlib.Path('build'))"
           $csc = python -c "from uni_vpn import desktop; print(desktop.csc_path())"
-          & $csc /nologo /target:winexe /optimize+ /win32icon:app\windows\uni-vpn.ico "/out:build\Uni VPN.exe" /lib:build /r:Microsoft.Web.WebView2.Core.dll /r:Microsoft.Web.WebView2.WinForms.dll /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll app\windows\UniVpn.cs
+          & $csc /nologo /target:winexe /platform:x64 /optimize+ /win32icon:app\windows\uni-vpn.ico "/out:build\Uni VPN.exe" /lib:build /r:Microsoft.Web.WebView2.Core.dll /r:Microsoft.Web.WebView2.WinForms.dll /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll app\windows\UniVpn.cs
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
   go:
@@ -711,7 +711,7 @@ jobs:
           go-version-file: go.mod
       - name: The Go core and its files
         shell: bash
-        run: packaging/stage-app.sh --go windows/amd64 stage
+        run: packaging/stage-app.sh --go windows/both stage
       - name: The app window and OpenConnect
         shell: powershell
         run: |
@@ -754,8 +754,9 @@ jobs:
           Copy-Item -Recurse stage\desktop app-update\windows\desktop
           # Signed, the core goes along: build-core.sh then puts this one into the update instead of its own.
           if ($env:AZURE_CLIENT_ID) {
-            New-Item -ItemType Directory -Force app-update\windows\bin | Out-Null
+            New-Item -ItemType Directory -Force app-update\windows\bin, app-update\windows-arm64\bin | Out-Null
             Copy-Item stage\bin\uni-vpn-core.exe app-update\windows\bin\
+            Copy-Item stage\bin\arm64\uni-vpn-core.exe app-update\windows-arm64\bin\
           }
           New-Item -ItemType File -Path "stage\desktop\.prebuilt" | Out-Null
           New-Item -ItemType Directory -Force out | Out-Null
@@ -781,111 +782,13 @@ jobs:
       - name: Install it like a user would
         shell: powershell
         run: |
-          $process = Start-Process -FilePath out\uni-vpn-setup.exe -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/LOG=install-setup.log" -PassThru
-          if (-not $process.WaitForExit(300000)) {
-            Write-Host "The installer did not finish within 5 minutes"
-            Get-CimInstance Win32_Process | Where-Object { $_.Name -match "uni|python|powershell|cmd|robocopy|msiexec|openconnect|schtasks|setup|explorer|curl|csc" } |
-              Format-Table ProcessId, ParentProcessId, CommandLine -AutoSize -Wrap | Out-String -Width 400 | Write-Host
-            Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\install.log" -ErrorAction SilentlyContinue
-            Get-Content install-setup.log -Tail 30 -ErrorAction SilentlyContinue
-            exit 1
-          }
-          Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\install.log" -ErrorAction SilentlyContinue
-          if ($process.ExitCode -ne 0) { Get-Content install-setup.log; exit 1 }
-          $ok = $false
-          foreach ($i in 1..30) {
-            try { Invoke-WebRequest -UseBasicParsing http://127.0.0.1:1081/status.json | Out-Null; $ok = $true; break } catch { Start-Sleep 1 }
-          }
-          if (-not $ok) {
-            Get-ChildItem "$env:ProgramFiles", "${env:ProgramFiles(x86)}" | Format-Table -AutoSize | Out-String | Write-Host
-            Get-ChildItem "$env:ProgramFiles", "${env:ProgramFiles(x86)}" -Recurse -Depth 2 -Filter "openconnect*.exe" -ErrorAction SilentlyContinue | ForEach-Object FullName
-            throw "the service did not start"
-          }
-          if (-not (Test-Path "$env:ProgramFiles\uni-vpn\.commit")) { throw ".commit is missing" }
-          # The Go core of this commit answers, started by the task; no Python.
-          $status = Invoke-RestMethod http://127.0.0.1:1081/status.json
-          if ($status.commit -ne $env:GITHUB_SHA) { throw "the service is not the Go core of this commit ($($status.commit))" }
-          if (Test-Path "$env:ProgramFiles\uni-vpn\python") { throw "Python is in uni-vpn's folder" }
-          if (Test-Path "$env:ProgramFiles\uni-vpn\uni_vpn") { throw "the Python program is in uni-vpn's folder" }
-          $action = (Get-ScheduledTask -TaskName uni-vpn).Actions[0]
-          Write-Host "task: $($action.Execute) $($action.Arguments)"
-          if ($action.Execute -notlike "*\conhost.exe" -or $action.Arguments -notlike "--headless *\bin\uni-vpn-core.exe* daemon") {
-            throw "the task does not run uni-vpn-core.exe in conhost.exe --headless"
-          }
-          if (-not (Test-Path "$env:ProgramFiles\uni-vpn\openconnect\wintun.dll")) { throw "Wintun is missing" }
-          # The tray app must keep running: one that ends at start would reach every user with the
-          # next update. Setup and the installer each start a copy (one stays, the other hands over
-          # and quits); the one that stays must still run 10 s later. Where the window cannot start
-          # (no WebView2 runtime) the page opens in the browser instead.
-          function Trays { @(Get-CimInstance Win32_Process -Filter "Name = 'Uni VPN.exe'") }
-          function ShowTrays {
-            Trays | Format-Table ProcessId, ParentProcessId, SessionId, CreationDate, CommandLine -AutoSize -Wrap | Out-String -Width 400 | Write-Host
-          }
-          function Explain {
-            ShowTrays
-            Get-WinEvent -FilterHashtable @{LogName = "Application"; ProviderName = ".NET Runtime", "Application Error"} -MaxEvents 6 -ErrorAction SilentlyContinue |
-              Format-List TimeCreated, ProviderName, Message | Out-String -Width 400 | Write-Host
-            Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\daemon.log" -Tail 40 -ErrorAction SilentlyContinue
-          }
-          $runtime = Get-ItemProperty "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" -ErrorAction SilentlyContinue
-          Write-Host "WebView2 runtime: $(if ($runtime) { $runtime.pv } else { 'none' }); session: $((Get-Process -Id $PID).SessionId); interactive: $([Environment]::UserInteractive)"
-          Start-Sleep 5
-          ShowTrays
-          if ((Trays).Count -eq 0) { Explain; throw "no tray app runs after the install" }
-          Start-Sleep 10
-          if ((Trays).Count -eq 0) { Explain; throw "the tray app ends at start" }
-          # The installer's copy handed its window over: the app window opened (its WebView2 runs
-          # with the app's data folder), not the browser. A window that cannot start on a handover
-          # would open the browser on every Start menu click while the icon runs.
-          $web = @(Get-CimInstance Win32_Process -Filter "Name = 'msedgewebview2.exe'" | Where-Object { $_.CommandLine -like "*uni-vpn\WebView2*" })
-          $browser = @(Get-CimInstance Win32_Process -Filter "Name = 'msedge.exe' OR Name = 'chrome.exe' OR Name = 'firefox.exe'" | Where-Object { $_.CommandLine -like "*127.0.0.1:1081*" })
-          Write-Host "app window WebView2 processes: $($web.Count); browser with the page: $($browser.Count)"
-          Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\app.log" -ErrorAction SilentlyContinue
-          $desktop = "$env:ProgramFiles\uni-vpn\desktop"
-          $env:PATH = "$desktop;$env:PATH"
-          try {
-            Add-Type -Path "$desktop\Microsoft.Web.WebView2.Core.dll"
-            Write-Host "WebView2 found: $([Microsoft.Web.WebView2.Core.CoreWebView2Environment]::GetAvailableBrowserVersionString())"
-            # As the window does it (a failure here comes at once, as in the window's constructor).
-            $start = [Microsoft.Web.WebView2.Core.CoreWebView2Environment]::CreateAsync($null, "$env:LOCALAPPDATA\uni-vpn\WebView2", $null)
-            if ($start.Wait(30000)) { Write-Host "WebView2 starts: $($start.Result.BrowserVersionString)" } else { Write-Host "WebView2 did not start within 30 s" }
-          } catch {
-            $e = $_.Exception
-            while ($e.InnerException) { $e = $e.InnerException }
-            Write-Host "WebView2 cannot start: $($e.GetType().FullName): $($e.Message)"
-          }
-          if ($web.Count -eq 0) { Explain; throw "the app window did not open on the handover" }
-          # A second start on purpose: the install's two starts race, and the copy that stays may
-          # have opened the window itself, without a handover.
-          function AppWebViews { @(Get-CimInstance Win32_Process -Filter "Name = 'msedgewebview2.exe'" | Where-Object { $_.CommandLine -like "*uni-vpn\WebView2*" }) }
-          Get-Process -Name "Uni VPN" -ErrorAction SilentlyContinue | Stop-Process -Force
-          foreach ($i in 1..30) { if ((AppWebViews).Count -eq 0) { break }; Start-Sleep 1 }
-          $old = @(AppWebViews | ForEach-Object ProcessId)
-          function NewWebViews { @(AppWebViews | Where-Object { $old -notcontains $_.ProcessId }) }
-          $exe = "$env:ProgramFiles\uni-vpn\desktop\Uni VPN.exe"
-          $icon = Start-Process $exe -ArgumentList "--port 1081 --hidden" -PassThru
-          Start-Sleep 5
-          if ($icon.HasExited -or (NewWebViews).Count -ne 0) { Explain; throw "the icon alone did not run as it should" }
-          $second = Start-Process $exe -ArgumentList "--port 1081" -PassThru
-          if (-not $second.WaitForExit(10000)) { Explain; throw "the second start did not hand over" }
-          foreach ($i in 1..15) { if ((NewWebViews).Count -gt 0) { break }; Start-Sleep 1 }
-          Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\app.log" -ErrorAction SilentlyContinue
-          if ($icon.HasExited -or (NewWebViews).Count -eq 0) { Explain; throw "the app window did not open on a second start" }
-          $lnk = Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter "Uni VPN.lnk"
-          if (-not $lnk) { throw "no Start menu entry" }
+          powershell -NoProfile -ExecutionPolicy Bypass -File packaging\windows\test-install.ps1
+          exit $LASTEXITCODE
       - name: Uninstall it like a user would
         shell: powershell
         run: |
-          # An update unpacked next to the app that waited for the VPN to go idle.
-          $staged = "$env:ProgramFiles\.uni-vpn-core-update-ci"
-          New-Item -ItemType Directory $staged | Out-Null
-          New-Item -ItemType File "$staged\uni-vpn-core.exe" | Out-Null
-          $process = Start-Process -FilePath "$env:ProgramFiles\uni-vpn\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES" -Wait -PassThru
-          Start-Sleep 5
-          if (Test-Path "$env:ProgramFiles\uni-vpn\bin\uni-vpn-core.exe") { throw "files are left in Program Files" }
-          if (Test-Path $staged) { throw "a waiting update is left in Program Files" }
-          if (Get-ScheduledTask -TaskName uni-vpn -ErrorAction SilentlyContinue) { throw "the task is still registered" }
-          if (Test-Path "$env:ProgramFiles\uni-vpn") { Write-Host "note: the folder is still there:"; Get-ChildItem -Recurse "$env:ProgramFiles\uni-vpn" | ForEach-Object FullName }
+          powershell -NoProfile -ExecutionPolicy Bypass -File packaging\windows\test-uninstall.ps1
+          exit $LASTEXITCODE
       - uses: actions/upload-artifact@v4
         with:
           name: app-windows
@@ -899,9 +802,42 @@ jobs:
             out/uni-vpn-openconnect-win64.zip
           retention-days: 7
 
+  # The same uni-vpn-setup.exe on a Windows 11 computer with an ARM processor: the ARM core,
+  # and OpenConnect and the app window as emulated x64 programs.
+  windows-arm-install:
+    needs: windows-installer
+    runs-on: windows-11-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: installer-windows
+          path: out
+      - name: openconnect.exe reaches a university gateway
+        shell: powershell
+        run: |
+          Expand-Archive out\uni-vpn-openconnect-win64.zip openconnect
+          $env:PATH = "$env:SystemRoot\System32"
+          $out = cmd /c "openconnect\openconnect.exe --non-inter --authenticate --protocol=anyconnect vpn-ac.uni-heidelberg.de < nul 2>&1"
+          $out | Select-Object -Last 5 | Write-Host
+          if ($out -match "certificate.*fail|verify failed") { exit 1 }
+          if (-not ($out -match "Connected to")) { Write-Host "openconnect did not reach the gateway"; exit 1 }
+          exit 0
+      - name: Install it like a user would
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File packaging\windows\test-install.ps1
+          exit $LASTEXITCODE
+      - name: Uninstall it like a user would
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File packaging\windows\test-uninstall.ps1
+          exit $LASTEXITCODE
+
   publish:
     # relay tests what "go" cannot: the sync client against the real relay code.
-    needs: [promote, macos-pkg, linux-packages, windows-installer, core-files, relay]
+    needs: [promote, macos-pkg, linux-packages, windows-installer, windows-arm-install, core-files, relay]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
