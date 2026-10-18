@@ -7,7 +7,8 @@ list made from the older macOS's SDK: one "# <install name>" line per library, t
                                               named by their install names, have
   system-symbols.py check LIST.gz FOLDER      fails if FOLDER needs a library or symbol LIST lacks
 
-Weak imports count too: the code calls them without checking that they exist."""
+Weak imports count too: the code calls them without checking that they exist. macos14-symbols.txt.gz
+is the list of Xcode 15.0.1's MacOSX14.0.sdk (macOS 14.0), made on a macOS 14 runner."""
 import gzip
 import json
 import os
