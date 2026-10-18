@@ -13,7 +13,7 @@ root=/usr/x86_64-w64-mingw32/sys-root/mingw
 dnf install -y -q make gcc pkgconf-pkg-config gettext unzip mingw64-gcc mingw64-binutils \
   mingw64-gnutls mingw64-libxml2 mingw64-zlib mingw64-gettext >/dev/null
 work=$(mktemp -d)
-curl -fsSL -o "$work/src.tar.gz" "https://www.infradead.org/openconnect/download/openconnect-$version.tar.gz"
+curl -fsSL --retry 5 --retry-all-errors --retry-delay 15 -o "$work/src.tar.gz" "https://www.infradead.org/openconnect/download/openconnect-$version.tar.gz"
 echo "$sha256  $work/src.tar.gz" | sha256sum -c -
 tar -xzf "$work/src.tar.gz" -C "$work"
 cd "$work/openconnect-$version"
@@ -39,7 +39,7 @@ while ((${#todo[@]})); do
   done
 done
 # Wintun, signed by WireGuard LLC, checked against the SHA-256 of the release.
-curl -fsSL -o "$work/wintun.zip" https://www.wintun.net/builds/wintun-0.14.1.zip
+curl -fsSL --retry 5 --retry-all-errors --retry-delay 15 -o "$work/wintun.zip" https://www.wintun.net/builds/wintun-0.14.1.zip
 echo "07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51  $work/wintun.zip" | sha256sum -c -
 unzip -o -j -q "$work/wintun.zip" wintun/bin/amd64/wintun.dll -d "$out"
 ls -l "$out"

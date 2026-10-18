@@ -69,8 +69,13 @@ done
 # openconnect itself is built here for the minimum, from the source Homebrew builds it from and
 # with its dependencies only. Homebrew makes no new bottles for older macOS, so the next rebuild
 # of openconnect leaves none for the minimum, and its newer ones call strchrnul (macOS 15.4).
-# brew fetch tries the formula's mirrors and checks the source against its sha256.
-brew fetch --quiet --build-from-source openconnect
+# brew fetch tries the formula's mirrors and checks the source against its sha256; again a minute
+# later when the runner cannot reach them for a moment.
+for try in 1 2 3; do
+  brew fetch --quiet --build-from-source openconnect && break
+  if [ "$try" = 3 ]; then exit 1; fi
+  sleep 60
+done
 src=$(mktemp -d)
 tar -xzf "$(brew --cache --build-from-source openconnect)" -C "$src" --strip-components 1
 # Only its dependencies' pkg-config files, and macOS's zlib and libxml2 as Homebrew uses them.
