@@ -46,7 +46,7 @@ func (p *pushTunnel) StartedAt() time.Time                   { return time.Time{
 func (p *pushTunnel) ReadyAt() time.Time                     { return time.Time{} }
 
 // A Duo push stays open for 60 s and the gateway answers "Login failed." when it runs out
-// (DuoRejected: "confirm the Duo request on your phone in time"). With the default ready_timeout
+// (DuoRejected: "confirm the sign-in request on your phone in time"). With the default ready_timeout
 // of 45 s the daemon gave up first, said the university did not answer in time and started
 // over, which sent the next push to the phone.
 func TestDuoGetsThePushWindow(t *testing.T) {

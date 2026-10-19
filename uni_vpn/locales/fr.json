@@ -163,7 +163,7 @@
   "msg.password_rejected": "Votre université n’a pas accepté le mot de passe.",
   "msg.totp_rejected": "Le code à usage unique n’a pas été accepté. Vérifiez que l’horloge de l’ordinateur est juste, ou saisissez à nouveau la clé de configuration.",
   "msg.append_rejected": "Votre université n’a pas accepté le mot de passe ou le code à usage unique. Vérifiez le mot de passe et l’horloge de l’ordinateur, ou saisissez à nouveau la clé de configuration.",
-  "msg.duo_rejected": "Échec de l’identification. Vérifiez le mot de passe et confirmez à temps la demande Duo sur votre téléphone.",
+  "msg.duo_rejected": "Échec de l’identification. Vérifiez le mot de passe et confirmez à temps la demande de connexion sur votre téléphone.",
   "msg.auth_rejected": "Échec de l’identification. Vérifiez le mot de passe. S’il est correct, votre université demande quelque chose à quoi Uni VPN ne sait pas encore répondre.",
   "msg.totp_unusable": "La clé de configuration enregistrée ne fonctionne pas. Saisissez-la à nouveau.",
   "msg.saml_required": "Votre université demande de se connecter sur une page web. Uni VPN ne sait pas encore le faire.",
@@ -203,7 +203,7 @@
   "uni.hku-students.mfa.3": "Passez à la page suivante et saisissez-y ce code.{code}",
   "uni.ugr.mfa.1": "Ouvrez la {portal} et connectez-vous. Choisissez « Doble Factor Autenticación para Servicios TIC UGR » puis cliquez sur « Generar nuevo token ».",
   "uni.ugr.mfa.2": "Faites une capture d’écran du code QR ({shot}) et déposez-la ou collez-la ici. Scannez-le aussi avec l’application de votre téléphone.{secret}",
-  "uni.w-hs.mfa.1": "Ouvrez la {portal} et connectez-vous sans @w-hs.de. Cliquez sur « Token ausrollen » à gauche, puis à nouveau sur « Token ausrollen » en bas.",
+  "uni.w-hs.mfa.1": "Ouvrez la {portal} et connectez-vous sans @w-hs.de ; si vous avez déjà un jeton, saisissez un code qu’il affiche. Cliquez sur « Token ausrollen » à gauche, puis à nouveau sur « Token ausrollen » en bas (pas sur « Neuen Token ausrollen »).",
   "uni.w-hs.mfa.2": "Faites une capture d’écran du code QR ({shot}) et déposez-la ou collez-la ici. Scannez-le aussi avec l’application de votre téléphone.{secret}",
   "phone.off": "Désactivé",
   "phone.edit_websites": "Ajouter un site web",
@@ -251,6 +251,6 @@
   "phone.uni.hku-students.mfa.3": "Passez à la page suivante et saisissez-y le code de test affiché ici.",
   "phone.uni.ugr.mfa.1": "Ouvrez la {portal} et connectez-vous. Choisissez « Doble Factor Autenticación para Servicios TIC UGR » puis touchez « Generar nuevo token ».",
   "phone.uni.ugr.mfa.2": "Scannez le code QR affiché, ou copiez la ligne qui commence par otpauth://, et collez-la ci-dessous. Ajoutez-le aussi à votre générateur de codes.",
-  "phone.uni.w-hs.mfa.1": "Ouvrez la {portal} et connectez-vous sans @w-hs.de. La page ne s’ouvre que sur le réseau de l’université. Touchez « Token ausrollen », puis à nouveau « Token ausrollen » en bas.",
+  "phone.uni.w-hs.mfa.1": "Ouvrez la {portal} et connectez-vous sans @w-hs.de. La page ne s’ouvre que sur le réseau de l’université. Si vous avez déjà un jeton, saisissez un code qu’il affiche. Touchez « Token ausrollen », puis à nouveau « Token ausrollen » en bas (pas « Neuen Token ausrollen »).",
   "phone.uni.w-hs.mfa.2": "Scannez le code QR affiché, ou copiez la ligne qui commence par otpauth://, et collez-la ci-dessous. Ajoutez-le aussi à votre générateur de codes."
 }

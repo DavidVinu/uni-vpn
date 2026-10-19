@@ -1,6 +1,6 @@
 # iPhone app
 
-`app/ios` is Uni VPN for iPhones with iOS 17 and newer, built from the mobile plan
+`app/ios` is Uni VPN for iPhones with iOS 18 and newer, built from the mobile plan
 (https://claude.ai/artifact/7akPD8xja1PJfRFeHG8CGS) after the Android app (`docs/android.md`).
 The same Go core, the same local API, the same screens and the same translations: the app is a
 thin SwiftUI shell around the core.

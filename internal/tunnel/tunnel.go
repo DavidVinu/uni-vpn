@@ -24,6 +24,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/DavidVinu/uni-vpn/internal/certs"
 	"github.com/DavidVinu/uni-vpn/internal/platform"
 )
 
@@ -211,6 +212,31 @@ func noExternalAuthArgs(openconnect string) []string {
 	return nil
 }
 
+// gnutlsBuild matches the "Using GnuTLS 3.7.9. Features present: ..." line in the usage of an
+// openconnect built with GnuTLS (only "Using" is translated).
+var gnutlsBuild = regexp.MustCompile(`GnuTLS \d`)
+
+// strapPriority is openconnect's own default GnuTLS priority without TLS 1.3 (gnutls.c, its
+// no_tls13 case).
+const strapPriority = "NORMAL:-VERS-SSL3.0:+SHA256:%COMPAT:-VERS-TLS1.3:-3DES-CBC:-ARCFOUR-128"
+
+// strapArgs: openconnect 9.00 to 9.09 (Debian 12: 9.01) always send STRAP keys (later versions
+// only with the web sign-in) and until 9.20 compute their channel binding wrongly over TLS 1.3
+// (openconnect issue 659). Gateways that check it refuse the tunnel after a good sign-in; the
+// University of Bremen documents it for Debian 12. Over TLS 1.2 the binding is right. Only a
+// GnuTLS build takes a priority string; the Debian and Ubuntu packages are such builds.
+func strapArgs(openconnect string) []string {
+	if runtime.GOOS != "linux" {
+		return nil
+	}
+	help := helpText(openconnect)
+	if bytes.Contains(help, []byte("--external-browser")) && !bytes.Contains(help, []byte("--no-external-auth")) &&
+		gnutlsBuild.Match(help) {
+		return []string{"--gnutls-priority=" + strapPriority}
+	}
+	return nil
+}
+
 // TokenArgs: the secret is passed via a 0600 file, never via the process list. openconnect
 // rereads it for every code it generates, so it stays until the tunnel is up.
 func (t *Tunnel) TokenArgs() []string {
@@ -239,18 +265,37 @@ func (t *Tunnel) Command(port int) []string {
 		// "exec" so that dash does not leave an sh running next to ocproxy.
 		"--script="+t.script(port),
 	)
-	if ca := platform.AndroidCAFile(); ca != "" {
+	cmd = append(cmd, strapArgs(t.OpenConnect)...)
+	if ca := t.caFile(); ca != "" {
 		cmd = append(cmd, "--cafile="+ca)
-	}
-	// The openconnect from the .pkg was built against Homebrew's certificate file, which a Mac
-	// without Homebrew does not have.
-	if platform.IsMacOS && platform.IsBundled(t.OpenConnect) {
-		if st, err := os.Stat(platform.MacOSCAFile); err == nil && st.Mode().IsRegular() {
-			cmd = append(cmd, "--cafile="+platform.MacOSCAFile)
-		}
 	}
 	cmd = append(cmd, t.TokenArgs()...)
 	return append(cmd, t.Cfg.Host)
+}
+
+// CAFileName is the file in the token folder with the certificates of internal/certs.
+const CAFileName = "ca.pem"
+
+// caFile is openconnect's --cafile, whose certificates it trusts besides the system's: on
+// Android the phone's own, which the app wrote together with the same extra certificates
+// (app/android); elsewhere certs.PEM in CAFileName. The openconnect from the .pkg was built
+// against Homebrew's certificate file, which a Mac without Homebrew does not have, so on macOS
+// the file starts with the certificates macOS itself ships. "" for none.
+func (t *Tunnel) caFile() string {
+	if platform.IsAndroid {
+		return platform.AndroidCAFile()
+	}
+	var system []byte
+	if platform.IsMacOS && platform.IsBundled(t.OpenConnect) {
+		st, err := os.Stat(platform.MacOSCAFile)
+		if err != nil || !st.Mode().IsRegular() {
+			return ""
+		}
+		if system, err = os.ReadFile(platform.MacOSCAFile); err != nil {
+			return ""
+		}
+	}
+	return certs.WriteFile(filepath.Join(t.TokenDir, CAFileName), system)
 }
 
 // script is the --script value. Android has no file for a wrapper script that it would run (only

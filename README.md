@@ -83,7 +83,7 @@ them.
 | "Your university did not accept the password" | Click **Update password** and type it again. |
 | "The one-time code was not accepted" | Turn on "Set time automatically" in your computer's date and time settings, then click **Try again**. If it still fails, click **Update second factor** and set it up again. |
 | "The second factor is not set up yet" | Click **Update second factor**. |
-| "Confirm the Duo request on your phone in time" | Click **Try again** and confirm the request on your phone. |
+| "Confirm the sign-in request on your phone in time" | Click **Try again** and confirm the request on your phone. |
 | "Waiting a few seconds for a new one-time code" | Nothing, it continues by itself. |
 | "Paused while Cisco Secure Client is connected" | Disconnect the Cisco VPN. Uni VPN continues by itself. |
 | "No internet" | On hotel, train or café Wi-Fi, open any website and accept the Wi-Fi's sign-in page. Uni VPN continues by itself. |
@@ -183,7 +183,8 @@ settings. `uni-vpn doctor` prints it.
 | University of Stuttgart (students) | vpn.tik.uni-stuttgart.de | none | profile only |
 | University of Bonn | unibn-vpn.uni-bonn.de | none | profile only |
 | University of Mannheim | vpn.uni-mannheim.de | none | profile only |
-| University of Kassel | univpn.uni-kassel.de | none | profile only |
+| University of Kassel (staff) | univpn.uni-kassel.de | NetIQ push | profile only |
+| University of Kassel (students) | univpn.uni-kassel.de | none | profile only |
 | Texas A&M University | connect.tamu.edu | Duo push | profile only |
 | University of Central Florida | secure.vpn.ucf.edu | sign-in on a web page (SAML) | not supported yet |
 | Ohio State University | vpn.service.osu.edu | Duo push | profile only |
@@ -204,7 +205,7 @@ settings. `uni-vpn doctor` prints it.
 | University of Hong Kong (students) | vpn2fa.hku.hk | one-time code | profile only |
 | University of Granada | vpn.ugr.es | one-time code | profile only |
 | Martin Luther University Halle-Wittenberg | vpn.uni-halle.de | none | profile only |
-| Flensburg University of Applied Sciences | vpn.hs-flensburg.de | none | profile only |
+| Flensburg University of Applied Sciences (students) | vpn.hs-flensburg.de | none | profile only |
 | Westphalian University of Applied Sciences | vpn-gateway.w-hs.de | one-time code | profile only |
 | Offenburg University of Applied Sciences | vpn.hs-offenburg.de | sign-in on a web page (SAML) | not supported yet |
 | University of Hamburg | vpn.rrz.uni-hamburg.de | sign-in on a web page (SAML) | not supported yet |
@@ -239,7 +240,7 @@ username_suffix = "@student-net.ethz.ch"
 | macOS 14+ (Apple Silicon and Intel) | CI only (unit tests, keychain, installer dry run), checklist in `docs/macos-test.md` |
 | Windows 10 and 11 (64-bit, Intel or AMD), Windows 11 on ARM | CI only (unit tests, Credential Manager, registry, Task Scheduler, installer dry run, install on an ARM runner), checklist in `docs/windows-test.md` |
 | Android 10+ (64-bit) | CI only (build, lint, unit tests, emulator test against a real gateway), not in a store yet, see `docs/android.md` |
-| iPhone, iOS 17+ | CI only (build, simulator tests against a real gateway), not in the App Store yet, see `docs/ios.md` |
+| iPhone, iOS 18+ | CI only (build, simulator tests against a real gateway), not in the App Store yet, see `docs/ios.md` |
 
 ### How it works
 

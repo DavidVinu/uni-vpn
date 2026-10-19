@@ -6,6 +6,7 @@ package linotp
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/DavidVinu/uni-vpn/internal/certs"
 )
 
 // SessionCookie holds the portal session; every call after the sign-in repeats its value as
@@ -59,6 +62,7 @@ func New(base string, dial func(ctx context.Context, network, address string) (n
 	jar, _ := cookiejar.New(nil)
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
+	transport.TLSClientConfig = &tls.Config{RootCAs: certs.Pool()}
 	if dial != nil {
 		transport.DialContext = dial
 	}

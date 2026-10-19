@@ -84,6 +84,7 @@ a.btn{display:inline-block;text-decoration:none}
 .list summary,.list .item{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;list-style:none}
 .list summary::-webkit-details-marker{display:none}
 .list .val{color:var(--muted);max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-left:auto}
+#v-uni{white-space:normal;text-align:right}
 .list summary:after{content:"";width:8px;height:8px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(-45deg);transition:transform .2s}
 .list details[open] summary:after{transform:rotate(45deg)}
 .list .item{cursor:default}
@@ -208,7 +209,7 @@ input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
            Back), 1Password and Bitwarden (add a code from a picture of its QR code). -->
       <form id="step2" hidden>
         <p class="step"></p>
-        <h2 data-t="app.second_factor"></h2>
+        <h2 tabindex="-1" data-t="app.second_factor"></h2>
         <img class="shot" id="g-shot" alt="" hidden onerror="this.hidden=true">
         <p class="guide-text" id="g-text" aria-live="polite"></p>
         <p class="warn" id="g-away" data-t="setup.portal_away" hidden></p>
@@ -427,7 +428,7 @@ function step(id, focusId) {
     if (keyRead) useKey($("s-totp").value, true);  // the code shown must be the current one
     if (offeredKey) { const key = offeredKey; offeredKey = ""; useKey(key); }
   }
-  const focus = focusId ? $(focusId) : $(id).querySelector("input:not([hidden])") || $(id).querySelector("h2");
+  const focus = focusId ? $(focusId) : $(id).querySelector("input:not([hidden]):not([type=file])") || $(id).querySelector("h2");
   if (focus) focus.focus();
 }
 
@@ -623,7 +624,9 @@ $("s-uni").onkeydown = (e) => {
   if (e.key === "Escape") { closeList(); return; }
   if (!["ArrowDown", "ArrowUp", "Enter"].includes(e.key) || (e.key === "Enter" && uni)) return;
   e.preventDefault();
-  if (e.key === "Enter") { const found = renderList(); pick(found[Math.max(active, 0)]); return; }
+  // Several matches and none chosen with the arrow keys: the list stays open to click one
+  // (Enter took the first, the "(staff)" entry of a split university).
+  if (e.key === "Enter") { const found = renderList(); if (active < 0 && found.length > 2) return; pick(found[Math.max(active, 0)]); return; }
   active += e.key === "ArrowDown" ? 1 : -1;
   if (active < 0) active = 0;
   renderList();
@@ -879,12 +882,13 @@ $("step2").onsubmit = async (e) => {
 };
 
 let checkSeq = 0;
-// refresh: the next code for the key in use, nothing else changes.
-async function useKey(secret, refresh) {
+// refresh: the next code for the key in use, nothing else changes. keep: the key read before,
+// when trying again.
+async function useKey(secret, refresh, keep) {
   const seq = ++checkSeq;
   secret = secret.trim();
   clearInterval(codeTimer);
-  const previous = keyRead ? $("s-totp").value : "";
+  const previous = keep ?? (keyRead ? $("s-totp").value : "");
   if (!refresh) {
     keyRead = false;
     $("s-totp").value = secret;
@@ -892,19 +896,23 @@ async function useKey(secret, refresh) {
   }
   if (!secret) return;
   let r;
-  try { r = await post("/api/totp/check", {secret, mfa: mfa()}); } catch (e) { r = {ok: false, data: null, text: t("msg.not_running")}; }
+  try { r = await post("/api/totp/check", {secret, mfa: mfa()}); } catch (e) { r = null; }
   if (seq !== checkSeq) return;
+  if (!r) {
+    // No answer: the core is restarting for an update (the banner says so). The same key again
+    // in a moment, not a tight loop; a paste or picture is not lost.
+    setTimeout(() => { if (seq === checkSeq && !$("step2").hidden) useKey(secret, refresh, previous); }, 3000);
+    return;
+  }
   if (!r.ok) {
-    // The key in use refused (the sign-in mode changed since it was read, see mfa()): read it
-    // again. A stray paste keeps the key that was already read.
-    const refused = refresh && !!r.data;
-    keyRead = !!previous && !refused;
+    // Refused. The key in use (the sign-in mode changed since it was read, see mfa()) is read
+    // again; a stray paste keeps the key that was already read.
+    keyRead = !refresh && !!previous;
     $("s-totp").value = keyRead ? previous : "";
-    if (!refresh || refused) err("s2-err", errText(r));  // a failed refresh: the banner says the core is away
-    if (refused) slide = secretAt();
+    err("s2-err", errText(r));
+    if (refresh) slide = secretAt();
     renderGuide();
-    // After a failed refresh (the core restarting for an update) a moment's pause, not a tight loop.
-    if (keyRead) setTimeout(() => { if (seq === checkSeq && !$("step2").hidden) useKey(previous, true); }, refresh ? 3000 : 0);
+    if (keyRead) useKey(previous, true);
     return;
   }
   showCode(r.data.code, r.data.remaining, secret);

@@ -189,8 +189,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         load(page)
         // A Dock icon while the window is open, like Tailscale.
         NSApp.setActivationPolicy(.regular)
+        if let win = window { fit(win) }
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    // The window cannot be resized: on a short screen (13" Mac with "Larger Text") it gets only
+    // as tall as the screen's free area and the page scrolls. Also for a frame saved on a bigger
+    // screen: shorter, and back on the screen. On a tall screen it stays as it is.
+    func fit(_ win: NSWindow) {
+        guard let screen = win.screen ?? NSScreen.main ?? NSScreen.screens.first else { return }
+        let area = screen.visibleFrame  // without the menu bar and the Dock
+        var frame = win.frameRect(forContentRect: NSRect(origin: .zero, size: windowSize))
+        frame.size.height = min(frame.height, area.height)
+        frame.origin.x = max(min(win.frame.minX, area.maxX - frame.width), area.minX)
+        frame.origin.y = max(min(win.frame.maxY, area.maxY) - frame.height, area.minY)  // the top stays
+        if frame != win.frame { win.setFrame(frame, display: true) }
     }
 
     // page: "" (as it is), "#main", "#settings", or "&user=ab123&university=ethz" from setup.

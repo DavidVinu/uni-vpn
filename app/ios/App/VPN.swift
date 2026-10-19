@@ -59,9 +59,7 @@ final class VPN {
         onDemand = (manager?.isEnabled ?? false) && (manager?.isOnDemandEnabled ?? false)
         if old != (status, onDemand) {
             UserDefaults(suiteName: SetVPN.appGroup)?.set(isOn, forKey: SetVPN.onKey)
-            if #available(iOS 18.0, *) {
-                ControlCenter.shared.reloadControls(ofKind: VPN.controlKind)
-            }
+            ControlCenter.shared.reloadControls(ofKind: VPN.controlKind)
             onStatus?(status)
         }
     }

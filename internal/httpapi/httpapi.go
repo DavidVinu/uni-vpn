@@ -24,6 +24,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/DavidVinu/uni-vpn/internal/certs"
 	"github.com/DavidVinu/uni-vpn/internal/config"
 	"github.com/DavidVinu/uni-vpn/internal/detect"
 	"github.com/DavidVinu/uni-vpn/internal/i18n"
@@ -823,7 +824,7 @@ func reachable(ctx context.Context, address string) bool {
 	if port == "" {
 		port = "443"
 	}
-	dialer := &tls.Dialer{Config: &tls.Config{ServerName: u.Hostname()}}
+	dialer := &tls.Dialer{Config: &tls.Config{ServerName: u.Hostname(), RootCAs: certs.Pool()}}
 	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(u.Hostname(), port))
 	if err != nil {
 		return false

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -53,7 +54,10 @@ func (f *flow) make() *Tunnel {
 	return tn
 }
 
-func (f *flow) tokenFiles() []string { return names(f.t, f.tokdir) }
+// tokenFiles: the token folder's files but the certificates file (CAFileName), which stays.
+func (f *flow) tokenFiles() []string {
+	return slices.DeleteFunc(names(f.t, f.tokdir), func(n string) bool { return n == CAFileName })
+}
 
 func (f *flow) start(tn *Tunnel, password, totp string) {
 	f.t.Helper()
@@ -573,6 +577,44 @@ func TestOpenconnectWithoutNoExternalAuth(t *testing.T) {
 			}
 			if got := externalArgs(tn.AuthArgs()); !slices.Equal(got, want) {
 				t.Fatal(got)
+			}
+			if runtime.GOOS != "linux" {
+				return
+			}
+			f.start(tn, "secret", token)
+			if !tn.WaitReady(3 * time.Second) {
+				v, _ := tn.Classification()
+				t.Fatal("not ready:", v, tn.StderrTail())
+			}
+			tn.Stop(2 * time.Second)
+		})
+	}
+}
+
+// openconnect 9.00 to 9.09 built with GnuTLS sign in over TLS 1.2 (strapArgs), with or without
+// no_external_auth; its warning about the option is no verdict.
+func TestTLS12ForOpenconnect90x(t *testing.T) {
+	priority := "--gnutls-priority=" + strapPriority
+	for _, c := range []struct {
+		version, tls string
+		noExternal   bool
+		want         bool
+	}{
+		{"9.01", "", true, true},
+		{"9.01", "", false, true},
+		{"9.01", "OpenSSL", true, false},
+		{"8.20", "", true, false},
+		{"", "", true, false},
+	} {
+		t.Run(cmp.Or(c.version, "current")+c.tls+strconv.FormatBool(c.noExternal), func(t *testing.T) {
+			f := newFlow(t)
+			f.cfg.NoExternalAuth = c.noExternal
+			t.Setenv("FAKE_VERSION", c.version)
+			t.Setenv("FAKE_TLS", c.tls)
+			tn := f.make()
+			cmd := tn.Command(1)
+			if got := slices.Contains(cmd, priority); got != (c.want && runtime.GOOS == "linux") {
+				t.Fatalf("%q", cmd)
 			}
 			if runtime.GOOS != "linux" {
 				return

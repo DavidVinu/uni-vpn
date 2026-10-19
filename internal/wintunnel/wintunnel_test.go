@@ -1,6 +1,7 @@
 package wintunnel
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/DavidVinu/uni-vpn/internal/certs"
 	"github.com/DavidVinu/uni-vpn/internal/tunnel"
 	"github.com/DavidVinu/uni-vpn/internal/tunnel/fakeoc"
 )
@@ -77,6 +79,35 @@ func TestCommandUsesTheProfileLikeThePosixTunnel(t *testing.T) {
 	if !slices.Contains(cmd, "--authgroup=staff-net") || !slices.Contains(cmd, "--user=jdoe@staff-net.ethz.ch") ||
 		slices.Contains(cmd, "--non-inter") || cmd[len(cmd)-1] != "sslvpn.ethz.ch" {
 		t.Fatal(cmd)
+	}
+}
+
+func TestCAFileNextToOpenconnect(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "openconnect")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tn := New(tunnel.Config{Host: "vpn.example", MFA: "none"}, filepath.Join(dir, "openconnect.exe"), "x.js", nil, t.TempDir())
+	ca := filepath.Join(dir, CAFileName)
+	if cmd := tn.Command(1); !slices.Contains(cmd, "--cafile="+ca) || cmd[len(cmd)-1] != "vpn.example" {
+		t.Fatalf("%q", cmd)
+	}
+	if data, err := os.ReadFile(ca); err != nil || !bytes.Equal(data, certs.PEM) {
+		t.Fatal(err, len(data))
+	}
+	// openconnect could not open a path outside the system's code page: no file then.
+	other := filepath.Join(t.TempDir(), "Müller")
+	if err := os.Mkdir(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tn = New(tunnel.Config{Host: "vpn.example", MFA: "none"}, filepath.Join(other, "openconnect.exe"), "x.js", nil, t.TempDir())
+	for _, a := range tn.Command(1) {
+		if strings.HasPrefix(a, "--cafile") {
+			t.Fatal(a)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(other, CAFileName)); err == nil {
+		t.Fatal("written")
 	}
 }
 

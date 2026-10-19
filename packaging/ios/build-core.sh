@@ -15,7 +15,7 @@ app="$root/app/ios"
 build="$app/build"
 native_dir="${NATIVE_DIR:-$build/native}"
 work="$build/core"
-min=17.0
+min=18.0
 rm -rf "$work" "$build/UniVPNCore.xcframework" "$build/licenses" "$build/Resources"
 mkdir -p "$build/licenses"
 

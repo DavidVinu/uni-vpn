@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DavidVinu/uni-vpn/internal/certs"
 	"github.com/DavidVinu/uni-vpn/internal/platform"
 	"github.com/DavidVinu/uni-vpn/internal/tunnel/fakeoc"
 )
@@ -78,13 +79,34 @@ func makeProfile(t *testing.T, edit func(*Config)) *Tunnel {
 }
 
 func TestHeidelbergCommandIsUnchanged(t *testing.T) {
-	// The command line from before profiles existed, argument for argument.
+	// The command line from before profiles existed, argument for argument, and the extra
+	// certificates (internal/certs).
+	tn := makeProfile(t, nil)
 	want := []string{
 		"/usr/bin/openconnect", "--protocol=anyconnect", "--useragent=AnyConnect Linux_64 5.1.18.314",
 		"--user=ab123", "--passwd-on-stdin", "--non-inter", "--no-dtls", "--force-dpd=30",
-		"--reconnect-timeout=60", "--script-tun", "--script=exec " + wrapper + " 4321", "vpn-ac.uni-heidelberg.de"}
-	if got := makeProfile(t, nil).Command(4321); !slices.Equal(got, want) {
+		"--reconnect-timeout=60", "--script-tun", "--script=exec " + wrapper + " 4321",
+		"--cafile=" + filepath.Join(tn.TokenDir, CAFileName), "vpn-ac.uni-heidelberg.de"}
+	if got := tn.Command(4321); !slices.Equal(got, want) {
 		t.Fatalf("%q", got)
+	}
+}
+
+func TestCAFileHoldsTheExtraCertificates(t *testing.T) {
+	tn := makeProfile(t, nil)
+	tn.Command(1)
+	data, err := os.ReadFile(filepath.Join(tn.TokenDir, CAFileName))
+	if err != nil || !bytes.Equal(data, certs.PEM) {
+		t.Fatal(err, len(data))
+	}
+	// Nowhere to write it: openconnect runs with the system's certificates alone, as before.
+	blocked := filepath.Join(t.TempDir(), "file")
+	os.WriteFile(blocked, nil, 0o600)
+	tn.TokenDir = blocked
+	for _, a := range tn.Command(1) {
+		if strings.HasPrefix(a, "--cafile") {
+			t.Fatal(a)
+		}
 	}
 }
 

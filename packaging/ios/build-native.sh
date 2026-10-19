@@ -26,7 +26,7 @@ patch_literal() {
 }
 [ $# -eq 2 ] || usage
 slice="$1"
-min=17.0
+min=18.0
 case "$slice" in
   iphoneos-arm64)
     sdk=iphoneos arch=arm64 target="arm64-apple-ios$min" host=aarch64-apple-darwin

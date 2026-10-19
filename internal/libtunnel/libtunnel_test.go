@@ -232,6 +232,53 @@ func TestStopDuringLogin(t *testing.T) {
 	}
 }
 
+// The library's external-browser mode prints its failure and then waits for a browser until
+// cancelled: the web sign-in verdict ends the login at once, as the program's run does.
+func TestWebSignInEndsTheLogin(t *testing.T) {
+	tun := newTunnel(tunnel.Config{Host: "vpn.example", MFA: "duo_push"},
+		&fakeEngine{connect: func(o octunnel.Options) (Session, error) {
+			o.Line("Failed to spawn external browser for https://vpn.example/+CSCOE+/saml/sp/login")
+			<-o.Cancel
+			o.Line("Socket accept cancelled")
+			return nil, &octunnel.ExitError{Code: 1}
+		}})
+	if err := tun.Start([]byte("pw"), ""); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	if tun.WaitReady(5 * time.Second) {
+		t.Fatal("ready")
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Error("took", d)
+	}
+	exited(t, tun)
+	if v, _ := tun.Classification(); v != (tunnel.Verdict{State: tunnel.StateAuthFailed, Message: tunnel.SAMLRequired}) || tun.StoppedByUs() {
+		t.Fatal(v, tun.StoppedByUs())
+	}
+}
+
+// Once the tunnel is up, a line that reads like a web sign-in does not end it.
+func TestWebSignInLineAfterReadyKeepsTheTunnel(t *testing.T) {
+	s := newSession()
+	var line func(string)
+	tun := newTunnel(tunnel.Config{Host: "vpn.example"},
+		&fakeEngine{connect: func(o octunnel.Options) (Session, error) { line = o.Line; return s, nil }})
+	if err := tun.Start([]byte("pw"), ""); err != nil {
+		t.Fatal(err)
+	}
+	if !tun.WaitReady(5 * time.Second) {
+		t.Fatal("not ready")
+	}
+	line("Failed to spawn external browser")
+	time.Sleep(100 * time.Millisecond)
+	if tun.HasExited() {
+		t.Fatal("ended")
+	}
+	tun.Stop(2 * time.Second)
+	exited(t, tun)
+}
+
 // What the program reads from stdin and its command line, by second factor.
 func TestLoginOptions(t *testing.T) {
 	cases := []struct {

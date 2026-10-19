@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/DavidVinu/uni-vpn/internal/certs"
 	"github.com/DavidVinu/uni-vpn/internal/config"
 	"github.com/DavidVinu/uni-vpn/internal/credentials"
 	"github.com/DavidVinu/uni-vpn/internal/devsync"
@@ -369,7 +370,8 @@ func (d *Daemon) keyringArgs() (string, time.Duration) {
 }
 
 // DefaultProbe is a TLS handshake with host (port 443 unless it names one, like
-// "vpn.uni-x.de:10443") using the system trust store. False behind a captive portal (which
+// "vpn.uni-x.de:10443") using the system trust store and the certificates openconnect gets
+// (internal/certs). False behind a captive portal (which
 // often answers with its own certificate) or without network.
 func DefaultProbe(ctx context.Context, host string, timeout time.Duration) bool {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
@@ -378,7 +380,11 @@ func DefaultProbe(ctx context.Context, host string, timeout time.Duration) bool 
 	if h, p, err := net.SplitHostPort(host); err == nil {
 		name, port = h, p
 	}
-	dialer := &tls.Dialer{Config: &tls.Config{ServerName: name, RootCAs: probeRoots}}
+	roots := probeRoots
+	if roots == nil {
+		roots = certs.Pool()
+	}
+	dialer := &tls.Dialer{Config: &tls.Config{ServerName: name, RootCAs: roots}}
 	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(name, port))
 	if err != nil {
 		return false
@@ -387,7 +393,7 @@ func DefaultProbe(ctx context.Context, host string, timeout time.Duration) bool 
 	return true
 }
 
-// probeRoots is nil, the system's trust store; tests trust their own gateway.
+// probeRoots is nil, certs.Pool(); tests trust their own gateway.
 var probeRoots *x509.CertPool
 
 // probe is DefaultProbe; tests replace it, there is no gateway in CI.

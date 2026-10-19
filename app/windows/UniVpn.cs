@@ -467,6 +467,10 @@ class MainWindow : Form
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
+        // A short screen (1366x768 at 125 %): no taller than the work area of the screen it opens on
+        // (CenterScreen takes the one with the mouse), and the page scrolls. Same pixels as ClientSize.
+        Rectangle work = Screen.FromPoint(Cursor.Position).WorkingArea;
+        if (Height > work.Height) ClientSize = new Size(ClientSize.Width, work.Height - (Height - ClientSize.Height));
         view.Dock = DockStyle.Fill;
         view.DefaultBackgroundColor = Color.Transparent;
         // Program Files is read only for the user: the browser profile goes next to the config.

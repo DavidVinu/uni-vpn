@@ -142,7 +142,8 @@ func TestLoginFailedIsWordedByTheSecondFactor(t *testing.T) {
 			t.Fatal(c.mfa, v)
 		}
 	}
-	if !strings.Contains(AppendRejected, "clock") || !strings.Contains(DuoRejected, "Duo") {
+	// duo_push also stands for other pushes (Kassel's NetIQ), so the text names no app.
+	if !strings.Contains(AppendRejected, "clock") || !strings.Contains(DuoRejected, "phone") || strings.Contains(DuoRejected, "Duo") {
 		t.Fatal()
 	}
 	for _, m := range []string{AppendRejected, DuoRejected} {

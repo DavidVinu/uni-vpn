@@ -27,6 +27,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/DavidVinu/uni-vpn/internal/certs"
 	"github.com/DavidVinu/uni-vpn/internal/i18n"
 )
 
@@ -249,9 +250,9 @@ func asciiUpper(b []byte) string {
 
 // Options tune Probe. The zero value matches Python's defaults.
 type Options struct {
-	UserAgent string        // default DefaultUserAgent
-	Timeout   time.Duration // default DefaultTimeout
-	RootCAs   *x509.CertPool
+	UserAgent string         // default DefaultUserAgent
+	Timeout   time.Duration  // default DefaultTimeout
+	RootCAs   *x509.CertPool // default certs.Pool()
 }
 
 // httpError mirrors urllib.error.HTTPError: the gateway answered, but not with 2xx.
@@ -313,6 +314,10 @@ func (c *deadlineConn) Write(b []byte) (int, error) {
 
 func newTransport(opts Options) *http.Transport {
 	dialer := &net.Dialer{Timeout: opts.Timeout}
+	roots := opts.RootCAs
+	if roots == nil {
+		roots = certs.Pool()
+	}
 	protocols := new(http.Protocols)
 	protocols.SetHTTP1(true) // urllib speaks HTTP/1.1 only
 	return &http.Transport{
@@ -325,7 +330,7 @@ func newTransport(opts Options) *http.Transport {
 			return &deadlineConn{conn, opts.Timeout}, nil
 		},
 		// ssl.create_default_context: verified chain and host name, TLS 1.2 or newer.
-		TLSClientConfig:    &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: opts.RootCAs},
+		TLSClientConfig:    &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots},
 		DisableCompression: true, // urllib sends Accept-Encoding: identity and never gunzips
 		DisableKeepAlives:  true,
 		Protocols:          protocols,

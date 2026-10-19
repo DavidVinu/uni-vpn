@@ -86,7 +86,9 @@ class ClassifyTests(unittest.TestCase):
             seq = tn.Classifier(mfa)
             self.assertEqual(seq.feed("Login failed."), ("auth_failed", expected), mfa)
         self.assertIn("clock", tn.APPEND_REJECTED)
-        self.assertIn("Duo", tn.DUO_REJECTED)
+        # duo_push also stands for other pushes (Kassel's NetIQ), so the text names no app.
+        self.assertIn("phone", tn.DUO_REJECTED)
+        self.assertNotIn("Duo", tn.DUO_REJECTED)
         for message in (tn.APPEND_REJECTED, tn.DUO_REJECTED):
             self.assertEqual(message.action, "password")
 

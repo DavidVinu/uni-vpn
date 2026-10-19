@@ -5,7 +5,9 @@ name: UniVPN
 options:
   bundleIdPrefix: de.davidvinu
   deploymentTarget:
-    iOS: "17.0"
+    # iOS 18 runs on every iPhone iOS 17 does; iOS 17 lacks the root certificate
+    # vpn2fa.hku.hk's certificate ends at (DigiCert TLS RSA4096 Root G5).
+    iOS: "18.0"
   developmentLanguage: en
   createIntermediateGroups: true
 settings:
@@ -107,11 +109,10 @@ targets:
         com.apple.developer.networking.networkextension: [packet-tunnel-provider]
         com.apple.security.application-groups: [group.de.davidvinu.univpn]
 
-  # The Control Center button needs iOS 18; on iOS 17 the app runs without it.
+  # The Control Center button (iOS 18).
   Control:
     type: app-extension
     platform: iOS
-    deploymentTarget: "18.0"
     sources:
       - path: Control
     dependencies:

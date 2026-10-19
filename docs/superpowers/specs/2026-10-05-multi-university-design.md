@@ -132,19 +132,22 @@ Initial entries (values from findings.md, corrected by the probes in 2):
 | bremen | vpn.uni-bremen.de | Tunnel-All-Traffic | | AnyConnect | totp_field | no |
 | muenster | vpn.uni-muenster.de | | | default | totp_field | no |
 | marburg | vpn.uni-marburg.de | unimr-vpn-staff-Passwort+2FA | | default | totp_append | no |
-| stanford | su-vpn.stanford.edu | Stanford | | default | duo_push | no |
+| stanford | su-vpn.stanford.edu | Stanford-Full | | default | duo_push | no |
 | harvard-fasrc | vpn.rc.fas.harvard.edu | | @fasrc | default | totp_field | no |
 | stuttgart | vpn.tik.uni-stuttgart.de | | @uni-stuttgart.de | default | none | no |
 | bonn | unibn-vpn.uni-bonn.de | | | AnyConnect | none | no |
 | mannheim | vpn.uni-mannheim.de | WebVPN | | default | none | no |
-| kassel | univpn.uni-kassel.de | | | AnyConnect Windows 5.1.18.314, win | none | no |
+| kassel | univpn.uni-kassel.de | | | AnyConnect Windows 5.1.18.314, win | duo_push | no |
 | fu-berlin | vpn.fu-berlin.de | | | AnyConnectLinux | saml | no |
 | oxford | vpn.ox.ac.uk | | | default | saml | no |
 
 Only Heidelberg has default domains; the others start with empty lists until someone
 contributes them. Where students sign in with another group or user name ending (ETH Zurich,
 Marburg, Stuttgart, NC State, Ottawa, HKU), they have their own entry `<id>-students` since
-2026-10-19.
+2026-10-19. Kassel's students sign in with the password alone, so `kassel` (staff, NetIQ push since
+2025-09-16) has `kassel-students` too. Stanford, Minnesota and Illinois use their full-tunnel groups
+(`Stanford-Full`, `AnyConnect-UofMvpnFull`, `OpenConnect2 (All)`): library publishers see a
+university address only through the full tunnel.
 
 TU Dresden was on this list until 2026-10-19 and was removed: its general VPN resource
 `tu-dresden.de` left the Cisco gateway in 05/2025 and is reachable over eduVPN only.
@@ -220,7 +223,7 @@ still means the code was wrong. Without it:
 |---|---|
 | `none`, `totp_field` | Login rejected: check your password (uni-vpn password) |
 | `totp_append` | Login rejected: check your password, then the computer's clock (uni-vpn password) |
-| `duo_push` | Login rejected: check your password, or the Duo request was denied or not answered in time (uni-vpn password) |
+| `duo_push` | Sign-in failed. Check the password, and confirm the sign-in request on your phone in time. |
 
 SAML and "external browser" markers say "This university signs in through a browser (SAML),
 uni-vpn does not support that yet"; CSD markers say "The server requires HostScan (CSD),

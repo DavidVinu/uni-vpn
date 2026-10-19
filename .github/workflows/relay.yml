@@ -30,6 +30,8 @@ jobs:
         run: |
           node relay/serve.mjs > "$RUNNER_TEMP/relay-url" &
           for _ in $(seq 50); do [ -s "$RUNNER_TEMP/relay-url" ] && break; sleep 0.1; done
+          # Without the URL the tests would use their in-memory relay and pass without the Worker.
+          [ -s "$RUNNER_TEMP/relay-url" ] || { echo "::error::relay/serve.mjs did not start"; exit 1; }
           UNI_VPN_TEST_RELAY=$(cat "$RUNNER_TEMP/relay-url") go test -count=1 ./internal/devsync/
       - name: Deploy
         if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != ''
