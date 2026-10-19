@@ -157,7 +157,7 @@ input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
           <span class="info"><button type="button" data-t-label="app.help"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></button>
             <span class="pop" data-t="setup.find_help" hidden></span></span></span>
           <input id="s-uni" role="combobox" aria-expanded="false" aria-controls="s-uni-list" aria-autocomplete="list" autocomplete="off" spellcheck="false" data-t-placeholder="setup.find_placeholder">
-          <ul class="options" id="s-uni-list" role="listbox" data-t-label="setup.universities" hidden></ul></div>
+          <ul class="options" id="s-uni-list" role="listbox" tabindex="-1" data-t-label="setup.universities" hidden></ul></div>
         <div id="s-other" hidden>
           <label class="field"><span data-t="setup.vpn_address"></span>
             <input id="s-host" autocapitalize="none" spellcheck="false" placeholder="vpn.example.edu"></label>
@@ -635,6 +635,7 @@ function renderList() {
     return li;
   }));
   list.hidden = false;
+  list.querySelector('[aria-selected="true"]')?.scrollIntoView({block: "nearest"});
   $("s-uni").setAttribute("aria-expanded", "true");
   $("s-uni").setAttribute("aria-activedescendant", active >= 0 ? "s-uni-" + found[active].id : "");
   return found;
@@ -666,7 +667,7 @@ $("s-uni").onfocus = () => { if (!uni) renderList(); };
 $("s-uni").onblur = closeList;
 $("s-uni").onkeydown = (e) => {
   if (e.key === "Escape") { closeList(); return; }
-  if (!["ArrowDown", "ArrowUp", "Enter"].includes(e.key) || (e.key === "Enter" && uni)) return;
+  if (!["ArrowDown", "ArrowUp", "Enter"].includes(e.key) || (e.key === "Enter" && uni && active < 0)) return;
   e.preventDefault();
   // Several matches and none chosen with the arrow keys: the list stays open to click one
   // (Enter took the first, the "(staff)" entry of a split university).
@@ -1376,14 +1377,16 @@ function renderDevices() {
   if (removeError && sync.error) removeSeen = true;
   else if (removeError && removeSeen) removeError = null;
   err("sync-err", (removeError && errText(removeError)) || (sync.on && sync.error ? tr("", sync.error) : ""));
-  const rows = (sync.on ? sync.devices : []).map((d) => {
+  const rows = (sync.on ? sync.devices : []).map((d, i) => {
     const row = document.createElement("div"), name = document.createElement("span"), val = document.createElement("span");
     row.className = "item";
-    name.textContent = d.name;
+    Object.assign(name, {id: "dev-name-" + i, textContent: d.name});
     val.className = "val";
-    if (d.this) { const me = document.createElement("span"); me.className = "small"; me.textContent = t("sync.this"); val.append(me); }
+    if (d.this) { const me = document.createElement("span"); Object.assign(me, {id: "dev-this", className: "small", textContent: t("sync.this")}); val.append(me); }
     const remove = document.createElement("button");
-    Object.assign(remove, {type: "button", className: "btn text remove", textContent: t("sync.remove")});
+    Object.assign(remove, {type: "button", id: "dev-remove-" + i, className: "btn text remove", textContent: t("sync.remove")});
+    // Read out with the device it removes: the first one is often this device.
+    remove.setAttribute("aria-labelledby", [remove.id, name.id, ...(d.this ? ["dev-this"] : [])].join(" "));
     remove.onclick = async () => {
       remove.disabled = true;
       removeError = null;
@@ -1489,6 +1492,7 @@ $("pair-entry").onsubmit = async (e) => {
   // Linked, but some settings could not be used here: said under the check mark.
   err("pair-err", r.data && r.data.error_t ? errText(r) : "");
   pairPart("pair-done");
+  $("pair-done").querySelector("h2").focus();
   refresh();
 };
 
