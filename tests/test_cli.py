@@ -18,7 +18,7 @@ from uni_vpn import daemon as dm
 from uni_vpn import platform as pf
 from uni_vpn.tunnel import free_port
 
-from tests import WINDOWS, posix_only
+from tests import WINDOWS, free_ports, posix_only
 from tests.test_daemon import DaemonHarness, wait_state
 
 
@@ -189,7 +189,7 @@ class DaemonCommandTests(unittest.TestCase):
         self.assertFalse((self.tmp / "daemon.log").exists())
 
     def test_config_error_daemon_serves_status_with_line(self):
-        socks_port, http_port = free_port(), free_port()
+        socks_port, http_port = free_ports(2)
         cfg_path = self.tmp / "config.toml"
         cfg_path.write_text(f'user = "u"\nsocks_port = {socks_port}\nhttp_port = {http_port}\nidle_minutes = "x"\n')
         captured = {}
