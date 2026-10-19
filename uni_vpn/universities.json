@@ -197,7 +197,7 @@
       "host": "connect.tamu.edu",
       "authgroup": "tunnel_tamu_traffic",
       "mfa": "duo_push",
-      "aliases": ["TAMU"],
+      "aliases": ["TAMU", "College Station"],
       "notes": "Profile from the university's documentation, not tested. Full tunnel group: tunnel_all_traffic. Duo pushes automatically."
     },
     {
@@ -217,7 +217,7 @@
       "host": "vpn.service.osu.edu",
       "authgroup": "OSUnet",
       "mfa": "duo_push",
-      "aliases": ["OSU", "The Ohio State University"],
+      "aliases": ["OSU", "The Ohio State University", "Columbus"],
       "notes": "Profile from the university's documentation, not tested. "
     },
     {
@@ -246,7 +246,7 @@
       "host": "vpn.ufl.edu",
       "username_suffix": "@ufl.edu",
       "mfa": "duo_push",
-      "aliases": ["UF"],
+      "aliases": ["UF", "Gainesville"],
       "notes": "Profile from the university's documentation, not tested. Unit groups use the suffix @ufl.edu/<unit>."
     },
     {
@@ -256,7 +256,7 @@
       "host": "tc-vpn-1.vpn.umn.edu",
       "authgroup": "AnyConnect-UofMvpnFull",
       "mfa": "duo_push",
-      "aliases": ["UMN"],
+      "aliases": ["UMN", "Minneapolis", "Twin Cities"],
       "notes": "Profile from the university's documentation (it.umn.edu/node/131921), not tested. vpn.umn.edu has no address; the Linux setup names tc-vpn-1.vpn.umn.edu. AnyConnect-UofMvpnFull gives a UMN public address, which library publishers need; the split group AnyConnect-UofMSplit uses private addresses."
     },
     {
@@ -297,7 +297,7 @@
       "host": "vpn.ncsu.edu",
       "authgroup": "1-Faculty-and-Staff",
       "mfa": "duo_push",
-      "aliases": ["NC State"],
+      "aliases": ["NC State", "Raleigh"],
       "notes": "Profile from the university's documentation, not tested. Students: ncsu-students."
     },
     {
@@ -307,7 +307,7 @@
       "host": "vpn.ncsu.edu",
       "authgroup": "2-Student",
       "mfa": "duo_push",
-      "aliases": ["NC State"],
+      "aliases": ["NC State", "Raleigh"],
       "notes": "Profile from the university's documentation, not tested. Faculty and staff: ncsu."
     },
     {

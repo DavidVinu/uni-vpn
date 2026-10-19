@@ -23,7 +23,7 @@ def placeholders(text: str) -> set[str]:
 
 class CatalogTests(unittest.TestCase):
     def test_every_language_has_every_key_with_the_same_placeholders(self):
-        source = i18n.catalog("en")
+        source = {k: v for k, v in i18n.catalog("en").items() if not k.startswith("uni.")}
         for code in i18n.CODES:
             with self.subTest(code=code):
                 cat = i18n.catalog(code)
@@ -46,11 +46,27 @@ class CatalogTests(unittest.TestCase):
                 if not key.startswith("uni."):
                     continue
                 with self.subTest(code=code, key=key):
+                    if key.endswith(".sign_in"):
+                        continue
                     _, uid, kind, number = key.split(".")
                     self.assertEqual(kind, "mfa")
                     steps = unis.get(uid).mfa_steps
                     self.assertLessEqual(int(number), len(steps))
                     self.assertEqual(placeholders(text), placeholders(steps[int(number) - 1]))
+
+    def test_sign_in_texts_are_for_listed_universities_in_every_language(self):
+        # The page, Android and iPhone show uni.<id>.sign_in instead of "the same as for email".
+        texts = {k for k in i18n.catalog("en") if k.startswith("uni.")}
+        self.assertTrue(texts)
+        for key in texts:
+            _, uid, kind = key.split(".")
+            self.assertEqual(kind, "sign_in")
+            self.assertIn(uid, unis.registry(), key)
+        for code in i18n.CODES:
+            with self.subTest(code=code):
+                cat = i18n.catalog(code)
+                self.assertEqual({k for k in cat if k.endswith(".sign_in") and k.startswith("uni.")}, texts)
+                self.assertFalse(any(placeholders(cat[k]) for k in texts))
 
     def test_translated_universities_have_all_their_steps(self):
         for code in i18n.CODES[1:]:

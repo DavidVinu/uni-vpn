@@ -1,6 +1,6 @@
 module github.com/DavidVinu/uni-vpn
 
-go 1.26.0
+go 1.26.9
 
 require (
 	github.com/BurntSushi/toml v1.6.0

@@ -175,7 +175,7 @@ input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
       <form id="step1" autocomplete="on" hidden>
         <p class="step"></p>
         <h2 data-t="setup.sign_in"></h2>
-        <p class="sub" data-t="setup.sign_in_sub"></p>
+        <p class="sub" id="s1-sub"></p>
         <label class="field"><span data-t="app.username"></span>
           <input id="s-user" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="ab123"></label>
         <label class="field"><span data-t="app.password"></span>
@@ -407,6 +407,7 @@ function applyLanguage(code) {
   OTHER.name = t("setup.not_listed");
   if (uni && uni.id === "other") $("s-uni").value = OTHER.name;
   if (UNIS) numberSteps();
+  signInSub();
   if (!$("step2").hidden) renderGuide();
 }
 
@@ -526,6 +527,7 @@ async function refresh() {
   if (S.setup_needed && !setupDone) {
     if (view !== "setup") { show("setup"); await loadUniversities(); step(uni ? "step1" : "step0", uni && $("s-user").value ? "s-pw" : null); }
     else if (!UNIS) loadUniversities();  // the core was away at the first try
+    restoreFocus();
     return;
   }
   if (view === "setup" && !setupSent && !changing) {
@@ -554,7 +556,10 @@ function restoreFocus() {
   const b = refocus, active = document.activeElement;
   if (!b || b.disabled) return;
   refocus = null;
-  if ((!active || active === document.body) && b.offsetParent !== null) b.focus();
+  if (active && active !== document.body) return;
+  // A Repair that worked hides its button: the screen's way on instead.
+  const next = b.offsetParent !== null ? b : $({fix: "toggle", "a-fix": "a-code", "s3-fix": "s3-back"}[b.id]);
+  if (next && next.offsetParent !== null && !next.disabled) next.focus();
 }
 
 // --- setup assistant ---------------------------------------------------------
@@ -619,6 +624,12 @@ function renderList() {
   return found;
 }
 
+// Some universities want another password than the usual one, or the full address.
+function signInSub() {
+  const own = uni && `uni.${uni.id}.sign_in`;
+  $("s1-sub").textContent = own && L.catalogs.en?.[own] ? t(own) : t("setup.sign_in_sub");
+}
+
 function pick(u) {
   uni = u;
   // A detection still running was for the address before (startChange fills it in after this).
@@ -629,6 +640,7 @@ function pick(u) {
   $("s-other").hidden = u.id !== "other";
   err("s0-err", u.mfa === "saml" ? t("setup.saml") : "");
   numberSteps();
+  signInSub();
   if (u.id === "other") $("s-host").focus();
 }
 
@@ -651,10 +663,11 @@ async function detect(group) {
   const host = $("s-host").value.trim(), seq = ++detectSeq;
   if (!host) { err("s0-err", t("setup.enter_address")); return; }
   err("s0-err", "");
-  $("s-detect").disabled = true;
+  press($("s-detect"));
   const r = await send("/api/detect", {host, group});
   if (seq !== detectSeq) return;
   $("s-detect").disabled = false;
+  restoreFocus();
   const d = r.data;
   $("s-mfa-row").hidden = false;
   if (!d || !d.ok) { err("s0-err", errText(r)); return; }
@@ -743,7 +756,8 @@ function autoProgress() {
     autoRunning = false;
     // A refused password: back to it like setupProgress, another code would not help.
     if (e && S.error_kind === "password" && !changingTotp) { step("step1", "s-pw"); err("s1-err", tr(e.error, e.error_t)); return; }
-    renderAuto(e ? tr(e.error, e.error_t) : "");
+    // No run at all: the service started again meanwhile, the code is used up (like the iPhone).
+    renderAuto(e ? tr(e.error, e.error_t) : t("enroll.failed"));
     $("a-code").focus();
     return;
   }
@@ -845,7 +859,7 @@ function secretAt() { return Math.max(0, guide.findIndex((g) => g.text.includes(
 function renderGuide() {
   guide = guideSteps();
   slide = Math.max(0, Math.min(slide, guide.length - 1));
-  const g = guide[slide], el = $("g-text");
+  const g = guide[slide], el = $("g-text"), inDrop = $("g-drop").contains(document.activeElement);
   $("g-shot").hidden = !g.picture;
   if (g.picture && !$("g-shot").src.endsWith("/guides/" + g.picture)) $("g-shot").src = "/guides/" + g.picture;
   const [before, after] = g.text.replace(/\{(secret|code)\}/g, "").replaceAll("{shot}", SHOT_KEYS).split("{portal}");
@@ -869,6 +883,8 @@ function renderGuide() {
   next.disabled = slide >= secretAt() && !keyRead;
   // Disabled with the focus (Enter on Next to the picture slide): on to the drop zone instead.
   if (had && next.disabled) ($("g-drop").hidden ? $("step2").querySelector("h2") : $("g-drop")).focus();
+  // The drop zone gone with the focus in it (on to the test after the key was read): Next.
+  else if (inDrop && $("g-drop").hidden) (next.disabled ? $("step2").querySelector("h2") : next).focus();
   next.textContent = t(last && changingTotp ? "app.save" : "app.next");
 }
 
@@ -1015,14 +1031,28 @@ document.addEventListener("dragleave", (e) => { if (!e.relatedTarget) $("g-drop"
 // in another window, the back arrow of a change).
 function guideOpen() { return view === "setup" && !$("step2").hidden; }
 
+let codeExpired = "";
+document.addEventListener("visibilitychange", () => {
+  const secret = codeExpired;
+  if (document.visibilityState !== "visible" || !secret) return;
+  codeExpired = "";
+  if (guideOpen() && $("s-totp").value.trim() === secret) useKey(secret, true);
+});
 function showCode(code, remaining, secret) {
   $("s-code").querySelector("b").textContent = code.slice(0, code.length / 2) + " " + code.slice(code.length / 2); // 123 456, 1234 5678
   const fg = $("s-code").querySelector(".fg");
-  let left = remaining;
+  // By the clock: a closed, covered or minimized window gets its ticks late or seldom.
+  const end = Date.now() + remaining * 1000;
   const tick = () => {
+    const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
     fg.style.strokeDashoffset = String(62.8 * (1 - left / 30));
     // A new code only while the guide is open: each check marks its window as used (MFA portal).
-    if (left-- <= 0) { clearInterval(codeTimer); if (guideOpen() && $("s-totp").value.trim() === secret) useKey(secret, true); }
+    if (left <= 0) {
+      clearInterval(codeTimer);
+      if (!guideOpen() || $("s-totp").value.trim() !== secret) return;
+      // Not while the window is closed (each check uses up a sign-in window): when it opens again.
+      if (document.visibilityState === "visible") useKey(secret, true); else codeExpired = secret;
+    }
   };
   tick();
   codeTimer = setInterval(tick, 1000);

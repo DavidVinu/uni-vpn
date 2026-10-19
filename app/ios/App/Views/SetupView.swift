@@ -268,7 +268,10 @@ private struct SignInPage: View {
             } header: {
                 Text(model.t("setup.sign_in"))
             } footer: {
-                ErrorText(text: setup.error)
+                VStack(alignment: .leading, spacing: 8) {
+                    if let hint = SetupState.signInHint(model, uniId: setup.uniId) { Text(hint) }
+                    ErrorText(text: setup.error)
+                }
             }
         }
         .safeAreaInset(edge: .bottom) {

@@ -447,6 +447,7 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
 
             SIGN_IN -> Page {
                 Text(model.t("setup.sign_in"), style = MaterialTheme.typography.headlineSmall)
+                signInHint(model, uniId)?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 OutlinedTextField(
                     value = user,
                     onValueChange = { user = it },
@@ -594,6 +595,12 @@ internal fun detected(d: JSONObject, strings: Strings): Detected {
     // web page.
     if (d.optBoolean("saml")) return Detected(strings.t("setup.saml"), d.optString("group"), groups, "")
     return Detected(null, d.optString("group"), groups, d.optJSONObject("suggestion")?.optString("mfa")?.takeIf { it.isNotEmpty() } ?: "totp_field")
+}
+
+/** What a university wants on sign-in when it is not the usual account (ETH's network password), else null. */
+internal fun signInHint(model: AppModel, uniId: String): String? {
+    val key = "uni.$uniId.sign_in"
+    return model.t(key).takeIf { it != key }
 }
 
 /** A university's own steps, translated where the catalog has them, else the general ones. */

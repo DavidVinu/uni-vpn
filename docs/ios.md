@@ -54,7 +54,9 @@ thin SwiftUI shell around the core.
   (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, shared by app and extension through the
   App Group), so reconnects work in a pocket and nothing goes into backups or to another phone.
 - **Certificates.** OpenSSL on iOS has no CA file, so openconnect asks its certificate callback,
-  which checks the gateway's chain with the phone's own trust store.
+  which checks the gateway's chain with the phone's own trust store. The cross-certificates in
+  `internal/certs/extra.pem` go along as intermediates, for gateways whose chain ends at a newer
+  root that iOS trusts only through an older one.
 - **Memory.** The extension may use about 50 MB; the core limits itself to 30 MB.
 - **Updates** come from the App Store; the core's self-updater is off on iOS.
 

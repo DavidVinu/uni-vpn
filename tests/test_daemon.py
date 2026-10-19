@@ -11,9 +11,8 @@ from unittest import mock
 from uni_vpn import config as config_mod
 from uni_vpn import credentials, daemon as dm, messages
 from uni_vpn.config import Config
-from uni_vpn.tunnel import free_port
 
-from tests import posix_only
+from tests import free_ports, posix_only
 
 FAKE = str(Path(__file__).parent / "fake_openconnect.py")
 
@@ -44,9 +43,10 @@ class DaemonHarness(unittest.IsolatedAsyncioTestCase):
         self.otp_patch = mock.patch.object(dm.Daemon, "_otp_wait", return_value=0)
         self.otp_patch.start()
         # ocproxy=FAKE: any executable path will do, the fake never starts the wrapper.
+        socks_port, http_port = free_ports(2)
         self.cfg = Config(
             user="u", host="vpn.example", openconnect=FAKE, ocproxy=FAKE,
-            socks_port=free_port(), http_port=free_port(),
+            socks_port=socks_port, http_port=http_port,
             idle_minutes=0.01, ready_timeout=4, client_wait=2, stop_grace=1,
             halfclose_grace=0.5, demand_window=0.3, retry_interval=0.2, tick=0.1,
             backoff=[0.1, 0.1],
