@@ -37,7 +37,7 @@ class RegistryTests(unittest.TestCase):
                          ("sogo.uni-heidelberg.de", "elearning-med.uni-heidelberg.de", "cip.dmed.uni-heidelberg.de",
                           "heico.uni-heidelberg.de", "moodle.uni-heidelberg.de", "yoki.urz.uni-heidelberg.de",
                           "m365.urz.uni-heidelberg.de", "lsf.uni-heidelberg.de", "telefonbuch.uni-heidelberg.de",
-                          "heibot-it.urz.uni-heidelberg.de"))
+                          "heibot-it.urz.uni-heidelberg.de", "doktoranden.uni-heidelberg.de"))
         self.assertIn("{portal}", hd.mfa_steps[0])
 
     def test_only_heidelberg_is_verified(self):

@@ -69,7 +69,8 @@ func TestSavedListGetsANewDefaultWebsiteOnce(t *testing.T) {
 	}
 	d := h.start(nil, firstStart)
 	want := []string{"sogo.uni-heidelberg.de", "example.org", "moodle.uni-heidelberg.de", "yoki.urz.uni-heidelberg.de",
-		"m365.urz.uni-heidelberg.de", "lsf.uni-heidelberg.de", "telefonbuch.uni-heidelberg.de", "heibot-it.urz.uni-heidelberg.de"}
+		"m365.urz.uni-heidelberg.de", "lsf.uni-heidelberg.de", "telefonbuch.uni-heidelberg.de", "heibot-it.urz.uni-heidelberg.de",
+		"doktoranden.uni-heidelberg.de"}
 	if got := websites(t, h); !slices.Equal(got, want) {
 		t.Fatal(got)
 	}
@@ -127,7 +128,8 @@ func TestNewDefaultWebsiteTheGroupKnowsIsNotAdded(t *testing.T) {
 			}
 			h.start(syncOptions("http://127.0.0.1:9", dir, nil), firstStart)
 			want := []string{"sogo.uni-heidelberg.de", "yoki.urz.uni-heidelberg.de", "m365.urz.uni-heidelberg.de",
-				"lsf.uni-heidelberg.de", "telefonbuch.uni-heidelberg.de", "heibot-it.urz.uni-heidelberg.de"}
+				"lsf.uni-heidelberg.de", "telefonbuch.uni-heidelberg.de", "heibot-it.urz.uni-heidelberg.de",
+				"doktoranden.uni-heidelberg.de"}
 			if got := websites(t, h); !slices.Equal(got, want) {
 				t.Fatal(got)
 			}
@@ -211,6 +213,22 @@ func TestVPNOnlyPortalGoesThroughOnceSetUp(t *testing.T) {
 	h.waitRefreshed([]int{h.cfg.HTTPPort})
 	if data := h.http("GET", "/status.json", nil, "").json(t); strings.Contains(fmt.Sprint(data["domains"]), "mfa.") {
 		t.Fatal(data["domains"])
+	}
+}
+
+// Refused, the core itself connects the browsers to the security page: some ignore the
+// rule's "; DIRECT".
+func TestVPNOnlyPortalReachedDirectlyWhenRefused(t *testing.T) {
+	h := newHarness(t)
+	d, _ := h.startSetup()
+	if hosts := d.forwarder.Direct(); len(hosts) != 0 {
+		t.Fatal(hosts)
+	}
+	if status, data := h.postSetup(`{"user": "ab123", "password": "pw", "secret": "GEZDGNBVGY3TQOJQ", "university": "heidelberg"}`); status != 200 {
+		t.Fatal(status, data)
+	}
+	if hosts := d.forwarder.Direct(); !slices.Equal(hosts, []string{"mfa.uni-heidelberg.de"}) {
+		t.Fatal(hosts)
 	}
 }
 

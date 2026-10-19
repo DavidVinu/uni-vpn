@@ -736,7 +736,7 @@ func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, s
 			// Back at what sync.json has while the group holds another value of this device's own:
 			// a write whose answer got lost, changed back since. Changing back is the later change.
 			case known && old.H == hv && !(changedHere(key, hv) && inRemote && r.D == me && h(r.V) != hv): // unchanged here
-			case inRemote && h(r.V) == hv: // already the same
+			case inRemote && h(r.V) == hv && !(changedHere(key, hv) && when(key, hv) > r.T): // already the same
 			case !known && inRemote && !changedHere(key, hv): // never synced here: the group's value is applied below
 			default:
 				stamp(key, v, when(key, hv))
@@ -774,6 +774,13 @@ func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, s
 		return "", false
 	}
 	var incoming []string
+	if st.Adopt && e.opts.Local.SetupDone() {
+		for key := range snap {
+			if _, ok := merged[key]; !ok && strings.HasPrefix(key, DomainPrefix) {
+				incoming = append(incoming, key)
+			}
+		}
+	}
 	for key, ent := range merged {
 		if strings.HasPrefix(key, DevicePrefix) {
 			continue
@@ -816,7 +823,10 @@ func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, s
 			// write below fails or the app is closed first: the next round must not send it
 			// back with a later time over a newer one from elsewhere.
 			for _, key := range applied {
-				ent := merged[key]
+				ent, ok := merged[key]
+				if !ok {
+					continue // a website the group does not list: gone here too
+				}
 				st.Hashes[key] = savedHash{H: h(ent.V), T: ent.T, D: ent.D}
 			}
 			// So is what was the same here already (a device set up by hand that joins): when the

@@ -359,6 +359,7 @@ func New(cfg *config.Config, log *slog.Logger, opts Options) *Daemon {
 	d.state, d.message, d.since = Idle, messages.NotConnected, d.wall()
 	d.lastActivity = d.mono()
 	d.forwarder = forwarder.New("127.0.0.1", cfg.SocksPort, d.acquire, d.noteActivity, seconds(cfg.HalfcloseGrace), log)
+	d.forwarder.Direct = d.directHosts
 	d.closeAll = d.forwarder.CloseAll
 	if opts.NeedsSetup {
 		d.message = messages.SetupNeeded
@@ -1022,6 +1023,17 @@ func (d *Daemon) ruleLocked() (string, error) {
 	return pac.BuildPACOrDirect(domains, portal, d.cfg.SocksPort), nil
 }
 
+// directHosts: what a browser still reaches when Uni VPN refuses, as the rule's "; DIRECT"
+// says. The core connects it itself, for browsers that ignore that.
+func (d *Daemon) directHosts() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if host := d.portalHostLocked(); host != "" {
+		return []string{host}
+	}
+	return nil
+}
+
 // portalHostLocked: the host of the vpnOnlyPortals portal the rule adds, "" for none.
 func (d *Daemon) portalHostLocked() string {
 	if d.needsSetup || d.configError != "" || !vpnOnlyPortals[d.cfg.University] {
@@ -1065,7 +1077,8 @@ func (d *Daemon) SetDomains(text string) ([]string, error) {
 // once, by the first core that knows it.
 var addedDefaults = map[string][]string{
 	"heidelberg": {"moodle.uni-heidelberg.de", "yoki.urz.uni-heidelberg.de", "m365.urz.uni-heidelberg.de",
-		"lsf.uni-heidelberg.de", "telefonbuch.uni-heidelberg.de", "heibot-it.urz.uni-heidelberg.de"},
+		"lsf.uni-heidelberg.de", "telefonbuch.uni-heidelberg.de", "heibot-it.urz.uni-heidelberg.de",
+		"doktoranden.uni-heidelberg.de"},
 }
 
 // addedDefaultsName lists the websites of addedDefaults this device dealt with, in the state

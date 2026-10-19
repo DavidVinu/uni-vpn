@@ -46,6 +46,8 @@ var DefaultDomains = []string{
 	"lsf.uni-heidelberg.de",
 	"telefonbuch.uni-heidelberg.de",
 	"heibot-it.urz.uni-heidelberg.de",
+	// heiDOCS, the doctoral candidates' online file: behind the same campus-only proxy as LSF.
+	"doktoranden.uni-heidelberg.de",
 }
 
 const label = `[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?`

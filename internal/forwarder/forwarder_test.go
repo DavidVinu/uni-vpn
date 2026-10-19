@@ -21,6 +21,7 @@ type env struct {
 	activity atomic.Int64
 	mu       sync.Mutex
 	target   func(ctx context.Context) (int, bool)
+	direct   []string
 }
 
 func freePort(t *testing.T) int {
@@ -77,6 +78,7 @@ func setup(t *testing.T) (*env, *syncBuffer) {
 	logs := &syncBuffer{}
 	log := slog.New(slog.NewTextHandler(logs, nil))
 	e.fwd = New("127.0.0.1", freePort(t), e.getTarget, func() { e.activity.Add(1) }, 500*time.Millisecond, log)
+	e.fwd.Direct = e.getDirect
 	if err := e.fwd.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -88,6 +90,18 @@ func (e *env) setTarget(fn func(ctx context.Context) (int, bool)) {
 	e.mu.Lock()
 	e.target = fn
 	e.mu.Unlock()
+}
+
+func (e *env) setDirect(hosts ...string) {
+	e.mu.Lock()
+	e.direct = hosts
+	e.mu.Unlock()
+}
+
+func (e *env) getDirect() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.direct
 }
 
 func (e *env) getTarget(ctx context.Context) (int, bool) {
