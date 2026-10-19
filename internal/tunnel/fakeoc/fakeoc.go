@@ -149,6 +149,25 @@ func openconnect(args []string) int {
 	if mode == "" {
 		mode = "ok"
 	}
+	if slices.Contains(args, "--help") && os.Getenv("FAKE_VERSION") != "9.01" {
+		os.Stdout.WriteString("Usage:  openconnect [options] <server>\n      --no-external-auth          Do not offer or use auth methods requiring external browser\n")
+		return 1
+	}
+	if os.Getenv("FAKE_VERSION") == "9.01" {
+		// openconnect before 9.10 (Debian 12: 9.01, Ubuntu 22.04: 8.20) has no --no-external-auth:
+		// getopt's complaint, then usage() on stdout and exit(1).
+		usage := "Usage:  openconnect [options] <server>\nOpen client for multiple VPN protocols, version v9.01\n" +
+			"      --external-browser=BROWSER  Set external browser executable\n"
+		if slices.Contains(args, "--help") {
+			os.Stdout.WriteString(usage)
+			return 1
+		}
+		if slices.Contains(args, "--no-external-auth") {
+			log("openconnect: unrecognized option '--no-external-auth'")
+			os.Stdout.WriteString(usage)
+			return 1
+		}
+	}
 	if mode == "totp_replayed" {
 		// Another device of the account used this window's code (LinOTP takes each code once):
 		// only the first start is rejected. FAKE_ARGS_FILE counts the starts.

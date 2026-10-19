@@ -29,7 +29,8 @@ struct TotpEntry: View {
                         .animation(.linear(duration: 1), value: left)
                 }
                 .frame(width: 24, height: 24)
-                Text(String(code.prefix(3)) + " " + String(code.dropFirst(3)))
+                // In halves: 123 456, or 1234 5678 (Marburg).
+                Text(String(code.prefix(code.count / 2)) + " " + String(code.dropFirst(code.count / 2)))
                     .font(.title.monospacedDigit())
                 Spacer()
                 Text(model.t("setup.check_code"))

@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -155,10 +156,32 @@ func (t *Tunnel) AuthArgs() []string {
 		// desktop, and gateways that check both should see what a Linux computer sends.
 		args = append(args, "--os=linux-64")
 	}
-	if cfg.NoExternalAuth {
+	if cfg.NoExternalAuth && (runtime.GOOS != "linux" || knowsNoExternalAuth(t.OpenConnect)) {
 		args = append(args, "--no-external-auth")
 	}
 	return args
+}
+
+var noExternalAuth sync.Map // openconnect path and its file's time -> usage lists --no-external-auth
+
+// knowsNoExternalAuth: the option came with openconnect 9.10. The Linux packages use the
+// distribution's openconnect (Ubuntu 22.04 and Mint 21: 8.20, Debian 12: 9.01), which stops at
+// an unknown option with its usage text. 8.20 never offers the browser sign-in, 9.01 always
+// does; without the option both sign in as they can.
+func knowsNoExternalAuth(openconnect string) bool {
+	key := openconnect
+	if info, err := os.Stat(openconnect); err == nil {
+		key += "\x00" + info.ModTime().String() // asked again after the distribution updates it
+	}
+	if v, ok := noExternalAuth.Load(key); ok {
+		return v.(bool)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, _ := exec.CommandContext(ctx, openconnect, "--help").Output() // usage on stdout, exit 1
+	known := len(out) == 0 || bytes.Contains(out, []byte("--no-external-auth"))
+	noExternalAuth.Store(key, known)
+	return known
 }
 
 // TokenArgs: the secret is passed via a 0600 file, never via the process list. openconnect

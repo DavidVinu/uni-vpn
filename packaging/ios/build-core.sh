@@ -4,7 +4,7 @@
 # app/ios/build/UniVPNCore.xcframework. Also the licence texts (app/ios/build/licenses) and the
 # camera prompt in every language (app/ios/build/Resources/<lang>.lproj/InfoPlist.strings).
 # Usage: packaging/ios/build-core.sh COMMIT
-# NATIVE_DIR=<dir> reuses openconnect and OpenSSL from an earlier build-native.sh run
+# NATIVE_DIR=<dir> reuses openconnect and OpenSSL from an earlier run of the same build-native.sh
 # (<dir>/<slice>/lib/...) instead of building them. Needs macOS with Xcode, Go and python3.
 set -euo pipefail
 [ $# -eq 1 ] || { echo "usage: $0 COMMIT" >&2; exit 2; }
@@ -29,7 +29,9 @@ for slice in iphoneos-arm64 iphonesimulator-arm64 iphonesimulator-x86_64; do
     iphonesimulator-x86_64) sdk=iphonesimulator goarch=amd64 target="x86_64-apple-ios$min-simulator" ;;
   esac
   native="$native_dir/$slice"
-  if [ ! -f "$native/lib/libopenconnect.a" ]; then
+  # Built again when build-native.sh changed since (it stamps its hash, CI's cache key).
+  stamp=$(shasum -a 256 "$root/packaging/ios/build-native.sh" | cut -d' ' -f1)
+  if [ ! -f "$native/lib/libopenconnect.a" ] || [ "$(cat "$native/.stamp" 2>/dev/null)" != "$stamp" ]; then
     "$root/packaging/ios/build-native.sh" "$slice" "$native"
   fi
   echo "==> [$slice] core"

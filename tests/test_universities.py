@@ -18,7 +18,7 @@ class RegistryTests(unittest.TestCase):
         profiles = unis.load()
         self.assertEqual(set(profiles), {
             "heidelberg", "ethz", "bremen", "muenster", "marburg", "stanford", "harvard-fasrc", "stuttgart",
-            "bonn", "mannheim", "kassel", "tu-dresden", "fu-berlin", "oxford", "tamu", "ucf", "osu", "utexas",
+            "bonn", "mannheim", "kassel", "fu-berlin", "oxford", "tamu", "ucf", "osu", "utexas",
             "asu", "ufl", "umn", "uiuc", "uga", "unc", "ncsu", "uwaterloo", "uottawa", "carleton", "hku", "ugr", "uni-halle",
             "hs-flensburg", "w-hs", "hs-offenburg", "uni-hamburg", "uni-jena", "uni-weimar", "th-koeln", "thu",
             "tu-braunschweig"})
@@ -55,11 +55,12 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(unis.get("umn").authgroup, "AnyConnect-UofMSplit")
         self.assertEqual(unis.get("ugr").mfa, "totp_field")
         for uni_id, group in [("bremen", "Tunnel-All-Traffic"), ("mannheim", "WebVPN"),
-                              ("tu-dresden", "A-Tunnel-TU-Networks"), ("ncsu", "1-Faculty-and-Staff"),
-                              ("uni-halle", "VPN"), ("w-hs", "Sec-Groups")]:
+                              ("ncsu", "1-Faculty-and-Staff"), ("uni-halle", "VPN"), ("w-hs", "VPN+MFA")]:
             self.assertEqual(unis.get(uni_id).authgroup, group)
         self.assertEqual(unis.get("hku").mfa, "totp_field")
         self.assertEqual(unis.get("hku").username_suffix, "@hku.hk")
+        for uni_id, suffix in [("uni-jena", "@uni-jena.de"), ("uni-weimar", "@uni-weimar.de"), ("thu", "@thu.de")]:
+            self.assertEqual(unis.get(uni_id).username_suffix, suffix)
         self.assertEqual(unis.get("tu-braunschweig").host, "vpngate.tu-braunschweig.de")
         self.assertEqual(unis.get("tu-braunschweig").mfa, "duo_push")
 

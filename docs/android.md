@@ -13,7 +13,8 @@ the Go core does the work and the app only talks to its local API.
   ocproxy straight from openconnect's `--script`, since there is no wrapper script on a phone.
 - **openconnect.** `packaging/android/build-native.sh` cross-builds openconnect 9.21 with OpenSSL,
   libxml2, and ocproxy 1.60 with libevent, statically, from pinned and checksummed sources.
-  openconnect's `/bin/sh` becomes `/system/bin/sh`. Its OpenSSL cannot read Android's
+  openconnect's `/bin/sh` becomes `/system/bin/sh`, and its OpenSSL accepts gateways without
+  secure renegotiation, as the computers' GnuTLS does. Its OpenSSL cannot read Android's
   certificate folder, so the app writes the phone's trusted certificates to `ca.pem` and the core
   passes `--cafile`. On Android the core sends `--os=linux-64` unless the profile says otherwise,
   to match the desktop user agents.

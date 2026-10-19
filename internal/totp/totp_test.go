@@ -15,6 +15,8 @@ import (
 const (
 	rfcSHA1   = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
 	rfcSHA256 = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZA"
+	rfcSHA512 = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ" +
+		"GEZDGNBVGY3TQOJQGEZDGNA"
 )
 
 func mustNormalize(t *testing.T, text, want string) {
@@ -59,8 +61,23 @@ func TestRejectsHOTPURI(t *testing.T) {
 }
 
 func TestRejectsUnusualDigitsOrPeriod(t *testing.T) {
-	for _, q := range []string{"digits=8", "period=60"} {
-		mustFail(t, "otpauth://totp/x?secret="+rfcSHA1+"&"+q)
+	for _, q := range []string{"digits=7", "digits=10", "digits=08", "period=60", "digits=8&period=60"} {
+		if err := mustFail(t, "otpauth://totp/x?secret="+rfcSHA1+"&"+q); keyOf(err) != "totp.digits" {
+			t.Errorf("%s: %v", q, err)
+		}
+	}
+}
+
+// Marburg's app tokens: 8 digits, HMAC-SHA512.
+func TestEightDigitTokensAreMarked(t *testing.T) {
+	mustNormalize(t, "otpauth://totp/x?secret="+rfcSHA512+"&algorithm=SHA512&digits=8&period=30",
+		"digits8:sha512:base32:"+rfcSHA512)
+	mustNormalize(t, "otpauth://totp/x?secret="+rfcSHA1+"&digits=8", "digits8:base32:"+rfcSHA1)
+	for token, want := range map[string]int{"digits8:sha512:base32:" + rfcSHA512: 8, "digits8:base32:" + rfcSHA1: 8,
+		"base32:" + rfcSHA1: 6, "sha256:base32:" + rfcSHA256: 6, "code:12345678": 6} {
+		if got := Digits(token); got != want {
+			t.Errorf("Digits(%q) = %d, want %d", token, got, want)
+		}
 	}
 }
 
@@ -136,6 +153,27 @@ func TestRFC6238SHA256Vector(t *testing.T) {
 	}
 }
 
+// RFC 6238, Appendix B, with 8 digits for all three algorithms.
+func TestRFC6238EightDigitVectors(t *testing.T) {
+	for _, tt := range []struct {
+		token string
+		now   int64
+		want  string
+	}{
+		{"digits8:base32:" + rfcSHA1, 59, "94287082"},
+		{"digits8:base32:" + rfcSHA1, 1111111109, "07081804"},
+		{"digits8:base32:" + rfcSHA1, 1234567890, "89005924"},
+		{"digits8:sha256:base32:" + rfcSHA256, 59, "46119246"},
+		{"digits8:sha512:base32:" + rfcSHA512, 59, "90693936"},
+		{"digits8:sha512:base32:" + rfcSHA512, 20000000000, "47863826"},
+	} {
+		got, err := CodeAt(tt.token, time.Unix(tt.now, 0))
+		if err != nil || got != tt.want {
+			t.Errorf("CodeAt(%q, %d) = %q, %v; want %q", tt.token, tt.now, got, err, tt.want)
+		}
+	}
+}
+
 // Value computed with uni_vpn/totp.py.
 func TestSHA512MatchesPython(t *testing.T) {
 	secret := strings.Repeat("GEZDGNBVGY3TQOJQ", 8)
@@ -154,10 +192,12 @@ func TestCodeUsesCurrentTimeByDefault(t *testing.T) {
 
 func TestCodeRejectsUnknownFormat(t *testing.T) {
 	for token, want := range map[string]string{
-		"hex:3132":              "totp.unknown",
-		"sha1:sha256:base32:AA": "totp.unknown",
-		"base32:gezdgnbv":       "totp.base32",
-		"base32:A\nAAAAAAA":     "totp.base32",
+		"hex:3132":                          "totp.unknown",
+		"sha1:sha256:base32:AA":             "totp.unknown",
+		"digits8:digits8:base32:" + rfcSHA1: "totp.unknown",
+		"sha512:digits8:base32:" + rfcSHA1:  "totp.unknown",
+		"base32:gezdgnbv":                   "totp.base32",
+		"base32:A\nAAAAAAA":                 "totp.base32",
 	} {
 		if _, err := Code(token); err == nil || keyOf(err) != want {
 			t.Errorf("Code(%q): %v, want %q", token, err, want)

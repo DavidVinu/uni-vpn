@@ -17,6 +17,13 @@ set -euo pipefail
 
 usage() { echo "usage: $0 iphoneos-arm64|iphonesimulator-arm64|iphonesimulator-x86_64 OUT-DIR" >&2; exit 2; }
 die() { echo "build-native: $*" >&2; exit 1; }
+# Replaces literal text in a source file, failing when it is not there (a new release changed it).
+patch_literal() {
+  local file="$1" from="$2" to="$3"
+  grep -qF -- "$from" "$file" || die "patch target not found in $file: $from"
+  FROM="$from" TO="$to" perl -0pi -e 's/\Q$ENV{FROM}\E/$ENV{TO}/g' "$file"
+  ! grep -qF -- "$from" "$file" || die "patch did not apply in $file: $from"
+}
 [ $# -eq 2 ] || usage
 slice="$1"
 min=17.0
@@ -36,6 +43,7 @@ esac
 for tool in xcrun curl perl make pkg-config shasum; do
   command -v "$tool" >/dev/null || die "missing host tool: $tool"
 done
+script_sum=$(shasum -a 256 "$0" | cut -d' ' -f1) # stamped on the result for build-core.sh
 sysroot=$(xcrun --sdk "$sdk" --show-sdk-path)
 clang=$(xcrun --sdk "$sdk" --find clang)
 [ -f "$sysroot/usr/include/libxml2/libxml/parser.h" ] || die "no libxml2 headers in $sysroot"
@@ -125,6 +133,11 @@ void uni_vpn_set_login(struct openconnect_info *vpninfo, const char *authgroup, 
 	vpninfo->no_external_auth = no_external_auth;
 }
 EOF
+# OpenSSL 3 refuses a gateway without secure renegotiation (RFC 5746, vpn-gateway.w-hs.de);
+# GnuTLS, which the computers' openconnect uses, allows the first handshake, and so does this.
+# Renegotiation itself stays refused. --allow-insecure-crypto would set it too, with weak ciphers.
+patch_literal openssl.c 'SSL_CTX_set_options(vpninfo->https_ctx, SSL_OP_TLSEXT_PADDING);' \
+  'SSL_CTX_set_options(vpninfo->https_ctx, SSL_OP_TLSEXT_PADDING | SSL_OP_LEGACY_SERVER_CONNECT);'
 export CC="$clang -target $target -isysroot $sysroot"
 export CFLAGS="-O2 -fPIC" CPPFLAGS="-I$out/include" LDFLAGS="-L$out/lib"
 export PKG_CONFIG_LIBDIR="$out/lib/pkgconfig" PKG_CONFIG_PATH=""
@@ -158,6 +171,7 @@ rm -f "$out"/lib/*.la
 rm -rf "${out:?}/lib/cmake" "${out:?}/share" "${out:?}/bin"
 mkdir -p "$out/licenses"
 cp "$src/openconnect-$openconnect_ver/COPYING.LGPL" "$out/licenses/openconnect-COPYING.LGPL"
+cp "$src/openconnect-$openconnect_ver/json/LICENSE" "$out/licenses/openconnect-json-parser-LICENSE"
 cp "$src/openssl-$openssl_ver/LICENSE.txt" "$out/licenses/openssl-LICENSE.txt"
 
 for lib in libopenconnect libssl libcrypto; do
@@ -168,3 +182,4 @@ for lib in libopenconnect libssl libcrypto; do
 done
 PKG_CONFIG_LIBDIR="$out/lib/pkgconfig" pkg-config --static --libs openconnect >/dev/null \
   || die "openconnect.pc does not resolve"
+echo "$script_sum" >"$out/.stamp"

@@ -14,7 +14,10 @@ thin SwiftUI shell around the core.
   they run the same daemon as `uni-vpn daemon`.
 - **openconnect is a library too.** `packaging/ios/build-native.sh` builds libopenconnect 9.21
   and OpenSSL 3.5.9 statically, from the same pinned and checksummed sources as the Android app;
-  libxml2 and zlib are the system's. The core drives libopenconnect through cgo, its tunnel goes
+  libxml2 and zlib are the system's. Two small changes to openconnect's source: a call that sets
+  the group and turns off web sign-in, as the program's `--authgroup` and `--no-external-auth`
+  do, and OpenSSL accepting gateways without secure renegotiation, as the computers' GnuTLS does.
+  The core drives libopenconnect through cgo, its tunnel goes
   to a socket pair, the other end feeds a userspace network stack (gVisor), and the core's SOCKS
   server dials through that stack. No ocproxy, no tun device.
 - **Where the core runs.** iOS keeps an app running only while it is on screen; only the Network

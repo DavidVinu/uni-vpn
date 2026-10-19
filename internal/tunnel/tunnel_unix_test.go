@@ -544,3 +544,19 @@ func TestOpenconnectKeepsTheCharacterSet(t *testing.T) {
 		t.Fatal(ctype)
 	}
 }
+
+// The Linux packages use the distribution's openconnect: Ubuntu 22.04 and Mint 21 have 8.20,
+// Debian 12 has 9.01, both without --no-external-auth (9.10). Every profile but Heidelberg's
+// sets no_external_auth, so the sign-in must not depend on it there.
+func TestOpenconnectWithoutNoExternalAuth(t *testing.T) {
+	f := newFlow(t)
+	f.cfg.NoExternalAuth = true
+	t.Setenv("FAKE_VERSION", "9.01")
+	tn := f.make()
+	f.start(tn, "secret", token)
+	if !tn.WaitReady(3 * time.Second) {
+		v, _ := tn.Classification()
+		t.Fatal("not ready:", v, tn.StderrTail())
+	}
+	tn.Stop(2 * time.Second)
+}

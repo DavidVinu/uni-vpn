@@ -557,6 +557,58 @@ func TestLinkedWithoutTheAccountWaitsQuietly(t *testing.T) {
 	}
 }
 
+// The same with config.toml unreadable (a university the update removed): the group's account
+// fails, and the language and automatic updates set without it woke the next round at once.
+func TestLinkedWithAnUnreadableConfigWaitsQuietly(t *testing.T) {
+	relay, _ := relaytest.Start(t)
+	var groupReads atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/v1/group/") {
+			groupReads.Add(1)
+		}
+		relay.ServeHTTP(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	laptopH := newHarness(t)
+	laptopH.cfg.User, laptopH.cfg.University = "ab123", "gone" // its older list still has it
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := config.WriteInitial(path, "ab123", "heidelberg", nil); err != nil {
+		t.Fatal(err)
+	}
+	laptop := laptopH.start(syncOptions(srv.URL, dir, func(o *Options) { o.ConfigPath = path }))
+	if err := laptop.SetLanguage("de"); err != nil {
+		t.Fatal(err)
+	}
+	desktopH := newHarness(t)
+	desktopDir := t.TempDir()
+	desktopPath := filepath.Join(desktopDir, "config.toml")
+	if err := os.WriteFile(desktopPath, []byte("university = \"gone\"\nuser = \"ab123\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.Load(desktopPath); err == nil {
+		t.Fatal("config.toml with an unknown university loaded")
+	}
+	desktop := desktopH.start(syncOptions(srv.URL, desktopDir, func(o *Options) {
+		o.ConfigPath, o.ConfigError = desktopPath, "unknown university 'gone'"
+	}))
+	offer, err := laptop.Sync("offer", pyjson.O())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pairing, _ := offer.Get("pairing")
+	code, _ := pairing.(pyjson.Object).Get("code")
+	if _, err := desktop.Sync("enter", pyjson.O("code", code)); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond) // the round the link woke is over
+	before := groupReads.Load()
+	time.Sleep(time.Second)
+	if n := groupReads.Load() - before; n > 3 {
+		t.Fatalf("%d group reads in a second", n)
+	}
+}
+
 // Then set up by hand: the laptop's language and automatic updates stay, the password typed
 // on the desktop reaches the laptop.
 func TestSetUpByHandAfterALinkKeepsTheGroupsSettings(t *testing.T) {

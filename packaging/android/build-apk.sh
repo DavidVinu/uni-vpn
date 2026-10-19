@@ -54,5 +54,14 @@ cp "$(cd "$root" && go env GOROOT)/LICENSE" "$licenses/go-LICENSE"
     done
     [ -n "$found" ] || echo "build-apk: warning: no licence file in Go module $path ($dir)" >&2
   done
+# The app's Java and Kotlin libraries (app/build.gradle.kts) are under the Apache License 2.0,
+# which is also OpenSSL's licence: its full text.
+grep -q "Apache License" "$licenses/openssl-LICENSE.txt" || { echo "build-apk: OpenSSL's licence is not the Apache License" >&2; exit 1; }
+{
+  echo "AndroidX (Jetpack Compose, Activity, Core, Fragment, Lifecycle), Kotlin, kotlinx.coroutines"
+  echo "and ZXing are licensed under the Apache License, Version 2.0:"
+  echo
+  cat "$licenses/openssl-LICENSE.txt"
+} >"$licenses/android-libraries-LICENSE.txt"
 cd "$app"
 ./gradlew --no-daemon -q "${tasks[@]}"

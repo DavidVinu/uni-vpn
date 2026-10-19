@@ -686,6 +686,10 @@ func (s *Server) totp(body []byte) (int, string, []byte, error) {
 		return problem(400, err)
 	}
 	if err := s.daemon.SetTOTP(token); err != nil {
+		var ve *ValueError
+		if errors.As(err, &ve) {
+			return problem(400, ve) // a key whose codes this university's sign-in can't use
+		}
 		return problem(500, err)
 	}
 	code, err := totp.Code(token)
@@ -742,7 +746,7 @@ func (s *Server) totpPicture(body []byte) (int, string, []byte, error) {
 		if _, err := totp.Normalize(text); err == nil {
 			return jsonReply(200, pyjson.O("ok", true, "secret", text))
 		} else if first == nil && strings.HasPrefix(strings.ToLower(text), "otpauth:") {
-			first = err // a sign-in QR code, but one we can't use (an HOTP or 8-digit one)
+			first = err // a sign-in QR code, but one we can't use (an HOTP one, or 60-second codes)
 		}
 	}
 	if first != nil {

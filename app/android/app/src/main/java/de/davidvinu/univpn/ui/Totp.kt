@@ -93,7 +93,8 @@ fun TotpEntry(model: AppModel, secret: String, onSecret: (String) -> Unit, onVal
     code?.let {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             CircularProgressIndicator(progress = { left / 30f }, modifier = Modifier.padding(4.dp))
-            Text(it.take(3) + " " + it.drop(3), style = MaterialTheme.typography.headlineMedium)
+            // In halves: 123 456, or 1234 5678 (Marburg).
+            Text(it.take(it.length / 2) + " " + it.drop(it.length / 2), style = MaterialTheme.typography.headlineMedium)
             Text(model.t("setup.check_code"), color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
         }
     }

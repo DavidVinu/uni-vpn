@@ -110,7 +110,7 @@ pre{font-size:12px;background:var(--bg);border-radius:10px;padding:10px;max-heig
 .drop:focus-visible,.drop.over{border-color:var(--accent);background:var(--bg)}
 .drop.done{border-style:solid;border-color:var(--ok);color:var(--text)}
 .drop.done>svg{color:var(--ok)}
-.drop{position:relative}.drop>input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}.drop .row-title{position:relative;z-index:1}
+.drop{position:relative}.drop>input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}.drop .info{z-index:1}
 .drop .row-title{gap:2px}
 .dots{display:flex;justify-content:center;gap:6px;margin:20px 0 -12px}
 .dots i{width:6px;height:6px;border-radius:50%;background:var(--line)}
@@ -399,6 +399,7 @@ function applyLanguage(code) {
   for (const el of document.querySelectorAll("[data-t]")) el.textContent = t(el.dataset.t);
   for (const el of document.querySelectorAll("[data-t-placeholder]")) el.placeholder = t(el.dataset.tPlaceholder);
   for (const el of document.querySelectorAll("[data-t-label]")) el.setAttribute("aria-label", t(el.dataset.tLabel));
+  $("g-file").title = t("setup.choose_picture"); // else the engine's "No file chosen" on hover
   $("language").replaceChildren(new Option(t("settings.language_system"), ""),
     ...L.languages.map(([c, name]) => new Option(name, c)));
   $("language").value = L.catalogs[code] ? code : "";
@@ -807,8 +808,9 @@ $("a-guide").onclick = async () => {
 // screenshot keys, {secret} takes the QR code picture, {code} shows the check code.
 let guide = [], slide = 0, keyRead = false, portalAway = false, portalSeq = 0, changingTotp = false;
 const SHOT_KEYS = /Mac/.test(navigator.platform) ? "⇧⌘4" : /Win/.test(navigator.platform) ? "Win+Shift+S" : "PrtSc";
-// The Linux app window (WebKitGTK) gives pages no pasted or dropped files.
-const LINUX = /Linux/.test(navigator.platform) && !/Android/.test(navigator.userAgent);
+// The Linux app window (WebKitGTK) gives pages no pasted or dropped files. Browsers do, also on
+// Linux (the page opens in one when the app window can't): its file field there takes no text.
+const LINUX = /Linux/.test(navigator.platform) && /\bUniVPN\b/.test(navigator.userAgent);
 const GENERIC = [1, 2, 3].map((n) => ({key: "setup.generic_step." + n, picture: `generic-${n}.svg`}));
 
 function guideSteps() {
@@ -935,7 +937,8 @@ async function readPicture(blob) {
 
 $("g-choose").onclick = () => $("g-file").click();
 $("g-file").onchange = () => { readPicture($("g-file").files[0]); $("g-file").value = ""; };
-$("g-drop").onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("g-file").click(); } };
+// Keys on the zone itself; its buttons (Choose picture, the help) do their own.
+$("g-drop").onkeydown = (e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); $("g-file").click(); } };
 // A picture or the key's text, pasted anywhere in the guide.
 document.addEventListener("paste", async (e) => {
   if (view !== "setup" || $("step2").hidden || !e.clipboardData) return;
@@ -980,7 +983,7 @@ for (const type of ["dragover", "drop"]) {
 document.addEventListener("dragleave", (e) => { if (!e.relatedTarget) $("g-drop").classList.remove("over"); });
 
 function showCode(code, remaining, secret) {
-  $("s-code").querySelector("b").textContent = code.slice(0, 3) + " " + code.slice(3);
+  $("s-code").querySelector("b").textContent = code.slice(0, code.length / 2) + " " + code.slice(code.length / 2); // 123 456, 1234 5678
   const fg = $("s-code").querySelector(".fg");
   let left = remaining;
   const tick = () => {
