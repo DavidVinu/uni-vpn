@@ -22,8 +22,8 @@ the Go core does the work and the app only talks to its local API.
   (TEST-NET-1), keeps both address families open, and carries the core's proxy rule
   (`VpnService.Builder.setHttpProxy` with `proxy.pac`). Browsers send the listed websites to the
   core's SOCKS port, the core opens the tunnel on demand, everything else and the phone's DNS stay
-  as they are. The app itself is outside the VPN. A changed website list re-establishes the VPN
-  with a new `?v=` in the rule's address so browsers reload it.
+  as they are. The app itself is outside the VPN. A changed rule re-establishes the VPN with a new
+  `?v=` (a hash of the rule) in its address so browsers reload it.
 - **Local API.** Every app on a phone can reach 127.0.0.1, so the core answers only requests
   with the app's token (`X-Uni-VPN-Token`, `UNI_VPN_API_TOKEN`). `proxy.pac` stays open for the
   browsers. Any app can also listen on the core's ports first and collect the token and the

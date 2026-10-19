@@ -214,7 +214,8 @@ func TestVPNOnlyPortalGoesThroughOnceSetUp(t *testing.T) {
 	}
 }
 
-// A saved list that already covers the portal: nothing added, and the rule did not change.
+// A saved list that already covers the portal (uni-heidelberg.de): the list stays as it is, and
+// the portal alone still goes directly when Uni VPN refuses.
 func TestVPNOnlyPortalCoveredByTheSavedList(t *testing.T) {
 	h := newHarness(t)
 	if err := pac.WriteDomains(h.domainsPath, []string{"uni-heidelberg.de"}); err != nil {
@@ -224,8 +225,12 @@ func TestVPNOnlyPortalCoveredByTheSavedList(t *testing.T) {
 	if status, data := h.postSetup(`{"user": "ab123", "password": "pw", "secret": "GEZDGNBVGY3TQOJQ", "university": "heidelberg"}`); status != 200 {
 		t.Fatal(status, data)
 	}
-	if r := h.http("GET", "/proxy.pac", nil, ""); strings.Contains(string(r.body), "mfa.") {
+	want := pac.BuildPACOrDirect([]string{"uni-heidelberg.de"}, []string{"mfa.uni-heidelberg.de"}, h.cfg.SocksPort)
+	if r := h.http("GET", "/proxy.pac", nil, ""); string(r.body) != want {
 		t.Fatal(string(r.body))
 	}
-	h.waitRefreshed(nil)
+	h.waitRefreshed([]int{h.cfg.HTTPPort})
+	if list, err := pac.ReadDomains(h.domainsPath, nil); err != nil || !slices.Equal(list, []string{"uni-heidelberg.de"}) {
+		t.Fatal(list, err)
+	}
 }

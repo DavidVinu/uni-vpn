@@ -153,6 +153,7 @@ and sends it to TestFlight from main.
 Everything that needs a phone and a signed build: the extension starting and taking over the
 core, Safari and other browsers following the proxy rule, connect on demand after a restart and
 a network change, the Control Center button, the camera scanner, a full sign-in with a real
-account and a second factor, the one-code second factor, Duo push, and the memory limit of the
-extension. The simulator tests cover the core, libopenconnect and the gateway, the API token and
-the secrets.
+account and a second factor, the one-code second factor, Duo push, the memory limit of the
+extension, and Safari opening the security page directly when Uni VPN refuses (`SOCKS5 ...;
+DIRECT`; try a wrong code on campus Wi-Fi, then open `mfa.za.w-hs.de`). The simulator tests
+cover the core, libopenconnect and the gateway, the API token and the secrets.

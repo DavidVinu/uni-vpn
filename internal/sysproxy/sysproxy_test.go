@@ -148,7 +148,7 @@ func TestLinuxRefreshBumpsURLVersionSoBrowsersRefetch(t *testing.T) {
 	}
 }
 
-// Two changes within a second (a sync join: the account, then the websites) each give a new
+// Changes within a second (a sync join: the account, then the websites) each give a new
 // address; the browsers read the rule again only when it changes.
 func TestRefreshTwiceInASecondChangesTheAddressTwice(t *testing.T) {
 	now := func() time.Time { return time.Unix(1700000000, 0) }
@@ -157,6 +157,15 @@ func TestRefreshTwiceInASecondChangesTheAddressTwice(t *testing.T) {
 	s.Now = now
 	s.Refresh(1081)
 	if reg.url != "http://127.0.0.1:1081/proxy.pac?v=1700000001" {
+		t.Fatal(reg.url)
+	}
+	s.Refresh(1081) // a third
+	if reg.url != "http://127.0.0.1:1081/proxy.pac?v=1700000002" {
+		t.Fatal(reg.url)
+	}
+	reg.url = "http://127.0.0.1:1081/proxy.pac"
+	s.Refresh(1081)
+	if reg.url != "http://127.0.0.1:1081/proxy.pac?v=1700000000" {
 		t.Fatal(reg.url)
 	}
 	r := &runner{answers: gsettings("auto", "http://127.0.0.1:1081/proxy.pac?v=1700000000")}

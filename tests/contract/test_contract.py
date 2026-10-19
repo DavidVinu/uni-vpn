@@ -279,7 +279,7 @@ class ContractTest(unittest.TestCase):
         self.assertEqual(payload["domains"], ["example.org", "uni-heidelberg.de"])
         self.assertEqual(self.status()["domains"], ["example.org", "uni-heidelberg.de"])
         self.assertEqual(self.request("GET", "/proxy.pac")[2].decode(),
-                         pac.build_pac(["example.org", "uni-heidelberg.de"], self.socks_port))
+                         pac.build_pac(["example.org", "uni-heidelberg.de"], self.socks_port, ["mfa.uni-heidelberg.de"]))
         written = (self.config_dir / "domains.txt").read_text()
         self.assertEqual(written, pac.HEADER + "example.org\nuni-heidelberg.de\n")
         code, payload = self.post("/api/domains", {"text": "not a host!"})

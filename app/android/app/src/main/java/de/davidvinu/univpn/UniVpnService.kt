@@ -227,6 +227,3 @@ class UniVpnService : VpnService() {
         }
     }
 }
-
-private fun org.json.JSONArray.join(separator: String) =
-    (0 until length()).joinToString(separator) { optString(it) }

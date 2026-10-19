@@ -300,7 +300,7 @@ func New(cfg *config.Config, log *slog.Logger, opts Options) *Daemon {
 	if opts.ProxyRefresh == nil {
 		opts.ProxyRefresh = sysproxy.Refresh
 		if platform.IsAndroid || platform.IsIOS {
-			// The app's VPN carries the PAC address and notices new websites in status.json.
+			// The app's VPN carries the PAC address and notices a new rule in GET /proxy.pac.
 			opts.ProxyRefresh = func(int) {}
 		}
 	}
@@ -907,7 +907,7 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 		}
 	}
 	d.mu.Lock()
-	before, _ := d.ruleDomainsLocked()
+	before, _ := d.ruleLocked()
 	config.CopyProfile(d.cfg, &profile)
 	port := d.cfg.HTTPPort
 	d.switching = false
@@ -919,8 +919,8 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 	d.needsSetup = false
 	d.configError = ""
 	// Another university's websites (no list of the user's own), or its portal: a new rule.
-	after, _ := d.ruleDomainsLocked()
-	newRule := !slices.Equal(before, after)
+	after, _ := d.ruleLocked()
+	newRule := before != after
 	if once {
 		d.startEnrollLocked(code, profile.MFAPortalURL)
 	}
@@ -998,15 +998,7 @@ func (d *Daemon) secretsChanged() {
 func (d *Daemon) PAC() (string, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	domains, err := pac.ReadDomains(d.opts.DomainsPath, d.cfg.DefaultDomains)
-	if err != nil {
-		return "", err
-	}
-	var portal []string
-	if host := d.portalHostLocked(domains); host != "" {
-		portal = []string{host}
-	}
-	return pac.BuildPACOrDirect(domains, portal, d.cfg.SocksPort), nil
+	return d.ruleLocked()
 }
 
 // vpnOnlyPortals: universities whose MFA portal opens only on the university network or over
@@ -1016,20 +1008,22 @@ func (d *Daemon) PAC() (string, error) {
 // opens on campus. Not before the setup: the listed websites wait for it.
 var vpnOnlyPortals = map[string]bool{"heidelberg": true, "w-hs": true}
 
-// ruleDomainsLocked: the websites the proxy rule sends through Uni VPN.
-func (d *Daemon) ruleDomainsLocked() ([]string, error) {
+// ruleLocked is the proxy rule. The portal comes first, also when the list covers it
+// (uni-heidelberg.de, the help's example): only it goes directly when Uni VPN refuses.
+func (d *Daemon) ruleLocked() (string, error) {
 	domains, err := pac.ReadDomains(d.opts.DomainsPath, d.cfg.DefaultDomains)
 	if err != nil {
-		return domains, err
+		return "", err
 	}
-	if host := d.portalHostLocked(domains); host != "" {
-		domains = append(domains, host)
+	var portal []string
+	if host := d.portalHostLocked(); host != "" {
+		portal = []string{host}
 	}
-	return domains, nil
+	return pac.BuildPACOrDirect(domains, portal, d.cfg.SocksPort), nil
 }
 
 // portalHostLocked: the host of the vpnOnlyPortals portal the rule adds, "" for none.
-func (d *Daemon) portalHostLocked(domains []string) string {
+func (d *Daemon) portalHostLocked() string {
 	if d.needsSetup || d.configError != "" || !vpnOnlyPortals[d.cfg.University] {
 		return ""
 	}
@@ -1037,10 +1031,7 @@ func (d *Daemon) portalHostLocked(domains []string) string {
 	if err != nil {
 		return ""
 	}
-	if host := pac.NormalizeHost(u.Hostname()); host != "" && !pac.Matches(host, domains) {
-		return host
-	}
-	return ""
+	return pac.NormalizeHost(u.Hostname())
 }
 
 // SetDomains saves the website list. Invalid lines are a *httpapi.ValueError.

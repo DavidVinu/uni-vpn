@@ -360,12 +360,15 @@ func (s *System) Refresh(httpPort int) {
 		return // networksetup requires admin rights; the user restarts the browser
 	}
 	version := s.Now().Unix()
-	// A new address each time, also for a second change within the same second.
+	// A new address each time, also for more changes within one second: past the one set now.
 	fresh := func(now string) string {
-		if url := PacURLVersion(httpPort, version); url != now {
-			return url
+		v := version
+		if _, set, ok := strings.Cut(now, "?v="); ok {
+			if n, err := strconv.ParseInt(set, 10, 64); err == nil && n >= v {
+				v = n + 1
+			}
 		}
-		return PacURLVersion(httpPort, version+1)
+		return PacURLVersion(httpPort, v)
 	}
 	if s.windows() {
 		if now, err := s.WinGet(); err == nil && IsOurs(now, httpPort) {
