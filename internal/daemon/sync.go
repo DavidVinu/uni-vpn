@@ -168,6 +168,9 @@ func (l syncLocal) Snapshot(ctx context.Context, withSecrets bool) (map[string]j
 
 func (l syncLocal) Apply(ctx context.Context, all map[string]devsync.Entry, keys []string) map[string]error {
 	d := l.d
+	if d.beforeApply != nil {
+		d.beforeApply()
+	}
 	failed := map[string]error{}
 	fail := func(err error, keys ...string) {
 		for _, key := range keys {

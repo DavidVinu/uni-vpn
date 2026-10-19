@@ -1133,6 +1133,44 @@ func TestTakenOverValueIsNotSentBackAfterAConflict(t *testing.T) {
 }
 
 // A password typed on this device while it takes over a setting from another one goes out.
+// A change noted here while a round takes settings over (an account set up by hand meanwhile)
+// makes what that round read of this device old; the next round reads it again.
+func TestChangeNotedDuringARoundMakesItsReadOld(t *testing.T) {
+	ctx := context.Background()
+	_, url := startRelay(t)
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	laptop := newDevice(t, url, "Laptop", setUpLaptop(), c)
+	desktop := newDevice(t, url, "Desktop", newLocal(false, nil), c)
+	pair(t, ctx, laptop, desktop)
+	desktop.local.set(KeyLanguage, "de")
+	desktop.Notify()
+	if err := desktop.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var e *Engine
+	var before, after bool
+	opts := laptop.opts
+	opts.Local = &hookLocal{fakeLocal: laptop.local, onApply: func() {
+		before = e.ChangedSinceRead()
+		laptop.local.set(KeyPassword, "typed")
+		e.Notify(KeyPassword)
+		after = e.ChangedSinceRead()
+	}}
+	e = New(opts)
+	if err := e.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if before || !after {
+		t.Fatalf("old before the change: %v, after it: %v", before, after)
+	}
+	if err := e.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if e.ChangedSinceRead() {
+		t.Fatal("still old after the next round")
+	}
+}
+
 func TestPasswordTypedWhileTakingOverGoesOut(t *testing.T) {
 	ctx := context.Background()
 	_, url := startRelay(t)

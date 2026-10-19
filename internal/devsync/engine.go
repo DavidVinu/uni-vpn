@@ -125,6 +125,7 @@ type Engine struct {
 	loaded        bool
 	pending       pending
 	pendingGen    int
+	readGen       int // pendingGen when the running round read this device's settings
 	pendingLoaded bool
 	applying      bool // Local.Apply runs: the settings it changes are not this device's own
 	devices       []DeviceInfo
@@ -447,6 +448,16 @@ func (e *Engine) Notify(typed ...string) {
 	e.Wake()
 }
 
+// ChangedSinceRead: a change was noted on this device after the running round read its
+// settings, an account set up by hand while the round waited for it, say. Local.Apply asks it
+// before it takes the group's account over: the round's view is old then, and the next round
+// sends the account typed here.
+func (e *Engine) ChangedSinceRead() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.pendingGen != e.readGen
+}
+
 // Defaulted: a new config.toml was just set up by hand (the app installed again, the old file
 // unreadable), so keys are at their defaults there, not chosen here: the group's values are
 // taken over, and a change made here from now on is one. A change of them not sent yet went
@@ -645,6 +656,7 @@ func (e *Engine) syncLocked(ctx context.Context) error {
 		e.loadPendingLocked()
 		p, gen := e.pending, e.pendingGen
 		p.Changes = maps.Clone(p.Changes)
+		e.readGen = gen
 		e.mu.Unlock()
 		// A sync.json from before keyed hashes is carried over by comparing values, secrets too.
 		done, err := e.step(ctx, k, remote, version, st, p.Secrets || version == 0 || !st.Keyed, p, gen)
