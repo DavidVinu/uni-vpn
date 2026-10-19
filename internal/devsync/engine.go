@@ -710,6 +710,11 @@ func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, s
 	merged := maps.Clone(remote.Entries)
 	// stamp offers a local value; the later change wins (docs/sync.md, Group document).
 	stamp := func(key string, v json.RawMessage, at int64) {
+		// A change made here comes after this device's own earlier one, also when the clock was
+		// set back since (it was ahead then): the earlier value must not come back over it.
+		if r, ok := merged[key]; ok && r.D == me && at <= r.T {
+			at = r.T + 1
+		}
 		ent := Entry{V: compact(v), T: at, D: me}
 		if r, ok := merged[key]; !ok || ent.newer(r) {
 			merged[key] = ent

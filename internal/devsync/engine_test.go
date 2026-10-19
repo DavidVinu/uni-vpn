@@ -2614,3 +2614,48 @@ func randomLinking(t *testing.T, seed uint64) {
 		}
 	}
 }
+
+// A device whose clock was ahead (dual boot, a clock set by hand) and was then corrected: the
+// user's next change of the same setting on this same device loses to its own earlier one, and
+// the round puts the earlier value back.
+func TestOwnChangeAfterClockSetBackStays(t *testing.T) {
+	ctx := context.Background()
+	_, url := startRelay(t)
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	lc := &clock{t: time.Unix(1_800_000_000, 0).Add(2 * time.Hour)} // the laptop's clock, 2 h ahead
+	laptop := newDevice(t, url, "Laptop", setUpLaptop(), lc)
+	phone := newDevice(t, url, "Phone", newLocal(false, nil), c)
+	pair(t, ctx, laptop, phone)
+
+	laptop.local.set(KeyLanguage, "de")
+	laptop.Notify()
+	if err := laptop.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	laptop.local.set(KeyPassword, "typed-while-ahead")
+	laptop.Notify(KeyPassword)
+	if err := laptop.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// NTP corrects the laptop's clock.
+	lc.mu.Lock()
+	lc.t = lc.t.Add(-2 * time.Hour)
+	lc.mu.Unlock()
+	// Ten minutes later the user picks another language and types the new password again.
+	lc.mu.Lock()
+	lc.t = lc.t.Add(10 * time.Minute)
+	lc.mu.Unlock()
+	laptop.local.set(KeyLanguage, "fr")
+	laptop.Notify()
+	laptop.local.set(KeyPassword, "the-new-one")
+	laptop.Notify(KeyPassword)
+	if err := laptop.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := laptop.local.get(KeyLanguage); got != `"fr"` {
+		t.Errorf("language the user just picked on this device was put back to %s", got)
+	}
+	if got := laptop.local.get(KeyPassword); got != `"the-new-one"` {
+		t.Errorf("password the user just typed on this device was put back to %s", got)
+	}
+}
