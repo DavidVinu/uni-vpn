@@ -5,8 +5,7 @@ name: UniVPN
 options:
   bundleIdPrefix: de.davidvinu
   deploymentTarget:
-    # iOS 18 runs on every iPhone iOS 17 does; iOS 17 lacks the root certificate
-    # vpn2fa.hku.hk's certificate ends at (DigiCert TLS RSA4096 Root G5).
+    # iOS 18 runs on every iPhone iOS 17 does.
     iOS: "18.0"
   developmentLanguage: en
   createIntermediateGroups: true

@@ -162,10 +162,10 @@ type Daemon struct {
 	log  *slog.Logger
 	opts Options
 
-	// Test hooks: the wall clock, and _otp_wait.
+	// Test hooks: the wall clock, the monotonic one (monoClock), and _otp_wait.
 	wall    func() float64
+	mono    func() float64
 	otpWait func(now float64) float64
-	base    time.Time // monotonic clock origin
 
 	mu            sync.Mutex
 	cfg           *config.Config
@@ -241,9 +241,10 @@ func New(cfg *config.Config, log *slog.Logger, opts Options) *Daemon {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	d := &Daemon{log: log, cfg: cfg, base: time.Now(), changed: make(chan struct{}), wake: make(chan struct{}),
+	d := &Daemon{log: log, cfg: cfg, changed: make(chan struct{}), wake: make(chan struct{}),
 		stop: make(chan struct{}), started: make(chan struct{}), offlineRecheck: 5}
 	d.wall = func() float64 { return float64(time.Now().UnixNano()) / 1e9 }
+	d.mono = monoClock(platform.IsAndroid || platform.IsIOS)
 	d.updateFirstCheck, d.updateInterval, d.updateJitter = 600*time.Second, 5*time.Hour, 30*time.Minute
 	d.after, d.updateNow = time.After, make(chan struct{}, 1)
 	if opts.PasswordGetter == nil {
@@ -354,8 +355,24 @@ func (d *Daemon) logf(level slog.Level, format string, args ...any) {
 	d.log.Log(context.Background(), level, fmt.Sprintf(format, args...))
 }
 
-// mono is time.monotonic(): seconds on a clock that only moves forward.
-func (d *Daemon) mono() float64 { return time.Since(d.base).Seconds() + 1e6 }
+// monoClock is time.monotonic(): seconds on a clock that only moves forward. Go's stops while
+// the computer sleeps (except on Windows), which is how the ticker tells a resume. A phone sleeps
+// whenever its screen is off: there the clock counts the time asleep, so the screen going off is
+// no resume (a tunnel that died meanwhile ends through openconnect's own dead-peer check), and
+// the idle limit and the demand window are the user's minutes, as on Windows.
+func monoClock(phone bool) func() float64 {
+	if phone {
+		// clock_gettime only fails for a clock the system lacks, so for all calls or none.
+		if start, err := sleepClock(); err == nil {
+			return func() float64 {
+				now, _ := sleepClock()
+				return now - start + 1e6
+			}
+		}
+	}
+	base := time.Now()
+	return func() float64 { return time.Since(base).Seconds() + 1e6 }
+}
 
 func (d *Daemon) user() string {
 	d.mu.Lock()
@@ -1820,7 +1837,8 @@ func (d *Daemon) backoff(ctx context.Context) bool {
 // --- Idle and resume -------------------------------------------------------------
 
 func (d *Daemon) ticker() {
-	// A clock that stops during sleep: the difference to the wall clock reveals a resume.
+	// A clock that stops during sleep: the difference to the wall clock reveals a resume. On a
+	// phone none does (monoClock).
 	awake := d.mono
 	if platform.IsWindows {
 		awake = winsys.AwakeSeconds

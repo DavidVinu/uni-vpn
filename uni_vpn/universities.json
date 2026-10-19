@@ -207,7 +207,7 @@
       "host": "secure.vpn.ucf.edu",
       "authgroup": "UCF Students",
       "mfa": "saml",
-      "aliases": ["UCF"],
+      "aliases": ["UCF", "Orlando"],
       "notes": "Profile from the university's documentation. Checked 2026-10-18: the gateway signs in only through a web page (SAML). A client without web sign-in only gets the group UCF_StartBeforeLogon. Duo push or call only."
     },
     {
@@ -236,7 +236,7 @@
       "host": "sslvpn.asu.edu",
       "usergroup": "2fa",
       "mfa": "saml",
-      "aliases": ["ASU"],
+      "aliases": ["ASU", "Tempe"],
       "notes": "Profile from the university's documentation. Checked 2026-10-18: the gateway signs in only through a web page (SAML)."
     },
     {
@@ -256,7 +256,7 @@
       "host": "tc-vpn-1.vpn.umn.edu",
       "authgroup": "AnyConnect-UofMvpnFull",
       "mfa": "duo_push",
-      "aliases": ["UMN", "Minneapolis", "Twin Cities"],
+      "aliases": ["UMN", "Minneapolis", "Saint Paul", "St. Paul", "Twin Cities"],
       "notes": "Profile from the university's documentation (it.umn.edu/node/131921), not tested. vpn.umn.edu has no address; the Linux setup names tc-vpn-1.vpn.umn.edu. AnyConnect-UofMvpnFull gives a UMN public address, which library publishers need; the split group AnyConnect-UofMSplit uses private addresses."
     },
     {
@@ -277,7 +277,7 @@
       "authgroup": "01 Default",
       "username_suffix": "@uga.edu",
       "mfa": "saml",
-      "aliases": ["UGA"],
+      "aliases": ["UGA", "Athens"],
       "notes": "Profile from the university's documentation. Checked 2026-10-18: the gateway signs in only through a web page (SAML). A client without web sign-in only gets its default group DefaultWEBVPNGroup, without a group list."
     },
     {
@@ -343,6 +343,7 @@
     {
       "id": "carleton",
       "name": "Carleton University",
+      "aliases": ["Ottawa"],
       "country": "CA",
       "host": "cuvpn.carleton.ca",
       "usergroup": "mfa",

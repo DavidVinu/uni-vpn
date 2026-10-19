@@ -273,6 +273,7 @@ input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
       <button class="item" type="button" id="row-uni"><span data-t="app.university"></span><span class="val" id="v-uni"></span></button>
       <button class="item" type="button" id="row-user"><span data-t="app.username"></span><span class="val" id="v-user"></span></button>
       <details id="d-pw"><summary><span data-t="app.password"></span></summary><div class="body">
+        <p class="sub" id="pw-sub" hidden></p>
         <form id="pwform"><div class="input"><input type="password" id="pw" autocomplete="current-password" data-t-label="app.password">
           <button type="button" class="icon-btn reveal" data-for="pw" data-t-label="app.show_password"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
         <button class="btn primary" type="submit" data-t="app.save"></button><span class="saved" id="pwmsg" role="status"></span></form></div></details>
@@ -472,6 +473,9 @@ function render() {
   $("toggle").disabled = S.state === "disconnecting" || (repairing && !isOn());
   $("v-uni").textContent = S.university_name;
   $("v-user").textContent = S.user;
+  // The password the university wants, where it is not the usual one (as on step 1).
+  $("pw-sub").textContent = ownSignIn(S.university);
+  $("pw-sub").hidden = !$("pw-sub").textContent;
   $("row-totp").hidden = !TOTP_MODES.includes(S.mfa);
   $("v-ver").textContent = S.version;
   $("v-ver").title = S.commit ? S.commit.slice(0, 7) : "";
@@ -625,10 +629,11 @@ function renderList() {
 }
 
 // Some universities want another password than the usual one, or the full address.
-function signInSub() {
-  const own = uni && `uni.${uni.id}.sign_in`;
-  $("s1-sub").textContent = own && L.catalogs.en?.[own] ? t(own) : t("setup.sign_in_sub");
+function ownSignIn(id) {
+  const own = `uni.${id}.sign_in`;
+  return L.catalogs.en?.[own] ? t(own) : "";
 }
+function signInSub() { $("s1-sub").textContent = (uni && ownSignIn(uni.id)) || t("setup.sign_in_sub"); }
 
 function pick(u) {
   uni = u;
