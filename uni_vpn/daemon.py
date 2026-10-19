@@ -8,6 +8,7 @@ import os
 import random
 import ssl
 import time
+import urllib.parse
 from enum import Enum
 from pathlib import Path
 from typing import Awaitable, Callable
@@ -40,6 +41,8 @@ FINAL_STATES = {State.auth_failed, State.keyring}
 RETRY_STATES = {State.offline, State.blocked, State.error}
 OTP_STEP = 30  # seconds per one-time code (RFC 6238, same as openconnect)
 BLOCKED_MESSAGE = M.BLOCKED
+# Universities whose security page opens only on campus or over the VPN (Go: vpnOnlyPortals).
+VPN_ONLY_PORTALS = frozenset({"heidelberg", "w-hs"})
 
 
 async def wait_event(event: asyncio.Event, timeout: float) -> bool:
@@ -367,7 +370,21 @@ class Daemon:
         await self.request_connect()
 
     def pac(self) -> str:
-        return pac.build_pac(pac.read_domains(self.domains_path, self.cfg.default_domains), self.cfg.socks_port)
+        return pac.build_pac(self.rule_domains(), self.cfg.socks_port)
+
+    def rule_domains(self) -> list[str]:
+        """The websites the proxy rule sends through Uni VPN: the list, plus the security page of
+        a university in VPN_ONLY_PORTALS once set up (as the Go core does)."""
+        domains = pac.read_domains(self.domains_path, self.cfg.default_domains)
+        if self.needs_setup or self.config_error or self.cfg.university not in VPN_ONLY_PORTALS:
+            return domains
+        try:
+            host = pac.normalize_host(urllib.parse.urlsplit(self.cfg.mfa_portal_url or "").hostname)
+        except ValueError:
+            return domains
+        if host and not pac.matches(host, domains):
+            domains.append(host)
+        return domains
 
     async def set_domains(self, text: str) -> list[str]:
         domains, errors = pac.parse_domain_list(text)
