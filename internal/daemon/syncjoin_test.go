@@ -3,13 +3,17 @@
 package daemon
 
 import (
+	"context"
+	"errors"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DavidVinu/uni-vpn/internal/config"
 	"github.com/DavidVinu/uni-vpn/internal/devsync/relaytest"
+	"github.com/DavidVinu/uni-vpn/internal/pyjson"
 )
 
 // setUpSyncDevice starts a device set up for Heidelberg (by hand, or by a pairing already).
@@ -87,5 +91,56 @@ func TestJoiningAGroupWithoutWebsites(t *testing.T) {
 	syncRound(t, phone, laptop, phone, laptop)
 	if got := listOf(t, laptop); len(got) != 0 {
 		t.Fatal("back on the laptop:", got)
+	}
+}
+
+// Every website removed and synced; a new device links while its keyring refuses the second
+// factor (the account is not used here, the page goes on with setup by hand), then it is set up
+// by hand. The group's empty list stays empty: the defaults of the setup by hand do not come
+// back to the other devices.
+func TestEmptyListStaysEmptyAfterALinkWhoseAccountFailed(t *testing.T) {
+	ctx := context.Background()
+	_, url := relaytest.Start(t)
+	_, laptop := setUpSyncDevice(t, url)
+	if _, err := laptop.SetDomains(""); err != nil {
+		t.Fatal(err)
+	}
+	if err := laptop.sync.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	desktopH := newHarness(t)
+	desktopH.totpSetter = func(string) error { return errors.New("keyring locked") }
+	dir := t.TempDir()
+	desktop := desktopH.start(syncOptions(url, dir, func(o *Options) {
+		o.NeedsSetup, o.ConfigPath = true, filepath.Join(dir, "config.toml")
+	}))
+	offer, err := laptop.Sync("offer", pyjson.O())
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, _ := offer.Get("pairing")
+	code, _ := p.(pyjson.Object).Get("code")
+	if _, err := desktop.Sync("enter", pyjson.O("code", code)); err != nil {
+		t.Fatal(err)
+	}
+	if statusValue(t, desktop, "setup_needed") != true {
+		t.Fatal("want the desktop still to be set up")
+	}
+	time.Sleep(200 * time.Millisecond) // the laptop's side of the pairing
+	desktopH.mu.Lock()
+	desktopH.totpSetter = nil
+	desktopH.mu.Unlock()
+	if err := desktop.CompleteSetup("ab123", "pw", "base32:GEZDGNBVGY3TQOJQ", "heidelberg", nil); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		for _, d := range []*Daemon{desktop, laptop} {
+			d.sync.Sync(ctx)
+		}
+	}
+	for name, d := range map[string]*Daemon{"laptop": laptop, "desktop": desktop} {
+		if got := listOf(t, d); len(got) != 0 {
+			t.Errorf("%s: %v, want the group's empty list", name, got)
+		}
 	}
 }
