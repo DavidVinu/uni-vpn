@@ -33,6 +33,12 @@ for _version in ("4.1", "4.0"):
 from gi.repository import Gio, GLib, Gtk, WebKit2  # noqa: E402
 
 try:
+    gi.require_version("GdkX11", "3.0")
+    from gi.repository import GdkX11  # noqa: E402
+except (ValueError, ImportError):
+    GdkX11 = None
+
+try:
     gi.require_version("AyatanaAppIndicator3", "0.1")
     from gi.repository import AyatanaAppIndicator3 as AppIndicator  # noqa: E402
 except (ValueError, ImportError):
@@ -287,7 +293,13 @@ class App(Gtk.Application):
             self.window.connect("delete-event", self.on_close)
         self.load(page)
         self.window.show_all()
-        self.window.present()
+        # The panel menu's click reaches no GTK event: without a time of its own the window
+        # would open behind the one the user worked in last (focus-stealing prevention).
+        gdk_window = self.window.get_window()
+        if GdkX11 and isinstance(gdk_window, GdkX11.X11Window):
+            self.window.present_with_time(GdkX11.x11_get_server_time(gdk_window))
+        else:
+            self.window.present()
 
     def load(self, page):
         """page: "" (as it is), "#main", "#settings", or "&user=ab123&university=ethz" from setup."""
