@@ -430,9 +430,11 @@ func TestTOTPSecretReachesOpenconnect(t *testing.T) {
 	if string(data) != "base32:GEZDGNBVGY3TQOJQ\n" {
 		t.Fatalf("%q", data)
 	}
-	// Only the certificates file stays (tunnel.CAFileName).
-	if entries, _ := os.ReadDir(h.tokenDir); len(entries) != 1 || entries[0].Name() != tunnel.CAFileName {
-		t.Fatal(entries)
+	// Only the certificates file and the last used code window stay (tunnel.CAFileName).
+	for _, e := range func() []os.DirEntry { entries, _ := os.ReadDir(h.tokenDir); return entries }() {
+		if e.Name() != tunnel.CAFileName && e.Name() != otpStepName {
+			t.Fatal(e.Name())
+		}
 	}
 }
 
@@ -538,6 +540,31 @@ func TestOTPWaitOnlyWithinSameWindow(t *testing.T) {
 		if got := d.realOTPWait(now); math.Abs(got-want) > 0.05 {
 			t.Fatal(now, got, want)
 		}
+	}
+}
+
+// The iPhone's app and its tunnel extension each run a core on the same folders, and a service
+// restarts after an update: the next core knows the window whose code was just used (a test code
+// typed into the MFA portal, or the last sign-in), since a code is accepted only once.
+func TestUsedCodeWindowSurvivesARestart(t *testing.T) {
+	h := newHarness(t)
+	first := h.start(nil)
+	first.NoteCodeShown() // /api/totp/check
+	first.mu.Lock()
+	step := first.lastOTPStep
+	first.mu.Unlock()
+	h.teardown()
+	h.d = nil
+	next := h.start(nil)
+	now := float64(time.Now().UnixNano()) / 1e9
+	if int64(math.Floor(now/OTPStep)) != step {
+		t.Skip("crossed a window boundary")
+	}
+	next.mu.Lock()
+	wait := next.realOTPWait(now)
+	next.mu.Unlock()
+	if wait == 0 {
+		t.Fatal("the next core would sign in with the code just used")
 	}
 }
 

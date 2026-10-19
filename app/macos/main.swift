@@ -53,10 +53,35 @@ var texts: [String: String] = [
     "menu.redo": "Redo", "menu.cut": "Cut", "menu.copy": "Copy", "menu.paste": "Paste",
     "menu.select_all": "Select All", "menu.window": "Window", "menu.minimize": "Minimize", "menu.close": "Close",
     "menu.background_off": "Uni VPN was off after you signed in",
-    "menu.background_hint": "So it starts on its own, allow Uni VPN in the background.",
+    "menu.background_hint": "So it starts on its own, allow Uni VPN and uni-vpn-core in the background.",
     "menu.background_open": "Open Settings", "menu.not_now": "Not Now",
 ]
 func t(_ key: String) -> String { texts[key] ?? key }
+
+// The background-items hint (askBackgroundIfOff) comes when the service cannot run, so it cannot
+// send it: the same texts as uni_vpn/locales, in the first of the user's languages.
+func backgroundTexts() -> [String: String] {
+    let language = (Locale.preferredLanguages.first ?? "en").lowercased()
+    let code = !language.hasPrefix("zh") ? String(language.prefix(2))
+        : ["zh-hant", "zh-tw", "zh-hk", "zh-mo"].contains(where: { language.hasPrefix($0) }) ? "zh-hant" : "zh-hans"
+    let all: [String: [String]] = [
+        "de": ["Uni VPN war nach der Anmeldung aus",
+               "Damit es von selbst startet, erlaube Uni VPN und uni-vpn-core im Hintergrund.",
+               "Einstellungen öffnen", "Nicht jetzt"],
+        "fr": ["Uni VPN était arrêté après votre connexion",
+               "Pour qu’il démarre tout seul, autorisez Uni VPN et uni-vpn-core en arrière-plan.",
+               "Ouvrir les réglages", "Plus tard"],
+        "es": ["Uni VPN estaba apagado al iniciar sesión",
+               "Para que se inicie solo, permite Uni VPN y uni-vpn-core en segundo plano.",
+               "Abrir Ajustes", "Ahora no"],
+        "zh-hans": ["登录后 Uni VPN 没有运行", "要让它自动启动，请允许 Uni VPN 和 uni-vpn-core 在后台运行。",
+                    "打开设置", "以后"],
+        "zh-hant": ["登入後 Uni VPN 沒有執行", "若要讓它自動啟動，請允許 Uni VPN 和 uni-vpn-core 在背景執行。",
+                    "打開設定", "以後"],
+    ]
+    let keys = ["menu.background_off", "menu.background_hint", "menu.background_open", "menu.not_now"]
+    return Dictionary(uniqueKeysWithValues: zip(keys, all[code] ?? []))
+}
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate, NSMenuDelegate {
     var window: NSWindow?
@@ -76,11 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     var seen: String?
     var restarting = false
     var setupStarted = false
-    // Opened by the user (not the login item) while the service was down: see askBackground.
-    let openedByUser = !CommandLine.arguments.contains("--hidden")
-    var firstPoll = true
-    var downAtLaunch = false
-    var startedAfterLogin = false
+    var askedBackground = false
 
     func applicationDidFinishLaunching(_ note: Notification) {
         // Started by the copy it replaces after an update: that one quits first.
@@ -342,16 +363,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
                 next.reachable = true
             }
             DispatchQueue.main.async {
-                if self?.firstPoll == true {
-                    self?.firstPoll = false
-                    self?.downAtLaunch = !next.reachable
-                }
                 self?.status = next
                 self?.render()
-                if next.reachable, self?.startedAfterLogin == true {
-                    self?.startedAfterLogin = false
-                    self?.askBackground()
-                }
                 self?.startServiceIfDown()
                 self?.restartIfUpdated()
             }
@@ -390,9 +403,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         let domain = "gui/\(getuid())"
         let plist = NSHomeDirectory() + "/Library/LaunchAgents/de.davidvinu.uni-vpn.plist"
         if setUpIfMissing(plist) { return }
-        if openedByUser, downAtLaunch, ProcessInfo.processInfo.systemUptime > 180 {
-            startedAfterLogin = true
-        }
+        askBackgroundIfOff(plist)
         for args in [["bootstrap", domain, plist], ["kickstart", domain + "/de.davidvinu.uni-vpn"]] {
             let task = Process()
             task.executableURL = URL(fileURLWithPath: "/bin/launchctl")
@@ -404,17 +415,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         }
     }
 
-    // The service was set up but did not start at login, and neither did this app's login item
-    // (it would have started the service): macOS's "Allow in the Background" is off for them
-    // (System Settings > General > Login Items). Like Dropbox and Tailscale, say so and open
-    // that page; macOS 12 and earlier have no such switch.
-    func askBackground() {
-        guard #available(macOS 13, *) else { return }
+    // The service is set up but not running. If "Allow in the Background" is off for it or for
+    // this app's login item (System Settings > General > Login Items), launchd starts neither at
+    // login and refuses launchctl too. As Apple advises for such login items, ask macOS, say so
+    // and open that page, like Dropbox and Tailscale. Once per launch; macOS 12 and earlier have
+    // no such switch.
+    func askBackgroundIfOff(_ plist: String) {
+        guard #available(macOS 13, *), !askedBackground else { return }
+        let agents = NSHomeDirectory() + "/Library/LaunchAgents/"
+        let off = [plist, agents + "de.davidvinu.uni-vpn.app.plist"].contains {
+            SMAppService.statusForLegacyPlist(at: URL(fileURLWithPath: $0)) == .requiresApproval
+        }
+        guard off else { return }
+        askedBackground = true
+        // In the user's language: the service, which sends the texts, is not running.
+        let say = { (key: String) in backgroundTexts()[key] ?? t(key) }
         let alert = NSAlert()
-        alert.messageText = t("menu.background_off")
-        alert.informativeText = t("menu.background_hint")
-        alert.addButton(withTitle: t("menu.background_open"))
-        alert.addButton(withTitle: t("menu.not_now"))
+        alert.messageText = say("menu.background_off")
+        alert.informativeText = say("menu.background_hint")
+        alert.addButton(withTitle: say("menu.background_open"))
+        alert.addButton(withTitle: say("menu.not_now"))
         let answer: (NSApplication.ModalResponse) -> Void = { response in
             if response == .alertFirstButtonReturn { SMAppService.openSystemSettingsLoginItems() }
         }

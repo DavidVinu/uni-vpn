@@ -35,7 +35,7 @@
       "useragent": "AnyConnect",
       "mfa": "totp_field",
       "mfa_portal_url": "https://www.password.ethz.ch/",
-      "aliases": ["ETH Zuerich", "Eidgenoessische Technische Hochschule"],
+      "aliases": ["ETH Zuerich", "Eidgenoessische Technische Hochschule", "Swiss Federal Institute of Technology"],
       "notes": "Students: ethz-students (authgroup \"student-net\", username_suffix \"@student-net.ethz.ch\"). The second factor is set up at www.password.ethz.ch (\"Automatic OTP Registration\")."
     },
     {
@@ -48,7 +48,7 @@
       "useragent": "AnyConnect",
       "mfa": "totp_field",
       "mfa_portal_url": "https://www.password.ethz.ch/",
-      "aliases": ["ETH Zuerich", "Eidgenoessische Technische Hochschule"],
+      "aliases": ["ETH Zuerich", "Eidgenoessische Technische Hochschule", "Swiss Federal Institute of Technology"],
       "notes": "Staff: ethz. The second factor is set up at www.password.ethz.ch (\"Automatic OTP Registration\")."
     },
     {
@@ -226,7 +226,7 @@
       "country": "US",
       "host": "vpn.utexas.edu",
       "mfa": "saml",
-      "aliases": ["UT Austin", "UT-Austin"],
+      "aliases": ["UT Austin", "UT-Austin", "The University of Texas at Austin"],
       "notes": "Profile from the university's documentation. Checked 2026-10-18: the gateway signs in only through a web page (SAML)."
     },
     {
@@ -256,7 +256,7 @@
       "host": "tc-vpn-1.vpn.umn.edu",
       "authgroup": "AnyConnect-UofMvpnFull",
       "mfa": "duo_push",
-      "aliases": ["UMN", "Minneapolis", "Saint Paul", "St. Paul", "Twin Cities"],
+      "aliases": ["UMN", "Minneapolis", "Saint Paul", "St. Paul", "Twin Cities", "University of Minnesota, Twin Cities"],
       "notes": "Profile from the university's documentation (it.umn.edu/node/131921), not tested. vpn.umn.edu has no address; the Linux setup names tc-vpn-1.vpn.umn.edu. AnyConnect-UofMvpnFull gives a UMN public address, which library publishers need; the split group AnyConnect-UofMSplit uses private addresses."
     },
     {
@@ -266,7 +266,7 @@
       "host": "vpn.illinois.edu",
       "authgroup": "OpenConnect2 (All)",
       "mfa": "duo_push",
-      "aliases": ["UIUC", "Illinois"],
+      "aliases": ["UIUC", "Illinois", "University of Illinois at Urbana-Champaign"],
       "notes": "Profile from the university's documentation, not tested. The university's library guidance asks for Tunnel All. Other OpenConnect groups: OpenConnect1 (Split), OpenConnect3 (Public)."
     },
     {
@@ -287,7 +287,7 @@
       "host": "vpn.unc.edu",
       "authgroup": "UNCCampus",
       "mfa": "saml",
-      "aliases": ["UNC", "UNC-Chapel Hill"],
+      "aliases": ["UNC", "UNC-Chapel Hill", "The University of North Carolina at Chapel Hill"],
       "notes": "Profile from the university's documentation. Checked 2026-10-18: the gateway signs in only through a web page (SAML). A client without web sign-in only gets the group UNCCampus-SBL."
     },
     {
@@ -364,7 +364,7 @@
         "Go to the next page and type this code there.{code}"
       ],
       "mfa_pictures": ["generic-1.svg", "generic-2.svg", "generic-3.svg"],
-      "aliases": ["HKU", "香港大學", "香港大学", "港大"],
+      "aliases": ["HKU", "香港大學", "香港大学", "港大", "The University of Hong Kong"],
       "notes": "Profile from the university's documentation, not tested. Checked 2026-10-19: after the password the gateway asks for a Microsoft one-time code; the code generator is added as \"a different authenticator app\" in Microsoft's security info. Students: hku-students."
     },
     {
@@ -381,7 +381,7 @@
         "Go to the next page and type this code there.{code}"
       ],
       "mfa_pictures": ["generic-1.svg", "generic-2.svg", "generic-3.svg"],
-      "aliases": ["HKU", "香港大學", "香港大学", "港大"],
+      "aliases": ["HKU", "香港大學", "香港大学", "港大", "The University of Hong Kong"],
       "notes": "Staff: hku (uid@hku.hk). Steps as hku."
     },
     {
@@ -498,7 +498,7 @@
       "country": "DE",
       "host": "vpngate.tu-braunschweig.de",
       "mfa": "duo_push",
-      "aliases": ["Technische Universitaet Braunschweig", "TUBS"],
+      "aliases": ["Technische Universitaet Braunschweig", "TUBS", "Technische Universitaet Carolo-Wilhelmina zu Braunschweig"],
       "notes": "Profile from the university's documentation, not tested. Checked 2026-10-19: the IT center's guides name vpngate.tu-braunschweig.de and Duo for the VPN."
     }
   ]

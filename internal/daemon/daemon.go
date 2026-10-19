@@ -277,6 +277,13 @@ func New(cfg *config.Config, log *slog.Logger, opts Options) *Daemon {
 	if opts.TokenDir == "" {
 		opts.TokenDir = platform.StateDir()
 	}
+	// The window whose code the core before this one used (the iPhone's app and its tunnel
+	// extension hand over; a restarted service): a code is taken only once.
+	if b, err := os.ReadFile(filepath.Join(opts.TokenDir, otpStepName)); err == nil {
+		if step, err := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64); err == nil {
+			d.lastOTPStep, d.hasOTPStep = step, true
+		}
+	}
 	if opts.DomainsPath == "" {
 		opts.DomainsPath = pac.DomainsPath()
 	}
@@ -928,7 +935,15 @@ func exists(path string) bool {
 func (d *Daemon) NoteCodeShown() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.lastOTPStep, d.hasOTPStep = int64(math.Floor(d.wall()/OTPStep)), true
+	d.markOTPStepLocked(int64(math.Floor(d.wall() / OTPStep)))
+}
+
+// otpStepName keeps the last used code window for the next core in the state folder.
+const otpStepName = "otp-step"
+
+func (d *Daemon) markOTPStepLocked(step int64) {
+	d.lastOTPStep, d.hasOTPStep = step, true
+	_ = os.WriteFile(filepath.Join(d.opts.TokenDir, otpStepName), []byte(strconv.FormatInt(step, 10)), 0o600)
 }
 
 // secretsChanged: new password or TOTP secret, an attempt still running with the old ones
@@ -1635,7 +1650,7 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 		// the output reader can lag behind the port check (macOS CI).
 		step := int64(math.Floor(d.wall() / OTPStep))
 		freshCode := !d.hasOTPStep || step != d.lastOTPStep
-		d.lastOTPStep, d.hasOTPStep = step, true
+		d.markOTPStepLocked(step)
 
 		wait := seconds(cfg.ReadyTimeout)
 		if cfg.MFA == "duo_push" {
@@ -1649,7 +1664,7 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 			return
 		}
 		if at := tun.OTPGeneratedAt(); !at.IsZero() {
-			d.lastOTPStep = int64(math.Floor(float64(at.UnixNano()) / 1e9 / OTPStep))
+			d.markOTPStepLocked(int64(math.Floor(float64(at.UnixNano()) / 1e9 / OTPStep)))
 		}
 		if ready && (tun.StoppedByUs() || d.state == Disconnecting) {
 			// Disconnect (or a resume) came while the port opened: the tunnel is going away, a
