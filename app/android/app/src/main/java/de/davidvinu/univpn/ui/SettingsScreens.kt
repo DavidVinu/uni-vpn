@@ -1,6 +1,9 @@
 package de.davidvinu.univpn.ui
 
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import androidx.activity.compose.BackHandler
+import androidx.core.net.toUri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
@@ -235,12 +238,16 @@ fun SecondFactorScreen(model: AppModel, @Suppress("UNUSED_PARAMETER") activity: 
     // desktop; null while the list loads.
     var auto by remember { mutableStateOf<Boolean?>(if (model.enrollSentAt > 0) true else null) }
     var byHand by rememberSaveable { mutableStateOf(false) }
+    // The university's portal and steps for the key, as on the setup page and the desktop guide.
+    var uni by remember { mutableStateOf<University?>(null) }
+    val context = LocalContext.current
     LaunchedEffect(Unit) {
-        if (auto != null) return@LaunchedEffect
         val list = model.get("/universities.json")?.optJSONArray("universities")
-        val uni = list?.let { a -> (0 until a.length()).map { a.getJSONObject(it) } }
+        val found = list?.let { a -> (0 until a.length()).map { a.getJSONObject(it) } }
             ?.firstOrNull { it.optString("id") == status.optString("university") }
-        auto = uni != null && uni.optString("mfa_enroll") == "linotp" && uni.optString("mfa_portal_url").isNotEmpty()
+        uni = found?.let { University(it) }
+        if (auto != null) return@LaunchedEffect
+        auto = uni?.enroll == true
     }
     val autoPage = auto == true && !byHand
 
@@ -256,7 +263,7 @@ fun SecondFactorScreen(model: AppModel, @Suppress("UNUSED_PARAMETER") activity: 
     BackHandler { leave() }
     Column(Modifier.fillMaxSize().navigationBarsPadding().imePadding().verticalScroll(rememberScrollState())) {
         Bar(model, model.t("app.second_factor"), onBack = { leave() }) {
-            Info(model, model.t(if (autoPage) "setup.auto_help" else "setup.totp_help"))
+            Info(model, if (autoPage) model.t("setup.auto_help") else mfaSteps(model, uni).joinToString("\n") + "\n\n" + model.t("setup.totp_help"))
         }
         Page {
             when {
@@ -273,6 +280,15 @@ fun SecondFactorScreen(model: AppModel, @Suppress("UNUSED_PARAMETER") activity: 
                     onFailed = { model.enrollError = it },
                 )
                 else -> {
+                    uni?.portal?.takeIf { it.isNotEmpty() }?.let { portal ->
+                        TextButton(onClick = {
+                            try {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, portal.toUri()))
+                            } catch (_: ActivityNotFoundException) {
+                                // No browser on this phone or profile: nothing to open.
+                            }
+                        }) { Text(model.t("setup.mfa_portal")) }
+                    }
                     TotpEntry(model, secret, { secret = it }, { valid = it }, error)
                     Actions {
                         Button(enabled = valid, onClick = {

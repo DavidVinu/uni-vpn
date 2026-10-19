@@ -182,8 +182,12 @@ static int auth_form_cb(void *priv, struct oc_auth_form *form)
 
 	if (form->banner)
 		outputf(u, "%s\n", form->banner);
-	if (form->error)
+	if (form->error) {
 		outputf(u, "%s\n", form->error);
+		/* "Login failed.": the program's stdin is closed now (tunnel.go), so a second
+		 * password prompt ends there instead of sending "push" or the code as the password. */
+		wipe(&u->queued);
+	}
 	if (form->message)
 		outputf(u, "%s\n", form->message);
 
@@ -303,8 +307,14 @@ static char *dup_or_null(const char *s)
 	return s && *s ? strdup(s) : NULL;
 }
 
+#ifdef UNI_VPN_SET_LOGIN
+/* Added to libopenconnect by packaging/ios/build-native.sh. */
+void uni_vpn_set_login(struct openconnect_info *vpninfo, const char *authgroup, int no_external_auth);
+#endif
+
 struct uni_vpn *uni_vpn_new(uintptr_t handle, const char *useragent, const char *user,
-			    const char *authgroup, const char *password, const char *queued)
+			    const char *authgroup, const char *password, const char *queued,
+			    int no_external_auth)
 {
 	struct uni_vpn *u = calloc(1, sizeof(*u));
 
@@ -326,6 +336,14 @@ struct uni_vpn *uni_vpn_new(uintptr_t handle, const char *useragent, const char 
 		return NULL;
 	}
 	openconnect_set_reconnected_handler(u->vpninfo, reconnected_cb);
+#ifdef UNI_VPN_SET_LOGIN
+	/* Like the program's --authgroup and --no-external-auth: the first request names the
+	 * group and offers no web sign-in, so a gateway whose default group signs in on a web
+	 * page answers with the group's password form. */
+	uni_vpn_set_login(u->vpninfo, u->authgroup, no_external_auth);
+#else
+	(void)no_external_auth;
+#endif
 	return u;
 }
 

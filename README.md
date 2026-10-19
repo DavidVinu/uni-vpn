@@ -196,19 +196,18 @@ settings. `uni-vpn doctor` prints it.
 | University of Waterloo | cn-vpn.uwaterloo.ca | Duo push | profile only |
 | University of Ottawa | uovpn.uottawa.ca | Microsoft push | profile only |
 | Carleton University | cuvpn.carleton.ca | sign-in on a web page (SAML) | not supported yet |
-| University of Hong Kong | vpn2fa.hku.hk | Microsoft push | profile only |
+| University of Hong Kong | vpn2fa.hku.hk | one-time code | profile only |
 | University of Granada | vpn.ugr.es | one-time code | profile only |
 | Martin Luther University Halle-Wittenberg | vpn.uni-halle.de | none | profile only |
 | Flensburg University of Applied Sciences | vpn.hs-flensburg.de | none | profile only |
 | Westphalian University of Applied Sciences | vpn-gateway.w-hs.de | one-time code | profile only |
 | Offenburg University of Applied Sciences | vpn.hs-offenburg.de | sign-in on a web page (SAML) | not supported yet |
 | University of Hamburg | vpn.rrz.uni-hamburg.de | sign-in on a web page (SAML) | not supported yet |
-| Friedrich-Alexander University Erlangen-Nuremberg | vpn.fau.de | none | profile only |
 | Friedrich Schiller University Jena | vpn.uni-jena.de | none | profile only |
 | Bauhaus-Universität Weimar | vpngate.uni-weimar.de | none | profile only |
 | TH Köln | vpn.th-koeln.de | sign-in on a web page (SAML) | not supported yet |
 | Technische Hochschule Ulm | vpn.thu.de | none | profile only |
-| TU Braunschweig | vpngate.tu-bs.de | none | profile only |
+| TU Braunschweig | vpngate.tu-braunschweig.de | Duo push | profile only |
 | Freie Universität Berlin | vpn.fu-berlin.de | sign-in on a web page (SAML) | not supported yet |
 | University of Oxford | vpn.ox.ac.uk | sign-in on a web page (SAML) | not supported yet |
 

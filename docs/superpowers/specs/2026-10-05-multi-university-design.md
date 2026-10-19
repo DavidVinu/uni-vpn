@@ -102,7 +102,7 @@ Contributors add a university by pull request.
 | `name`, `country` | string, required / `""` | shown in the picker; country is ISO 3166 alpha-2 |
 | `host` | string, required | gateway, optionally `:port`; a path is allowed for old configs but new entries use `usergroup` |
 | `usergroup` | string, `""` | URL path group, `--usergroup` |
-| `authgroup` | string, `""` | group-select value, `--authgroup`; set only when it changes the login method or realm (ETH, Marburg, Stanford), not for split vs full tunnel, which does not matter behind ocproxy |
+| `authgroup` | string, `""` | group-select value, `--authgroup`; set when the gateway lists more than one group (openconnect asks for one otherwise, and uni-vpn cannot answer) or when it changes the login method or realm (ETH, Marburg, Stanford); prefer the group that reaches the library's publishers |
 | `username_suffix` | string, `""` | appended to the user name on the command line unless the user name already contains `@` |
 | `useragent` | string, `AnyConnect Linux_64 5.1.18.314` | `--useragent` |
 | `os` | `""`, `linux`, `linux-64`, `win`, `mac-intel`, `android`, `apple-ios` | `--os` when not empty |

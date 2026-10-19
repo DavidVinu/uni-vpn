@@ -110,6 +110,7 @@ pre{font-size:12px;background:var(--bg);border-radius:10px;padding:10px;max-heig
 .drop:focus-visible,.drop.over{border-color:var(--accent);background:var(--bg)}
 .drop.done{border-style:solid;border-color:var(--ok);color:var(--text)}
 .drop.done>svg{color:var(--ok)}
+.drop{position:relative}.drop>input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}.drop .row-title{position:relative;z-index:1}
 .drop .row-title{gap:2px}
 .dots{display:flex;justify-content:center;gap:6px;margin:20px 0 -12px}
 .dots i{width:6px;height:6px;border-radius:50%;background:var(--line)}
@@ -217,7 +218,7 @@ input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
           <span class="row-title"><button type="button" class="btn text" id="g-choose" data-t="setup.choose_picture"></button>
             <span class="info"><button type="button" data-t-label="app.help"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></button>
               <span class="pop" data-t="setup.drop_help" hidden></span></span></span>
-          <input type="file" id="g-file" accept="image/*" hidden>
+          <input type="file" id="g-file" accept="image/*" tabindex="-1" aria-hidden="true">
         </div>
         <input id="s-totp" type="password" autocomplete="off" hidden>
         <p class="error" id="s2-err" role="alert" hidden></p>
@@ -806,6 +807,8 @@ $("a-guide").onclick = async () => {
 // screenshot keys, {secret} takes the QR code picture, {code} shows the check code.
 let guide = [], slide = 0, keyRead = false, portalAway = false, portalSeq = 0, changingTotp = false;
 const SHOT_KEYS = /Mac/.test(navigator.platform) ? "⇧⌘4" : /Win/.test(navigator.platform) ? "Win+Shift+S" : "PrtSc";
+// The Linux app window (WebKitGTK) gives pages no pasted or dropped files.
+const LINUX = /Linux/.test(navigator.platform) && !/Android/.test(navigator.userAgent);
 const GENERIC = [1, 2, 3].map((n) => ({key: "setup.generic_step." + n, picture: `generic-${n}.svg`}));
 
 function guideSteps() {
@@ -934,18 +937,35 @@ $("g-choose").onclick = () => $("g-file").click();
 $("g-file").onchange = () => { readPicture($("g-file").files[0]); $("g-file").value = ""; };
 $("g-drop").onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("g-file").click(); } };
 // A picture or the key's text, pasted anywhere in the guide.
-document.addEventListener("paste", (e) => {
+document.addEventListener("paste", async (e) => {
   if (view !== "setup" || $("step2").hidden || !e.clipboardData) return;
   const file = [...e.clipboardData.items].find((i) => i.kind === "file" && i.type.startsWith("image/"));
   const text = e.clipboardData.getData("text/plain");
-  if (!file && !text.trim()) return;
-  e.preventDefault();
-  if (file) readPicture(file.getAsFile()); else useKey(text);
+  if (file || text.trim()) {
+    e.preventDefault();
+    if (file) readPicture(file.getAsFile()); else useKey(text);
+    return;
+  }
+  // The Linux app window leaves a pasted picture out of clipboardData; during the paste the
+  // clipboard itself still hands it over.
+  if (!LINUX) return;
+  try {
+    for (const item of await navigator.clipboard.read()) {
+      const type = item.types.find((t) => t.startsWith("image/"));
+      if (type) { readPicture(await item.getType(type)); return; }
+    }
+  } catch (err) { /* nothing to read */ }
 });
 // Dropped files must never open in the window in place of the app; text drops elsewhere (the
 // websites list) stay as they are.
 for (const type of ["dragover", "drop"]) {
   document.addEventListener(type, (e) => {
+    // The Linux app window gives pages no dropped files: the file field over the drop zone
+    // takes them. Dropped text still goes to the page.
+    if (LINUX && e.target === $("g-file")) {
+      $("g-drop").classList.toggle("over", type === "dragover");
+      if (type === "dragover" || !e.dataTransfer || !e.dataTransfer.getData("text/plain")) return;
+    }
     const over = view === "setup" && !$("step2").hidden;
     const files = e.dataTransfer && [...e.dataTransfer.types].includes("Files");
     if (!over && !files) return;
@@ -1139,6 +1159,7 @@ async function startChange(first) {
   $("s-use-other").hidden = true;  // first setup only; refresh() would hide it a poll later
   changeWebsites = (S.domains || []).join("\n");
   setupDone = setupSent = false;
+  for (const id of ["s0-err", "s1-err", "s2-err"]) err(id, "");
   const current = UNIS.find((u) => u.id === S.university);
   if (current) {
     pick(current);
@@ -1157,13 +1178,13 @@ async function startChange(first) {
   keyRead = false;
   slide = 0;
   checkSeq++;
-  for (const id of ["s0-err", "s1-err", "s2-err"]) err(id, "");
   $("cancel-change").hidden = false;
   changingTotp = first === "step2";
   autoRunning = false;
   err("a-err", "");
   show("setup");
-  step(changingTotp && autoOK() ? "step2a" : first);
+  // A university that now signs in only through a web page: its first step says so (pick).
+  step(uni.mfa === "saml" && !changingTotp ? "step0" : changingTotp && autoOK() ? "step2a" : first);
   return true;
 }
 async function resumeAuto() {

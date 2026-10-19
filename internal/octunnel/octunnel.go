@@ -5,6 +5,7 @@ package octunnel
 /*
 #cgo linux pkg-config: openconnect
 #cgo ios LDFLAGS: -framework Security -framework CoreFoundation
+#cgo ios CFLAGS: -DUNI_VPN_SET_LOGIN
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
@@ -165,7 +166,11 @@ func Connect(o Options) (*Session, error) {
 
 	useragent, user, group := cString(o.UserAgent), cString(o.User), cString(o.AuthGroup)
 	second, password := cBytes([]byte(o.SecondPassword)), cBytes(o.Password)
-	s.u = C.uni_vpn_new(C.uintptr_t(s.handle), useragent, user, group, password, second)
+	noExternalAuth := C.int(0)
+	if o.NoExternalAuth {
+		noExternalAuth = 1
+	}
+	s.u = C.uni_vpn_new(C.uintptr_t(s.handle), useragent, user, group, password, second, noExternalAuth)
 	wipe(password, len(o.Password))
 	wipe(second, len(o.SecondPassword))
 	if s.u != nil && testTrust != 0 {

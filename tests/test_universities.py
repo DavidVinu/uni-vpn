@@ -20,7 +20,7 @@ class RegistryTests(unittest.TestCase):
             "heidelberg", "ethz", "bremen", "muenster", "marburg", "stanford", "harvard-fasrc", "stuttgart",
             "bonn", "mannheim", "kassel", "tu-dresden", "fu-berlin", "oxford", "tamu", "ucf", "osu", "utexas",
             "asu", "ufl", "umn", "uiuc", "uga", "unc", "ncsu", "uwaterloo", "uottawa", "carleton", "hku", "ugr", "uni-halle",
-            "hs-flensburg", "w-hs", "hs-offenburg", "uni-hamburg", "fau", "uni-jena", "uni-weimar", "th-koeln", "thu",
+            "hs-flensburg", "w-hs", "hs-offenburg", "uni-hamburg", "uni-jena", "uni-weimar", "th-koeln", "thu",
             "tu-braunschweig"})
 
     def test_heidelberg_keeps_todays_values(self):
@@ -54,6 +54,14 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(unis.get("umn").host, "tc-vpn-1.vpn.umn.edu")
         self.assertEqual(unis.get("umn").authgroup, "AnyConnect-UofMSplit")
         self.assertEqual(unis.get("ugr").mfa, "totp_field")
+        for uni_id, group in [("bremen", "Tunnel-All-Traffic"), ("mannheim", "WebVPN"),
+                              ("tu-dresden", "A-Tunnel-TU-Networks"), ("ncsu", "1-Faculty-and-Staff"),
+                              ("uni-halle", "VPN"), ("w-hs", "Sec-Groups")]:
+            self.assertEqual(unis.get(uni_id).authgroup, group)
+        self.assertEqual(unis.get("hku").mfa, "totp_field")
+        self.assertEqual(unis.get("hku").username_suffix, "@hku.hk")
+        self.assertEqual(unis.get("tu-braunschweig").host, "vpngate.tu-braunschweig.de")
+        self.assertEqual(unis.get("tu-braunschweig").mfa, "duo_push")
 
     def test_new_entries_default_to_no_external_auth(self):
         self.assertTrue(unis.get("bonn").no_external_auth)

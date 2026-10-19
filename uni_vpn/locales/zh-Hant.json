@@ -195,6 +195,8 @@
   "uni.heidelberg.mfa.4": "擷取 QR 碼的螢幕截圖（{shot}），拖到這裡或貼上。{secret}",
   "uni.heidelberg.mfa.5": "按「Weiter」，再按「Testen」。輸入這個驗證碼並按「Absenden」。{code}",
   "uni.heidelberg.mfa.6": "最後按「Abschließen」。",
+  "uni.ugr.mfa.1": "開啟{portal}並登入。選擇「Doble Factor Autenticación para Servicios TIC UGR」，然後按「Generar nuevo token」。",
+  "uni.ugr.mfa.2": "擷取 QR 碼的螢幕截圖（{shot}），拖到這裡或貼上。也用手機上的 App 掃描它。{secret}",
   "phone.off": "已關閉",
   "phone.edit_websites": "新增網站",
   "phone.scan_qr": "掃描 QR 碼",
@@ -232,5 +234,7 @@
   "phone.uni.heidelberg.mfa.3": "輸入一個名稱（例如「手機」），然後點按「Weiter」。",
   "phone.uni.heidelberg.mfa.4": "點按「Tokendetails einblenden」，複製以 otpauth:// 開頭的那一行，並貼到下方。",
   "phone.uni.heidelberg.mfa.5": "點按「Weiter」，再點按「Testen」。輸入這裡顯示的驗證碼並點按「Absenden」。",
-  "phone.uni.heidelberg.mfa.6": "最後點按「Abschließen」。"
+  "phone.uni.heidelberg.mfa.6": "最後點按「Abschließen」。",
+  "phone.uni.ugr.mfa.1": "開啟{portal}並登入。選擇「Doble Factor Autenticación para Servicios TIC UGR」，然後點按「Generar nuevo token」。",
+  "phone.uni.ugr.mfa.2": "掃描顯示的 QR 碼，或複製以 otpauth:// 開頭的那一行，並貼到下方。也把它加入你的驗證碼產生器。"
 }

@@ -86,7 +86,7 @@ private val USER_RE = Regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(@[A-Za-z0-9][A-Za-
 private val PROFILE_FIELDS = setOf("university", "host", "usergroup", "authgroup", "mfa")
 
 /** One university of /universities.json. */
-private class University(val json: JSONObject) {
+internal class University(val json: JSONObject) {
     val id: String = json.optString("id")
     val name: String = json.optString("name")
     val country: String = json.optString("country")
@@ -597,7 +597,7 @@ internal fun detected(d: JSONObject, strings: Strings): Detected {
 }
 
 /** A university's own steps, translated where the catalog has them, else the general ones. */
-private fun mfaSteps(model: AppModel, uni: University?): List<String> {
+internal fun mfaSteps(model: AppModel, uni: University?): List<String> {
     val portal = model.t("setup.mfa_portal")
     if (uni == null || uni.steps.isEmpty()) return (1..3).map { "$it. " + model.t("setup.generic_step.$it", "portal" to portal) }
     return uni.steps.mapIndexed { i, text ->

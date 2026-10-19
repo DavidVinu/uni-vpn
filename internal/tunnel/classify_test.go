@@ -103,6 +103,35 @@ func TestLoginFailedAfterOTPMeansSecondFactor(t *testing.T) {
 	}
 }
 
+// Real openconnect output with a wrong password (fake gateway, pass 22). A gateway with the
+// code field in the password's form (ugr, ethz) gets the code before that form is sent, a
+// Heidelberg-style one only in the OTP form after it. With --authgroup the form comes twice.
+func TestLoginFailedInTheFormWithTheCodeNamesBoth(t *testing.T) {
+	const oneForm = "POST https://vpn.example.edu/\nConnected to 10.0.0.1:443\n" +
+		"XML POST enabled\nPlease enter your username and password.\n" +
+		"Generating OATH TOTP token code\nPOST https://vpn.example.edu/\nLogin failed."
+	const twoSteps = "POST https://vpn.example.edu/\nConnected to 10.0.0.1:443\n" +
+		"XML POST enabled\nPlease enter your username and password.\nPOST https://vpn.example.edu/\n" +
+		"Please enter second factor (OTP).\nGenerating OATH TOTP token code\n" +
+		"POST https://vpn.example.edu/\nLogin failed."
+	const group = "XML POST enabled\nPlease enter your username and password.\n" +
+		"POST https://vpn.example.edu/\n"
+	for _, c := range []struct{ name, out, want string }{
+		{"one form", oneForm, AppendRejected},
+		{"two steps", twoSteps, TOTPRejected},
+		{"one form with a group", strings.Replace(oneForm, "XML", group+"XML", 1), AppendRejected},
+		{"two steps with a group", strings.Replace(twoSteps, "XML", group+"XML", 1), TOTPRejected},
+	} {
+		seq := NewClassifier("totp_field")
+		for _, line := range strings.Split(c.out, "\n") {
+			seq.Feed(line)
+		}
+		if v, _ := seq.Verdict(); v != (Verdict{"auth_failed", c.want}) {
+			t.Error(c.name, v)
+		}
+	}
+}
+
 func TestLoginFailedIsWordedByTheSecondFactor(t *testing.T) {
 	for _, c := range []struct{ mfa, want string }{
 		{"none", PasswordRejected}, {"totp_field", PasswordRejected},

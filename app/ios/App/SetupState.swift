@@ -325,7 +325,9 @@ final class SetupState {
     }
 
     /// A university's own steps, translated where the catalog has them, else the general ones.
-    func mfaSteps(_ model: AppModel) -> [String] {
+    func mfaSteps(_ model: AppModel) -> [String] { Self.mfaSteps(model, uni: uni) }
+
+    static func mfaSteps(_ model: AppModel, uni: University?) -> [String] {
         let portal = model.t("setup.mfa_portal")
         guard let uni, !uni.steps.isEmpty else {
             return (1...3).map { "\($0). " + model.t("setup.generic_step.\($0)", ["portal": portal]) }

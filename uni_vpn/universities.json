@@ -42,10 +42,11 @@
       "name": "University of Bremen",
       "country": "DE",
       "host": "vpn.uni-bremen.de",
+      "authgroup": "Tunnel-All-Traffic",
       "useragent": "AnyConnect",
       "mfa": "totp_field",
       "aliases": ["Universitaet Bremen"],
-      "notes": "Without 2FA the second field stays empty, which uni-vpn cannot send yet."
+      "notes": "Without 2FA the second field stays empty, which uni-vpn cannot send yet. Checked 2026-10-19: the gateway lists two groups; Tunnel-All-Traffic (its default) reaches the library's e-books, Tunnel-Uni-Bremen only the campus."
     },
     {
       "id": "muenster",
@@ -107,8 +108,10 @@
       "name": "University of Mannheim",
       "country": "DE",
       "host": "vpn.uni-mannheim.de",
+      "authgroup": "WebVPN",
       "mfa": "none",
-      "aliases": ["Universitaet Mannheim"]
+      "aliases": ["Universitaet Mannheim"],
+      "notes": "Checked 2026-10-19: the gateway lists WebVPN and WebVPN-Split; only WebVPN reaches the library databases."
     },
     {
       "id": "kassel",
@@ -126,8 +129,11 @@
       "name": "TU Dresden",
       "country": "DE",
       "host": "vpn2.zih.tu-dresden.de",
+      "authgroup": "A-Tunnel-TU-Networks",
+      "username_suffix": "@tu-dresden.de",
       "mfa": "none",
-      "aliases": ["Technische Universitaet Dresden", "ZIH"]
+      "aliases": ["Technische Universitaet Dresden", "ZIH"],
+      "notes": "Checked 2026-10-19: the gateway lists 12 groups, A-Tunnel-TU-Networks is its default. The user name is ZIH-Login@tu-dresden.de. ZIH moves its VPN to eduVPN, so this gateway may be switched off."
     },
     {
       "id": "fu-berlin",
@@ -250,9 +256,10 @@
       "name": "North Carolina State University",
       "country": "US",
       "host": "vpn.ncsu.edu",
+      "authgroup": "1-Faculty-and-Staff",
       "mfa": "duo_push",
       "aliases": ["NC State"],
-      "notes": "Profile from the university's documentation, not tested. "
+      "notes": "Profile from the university's documentation, not tested. Students: authgroup = \"2-Student\"."
     },
     {
       "id": "uwaterloo",
@@ -288,9 +295,11 @@
       "name": "University of Hong Kong",
       "country": "HK",
       "host": "vpn2fa.hku.hk",
-      "mfa": "duo_push",
+      "username_suffix": "@hku.hk",
+      "mfa": "totp_field",
+      "mfa_portal_url": "https://mysignins.microsoft.com/security-info",
       "aliases": ["HKU"],
-      "notes": "Profile from the university's documentation, not tested. Microsoft Authenticator push; SMS codes are not supported by uni-vpn."
+      "notes": "Profile from the university's documentation, not tested. Checked 2026-10-19: after the password the gateway asks for a Microsoft one-time code; the code generator is added as \"a different authenticator app\" in Microsoft's security info. Students type uid@connect.hku.hk."
     },
     {
       "id": "ugr",
@@ -299,6 +308,11 @@
       "host": "vpn.ugr.es",
       "mfa": "totp_field",
       "mfa_portal_url": "https://oficinavirtual.ugr.es/",
+      "mfa_steps": [
+        "Open the {portal} and sign in. Choose \"Doble Factor Autenticación para Servicios TIC UGR\" and click \"Generar nuevo token\".",
+        "Take a screenshot of the QR code ({shot}) and drop or paste it here. Also scan it with the app on your phone.{secret}"
+      ],
+      "mfa_pictures": ["generic-1.svg", "generic-2.svg"],
       "aliases": ["Universidad de Granada", "UGR"],
       "notes": "Profile from the university's documentation, not tested. User name is the full address cuenta@ugr.es. Checked 2026-10-18: the gateway asks for a one-time code in its own field; the code generator is added under \"Doble Factor Autenticación para Servicios TIC UGR\" in the Oficina Virtual."
     },
@@ -307,6 +321,7 @@
       "name": "Martin Luther University Halle-Wittenberg",
       "country": "DE",
       "host": "vpn.uni-halle.de",
+      "authgroup": "VPN",
       "mfa": "none",
       "aliases": ["Universitaet Halle", "MLU"],
       "notes": "Profile from the university's documentation, not tested. No second factor is mentioned in its documentation. "
@@ -326,6 +341,7 @@
       "name": "Westphalian University of Applied Sciences",
       "country": "DE",
       "host": "vpn-gateway.w-hs.de",
+      "authgroup": "Sec-Groups",
       "mfa": "totp_field",
       "aliases": ["Westfaelische Hochschule", "Gelsenkirchen"],
       "notes": "Profile from the university's documentation, not tested. User name without @w-hs.de."
@@ -347,15 +363,6 @@
       "mfa": "saml",
       "aliases": ["Universitaet Hamburg", "UHH", "RRZ"],
       "notes": "Profile from the university's documentation. Checked 2026-10-18: the gateway signs in only through a web page (SAML). No second factor is mentioned in its documentation."
-    },
-    {
-      "id": "fau",
-      "name": "Friedrich-Alexander University Erlangen-Nuremberg",
-      "country": "DE",
-      "host": "vpn.fau.de",
-      "mfa": "none",
-      "aliases": ["FAU", "Universitaet Erlangen-Nuernberg", "RRZE"],
-      "notes": "Profile from the university's documentation, not tested. No second factor is mentioned in its documentation. "
     },
     {
       "id": "uni-jena",
@@ -397,10 +404,10 @@
       "id": "tu-braunschweig",
       "name": "TU Braunschweig",
       "country": "DE",
-      "host": "vpngate.tu-bs.de",
-      "mfa": "none",
+      "host": "vpngate.tu-braunschweig.de",
+      "mfa": "duo_push",
       "aliases": ["Technische Universitaet Braunschweig"],
-      "notes": "Profile from the university's documentation, not tested. No second factor is mentioned in its documentation. "
+      "notes": "Profile from the university's documentation, not tested. Checked 2026-10-19: the IT center's guides name vpngate.tu-braunschweig.de and Duo for the VPN."
     }
   ]
 }

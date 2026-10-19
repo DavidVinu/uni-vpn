@@ -5,7 +5,8 @@
 // Environment variables:
 //
 //	FAKE_MODE           ok (default) | auth_fail | input_required | totp_rejected | totp_replayed | never_ready |
-//	                    ignore_sigterm | exit_after_ready | clientcert_auth_fail | gateway_503 | cstp_503
+//	                    ignore_sigterm | exit_after_ready | clientcert_auth_fail | gateway_503 | cstp_503 |
+//	                    second_password
 //	FAKE_DELAY          seconds until the port listens (default 0.2)
 //	FAKE_EXIT_AFTER     with exit_after_ready: seconds after becoming ready (default 0.5)
 //	FAKE_PASSWORD_FILE  file every line read from stdin is appended to (password, "push" for Duo,
@@ -192,6 +193,12 @@ func openconnect(args []string) int {
 		return true
 	}
 	interactive := !slices.Contains(args, "--non-inter")
+	prompt := func(label string) bool {
+		os.Stderr.WriteString(label)
+		ok := next()
+		os.Stderr.WriteString("\n")
+		return ok
+	}
 	next()
 	if !interactive {
 		for next() {
@@ -207,7 +214,8 @@ func openconnect(args []string) int {
 		time.Sleep(delay)
 		log("Bitte geben Sie ihren Benutzernamen und ihr Passwort ein.")
 		log("Login failed.")
-		for interactive && next() {
+		// openconnect's prompt ends without a newline.
+		for interactive && prompt("Password:") {
 			log("Bitte geben Sie ihren Benutzernamen und ihr Passwort ein.")
 			log("Login failed.")
 		}
@@ -217,6 +225,14 @@ func openconnect(args []string) int {
 		log("User input required in non-interactive mode")
 		log("Failed to complete authentication")
 		return 1
+	case "second_password":
+		// Duo's field in the password's form: openconnect asks for it before sending the form.
+		log("Please enter your username and password.")
+		if !prompt("Second Password:") {
+			log("fgets (stdin): Inappropriate ioctl for device")
+			return 1
+		}
+		interactive = false
 	case "clientcert_auth_fail":
 		// An ASA that asks for an optional client certificate (auth.c, PRG_INFO), then the
 		// wrong-password sequence measured on 2026-09-08.

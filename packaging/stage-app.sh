@@ -5,7 +5,8 @@
 # --go: the Go core without Python (docs/go-switch.md): bin/uni-vpn-core built for TARGET
 # (linux/amd64, linux/arm64, windows/amd64, darwin/universal for both Mac processors in one
 # file, or windows/both: amd64 in bin and arm64 in bin/arm64, the installer picks one), its
-# helpers in bin, the app windows' sources and icons in app. Needs Go.
+# helpers in bin, the app windows' sources and icons in app, the licences of Go and the core's
+# Go modules in licenses. Needs Go.
 # Without --go: the Python program (uni_vpn/updater.py).
 set -eu
 repo=$(cd "$(dirname "$0")/.." && pwd)
@@ -49,6 +50,12 @@ else
     windows/*) build windows "${target#*/}" "$out/bin/uni-vpn-core.exe" ;;
     */*) build "${target%/*}" "${target#*/}" "$out/bin/uni-vpn-core" ;;
     *) echo "unknown target $target" >&2; exit 2 ;;
+  esac
+  # The same modules for both processors.
+  case "$target" in
+    darwin/universal) "$repo/packaging/go-licenses.sh" darwin arm64 "$out/licenses" ;;
+    windows/both) "$repo/packaging/go-licenses.sh" windows amd64 "$out/licenses" ;;
+    *) "$repo/packaging/go-licenses.sh" "${target%/*}" "${target#*/}" "$out/licenses" ;;
   esac
 fi
 if [ -n "${GITHUB_SHA:-}" ]; then echo "$GITHUB_SHA" > "$out/.commit"; fi

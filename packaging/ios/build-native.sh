@@ -112,6 +112,19 @@ run make install_dev
 
 begin openconnect
 cd "$src/openconnect-$openconnect_ver"
+# The library has no call for what the program's --authgroup and --no-external-auth set
+# (main.c): without them the first request names no group and offers a web sign-in, and a
+# gateway whose default group signs in on a web page (Stanford, UIUC) answers with that page.
+# internal/octunnel/shim.c calls this.
+cat >>library.c <<'EOF'
+
+void uni_vpn_set_login(struct openconnect_info *vpninfo, const char *authgroup, int no_external_auth)
+{
+	free(vpninfo->authgroup);
+	vpninfo->authgroup = authgroup && *authgroup ? strdup(authgroup) : NULL;
+	vpninfo->no_external_auth = no_external_auth;
+}
+EOF
 export CC="$clang -target $target -isysroot $sysroot"
 export CFLAGS="-O2 -fPIC" CPPFLAGS="-I$out/include" LDFLAGS="-L$out/lib"
 export PKG_CONFIG_LIBDIR="$out/lib/pkgconfig" PKG_CONFIG_PATH=""

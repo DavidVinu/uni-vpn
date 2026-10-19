@@ -94,7 +94,8 @@ type Tunnel struct {
 	tokenFile      string
 	once           bool // a typed code goes through openconnect's prompt (OncePrefix)
 	stdin          io.WriteCloser
-	heldCode       []byte // the typed code, written once the OTP form asks for it
+	heldCode       []byte // the typed code, written once the OTP form asks for it, or Duo's "push"
+	heldForPrompt  bool   // heldCode is Duo's "push", written at openconnect's next prompt
 	port           int
 	cmd            *exec.Cmd
 	exited         chan struct{}
@@ -423,19 +424,22 @@ func (t *Tunnel) Start(password []byte, totp string) error {
 		t.RemoveTokenFile()
 		return err
 	}
-	// A typed code waits for the OTP form: after a refused password openconnect asks for the
-	// password again and would send the code as one (a second failed sign-in).
+	// A typed code waits for the OTP form, Duo's "push" for a prompt: after a refused password
+	// openconnect asks for the password again and would send either as one (a second failed
+	// sign-in).
 	var held []byte
-	if once && t.Cfg.MFA != "totp_append" {
-		end := bytes.LastIndexByte(data[:len(data)-1], '\n') + 1 // the code is the last line
+	if once && t.Cfg.MFA != "totp_append" || !once && t.Cfg.MFA == "duo_push" {
+		end := bytes.LastIndexByte(data[:len(data)-1], '\n') + 1 // it is the last line
 		data, held = data[:end], data[end:]
 	}
 	t.mu.Lock()
 	t.cmd = cmd
 	if held != nil {
-		t.stdin, t.heldCode = stdin, held
-		// A server that words its OTP form differently (classify.go) gets the code anyway.
-		time.AfterFunc(otpFormWait, t.releaseCode)
+		t.stdin, t.heldCode, t.heldForPrompt = stdin, held, !once
+		if once {
+			// A server that words its OTP form differently (classify.go) gets the code anyway.
+			time.AfterFunc(otpFormWait, t.releaseCode)
+		}
 	}
 	t.mu.Unlock()
 	go t.readOutput(r, cmd)
@@ -484,8 +488,54 @@ func decodeReplace(b []byte) string {
 	return sb.String()
 }
 
+// promptWait is how long openconnect's output must stop at an unfinished line before it counts
+// as a prompt waiting for stdin: prompts ("Second Password:") end without a newline.
+const promptWait = 300 * time.Millisecond
+
+// promptReader calls onPrompt when the reader waits for more output after an unfinished line.
+// bufio asks for more only once every full line before it was handled, so a verdict in them
+// is known by then.
+type promptReader struct {
+	r        io.Reader
+	partial  bool
+	onPrompt func()
+}
+
+func (p *promptReader) Read(b []byte) (int, error) {
+	var timer *time.Timer
+	if p.partial {
+		timer = time.AfterFunc(promptWait, p.onPrompt)
+	}
+	n, err := p.r.Read(b)
+	if timer != nil {
+		timer.Stop()
+	}
+	if n > 0 {
+		p.partial = b[n-1] != '\n'
+	}
+	return n, err
+}
+
+// atPrompt answers openconnect's prompt with the held "push"; after a verdict
+// releaseCodeLocked has already closed stdin without it.
+func (t *Tunnel) atPrompt() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.heldForPrompt {
+		t.releaseCodeLocked()
+	}
+}
+
+// dropHeldLocked closes stdin without the held line: the login is over.
+func (t *Tunnel) dropHeldLocked() {
+	if t.stdin != nil {
+		_ = t.stdin.Close()
+	}
+	t.stdin, t.heldCode, t.heldForPrompt = nil, nil, false
+}
+
 func (t *Tunnel) readOutput(r io.ReadCloser, cmd *exec.Cmd) {
-	br := bufio.NewReader(r)
+	br := bufio.NewReader(&promptReader{r: r, onPrompt: t.atPrompt})
 	for {
 		line, err := readLine(br, MaxLine)
 		if len(line) > 0 {
@@ -500,6 +550,7 @@ func (t *Tunnel) readOutput(r io.ReadCloser, cmd *exec.Cmd) {
 	code := exitCode(cmd.ProcessState)
 	t.mu.Lock()
 	t.returnCode = &code
+	t.dropHeldLocked()
 	t.mu.Unlock()
 	t.RemoveTokenFile()
 	t.logf(slog.LevelInfo, "openconnect exited with code %d", code)
@@ -550,8 +601,7 @@ func (t *Tunnel) releaseCodeLocked() {
 	if t.classification == nil {
 		_, _ = t.stdin.Write(t.heldCode)
 	}
-	_ = t.stdin.Close()
-	t.stdin, t.heldCode = nil, nil
+	t.dropHeldLocked()
 }
 
 func exitCode(ps *os.ProcessState) int {
@@ -587,6 +637,7 @@ func (t *Tunnel) WaitReady(timeout time.Duration) bool {
 func (t *Tunnel) MarkReady() {
 	t.mu.Lock()
 	t.readyAt = time.Now()
+	t.dropHeldLocked() // signed in without asking (a Duo push approved on the phone)
 	t.mu.Unlock()
 	t.RemoveTokenFile()
 }

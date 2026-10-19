@@ -345,7 +345,7 @@ func (d *Desktop) browserEntry(port int, dry bool, created func(string)) bool {
 			return false
 		}
 	default:
-		err = os.WriteFile(path, []byte("[Desktop Entry]\nType=Application\nName=Uni VPN\nComment=University VPN for selected websites\n"+
+		err = os.WriteFile(path, []byte("[Desktop Entry]\nType=Application\nName=Uni VPN\n"+strings.Join(menuComment, "\n")+"\n"+
 			"Exec=xdg-open "+link+"\nIcon=network-vpn\nCategories=Network;\nTerminal=false\n"), 0o666)
 	}
 	if err != nil {
@@ -601,6 +601,17 @@ func DesktopQuote(text string) string {
 	return `"` + strings.ReplaceAll(escaped, "%", "%%") + `"`
 }
 
+// menuComment is the app menu's description in the languages of uni_vpn/locales (the download
+// site's tagline), as in packaging/linux/de.davidvinu.UniVPN.desktop.
+var menuComment = []string{
+	"Comment=Your university's websites from home, as if you were on campus.",
+	"Comment[de]=Die Webseiten deiner Uni von zu Hause, als wärst du auf dem Campus.",
+	"Comment[fr]=Les sites de votre université depuis chez vous, comme sur le campus.",
+	"Comment[es]=Las webs de tu universidad desde casa, como si estuvieras en el campus.",
+	"Comment[zh_CN]=在家访问学校网站，就像在校园里一样。",
+	"Comment[zh_TW]=在家存取學校網站，就像在校園裡一樣。",
+}
+
 // DesktopEntry is the app entry (or with hidden the login item) for the GTK shell.
 func (d *Desktop) DesktopEntry(python string, port int, hidden bool) string {
 	command := fmt.Sprintf("%s %s --port %d", DesktopQuote(python), DesktopQuote(d.linuxScript()), port)
@@ -609,9 +620,9 @@ func (d *Desktop) DesktopEntry(python string, port int, hidden bool) string {
 	} else {
 		command += " %u" // an otpauth:// link (MimeType), see OTPAuthKey
 	}
-	lines := []string{"[Desktop Entry]", "Type=Application", "Name=" + AppName, "Comment=University VPN for selected websites",
-		"Exec=" + command, "Icon=" + AppID, "StartupWMClass=" + AppID, "Categories=Network;",
-		"Terminal=false", "StartupNotify=true"}
+	lines := append([]string{"[Desktop Entry]", "Type=Application", "Name=" + AppName}, menuComment...)
+	lines = append(lines, "Exec="+command, "Icon="+AppID, "StartupWMClass="+AppID, "Categories=Network;",
+		"Terminal=false", "StartupNotify=true")
 	if hidden {
 		lines = append(lines, "NoDisplay=true", "X-GNOME-Autostart-enabled=true")
 	} else {

@@ -1,7 +1,12 @@
 [Desktop Entry]
 Type=Application
 Name=Uni VPN
-Comment=University VPN for selected websites
+Comment=Your university's websites from home, as if you were on campus.
+Comment[de]=Die Webseiten deiner Uni von zu Hause, als wärst du auf dem Campus.
+Comment[fr]=Les sites de votre université depuis chez vous, comme sur le campus.
+Comment[es]=Las webs de tu universidad desde casa, como si estuvieras en el campus.
+Comment[zh_CN]=在家访问学校网站，就像在校园里一样。
+Comment[zh_TW]=在家存取學校網站，就像在校園裡一樣。
 Exec=/usr/share/uni-vpn/uni-vpn-open
 Icon=de.davidvinu.UniVPN
 StartupWMClass=de.davidvinu.UniVPN
