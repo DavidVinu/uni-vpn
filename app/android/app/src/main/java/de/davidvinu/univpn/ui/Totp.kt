@@ -1,7 +1,7 @@
 package de.davidvinu.univpn.ui
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
@@ -106,11 +106,11 @@ fun TotpEntry(model: AppModel, mfa: String, secret: String, onSecret: (String) -
     }
     ErrorText(checkError ?: error)
     code?.let {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), itemVerticalAlignment = Alignment.CenterVertically) {
             CircularProgressIndicator(progress = { left / 30f }, modifier = Modifier.padding(4.dp))
             // In halves: 123 456, or 1234 5678 (Marburg).
             Text(it.take(it.length / 2) + " " + it.drop(it.length / 2), style = MaterialTheme.typography.headlineMedium)
-            Text(model.t("setup.check_code"), color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+            Text(model.t("setup.check_code"), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

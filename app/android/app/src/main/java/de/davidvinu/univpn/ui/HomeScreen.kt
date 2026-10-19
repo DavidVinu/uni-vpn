@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -113,9 +114,10 @@ fun HomeScreen(model: AppModel, vpnOn: Boolean, activity: MainActivity) {
                     val fix = FIX[status.optString("action")]
                     val stopped = vpnOn && state in setOf("auth_failed", "keyring", "error") && !status.optBoolean("busy")
                     if (vpnOn && (fix != null || stopped)) {
-                        Row(
+                        FlowRow(
                             Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             if (stopped) {
                                 TextButton(onClick = { scope.launch { model.post("/api/connect") } }) { Text(model.t("main.try_again")) }
