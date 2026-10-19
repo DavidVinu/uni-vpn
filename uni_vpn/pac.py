@@ -24,6 +24,10 @@ DEFAULT_DOMAINS = [
     # Moodle (and exam.moodle) open only on the university network or over the VPN since
     # July 2024 (URZ).
     "moodle.uni-heidelberg.de",
+    # YoKI (the AI platform) and the Microsoft 365 license portal open only on the university
+    # network or over the VPN (URZ).
+    "yoki.urz.uni-heidelberg.de",
+    "m365.urz.uni-heidelberg.de",
 ]
 _LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
 HOST_RE = re.compile(rf"^(?=.{{1,253}}$){_LABEL}(?:\.{_LABEL})+$")

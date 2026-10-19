@@ -227,10 +227,13 @@ func (d *Daemon) waitConnected(ctx context.Context) error {
 	}
 }
 
-// description names the token in the portal's list, so the user knows what it is.
+// description names the token in the portal's list, so the user knows what it is: the
+// device's name (a phone's own, a Mac's from System Settings), else the host name's first part.
 func description() string {
-	name, _ := os.Hostname()
-	name, _, _ = strings.Cut(name, ".")
+	name := deviceName()
+	if host, err := os.Hostname(); err == nil && name == strings.TrimSuffix(host, ".local") {
+		name, _, _ = strings.Cut(name, ".")
+	}
 	clean := strings.Map(func(r rune) rune {
 		if r < 0x80 && (r == '-' || r == ' ' || r >= '0' && r <= '9' || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z') {
 			return r
@@ -240,6 +243,7 @@ func description() string {
 	if len(clean) > 30 {
 		clean = clean[:30]
 	}
+	clean = strings.TrimSpace(clean)
 	if clean == "" {
 		return "Uni VPN"
 	}
@@ -329,8 +333,8 @@ func (d *Daemon) enroll(ctx context.Context, job *enrollJob, portal string) erro
 }
 
 // replaceOwnToken notes serial as this device's code generator and removes the one it added at
-// its last setup, now unused: only that one, by its serial. The name is no proof, phones are all
-// "localhost" and another computer of the user may have the same name.
+// its last setup, now unused: only that one, by its serial. The name is no proof: another device
+// of the user may have the same name.
 func (d *Daemon) replaceOwnToken(client *linotp.Client, serial string) {
 	path := filepath.Join(d.opts.TokenDir, ownTokenFile)
 	data, _ := os.ReadFile(path)
@@ -352,8 +356,9 @@ func ownTokens(ctx context.Context, client *linotp.Client) ([]string, error) {
 		return nil, err
 	}
 	var own []string
+	name := description()
 	for _, t := range tokens {
-		if t.Description == description() {
+		if t.Description == name {
 			own = append(own, t.Serial)
 		}
 	}

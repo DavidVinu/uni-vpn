@@ -432,7 +432,7 @@ func TestTOTPSecretReachesOpenconnect(t *testing.T) {
 	}
 	// Only the certificates file and the last used code window stay (tunnel.CAFileName).
 	for _, e := range func() []os.DirEntry { entries, _ := os.ReadDir(h.tokenDir); return entries }() {
-		if e.Name() != tunnel.CAFileName && e.Name() != otpStepName {
+		if !slices.Contains([]string{tunnel.CAFileName, otpStepName, signedInName, addedDefaultsName, pacSumName}, e.Name()) {
 			t.Fatal(e.Name())
 		}
 	}
@@ -568,6 +568,105 @@ func TestCodeInPasswordFormWithoutEarlierSignInIsNotTriedAgain(t *testing.T) {
 	if len(h.pwLines()) != 1 {
 		t.Fatal(h.pwLines())
 	}
+}
+
+// The iPhone's tunnel extension runs a core of its own on the app's folders, and a service
+// restarts after an update: a password that signed in with the core before is tried once more
+// with the next code there too.
+func TestCodeInPasswordFormRetryAcrossCores(t *testing.T) {
+	h := newHarness(t)
+	args := filepath.Join(t.TempDir(), "args")
+	t.Setenv("FAKE_ARGS_FILE", args)
+	app := h.start(nil)
+	app.RequestConnect()
+	waitState(t, app, Connected)
+	app.RequestDisconnect()
+	waitState(t, app, Idle)
+	h.teardown()
+	h.d = nil
+	os.Remove(args)
+	t.Setenv("FAKE_MODE", "append_replayed")
+	ext := h.start(nil, func(d *Daemon) { d.hasOTPStep = false }) // minutes later
+	ext.RequestConnect()
+	deadline := time.Now().Add(6 * time.Second)
+	for time.Now().Before(deadline) {
+		st, m := ext.snapshot()
+		if st == Connected {
+			return
+		}
+		if st == AuthFailed {
+			time.Sleep(500 * time.Millisecond)
+			t.Fatalf("stranded in %s (%s); the next window's code was never tried", st, m.ID)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal(ext.snapshot())
+}
+
+// A password changed after the last sign-in never signed in: the next core does not try it twice.
+func TestChangedPasswordIsNotTriedTwiceByTheNextCore(t *testing.T) {
+	h := newHarness(t)
+	app := h.start(nil)
+	app.RequestConnect()
+	waitState(t, app, Connected)
+	app.RequestDisconnect()
+	waitState(t, app, Idle)
+	if err := app.SetPassword("new-pw"); err != nil {
+		t.Fatal(err)
+	}
+	h.teardown()
+	h.d = nil
+	os.Remove(h.pwfile)
+	t.Setenv("FAKE_MODE", "append_rejected")
+	ext := h.start(nil, func(d *Daemon) { d.hasOTPStep = false })
+	ext.RequestConnect()
+	waitState(t, ext, AuthFailed)
+	time.Sleep(500 * time.Millisecond)
+	if len(h.pwLines()) != 1 {
+		t.Fatal(h.pwLines())
+	}
+}
+
+// The password changed at the university after the last sign-in: refused with the next code
+// too, it gets no more second attempts, also not from the next core (the account may lock).
+func TestPasswordRefusedTwiceGetsNoMoreRetries(t *testing.T) {
+	h := newHarness(t)
+	d := h.start(nil)
+	d.RequestConnect()
+	waitState(t, d, Connected)
+	d.RequestDisconnect()
+	waitState(t, d, Idle)
+	os.Remove(h.pwfile)
+	t.Setenv("FAKE_MODE", "append_rejected")
+	d.mu.Lock()
+	d.hasOTPStep = false
+	d.mu.Unlock()
+	d.RequestConnect()
+	waitState(t, d, AuthFailed)
+	time.Sleep(500 * time.Millisecond)
+	if len(h.pwLines()) != 2 {
+		t.Fatal("first time", h.pwLines())
+	}
+	attempt := func(d *Daemon) {
+		t.Helper()
+		os.Remove(h.pwfile)
+		d.mu.Lock()
+		d.hasOTPStep = false // minutes later
+		d.mu.Unlock()
+		d.RequestConnect()
+		deadline := time.Now().Add(3 * time.Second)
+		for len(h.pwLines()) == 0 && time.Now().Before(deadline) {
+			time.Sleep(20 * time.Millisecond)
+		}
+		time.Sleep(time.Second)
+		if st, _ := d.snapshot(); st != AuthFailed || len(h.pwLines()) != 1 {
+			t.Fatal(st, h.pwLines())
+		}
+	}
+	attempt(d)
+	h.teardown()
+	h.d = nil
+	attempt(h.start(nil))
 }
 
 func TestSuccessfulLoginRecordsOTPWindow(t *testing.T) {
@@ -866,8 +965,8 @@ func TestStaleTokenFilesAreRemovedAtStart(t *testing.T) {
 	h := newHarness(t)
 	os.WriteFile(filepath.Join(h.tokenDir, "totp-old"), []byte("base32:OLD"), 0o600)
 	h.start(nil)
-	if entries, _ := os.ReadDir(h.tokenDir); len(entries) != 0 {
-		t.Fatal(entries)
+	if _, err := os.Stat(filepath.Join(h.tokenDir, "totp-old")); err == nil {
+		t.Fatal("totp-old left")
 	}
 }
 

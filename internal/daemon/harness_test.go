@@ -9,9 +9,11 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -195,6 +197,14 @@ func (h *harness) start(edit func(*Options), before ...func(*Daemon)) *Daemon {
 	// The tests reconnect every second; really waiting for the next one-time code window
 	// (up to 30 s) would slow them down. Only the OTP tests use the original.
 	d.otpWait = func(float64) float64 { return 0 }
+	// As after the first start of this version: what a start does once (an update's new default
+	// websites, the browsers told about the rule) is not what the tests count. firstStart undoes it.
+	if marker := filepath.Join(h.tokenDir, addedDefaultsName); !exists(marker) {
+		_ = os.WriteFile(marker, []byte(strings.Join(slices.Concat(slices.Collect(maps.Values(addedDefaults))...), "\n")), 0o600)
+	}
+	if sum, err := d.pacSum(); err == nil && !exists(filepath.Join(h.tokenDir, pacSumName)) {
+		_ = os.WriteFile(filepath.Join(h.tokenDir, pacSumName), []byte(sum), 0o600)
+	}
 	for _, f := range before {
 		f(d)
 	}

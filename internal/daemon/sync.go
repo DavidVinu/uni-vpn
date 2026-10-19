@@ -285,6 +285,7 @@ func (d *Daemon) secretsSynced(reconnect bool) {
 	retry := reconnect || d.state == Connecting || d.state.final() || d.state.retry()
 	if !retry {
 		d.secretsGen++
+		d.forgetSignIn()
 	}
 	d.mu.Unlock()
 	if retry {

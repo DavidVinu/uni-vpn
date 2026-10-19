@@ -1,6 +1,8 @@
 package de.davidvinu.univpn
 
 import android.app.Application
+import android.os.SystemClock
+import android.view.ViewConfiguration
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -60,6 +62,13 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     private var stringsFor = ""
 
     val stack = mutableStateListOf(Visit(Screen.Home, HOME))
+    /**
+     * When what is on screen last changed: the second tap of a double tap would land on what the
+     * new screen has there (App.kt drops it).
+     */
+    private var changedAt = 0L
+    fun screenChanged() { changedAt = SystemClock.uptimeMillis() }
+    val justChanged get() = SystemClock.uptimeMillis() - changedAt < ViewConfiguration.getDoubleTapTimeout()
     val screen get() = stack.last().screen
     val visit get() = stack.last().id
 

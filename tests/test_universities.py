@@ -35,7 +35,8 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(hd.mfa_portal_url, "https://mfa.uni-heidelberg.de/")
         self.assertEqual(hd.default_domains,
                          ("sogo.uni-heidelberg.de", "elearning-med.uni-heidelberg.de", "cip.dmed.uni-heidelberg.de",
-                          "heico.uni-heidelberg.de", "moodle.uni-heidelberg.de"))
+                          "heico.uni-heidelberg.de", "moodle.uni-heidelberg.de", "yoki.urz.uni-heidelberg.de",
+                          "m365.urz.uni-heidelberg.de"))
         self.assertIn("{portal}", hd.mfa_steps[0])
 
     def test_only_heidelberg_is_verified(self):

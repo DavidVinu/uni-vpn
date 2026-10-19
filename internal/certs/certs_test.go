@@ -32,6 +32,7 @@ func TestExtraCertificates(t *testing.T) {
 		{"HARICA TLS RSA Root CA 2021", "Hellenic Academic and Research Institutions RootCA 2015"},
 		{"HARICA TLS ECC Root CA 2021", "Hellenic Academic and Research Institutions ECC RootCA 2015"},
 		{"emSign Root TLS CA - G1", "emSign Root CA - G1"},
+		{"emSign Root TLS CA - G3", "emSign ECC Root CA - G3"},
 		{"DigiCert TLS RSA4096 Root G5", "DigiCert Global Root CA"},
 		{"DigiCert TLS ECC P384 Root G5", "DigiCert Global Root G3"},
 		{"GlobalSign Root R46", "GlobalSign"},
@@ -64,7 +65,7 @@ func TestGatewayIntermediates(t *testing.T) {
 	roots := x509.NewCertPool()
 	roots.AppendCertsFromPEM(PEM)
 	at := time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC)
-	for _, name := range []string{"incommon-ovg2c.pem", "geotrust-g5-ca1.pem"} {
+	for _, name := range []string{"incommon-ovg2c.pem", "incommon-ovg3c.pem", "geotrust-g5-ca1.pem"} {
 		data, err := os.ReadFile(filepath.Join("testdata", name))
 		if err != nil {
 			t.Fatal(err)
