@@ -892,7 +892,7 @@ async function useKey(secret, refresh) {
   }
   if (!secret) return;
   let r;
-  try { r = await post("/api/totp/check", {secret}); } catch (e) { r = {ok: false, data: null, text: t("msg.not_running")}; }
+  try { r = await post("/api/totp/check", {secret, mfa: mfa()}); } catch (e) { r = {ok: false, data: null, text: t("msg.not_running")}; }
   if (seq !== checkSeq) return;
   if (!r.ok) {
     // A stray paste keeps the key that was already read.

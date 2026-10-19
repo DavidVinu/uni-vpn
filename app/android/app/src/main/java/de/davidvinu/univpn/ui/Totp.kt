@@ -38,10 +38,11 @@ import org.json.JSONObject
 /**
  * The setup key of the second factor, role model Google Authenticator: scan the QR code of the
  * university's security page, or type the key. A valid key shows the current test code with the
- * time it has left, for the security page's "test" step.
+ * time it has left, for the security page's "test" step. [mfa] is the sign-in mode being set up:
+ * a key whose codes it can't use is refused before the user registers it.
  */
 @Composable
-fun TotpEntry(model: AppModel, secret: String, onSecret: (String) -> Unit, onValid: (Boolean) -> Unit, error: String?) {
+fun TotpEntry(model: AppModel, mfa: String, secret: String, onSecret: (String) -> Unit, onValid: (Boolean) -> Unit, error: String?) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var shown by rememberSaveable { mutableStateOf(false) }
     var code by remember { mutableStateOf<String?>(null) }
@@ -68,14 +69,14 @@ fun TotpEntry(model: AppModel, secret: String, onSecret: (String) -> Unit, onVal
         },
         modifier = Modifier.fillMaxWidth(),
     )
-    LaunchedEffect(secret, checks) {
+    LaunchedEffect(secret, mfa, checks) {
         code = null
         onValid(false)
         checkError = null
         val trimmed = secret.trim()
         if (trimmed.isEmpty()) return@LaunchedEffect
         delay(300)
-        val result = model.post("/api/totp/check", JSONObject().put("secret", trimmed))
+        val result = model.post("/api/totp/check", JSONObject().put("secret", trimmed).put("mfa", mfa))
         if (!result.ok) {
             checkError = result.error
             return@LaunchedEffect

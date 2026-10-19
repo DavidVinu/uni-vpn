@@ -35,6 +35,7 @@ func newFlow(t *testing.T) *flow {
 		t.Fatal(err)
 	}
 	t.Setenv(fakeoc.EnvVar, "openconnect")
+	fakeUsage(t, nil) // the fake's own usage, for this test's FAKE_VERSION
 	// A race-enabled fake would sleep a second before every exit.
 	t.Setenv("GORACE", "atexit_sleep_ms=0")
 	t.Setenv("FAKE_PASSWORD_FILE", f.pwfile)

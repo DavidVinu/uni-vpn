@@ -312,7 +312,7 @@ private struct SecondFactorPage: View {
                 if let portal = setup.uni?.portal, let url = URL(string: portal), !portal.isEmpty {
                     Link(model.t("setup.mfa_portal"), destination: url)
                 }
-                TotpEntry(model: model, secret: $setup.secret, valid: $setup.secretValid, error: setup.error)
+                TotpEntry(model: model, mfa: setup.mfa, secret: $setup.secret, valid: $setup.secretValid, error: setup.error)
             } header: {
                 HStack {
                     Text(model.t("app.second_factor"))

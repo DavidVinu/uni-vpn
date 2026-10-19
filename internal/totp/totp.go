@@ -42,6 +42,12 @@ func Digits(token string) int {
 	return 6
 }
 
+// Fits says whether a token's codes work with the sign-in mode mfa: openconnect makes the codes
+// itself, 6-digit ones only, unless they go after the password (totp_append).
+func Fits(mfa, token string) bool {
+	return mfa == "totp_append" || Digits(token) == 6
+}
+
 var base32RE = regexp.MustCompile(`^[A-Z2-7]+$`)
 
 // Normalize turns an otpauth URL or Base32 text into an openconnect token

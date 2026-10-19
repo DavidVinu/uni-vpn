@@ -884,8 +884,8 @@ func (s *Setup) askSecrets(cfg *config.Config) error {
 		return nil
 	}
 	token, err := totp.Normalize(text)
-	if err == nil && cfg.MFA != "totp_append" && totp.Digits(token) != 6 {
-		err = i18n.T("totp.digits") // openconnect makes 6-digit codes only
+	if err == nil && !totp.Fits(cfg.MFA, token) {
+		err = i18n.T("totp.digits")
 	}
 	if err != nil {
 		s.printf("   %s. Add it later in the app, under Settings.", err)

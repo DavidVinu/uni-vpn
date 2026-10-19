@@ -514,7 +514,7 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
                         Text(model.t("setup.mfa_portal"))
                     }
                 }
-                TotpEntry(model, secret, { secret = it }, { secretValid = it }, error)
+                TotpEntry(model, mfa, secret, { secret = it }, { secretValid = it }, error)
                 Actions {
                     Button(enabled = secretValid, onClick = { submit() }) { Text(model.t("app.next")) }
                 }

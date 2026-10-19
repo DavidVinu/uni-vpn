@@ -231,7 +231,7 @@ struct SecondFactorView: View {
                 if let portal = uni?.portal, let url = URL(string: portal), !portal.isEmpty {
                     Link(model.t("setup.mfa_portal"), destination: url)
                 }
-                TotpEntry(model: model, secret: $secret, valid: $valid, error: error)
+                TotpEntry(model: model, mfa: model.status?.string("mfa") ?? "", secret: $secret, valid: $valid, error: error)
             }
         }
         .toolbar {

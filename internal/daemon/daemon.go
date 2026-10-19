@@ -746,7 +746,7 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 	if listed, _ := unis.Get(university); once && (listed.MFAEnroll != "linotp" || profile.MFAPortalURL == "") {
 		return unis.TextError("totp", i18n.T("enroll.not_here"))
 	}
-	if profile.NeedsTOTP() && !once && !codesFit(profile.MFA, token) {
+	if profile.NeedsTOTP() && !once && !totp.Fits(profile.MFA, token) {
 		return unis.TextError("totp", i18n.T("totp.digits"))
 	}
 	d.mu.Lock()
@@ -1374,17 +1374,12 @@ func (d *Daemon) SetPassword(password string) error {
 	return nil
 }
 
-// codesFit: openconnect makes 6-digit codes only (totp_field), the core any (totp_append).
-func codesFit(mfa, token string) bool {
-	return mfa == "totp_append" || totp.Digits(token) == 6
-}
-
 // SetTOTP stores a new TOTP secret and connects with it.
 func (d *Daemon) SetTOTP(token string) error {
 	d.mu.Lock()
 	mfa := d.cfg.MFA
 	d.mu.Unlock()
-	if !codesFit(mfa, token) {
+	if !totp.Fits(mfa, token) {
 		return httpapi.TextValueError(i18n.T("totp.digits"))
 	}
 	if err := d.opts.TOTPSetter(token); err != nil {
@@ -1557,7 +1552,7 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 				d.final(Keyring, messages.TOTPMissing)
 				return
 			}
-			if !codesFit(cfg.MFA, secret) {
+			if !totp.Fits(cfg.MFA, secret) {
 				// An 8-digit token, for example after mfa changed in config.toml: openconnect would
 				// take it for a raw key and send wrong codes.
 				d.logf(slog.LevelError, "TOTP secret unusable: openconnect makes 6-digit codes only")

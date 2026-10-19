@@ -66,3 +66,30 @@ func TestEightDigitKeysAreRefusedWhereOpenconnectMakesTheCodes(t *testing.T) {
 		t.Fatal("stored:", h.storedTOTP)
 	}
 }
+
+// The setup assistant's check refuses such a key before it shows a code, so the user never
+// registers it in the portal; after the password, or without a mode, it gives the code.
+func TestKeyCheckRefusesCodesTheSignInCannotUse(t *testing.T) {
+	h := newHarness(t)
+	h.start(nil)
+	check := func(mfa string) reply {
+		body := `{"secret": "otpauth://totp/x?secret=GEZDGNBVGY3TQOJQ&algorithm=SHA512&digits=8"`
+		if mfa != "" {
+			body += fmt.Sprintf(`, "mfa": %q`, mfa)
+		}
+		return h.post("/api/totp/check", body+"}")
+	}
+	r := check("totp_field")
+	if r.status != 400 || r.json(t)["error_t"].(map[string]any)["key"] != "totp.digits" {
+		t.Fatal(r.status, string(r.body))
+	}
+	for _, mfa := range []string{"totp_append", ""} {
+		if r := check(mfa); r.status != 200 || len(r.json(t)["code"].(string)) != 8 {
+			t.Fatal(mfa, r.status, string(r.body))
+		}
+	}
+	r = h.post("/api/totp/check", `{"secret": "GEZDGNBVGY3TQOJQ", "mfa": "totp_field"}`)
+	if r.status != 200 || len(r.json(t)["code"].(string)) != 6 {
+		t.Fatal(r.status, string(r.body))
+	}
+}

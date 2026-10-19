@@ -289,7 +289,7 @@ fun SecondFactorScreen(model: AppModel, @Suppress("UNUSED_PARAMETER") activity: 
                             }
                         }) { Text(model.t("setup.mfa_portal")) }
                     }
-                    TotpEntry(model, secret, { secret = it }, { valid = it }, error)
+                    TotpEntry(model, status.optString("mfa"), secret, { secret = it }, { valid = it }, error)
                     Actions {
                         Button(enabled = valid, onClick = {
                             scope.launch {
