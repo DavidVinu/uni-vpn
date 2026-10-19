@@ -54,7 +54,8 @@ Name: "fr"; MessagesFile: "compiler:Languages\French.isl"
 Name: "es"; MessagesFile: "compiler:Languages\Spanish.isl"
 Name: "ja"; MessagesFile: "compiler:Languages\Japanese.isl"
 ; Inno Setup 6 has no Chinese translations: these two are its official ones from 7.0.2
-; (jrsoftware/issrc, tag is-7_0_2, Files/Languages), with the same messages as 6.7.1.
+; (jrsoftware/issrc, tag is-7_0_2, Files/Languages, licence in Inno-Setup-LICENSE.txt), with
+; the same messages as 6.7.1.
 Name: "zh"; MessagesFile: "ChineseSimplified.isl"
 Name: "zhtw"; MessagesFile: "ChineseTraditional.isl"
 

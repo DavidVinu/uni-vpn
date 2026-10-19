@@ -23,6 +23,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/DavidVinu/uni-vpn/internal/certs"
 	"github.com/DavidVinu/uni-vpn/internal/messages"
 	"github.com/DavidVinu/uni-vpn/internal/platform"
 	"github.com/DavidVinu/uni-vpn/internal/tunnel"
@@ -208,8 +209,31 @@ func (w *Tunnel) command(int) []string {
 		// openconnect 9.12 runs it as: cscript.exe "<script>" (the .js association picks JScript)
 		"--script="+w.Script,
 	)
+	if ca := w.caFile(); ca != "" {
+		cmd = append(cmd, "--cafile="+ca)
+	}
 	cmd = append(cmd, w.TokenArgs()...)
 	return append(cmd, w.Cfg.Host)
+}
+
+// CAFileName is the file next to openconnect.exe with the certificates of internal/certs.
+const CAFileName = "extra-ca.pem"
+
+// caFile is openconnect's --cafile, whose certificates it trusts besides the system's:
+// certs.PEM next to openconnect.exe, in Program Files, where only administrators can change it
+// (the user's own folders are not). openconnect's GnuTLS opens the file in the system's code
+// page, so a path with other characters gets none.
+func (w *Tunnel) caFile() string {
+	if !filepath.IsAbs(w.OpenConnect) {
+		return ""
+	}
+	path := filepath.Join(filepath.Dir(w.OpenConnect), CAFileName)
+	for i := 0; i < len(path); i++ {
+		if path[i] >= utf8.RuneSelf {
+			return ""
+		}
+	}
+	return certs.WriteFile(path, nil)
 }
 
 func (w *Tunnel) env(env []string, port int) []string {

@@ -430,7 +430,8 @@ func TestTOTPSecretReachesOpenconnect(t *testing.T) {
 	if string(data) != "base32:GEZDGNBVGY3TQOJQ\n" {
 		t.Fatalf("%q", data)
 	}
-	if entries, _ := os.ReadDir(h.tokenDir); len(entries) != 0 {
+	// Only the certificates file stays (tunnel.CAFileName).
+	if entries, _ := os.ReadDir(h.tokenDir); len(entries) != 1 || entries[0].Name() != tunnel.CAFileName {
 		t.Fatal(entries)
 	}
 }

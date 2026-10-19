@@ -19,7 +19,7 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(set(profiles), {
             "heidelberg", "ethz", "ethz-students", "bremen", "muenster", "marburg", "marburg-students", "stanford",
             "harvard-fasrc", "stuttgart", "stuttgart-students",
-            "bonn", "mannheim", "kassel", "fu-berlin", "oxford", "tamu", "ucf", "osu", "utexas",
+            "bonn", "mannheim", "kassel", "kassel-students", "fu-berlin", "oxford", "tamu", "ucf", "osu", "utexas",
             "asu", "ufl", "umn", "uiuc", "uga", "unc", "ncsu", "ncsu-students", "uwaterloo", "uottawa",
             "uottawa-students", "carleton", "hku", "hku-students", "ugr", "uni-halle",
             "hs-flensburg", "w-hs", "hs-offenburg", "uni-hamburg", "uni-jena", "uni-weimar", "th-koeln", "thu",
@@ -49,26 +49,30 @@ class RegistryTests(unittest.TestCase):
     def test_profiles_from_the_probes(self):
         self.assertEqual(unis.get("marburg").authgroup, "unimr-vpn-staff-Passwort+2FA")
         self.assertEqual(unis.get("marburg").mfa, "totp_append")
-        self.assertEqual(unis.get("stanford").authgroup, "Stanford")
+        self.assertEqual(unis.get("stanford").authgroup, "Stanford-Full")
         self.assertEqual(unis.get("stanford").mfa, "duo_push")
         self.assertEqual(unis.get("ethz").username_suffix, "@staff-net.ethz.ch")
         self.assertEqual(unis.get("kassel").os, "win")
         self.assertEqual(unis.get("umn").host, "tc-vpn-1.vpn.umn.edu")
-        self.assertEqual(unis.get("umn").authgroup, "AnyConnect-UofMSplit")
+        # The full tunnel: library publishers see a university address only through it.
+        self.assertEqual(unis.get("umn").authgroup, "AnyConnect-UofMvpnFull")
+        self.assertEqual(unis.get("uiuc").authgroup, "OpenConnect2 (All)")
         self.assertEqual(unis.get("ugr").mfa, "totp_field")
         for uni_id, group in [("bremen", "Tunnel-All-Traffic"), ("mannheim", "WebVPN"),
                               ("ncsu", "1-Faculty-and-Staff"), ("uni-halle", "VPN"), ("w-hs", "VPN+MFA")]:
             self.assertEqual(unis.get(uni_id).authgroup, group)
         self.assertEqual(unis.get("hku").mfa, "totp_field")
         self.assertEqual(unis.get("hku").username_suffix, "@hku.hk")
-        # Students sign in with their own group or user name ending.
+        # Students sign in with their own group, user name ending or second factor.
         for uni_id, field, value in [("ethz-students", "authgroup", "student-net"),
                                      ("ethz-students", "username_suffix", "@student-net.ethz.ch"),
                                      ("marburg-students", "authgroup", "unimr-vpn-students-Passwort+2FA"),
                                      ("stuttgart-students", "username_suffix", "@stud.uni-stuttgart.de"),
                                      ("ncsu-students", "authgroup", "2-Student"),
                                      ("uottawa-students", "usergroup", "students"),
-                                     ("hku-students", "username_suffix", "@connect.hku.hk")]:
+                                     ("hku-students", "username_suffix", "@connect.hku.hk"),
+                                     ("kassel", "mfa", "duo_push"), ("kassel-students", "mfa", "none"),
+                                     ("kassel-students", "os", "win")]:
             self.assertEqual(getattr(unis.get(uni_id), field), value, uni_id)
         for uni_id, suffix in [("uni-jena", "@uni-jena.de"), ("uni-weimar", "@uni-weimar.de"), ("thu", "@thu.de")]:
             self.assertEqual(unis.get(uni_id).username_suffix, suffix)
@@ -98,6 +102,8 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual([p.id for p in unis.search("MÜNSTER")], ["muenster"])
         self.assertEqual([p.id for p in unis.search("fasrc")], ["harvard-fasrc"])
         self.assertEqual([p.id for p in unis.search("bonn")], ["bonn"])
+        self.assertEqual([p.id for p in unis.search("Universität Kassel")], ["kassel", "kassel-students"])
+        self.assertEqual([p.id for p in unis.search("Bocholt")], ["w-hs"])
         self.assertEqual(unis.search("   "), [])
 
 

@@ -9,6 +9,8 @@
 //	                    second_password | sso_browser | sso_embedded
 //	FAKE_VERSION        9.01 or 8.20: an openconnect without --no-external-auth (8.20 also without
 //	                    --external-browser); default: a current one with both
+//	FAKE_TLS            OpenSSL: an openconnect built with OpenSSL (no --gnutls-priority);
+//	                    default GnuTLS
 //	FAKE_DELAY          seconds until the port listens (default 0.2)
 //	FAKE_EXIT_AFTER     with exit_after_ready: seconds after becoming ready (default 0.5)
 //	FAKE_PASSWORD_FILE  file every line read from stdin is appended to (password, "push" for Duo,
@@ -155,14 +157,20 @@ func openconnect(args []string) int {
 	// openconnect before 9.10 (Debian 12: 9.01, Ubuntu 22.04: 8.20) has no --no-external-auth,
 	// 8.20 no --external-browser either: getopt's complaint, then usage() on stdout and exit(1).
 	version := os.Getenv("FAKE_VERSION")
-	usage := "Usage:  openconnect [options] <server>\nOpen client for multiple VPN protocols, version v" + cmp.Or(version, "9.21") + "\n"
+	usage := "Usage:  openconnect [options] <server>\nOpen client for multiple VPN protocols, version v" + cmp.Or(version, "9.21") + "\n\n"
 	var unknown []string
+	if os.Getenv("FAKE_TLS") == "OpenSSL" {
+		usage += "Using OpenSSL 3.0.13 30 Jan 2024. Features present: TPMv2, HOTP software token, TOTP software token, DTLS, ESP\n"
+		unknown = append(unknown, "--gnutls-priority")
+	} else {
+		usage += "Using GnuTLS 3.7.9. Features present: TPMv2, PKCS#11, HOTP software token, TOTP software token, DTLS, ESP\n"
+	}
 	switch version {
 	case "9.01":
 		usage += "      --external-browser=BROWSER  Set external browser executable\n"
-		unknown = []string{"--no-external-auth"}
+		unknown = append(unknown, "--no-external-auth")
 	case "8.20":
-		unknown = []string{"--no-external-auth", "--external-browser"}
+		unknown = append(unknown, "--no-external-auth", "--external-browser")
 	default:
 		usage += "      --external-browser=BROWSER  Set external browser executable\n" +
 			"      --no-external-auth          Do not offer or use auth methods requiring external browser\n"
@@ -177,6 +185,12 @@ func openconnect(args []string) int {
 			os.Stdout.WriteString(usage)
 			return 1
 		}
+	}
+	if slices.ContainsFunc(args, func(a string) bool { return strings.HasPrefix(a, "--gnutls-priority=") }) {
+		log("WARNING: You specified --gnutls-priority. This should not be")
+		log("         necessary; please report cases where a priority string")
+		log("         override is necessary to connect to a server")
+		log("         to <openconnect-devel@lists.infradead.org>.")
 	}
 	if mode == "totp_replayed" {
 		// Another device of the account used this window's code (LinOTP takes each code once):

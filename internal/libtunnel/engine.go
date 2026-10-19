@@ -219,10 +219,24 @@ func (t *Tunnel) handleLine(line string) {
 	if t.classification == nil {
 		if v, ok := t.classifier.Feed(text); ok {
 			t.classification = &v
+			if v == (tunnel.Verdict{State: tunnel.StateAuthFailed, Message: tunnel.SAMLRequired}) && !t.isReady() {
+				// A web sign-in never succeeds here, and the library waits for the browser it
+				// could not start until cancelled: end the login, not as stopped by us.
+				t.cancelOnce.Do(func() { close(t.cancel) })
+			}
 		}
 	}
 	if t.classifier.OTPGenerated && t.otpGeneratedAt.IsZero() {
 		t.otpGeneratedAt = time.Now()
+	}
+}
+
+func (t *Tunnel) isReady() bool {
+	select {
+	case <-t.ready:
+		return true
+	default:
+		return false
 	}
 }
 

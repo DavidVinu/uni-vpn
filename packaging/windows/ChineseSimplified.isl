@@ -1,4 +1,6 @@
 ﻿; *** Inno Setup version 6.5.0+ Chinese Simplified messages ***
+; From Inno Setup 7.0.2 (Files/Languages), changed for Uni VPN: UTF-8 byte order mark and LF
+; line endings. Licence: Inno-Setup-LICENSE.txt next to this file.
 ;
 ; To download user-contributed translations of this file, go to:
 ;   https://jrsoftware.org/files/istrans/

@@ -31,7 +31,7 @@ func TestShippedRegistryLoads(t *testing.T) {
 	want := []string{
 		"heidelberg", "ethz", "ethz-students", "bremen", "muenster", "marburg", "marburg-students", "stanford",
 		"harvard-fasrc", "stuttgart", "stuttgart-students",
-		"bonn", "mannheim", "kassel", "fu-berlin", "oxford", "tamu", "ucf", "osu", "utexas",
+		"bonn", "mannheim", "kassel", "kassel-students", "fu-berlin", "oxford", "tamu", "ucf", "osu", "utexas",
 		"asu", "ufl", "umn", "uiuc", "uga", "unc", "ncsu", "ncsu-students", "uwaterloo", "uottawa",
 		"uottawa-students", "carleton", "hku", "hku-students", "ugr", "uni-halle",
 		"hs-flensburg", "w-hs", "hs-offenburg", "uni-hamburg", "uni-jena", "uni-weimar", "th-koeln", "thu",
@@ -116,12 +116,14 @@ func TestProfilesFromTheProbes(t *testing.T) {
 	tests := []struct{ id, field, got, want string }{
 		{"marburg", "authgroup", mustGet(t, "marburg").Authgroup, "unimr-vpn-staff-Passwort+2FA"},
 		{"marburg", "mfa", mustGet(t, "marburg").MFA, "totp_append"},
-		{"stanford", "authgroup", mustGet(t, "stanford").Authgroup, "Stanford"},
+		{"stanford", "authgroup", mustGet(t, "stanford").Authgroup, "Stanford-Full"},
 		{"stanford", "mfa", mustGet(t, "stanford").MFA, "duo_push"},
 		{"ethz", "username_suffix", mustGet(t, "ethz").UsernameSuffix, "@staff-net.ethz.ch"},
 		{"kassel", "os", mustGet(t, "kassel").OS, "win"},
 		{"umn", "host", mustGet(t, "umn").Host, "tc-vpn-1.vpn.umn.edu"},
-		{"umn", "authgroup", mustGet(t, "umn").Authgroup, "AnyConnect-UofMSplit"},
+		// The full tunnel: library publishers see a university address only through it.
+		{"umn", "authgroup", mustGet(t, "umn").Authgroup, "AnyConnect-UofMvpnFull"},
+		{"uiuc", "authgroup", mustGet(t, "uiuc").Authgroup, "OpenConnect2 (All)"},
 		{"ugr", "mfa", mustGet(t, "ugr").MFA, "totp_field"},
 		// Gateways that list several groups: without one openconnect asks, and sign-in fails.
 		{"bremen", "authgroup", mustGet(t, "bremen").Authgroup, "Tunnel-All-Traffic"},
@@ -131,7 +133,7 @@ func TestProfilesFromTheProbes(t *testing.T) {
 		{"w-hs", "authgroup", mustGet(t, "w-hs").Authgroup, "VPN+MFA"},
 		{"hku", "mfa", mustGet(t, "hku").MFA, "totp_field"},
 		{"hku", "username_suffix", mustGet(t, "hku").UsernameSuffix, "@hku.hk"},
-		// Students sign in with their own group or user name ending.
+		// Students sign in with their own group, user name ending or second factor.
 		{"ethz-students", "authgroup", mustGet(t, "ethz-students").Authgroup, "student-net"},
 		{"ethz-students", "username_suffix", mustGet(t, "ethz-students").UsernameSuffix, "@student-net.ethz.ch"},
 		{"marburg-students", "authgroup", mustGet(t, "marburg-students").Authgroup, "unimr-vpn-students-Passwort+2FA"},
@@ -139,6 +141,9 @@ func TestProfilesFromTheProbes(t *testing.T) {
 		{"ncsu-students", "authgroup", mustGet(t, "ncsu-students").Authgroup, "2-Student"},
 		{"uottawa-students", "usergroup", mustGet(t, "uottawa-students").Usergroup, "students"},
 		{"hku-students", "username_suffix", mustGet(t, "hku-students").UsernameSuffix, "@connect.hku.hk"},
+		{"kassel", "mfa", mustGet(t, "kassel").MFA, "duo_push"},
+		{"kassel-students", "mfa", mustGet(t, "kassel-students").MFA, "none"},
+		{"kassel-students", "os", mustGet(t, "kassel-students").OS, "win"},
 		// Gateways that refuse the bare login.
 		{"uni-jena", "username_suffix", mustGet(t, "uni-jena").UsernameSuffix, "@uni-jena.de"},
 		{"uni-weimar", "username_suffix", mustGet(t, "uni-weimar").UsernameSuffix, "@uni-weimar.de"},
@@ -223,6 +228,8 @@ func TestSearchIgnoresCaseAndUmlautsAndPrefersAnExactID(t *testing.T) {
 		{"MÜNSTER", []string{"muenster"}},
 		{"fasrc", []string{"harvard-fasrc"}},
 		{"bonn", []string{"bonn"}},
+		{"Universität Kassel", []string{"kassel", "kassel-students"}},
+		{"Bocholt", []string{"w-hs"}},
 		{"Uni Heidelberg", []string{"heidelberg"}}, // every word, in any field
 		{"uni  bonn", []string{"bonn"}},
 		{"   ", []string{}},

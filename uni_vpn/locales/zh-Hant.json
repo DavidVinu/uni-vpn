@@ -163,7 +163,7 @@
   "msg.password_rejected": "你的大學不接受這個密碼。",
   "msg.totp_rejected": "一次性驗證碼未被接受。請檢查電腦時間是否正確，或重新輸入設定密鑰。",
   "msg.append_rejected": "你的大學不接受密碼或一次性驗證碼。請檢查密碼和電腦時間，或重新輸入設定密鑰。",
-  "msg.duo_rejected": "登入失敗。請檢查密碼，並及時在手機上確認 Duo 要求。",
+  "msg.duo_rejected": "登入失敗。請檢查密碼，並及時在手機上確認登入要求。",
   "msg.auth_rejected": "登入失敗。請檢查密碼。如果密碼正確，表示你的大學要求了 Uni VPN 暫時無法回答的資訊。",
   "msg.totp_unusable": "已儲存的設定密鑰無效。請重新輸入。",
   "msg.saml_required": "你的大學需要透過網頁登入，Uni VPN 暫時還不支援。",
@@ -203,7 +203,7 @@
   "uni.hku-students.mfa.3": "前往下一頁，在那裡輸入這個驗證碼。{code}",
   "uni.ugr.mfa.1": "開啟{portal}並登入。選擇「Doble Factor Autenticación para Servicios TIC UGR」，然後按「Generar nuevo token」。",
   "uni.ugr.mfa.2": "擷取 QR 碼的螢幕截圖（{shot}），拖到這裡或貼上。也用手機上的 App 掃描它。{secret}",
-  "uni.w-hs.mfa.1": "開啟{portal}，登入時不要加 @w-hs.de。按左側的「Token ausrollen」，然後再按下方的「Token ausrollen」。",
+  "uni.w-hs.mfa.1": "開啟{portal}，登入時不要加 @w-hs.de；如果你已經有令牌，請輸入它產生的驗證碼。按左側的「Token ausrollen」，然後再按下方的「Token ausrollen」（不要按「Neuen Token ausrollen」）。",
   "uni.w-hs.mfa.2": "擷取 QR 碼的螢幕截圖（{shot}），拖到這裡或貼上。也用手機上的 App 掃描它。{secret}",
   "phone.off": "已關閉",
   "phone.edit_websites": "新增網站",
@@ -251,6 +251,6 @@
   "phone.uni.hku-students.mfa.3": "前往下一頁，在那裡輸入這裡顯示的測試碼。",
   "phone.uni.ugr.mfa.1": "開啟{portal}並登入。選擇「Doble Factor Autenticación para Servicios TIC UGR」，然後點按「Generar nuevo token」。",
   "phone.uni.ugr.mfa.2": "掃描顯示的 QR 碼，或複製以 otpauth:// 開頭的那一行，並貼到下方。也把它加入你的驗證碼產生器。",
-  "phone.uni.w-hs.mfa.1": "開啟{portal}，登入時不要加 @w-hs.de。此頁面只能在校園網路內開啟。點按「Token ausrollen」，然後再點按下方的「Token ausrollen」。",
+  "phone.uni.w-hs.mfa.1": "開啟{portal}，登入時不要加 @w-hs.de。此頁面只能在校園網路內開啟。如果你已經有令牌，請輸入它產生的驗證碼。點按「Token ausrollen」，然後再點按下方的「Token ausrollen」（不要點按「Neuen Token ausrollen」）。",
   "phone.uni.w-hs.mfa.2": "掃描顯示的 QR 碼，或複製以 otpauth:// 開頭的那一行，並貼到下方。也把它加入你的驗證碼產生器。"
 }

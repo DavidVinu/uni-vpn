@@ -98,6 +98,20 @@ def page_from(args):
     return None if "--hidden" in args else ""
 
 
+def window_height(display):
+    """660, or less on a short screen: the window cannot be resized, so the page scrolls in it."""
+    try:
+        # The monitor GTK centres the window on: the pointer's.
+        _screen, x, y = display.get_default_seat().get_pointer().get_position()
+        monitor = display.get_monitor_at_point(x, y)
+        area, full = monitor.get_workarea(), monitor.get_geometry()
+    except (AttributeError, TypeError, ValueError):
+        return 660
+    # Room for the title bar; Wayland gives the whole screen as work area, so also for a panel.
+    room = 50 if area.height < full.height else 90
+    return max(300, min(660, area.height - room))
+
+
 class App(Gtk.Application):
     def __init__(self):
         super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
@@ -250,7 +264,7 @@ class App(Gtk.Application):
     def show(self, page):
         if self.window is None:
             self.window = Gtk.ApplicationWindow(application=self, title="Uni VPN")
-            self.window.set_default_size(420, 660)
+            self.window.set_default_size(420, window_height(self.window.get_display()))
             self.window.set_resizable(False)
             self.window.set_position(Gtk.WindowPosition.CENTER)
             self.window.set_icon_name(APP_ID)
