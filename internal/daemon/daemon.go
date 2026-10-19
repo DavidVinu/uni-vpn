@@ -130,7 +130,9 @@ type Options struct {
 	ProxyRefresh func(httpPort int)
 	// ProxyUnversioned: the system has the rule's plain address (sysproxy.Unversioned).
 	ProxyUnversioned func(httpPort int) bool
-	RepairStart      func() (Process, error)
+	// ProxyCover gives the rule to network services added since the install (sysproxy.Cover).
+	ProxyCover  func(httpPort int)
+	RepairStart func() (Process, error)
 	// Elevated is is_admin() on Windows, nil elsewhere (status "elevated": null).
 	Elevated func() *bool
 	// Updater is the self-updater; nil means updater.New(Commit).
@@ -310,6 +312,12 @@ func New(cfg *config.Config, log *slog.Logger, opts Options) *Daemon {
 		opts.ProxyUnversioned = sysproxy.Unversioned
 		if platform.IsAndroid || platform.IsIOS {
 			opts.ProxyUnversioned = func(int) bool { return false }
+		}
+	}
+	if opts.ProxyCover == nil {
+		opts.ProxyCover = sysproxy.Cover
+		if platform.IsAndroid || platform.IsIOS {
+			opts.ProxyCover = func(int) {}
 		}
 	}
 	if opts.Probe == nil {
@@ -609,10 +617,6 @@ func (d *Daemon) Status() (pyjson.Object, error) {
 	if len(tail) > 30 {
 		tail = tail[len(tail)-30:]
 	}
-	pacRefresh := "auto"
-	if platform.IsMacOS {
-		pacRefresh = "manual"
-	}
 	var elevated any
 	if e := d.opts.Elevated(); e != nil {
 		elevated = *e
@@ -655,7 +659,9 @@ func (d *Daemon) Status() (pyjson.Object, error) {
 		"last_error", lastErr,
 		"domains", domains,
 		"pac_url", sysproxy.PacURL(cfg.HTTPPort),
-		"pac_refresh", pacRefresh,
+		// "manual" (restart the browser after a change) only from the older core on macOS: this
+		// one gives the rule a new address there too.
+		"pac_refresh", "auto",
 		"log_tail", append([]string{}, tail...),
 		"setup_needed", d.needsSetup || d.configError != "",
 		"repairing", d.repairingLocked(),
@@ -1031,14 +1037,22 @@ func (d *Daemon) ruleLocked() (string, error) {
 }
 
 // directHosts: what a browser still reaches when Uni VPN refuses, as the rule's "; DIRECT"
-// says. The core connects it itself, for browsers that ignore that.
+// says. The core connects it itself, for browsers that ignore that. While the gateway cannot
+// be reached, the listed websites too: some universities' gateways cannot be reached from
+// their own network (Halle, HS Flensburg), where the websites open directly.
 func (d *Daemon) directHosts() []string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	var hosts []string
 	if host := d.portalHostLocked(); host != "" {
-		return []string{host}
+		hosts = append(hosts, host)
 	}
-	return nil
+	if d.state == Offline && !d.needsSetup && d.configError == "" {
+		if domains, err := pac.ReadDomains(d.opts.DomainsPath, d.cfg.DefaultDomains); err == nil {
+			hosts = append(hosts, domains...)
+		}
+	}
+	return hosts
 }
 
 // portalHostLocked: the host of the vpnOnlyPortals portal the rule adds, "" for none.
@@ -1302,6 +1316,7 @@ func (d *Daemon) Run() {
 	go func() {
 		if server != nil {
 			d.refreshIfRuleChanged(httpPort)
+			d.opts.ProxyCover(httpPort)
 		}
 		close(refreshDone)
 	}()
@@ -2047,6 +2062,9 @@ func (d *Daemon) backoff(ctx context.Context) bool {
 
 // --- Idle and resume -------------------------------------------------------------
 
+// coverEvery: how many retry intervals (30 s) apart the ticker looks for new network services.
+const coverEvery = 10
+
 func (d *Daemon) ticker() {
 	// A clock that stops during sleep: the difference to the wall clock reveals a resume. On a
 	// phone none does (monoClock).
@@ -2056,7 +2074,7 @@ func (d *Daemon) ticker() {
 	}
 	lastAwake, lastWall := awake(), d.wall()
 	lastCisco := d.mono()
-	lastBind := lastCisco
+	lastBind, lastCover := lastCisco, lastCisco
 	d.mu.Lock()
 	tick := seconds(d.cfg.Tick)
 	d.mu.Unlock()
@@ -2100,6 +2118,11 @@ func (d *Daemon) ticker() {
 			} else if !cisco && d.state == Blocked && !d.loopRunning {
 				d.set(Idle, messages.NotConnected)
 			}
+		}
+		// A dock or an iPhone plugged in brings a new network service on macOS, without our rule.
+		if mono-lastCover >= coverEvery*cfg.RetryInterval && d.httpWaiting == nil {
+			lastCover = mono
+			d.unlocked(func() { d.opts.ProxyCover(cfg.HTTPPort) })
 		}
 		if jump > 30 {
 			d.logf(slog.LevelInfo, "Resume detected (clock jumped by %.0f s)", jump)

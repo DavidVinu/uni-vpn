@@ -665,6 +665,8 @@ function pick(u) {
 $("s-uni").oninput = () => { uni = null; detectSeq++; $("s-detect").disabled = false; $("s-other").hidden = true; err("s0-err", ""); active = -1; renderList(); };
 $("s-uni").onfocus = () => { if (!uni) renderList(); };
 $("s-uni").onblur = closeList;
+// The list's scrollbar and padding: the search keeps the focus, so the list stays open.
+$("s-uni-list").onmousedown = (e) => e.preventDefault();
 $("s-uni").onkeydown = (e) => {
   if (e.key === "Escape") { closeList(); return; }
   if (!["ArrowDown", "ArrowUp", "Enter"].includes(e.key) || (e.key === "Enter" && uni && active < 0)) return;
@@ -1293,8 +1295,8 @@ function endChange() {
   $("s-pw").value = $("s-totp").value = "";
   $("cancel-change").hidden = true;
   openSettings();
-  // Another university's websites: browsers that read the rule only at start (macOS) need a
-  // restart, as after an edit of the list.
+  // Another university's websites: browsers that read the rule only at start (macOS with the
+  // older core) need a restart, as after an edit of the list.
   if (sent && S.pac_refresh === "manual" && (S.domains || []).join("\n") !== changeWebsites) {
     $("d-dom").open = true;
     saved("dommsg", {ok: true}, t("app.saved_restart"));

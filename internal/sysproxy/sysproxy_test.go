@@ -425,7 +425,9 @@ func kde(r *runner) *System {
 func TestKDEInstallWritesKioslavercAndUninstallRestores(t *testing.T) {
 	backup := tempBackup(t, "backup.json")
 	r := &runner{answers: kdeAnswers()}
-	if got, err := kde(r).Install(1081, backup); got != "ok" || err != nil {
+	k := kde(r)
+	k.Now = func() time.Time { return time.Unix(100, 0) }
+	if got, err := k.Install(1081, backup); got != "ok" || err != nil {
 		t.Fatal(got, err)
 	}
 	if got := readBackup(t, backup); got != `{"kde": {"type": "0", "url": ""}}` {
@@ -433,7 +435,7 @@ func TestKDEInstallWritesKioslavercAndUninstallRestores(t *testing.T) {
 	}
 	write := []string{"/usr/bin/kwriteconfig6", "--file", "kioslaverc", "--group", "Proxy Settings", "--key"}
 	if !r.called(append(write, "ProxyType", "2")...) ||
-		!r.called(append(write[:len(write):len(write)], "Proxy Config Script", "http://127.0.0.1:1081/proxy.pac")...) {
+		!r.called(append(write[:len(write):len(write)], "Proxy Config Script", "http://127.0.0.1:1081/proxy.pac?v=100")...) {
 		t.Fatal(r.calls)
 	}
 	r2 := &runner{answers: kdeAnswers()}
@@ -503,11 +505,12 @@ func windowsSystem(reg *registry) *System {
 func TestWindowsInstallSetsAutoconfigURLAndUninstallRemovesIt(t *testing.T) {
 	reg := &registry{}
 	s := windowsSystem(reg)
+	s.Now = func() time.Time { return time.Unix(100, 0) }
 	backup := tempBackup(t, "backup.json")
 	if got, _ := s.Install(1081, backup); got != "ok" {
 		t.Fatal(got)
 	}
-	if reg.url != "http://127.0.0.1:1081/proxy.pac" || s.State(1081) != "ok" {
+	if reg.url != "http://127.0.0.1:1081/proxy.pac?v=100" || s.State(1081) != "ok" {
 		t.Fatal(reg.url)
 	}
 	if got := readBackup(t, backup); got != `{"windows": {"url": ""}}` {
@@ -539,7 +542,7 @@ func TestWindowsForeignPACIsReplacedAndRestored(t *testing.T) {
 	}
 }
 
-// Only setup writes the plain address; Refresh always adds a version.
+// Older installers wrote the plain address; Install and Refresh always add a version.
 func TestUnversionedIsThePlainAddressInUse(t *testing.T) {
 	plain, versioned := "http://127.0.0.1:1081/proxy.pac", "http://127.0.0.1:1081/proxy.pac?v=3"
 	for url, want := range map[string]bool{plain: true, versioned: false, "http://corp/wpad.dat": false, "": false} {
@@ -686,5 +689,109 @@ func TestBackupWithKDENullRestoresTheRest(t *testing.T) {
 		if strings.Contains(c[0], "kwriteconfig") {
 			t.Fatal(r.calls)
 		}
+	}
+}
+
+// Install gives the rule a new address: macOS keeps the rule it loaded per address until the
+// user signs out, and the core that answers now (restarted by Repair or the installer) is
+// asked again. Past the address set now, also within the same second.
+func TestInstallGivesTheRuleANewAddress(t *testing.T) {
+	now := func() time.Time { return time.Unix(100, 0) }
+	r := &runner{answers: append([]answer{{"networksetup -getautoproxyurl Wi-Fi", 0, "URL: http://127.0.0.1:1081/proxy.pac?v=200\nEnabled: Yes\n"}}, macAnswers()...)}
+	s := mac(r)
+	s.Now = now
+	if got, _ := s.Install(1081, tempBackup(t, "b.json")); got != "ok" {
+		t.Fatal(got)
+	}
+	if !r.called("networksetup", "-setautoproxyurl", "Wi-Fi", "http://127.0.0.1:1081/proxy.pac?v=201") {
+		t.Fatal(r.calls)
+	}
+	reg := &registry{}
+	w := windowsSystem(reg)
+	w.Now = now
+	w.Install(1081, tempBackup(t, "b.json"))
+	if reg.url != "http://127.0.0.1:1081/proxy.pac?v=100" {
+		t.Fatal(reg.url)
+	}
+	r = &runner{answers: gsettings("none", "")}
+	g := gnome(r.run)
+	g.Now = now
+	g.Install(1081, tempBackup(t, "b.json"))
+	if !r.called("gsettings", "set", "org.gnome.system.proxy", "autoconfig-url", "http://127.0.0.1:1081/proxy.pac?v=100") {
+		t.Fatal(r.calls)
+	}
+}
+
+// A network service added after the install (a dock's Ethernet, an iPhone over USB) gets our
+// rule too, backed up first so that uninstalling turns it off again. Services the backup knows
+// keep what the user set, and so do services with a setting of their own.
+func TestMacCoverGivesNewServicesTheRule(t *testing.T) {
+	backup := tempBackup(t, "b.json")
+	before := `{"services": {"Wi-Fi": {"url": "", "enabled": false}, "Ethernet": {"url": "", "enabled": false}}}`
+	os.WriteFile(backup, []byte(before), 0o600)
+	ours := "http://127.0.0.1:1081/proxy.pac?v=7"
+	answers := func(wifi string) []answer {
+		return []answer{
+			{"networksetup -listallnetworkservices", 0, "An asterisk (*) denotes that a network service is disabled.\nWi-Fi\nEthernet\nUSB 10/100/1000 LAN\niPhone USB\n*Thunderbolt Bridge\n"},
+			{"networksetup -getautoproxyurl Wi-Fi", 0, wifi},
+			{"networksetup -getautoproxyurl Ethernet", 0, "URL: (null)\nEnabled: No\n"},
+			{"networksetup -getautoproxyurl USB 10/100/1000 LAN", 0, "URL: (null)\nEnabled: No\n"},
+			{"networksetup -getautoproxyurl iPhone USB", 0, "URL: http://corp/wpad.dat\nEnabled: Yes\n"},
+		}
+	}
+	setOn := func(r *runner) []string {
+		var names []string
+		for _, c := range r.calls {
+			if len(c) > 1 && c[1] == "-setautoproxyurl" {
+				names = append(names, c[2])
+				if c[3] != ours {
+					t.Fatal(c)
+				}
+			}
+		}
+		return names
+	}
+	r := &runner{answers: answers("URL: " + ours + "\nEnabled: Yes\n")}
+	mac(r).Cover(1081, backup)
+	if got := setOn(r); !reflect.DeepEqual(got, []string{"USB 10/100/1000 LAN"}) {
+		t.Fatal(r.calls)
+	}
+	after := `{"services": {"Wi-Fi": {"url": "", "enabled": false}, "Ethernet": {"url": "", "enabled": false}, "USB 10/100/1000 LAN": {"url": "", "enabled": false}}}`
+	if got := readBackup(t, backup); got != after {
+		t.Fatal(got)
+	}
+	// Our rule on no service (turned off, or not installed): nothing changes.
+	os.WriteFile(backup, []byte(before), 0o600)
+	r = &runner{answers: answers("URL: (null)\nEnabled: No\n")}
+	mac(r).Cover(1081, backup)
+	if got := setOn(r); len(got) != 0 || readBackup(t, backup) != before {
+		t.Fatal(r.calls)
+	}
+	// No backup: uninstalling could not turn it off again.
+	r = &runner{answers: answers("URL: " + ours + "\nEnabled: Yes\n")}
+	mac(r).Cover(1081, tempBackup(t, "none.json"))
+	if got := setOn(r); len(got) != 0 {
+		t.Fatal(r.calls)
+	}
+}
+
+// Repair or the installer again sets our rule on every service: services added since the
+// first install are backed up too (off where they already had our rule), so uninstalling
+// restores them as well.
+func TestMacInstallAgainBacksUpServicesAddedSince(t *testing.T) {
+	backup := tempBackup(t, "b.json")
+	os.WriteFile(backup, []byte(`{"services": {"Wi-Fi": {"url": "", "enabled": false}}}`), 0o600)
+	r := &runner{answers: []answer{
+		{"networksetup -listallnetworkservices", 0, "An asterisk (*) denotes that a network service is disabled.\nWi-Fi\nUSB LAN\niPhone USB\n"},
+		{"networksetup -getautoproxyurl Wi-Fi", 0, "URL: http://127.0.0.1:1081/proxy.pac?v=7\nEnabled: Yes\n"},
+		{"networksetup -getautoproxyurl USB LAN", 0, "URL: http://127.0.0.1:1081/proxy.pac?v=7\nEnabled: Yes\n"},
+		{"networksetup -getautoproxyurl iPhone USB", 0, "URL: http://corp/wpad.dat\nEnabled: Yes\n"},
+	}}
+	if got, _ := mac(r).Install(1081, backup); got != "replaced" {
+		t.Fatal(got)
+	}
+	want := `{"services": {"Wi-Fi": {"url": "", "enabled": false}, "USB LAN": {"url": "", "enabled": false}, "iPhone USB": {"url": "http://corp/wpad.dat", "enabled": true}}}`
+	if got := readBackup(t, backup); got != want {
+		t.Fatal(got)
 	}
 }

@@ -161,7 +161,9 @@ and rooms search at `https://lsf.uni-heidelberg.de`, the phone book at
 `https://myprint.uni-heidelberg.de`. Everything else does not.
 Once Uni VPN is set up, the security page `https://mfa.uni-heidelberg.de` goes through it too
 (W-HS: `https://mfa.za.w-hs.de`), so a new phone's code generator can be added from home. When
-Uni VPN cannot sign in, the page opens directly (on campus, or with the Cisco VPN).
+Uni VPN cannot sign in, the page opens directly (on campus, or with the Cisco VPN). While the
+university's VPN server cannot be reached, the listed websites open directly too: some
+universities' servers cannot be reached from their own network (Halle, HS Flensburg).
 For other universities the list starts empty. Domains go under Settings, Websites.
 
 Without a desktop, `--university ID` (`-University ID` on Windows) picks the university, for
@@ -172,7 +174,9 @@ example `./install.sh --university ethz`.
 The service serves a rule at `http://127.0.0.1:1081/proxy.pac`: listed domains over
 `127.0.0.1:1080`, everything else direct. The installer registers that address as the
 system's automatic proxy configuration (GNOME and KDE settings on Linux, network settings on
-macOS, Internet Options on Windows). Chrome, Edge and Firefox read it from there. On other
+macOS, Internet Options on Windows). Chrome, Edge and Firefox read it from there. On macOS
+every network service has its own setting; one added later (a dock's Ethernet, an iPhone over
+USB) gets the rule within a few minutes, and uninstalling turns it off again. On other
 desktops (Xfce and others), enter the address as a PAC URL in the browser's own proxy
 settings. `uni-vpn doctor` prints it.
 

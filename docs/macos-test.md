@@ -19,7 +19,7 @@ Record the environment: macOS version, chip, Homebrew version, Chrome and Firefo
    `state = running`.
 5. `curl -s --socks5-hostname 127.0.0.1:1080 https://ifconfig.me` returns a university address.
    If a keychain dialog appears: choose "Always Allow" and note it.
-6. Restart Chrome, open `https://sogo.uni-heidelberg.de`, status page `http://127.0.0.1:1081/` shows `connected`; `https://ifconfig.me` shows the normal address. System Settings > Network > Wi-Fi > Details > Proxies: "Automatic proxy configuration" points to `http://127.0.0.1:1081/proxy.pac`.
+6. Restart Chrome, open `https://sogo.uni-heidelberg.de`, status page `http://127.0.0.1:1081/` shows `connected`; `https://ifconfig.me` shows the normal address. System Settings > Network > Wi-Fi > Details > Proxies: "Automatic proxy configuration" points to `http://127.0.0.1:1081/proxy.pac?v=` and a number.
 7. Restart Firefox (Settings > Network: "Use system proxy settings"), the same.
 8. Lock the screen, unlock, reload the page: does it work without a dialog?
 9. Restart the Mac, open the browser, load a page: does it connect on its own?

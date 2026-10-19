@@ -897,6 +897,15 @@ func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, s
 	saved := state{Version: version, Keyed: true, Hashes: map[string]savedHash{}}
 	for key, ent := range merged {
 		hv := h(ent.V)
+		if errors.Is(failed[key], ErrBusy) && !st.Adopt {
+			// Changed here while the round ran (a setup by hand): what it read of this device is
+			// old. sync.json keeps what it had, nothing for a value never synced here: the next
+			// round sends what was typed.
+			if old, ok := st.Hashes[key]; ok {
+				saved.Hashes[key] = old
+			}
+			continue
+		}
 		if failed[key] != nil {
 			// Not taken over: what this device has counts as seen, so it is not sent back as a
 			// change of its own; a newer value from the group is tried again.
