@@ -33,6 +33,10 @@ func (o Object) Get(key string) (any, bool) {
 	return nil, false
 }
 
+// MarshalJSON writes o as an object with its keys in order where encoding/json meets it (in a
+// struct, for example), not as a list of Members.
+func (o Object) MarshalJSON() ([]byte, error) { return Marshal(o), nil }
+
 // set replaces the value of an existing key in place, like assigning to a dict.
 func (o Object) set(key string, value any) Object {
 	for i := range o {

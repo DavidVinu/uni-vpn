@@ -12,6 +12,27 @@
 
 #include "shim.h"
 
+/* internal/certs' certificates (trust_ios.go), offered as intermediates after the server's
+ * chain: Ohio State's ends at emSign Root TLS CA - G1, which only its cross-certificate links
+ * to a root the phone trusts. Filled once before the first connection, then only read. */
+static CFMutableArrayRef extra;
+
+void uni_vpn_trust_add(const void *der, size_t len)
+{
+	CFDataRef data = CFDataCreate(NULL, der, (CFIndex)len);
+	SecCertificateRef cert = data ? SecCertificateCreateWithData(NULL, data) : NULL;
+
+	if (cert) {
+		if (!extra)
+			extra = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
+		if (extra)
+			CFArrayAppendValue(extra, cert);
+		CFRelease(cert);
+	}
+	if (data)
+		CFRelease(data);
+}
+
 int uni_vpn_trust(struct openconnect_info *vpninfo, const char *host)
 {
 	struct oc_cert *chain = NULL;
@@ -54,6 +75,9 @@ int uni_vpn_trust(struct openconnect_info *vpninfo, const char *host)
 	}
 	openconnect_free_peer_cert_chain(vpninfo, chain);
 
+	/* After the server's own: the first certificate must stay the server's. */
+	if (extra && CFArrayGetCount(certs) > 0)
+		CFArrayAppendArray(certs, extra, CFRangeMake(0, CFArrayGetCount(extra)));
 	policy = SecPolicyCreateSSL(true, name);
 	if (CFArrayGetCount(certs) > 0 &&
 	    SecTrustCreateWithCertificates(certs, policy, &trust) == errSecSuccess)

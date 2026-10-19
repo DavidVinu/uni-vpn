@@ -101,15 +101,22 @@ def page_from(args):
 def window_height(display):
     """660, or less on a short screen: the window cannot be resized, so the page scrolls in it."""
     try:
-        # The monitor GTK centres the window on: the pointer's.
-        _screen, x, y = display.get_default_seat().get_pointer().get_position()
-        monitor = display.get_monitor_at_point(x, y)
-        area, full = monitor.get_workarea(), monitor.get_geometry()
+        if display.__gtype__.name.startswith("GdkWayland"):
+            # Wayland tells an app neither where the pointer is nor where its window opens:
+            # the window may open on any monitor, so it fits the shortest.
+            monitors = [display.get_monitor(i) for i in range(display.get_n_monitors())]
+        else:
+            # The monitor GTK centres the window on: the pointer's.
+            _screen, x, y = display.get_default_seat().get_pointer().get_position()
+            monitors = [display.get_monitor_at_point(x, y)]
+        heights = []
+        for monitor in monitors:
+            area, full = monitor.get_workarea(), monitor.get_geometry()
+            # Room for the title bar; Wayland gives the whole screen as work area, so also for a panel.
+            heights.append(area.height - (50 if area.height < full.height else 90))
     except (AttributeError, TypeError, ValueError):
         return 660
-    # Room for the title bar; Wayland gives the whole screen as work area, so also for a panel.
-    room = 50 if area.height < full.height else 90
-    return max(300, min(660, area.height - room))
+    return max(300, min([660] + heights))
 
 
 class App(Gtk.Application):

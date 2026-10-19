@@ -144,8 +144,8 @@ class Core(private val context: Context) {
             pem.append(Base64.encodeToString(cert.encoded, Base64.DEFAULT))
             pem.append("-----END CERTIFICATE-----\n")
         }
-        // Android 13 and older lack HARICA's 2021 roots, where the GEANT certificates of many
-        // university gateways end: HARICA's cross-certificates from its 2015 roots, which they have.
+        // Some gateways' chains end at roots older Android versions lack (HARICA 2021, emSign
+        // Root TLS CA - G1, DigiCert TLS RSA4096 Root G5): cross-certificates from roots they have.
         pem.append(context.assets.open(EXTRA_CERTIFICATES).bufferedReader().use { it.readText() })
         File(context.filesDir, "ca.pem").apply { writeText(pem.toString()) }
     } catch (e: Exception) {
