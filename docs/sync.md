@@ -85,6 +85,8 @@ when another follows before the device is back online, and when password or seco
 changed (each with its own time, without a hash there); secrets are read from the keyring only
 then. A value this device cannot take over (a newer version's language, say) is logged and
 skipped; the rest of the round goes through, and adding or removing a device still works. A
+website that joining could not drop (the list not written) is noted with `"drop": true` and
+dropped again in each round until the list is written, so it never goes to the group. A
 setting this version does not know at all is not noted in `sync.json` either: after the update
 the device takes the group's value instead of sending its own default.
 

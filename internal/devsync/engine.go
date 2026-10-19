@@ -86,6 +86,9 @@ type savedHash struct {
 	H string `json:"h"`
 	T int64  `json:"t"`
 	D string `json:"d"`
+	// Drop: a website a join could not drop (its list not written), dropped again each round
+	// until the list is written.
+	Drop bool `json:"drop,omitempty"`
 }
 
 // state is the file next to config.toml: what was last in step, as hashes, so a local
@@ -125,6 +128,7 @@ type Engine struct {
 	loaded        bool
 	pending       pending
 	pendingGen    int
+	readGen       int // pendingGen when the running round read this device's settings
 	pendingLoaded bool
 	applying      bool // Local.Apply runs: the settings it changes are not this device's own
 	devices       []DeviceInfo
@@ -365,7 +369,11 @@ func (e *Engine) Notify(typed ...string) {
 	// A setting from another device being taken over is not a change made here. A password or
 	// second factor is: Apply stores those without a Notify, so one now was typed on this device.
 	if applying && !secrets {
-		e.Wake()
+		// A device not set up yet (linked while the group's account could not be used here) only
+		// took the group's websites: another round now would only try that account again.
+		if e.opts.Local.SetupDone() {
+			e.Wake()
+		}
 		return
 	}
 	now := e.nowMS()
@@ -445,6 +453,16 @@ func (e *Engine) Notify(typed ...string) {
 		e.logf(slog.LevelWarn, "Could not note a settings change for syncing: %s", err)
 	}
 	e.Wake()
+}
+
+// ChangedSinceRead: a change was noted on this device after the running round read its
+// settings, an account set up by hand while the round waited for it, say. Local.Apply asks it
+// before it takes the group's account over: the round's view is old then, and the next round
+// sends the account typed here.
+func (e *Engine) ChangedSinceRead() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.pendingGen != e.readGen
 }
 
 // Defaulted: a new config.toml was just set up by hand (the app installed again, the old file
@@ -645,6 +663,7 @@ func (e *Engine) syncLocked(ctx context.Context) error {
 		e.loadPendingLocked()
 		p, gen := e.pending, e.pendingGen
 		p.Changes = maps.Clone(p.Changes)
+		e.readGen = gen
 		e.mu.Unlock()
 		// A sync.json from before keyed hashes is carried over by comparing values, secrets too.
 		done, err := e.step(ctx, k, remote, version, st, p.Secrets || version == 0 || !st.Keyed, p, gen)
@@ -789,6 +808,16 @@ func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, s
 			incoming = append(incoming, key)
 		}
 	}
+	// A website a join could not drop (its list not written) is dropped again until the list is
+	// written: kept, it would go to the group as this device's own once a later round no longer
+	// has it in sync.json.
+	for key, old := range st.Hashes {
+		if _, listed := merged[key]; !listed && old.Drop {
+			if _, here := snap[key]; here && !slices.Contains(incoming, key) {
+				incoming = append(incoming, key)
+			}
+		}
+	}
 	// failed: what Apply could not take over; refused: those but a newer version's settings,
 	// which wait for an update without a note.
 	var failed, refused map[string]error
@@ -883,7 +912,7 @@ func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, s
 	for key := range failed {
 		if _, ok := merged[key]; !ok && strings.HasPrefix(key, DomainPrefix) {
 			if hv, ok := local(key); ok {
-				saved.Hashes[key] = savedHash{H: hv}
+				saved.Hashes[key] = savedHash{H: hv, Drop: true}
 			}
 		}
 	}

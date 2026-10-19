@@ -26,7 +26,7 @@ struct RootView: View {
 
     var body: some View {
         if model.portTaken {
-            PortTakenView(model: model)
+            FitPage { PortTakenView(model: model) }
         } else if model.status == nil {
             ProgressView()
         } else if model.setupNeeded || model.changingAccount || model.setupFinishing {

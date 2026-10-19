@@ -166,10 +166,12 @@ type Daemon struct {
 	log  *slog.Logger
 	opts Options
 
-	// Test hooks: the wall clock, the monotonic one (monoClock), and _otp_wait.
-	wall    func() float64
-	mono    func() float64
-	otpWait func(now float64) float64
+	// Test hooks: the wall clock, the monotonic one (monoClock), _otp_wait, and what happens
+	// when a sync round starts to take settings over (after it read this device's).
+	wall        func() float64
+	mono        func() float64
+	otpWait     func(now float64) float64
+	beforeApply func()
 
 	mu            sync.Mutex
 	cfg           *config.Config
@@ -769,6 +771,11 @@ func (d *Daemon) CompleteSetup(user, password, token, university string, overrid
 func (d *Daemon) completeSetup(user, password, token, university string, overrides []config.Setting, synced bool) error {
 	d.setupMu.Lock()
 	defer d.setupMu.Unlock()
+	if synced && d.sync.ChangedSinceRead() {
+		// Set up or changed here by hand while the round waited: the account typed here is the
+		// newer one, the next round sends it.
+		return devsync.ErrBusy
+	}
 	user = httpapi.PyStrip(user)
 	if !config.ValidUser(user) {
 		return unis.TextError("user", i18n.T("setup.invalid_user"))

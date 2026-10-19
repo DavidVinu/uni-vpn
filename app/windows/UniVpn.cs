@@ -413,7 +413,8 @@ static class TrayIcon
         using (Graphics g = Graphics.FromImage(bitmap))
         {
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            Color color = LightTaskbar() ? Color.Black : Color.White;
+            // A contrast theme sets the taskbar's colors whatever the light or dark mode says.
+            Color color = SystemInformation.HighContrast ? SystemColors.WindowText : LightTaskbar() ? Color.Black : Color.White;
             if (!reachable) color = Color.FromArgb(128, color);
             float s = size / 16f;
             using (GraphicsPath path = new GraphicsPath())

@@ -88,7 +88,7 @@ struct SetupView: View {
     @ViewBuilder
     private func page(_ setup: SetupState) -> some View {
         switch setup.step {
-        case .welcome: WelcomePage(model: model, setup: setup)
+        case .welcome: FitPage { WelcomePage(model: model, setup: setup) }
         case .code: CodePage(model: model, setup: setup)
         case .university:
             // An account change waits for the list, as on the desktop page.
@@ -99,8 +99,8 @@ struct SetupView: View {
             }
         case .signIn: SignInPage(model: model, setup: setup)
         case .secondFactor: SecondFactorPage(model: model, setup: setup)
-        case .connecting: ConnectingPage(model: model, setup: setup)
-        case .done: DonePage(model: model)
+        case .connecting: FitPage { ConnectingPage(model: model, setup: setup) }
+        case .done: FitPage { DonePage(model: model) }
         }
     }
 }

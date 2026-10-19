@@ -362,7 +362,7 @@
         "Open the {portal} and sign in. Add a sign-in method: the authenticator app, then the option to use a different authenticator app.",
         "Take a screenshot of the QR code ({shot}) and drop or paste it here.{secret}",
         "Go to the next page and type this code there.{code}",
-        "If the line with \"Change\" at the top of the page shows a phone number, click \"Change\" and choose \"Authenticator app or hardware token - code\"."
+        "If the line with \"Change\" at the top of the page shows a phone number, click \"Change\", choose \"App based authentication or hardware token - code\" and click \"Confirm\"."
       ],
       "mfa_pictures": ["generic-1.svg", "generic-2.svg", "generic-3.svg", "hku-4.svg"],
       "aliases": ["HKU", "香港大學", "香港大学", "港大", "The University of Hong Kong"],
@@ -380,7 +380,7 @@
         "Open the {portal} and sign in. Add a sign-in method: the authenticator app, then the option to use a different authenticator app.",
         "Take a screenshot of the QR code ({shot}) and drop or paste it here.{secret}",
         "Go to the next page and type this code there.{code}",
-        "If the line with \"Change\" at the top of the page shows a phone number, click \"Change\" and choose \"Authenticator app or hardware token - code\"."
+        "If the line with \"Change\" at the top of the page shows a phone number, click \"Change\", choose \"App based authentication or hardware token - code\" and click \"Confirm\"."
       ],
       "mfa_pictures": ["generic-1.svg", "generic-2.svg", "generic-3.svg", "hku-4.svg"],
       "aliases": ["HKU", "香港大學", "香港大学", "港大", "The University of Hong Kong"],

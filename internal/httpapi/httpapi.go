@@ -380,11 +380,14 @@ func (s *Server) otherAccount(c net.Conn) bool {
 	return other
 }
 
-// otherAccountPage reloads itself: once this account's own uni-vpn has the port (the other
-// account signed out), the window shows it.
+// otherAccountPage reloads itself once this account's own uni-vpn has the port (the other
+// account signed out). It keeps asking: a single reload in the gap before this account's
+// uni-vpn takes the port fails, and a hidden window would keep this text when opened again.
 const otherAccountPage = `<!doctype html><html lang="%s"><meta charset="utf-8">` +
-	`<meta http-equiv="refresh" content="5"><meta name="color-scheme" content="light dark">` +
-	`<title>Uni VPN</title><p style="font:16px/1.5 system-ui,sans-serif;margin:2em">%s</p></html>`
+	`<meta name="color-scheme" content="light dark">` +
+	`<title>Uni VPN</title><p style="font:16px/1.5 system-ui,sans-serif;margin:2em">%s</p>` +
+	`<script>setInterval(() => fetch("/status.json", {cache: "no-store"})` +
+	`.then((r) => { if (r.status !== 403) location.reload(); }, () => {}), 5000);</script></html>`
 
 // refuse answers another account's window (in its language) and its programs (JSON).
 func (s *Server) refuse(c net.Conn, path string, hdrs headers) {

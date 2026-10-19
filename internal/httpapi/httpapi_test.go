@@ -83,8 +83,14 @@ func TestAnotherAccountGetsOnlyThePAC(t *testing.T) {
 	head, body := get(t, s, "GET", "/?app=1", "Accept-Language: de-DE,en\r\n")
 	german := i18n.Catalog("de")["app.other_account"]
 	if !strings.HasPrefix(head, "HTTP/1.1 403 ") || !strings.Contains(head, "text/html") || german == "" ||
-		!bytes.Contains(body, []byte(german)) || !bytes.Contains(body, []byte(`http-equiv="refresh"`)) {
+		!bytes.Contains(body, []byte(german)) {
 		t.Fatal(head, string(body))
+	}
+	// It keeps asking until its own uni-vpn answers, also while the window is hidden: a single
+	// reload in the gap after the other account signed out would leave this text for good.
+	if !bytes.Contains(body, []byte(`setInterval(`)) || !bytes.Contains(body, []byte(`fetch("/status.json"`)) ||
+		!bytes.Contains(body, []byte(`location.reload()`)) || bytes.Contains(body, []byte(`http-equiv="refresh"`)) {
+		t.Fatal(string(body))
 	}
 	for _, req := range [][2]string{{"GET", "/status.json?menu=en"}, {"POST", "/api/sync/offer"}, {"POST", "/api/connect"}} {
 		head, body := get(t, s, req[0], req[1], "X-Uni-VPN: 1\r\n")
