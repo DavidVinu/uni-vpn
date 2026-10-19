@@ -50,6 +50,7 @@ type Forwarder struct {
 	Direct func() []string
 
 	getTarget      TargetFunc
+	dialDirect     func(ctx context.Context, network, address string) (net.Conn, error)
 	onActivity     func()
 	halfcloseGrace time.Duration
 	log            *slog.Logger
@@ -78,7 +79,7 @@ func New(host string, port int, getTarget TargetFunc, onActivity func(), halfclo
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Forwarder{Host: host, Port: port, getTarget: getTarget, onActivity: onActivity,
-		halfcloseGrace: halfcloseGrace, log: log}
+		halfcloseGrace: halfcloseGrace, log: log, dialDirect: (&net.Dialer{Timeout: directWait}).DialContext}
 }
 
 // Active is the number of open browser connections, including those waiting for a target.
@@ -270,9 +271,13 @@ func (f *Forwarder) direct(client net.Conn) bool {
 		client.Write(socksReply(2)) // not allowed
 		return false
 	}
-	d := net.Dialer{Timeout: directWait}
 	host = pac.NormalizeHost(host)
-	upstream, err := d.DialContext(f.ctx, "tcp", net.JoinHostPort(host, strconv.Itoa(port)))
+	// Like a handler waiting for a target, so that CloseAll and Stop end the dial.
+	w := &waiter{done: make(chan struct{})}
+	ctx, end := f.cancellable(w)
+	upstream, err := f.dialDirect(ctx, "tcp", net.JoinHostPort(host, strconv.Itoa(port)))
+	end()
+	close(w.done)
 	if err != nil {
 		f.log.Info(fmt.Sprintf("%s not reachable directly: %s", host, err))
 		client.Write(socksReply(4)) // host unreachable
@@ -352,19 +357,25 @@ func greets(c net.Conn) bool {
 	return err == nil && first[0] == socksVersion
 }
 
-// target asks getTarget while the handler counts as waiting for CloseAll.
-func (f *Forwarder) target(w *waiter) (port int, ok, cancelled bool) {
+// cancellable is a context that CloseAll cancels while w counts as waiting; end stops that.
+func (f *Forwarder) cancellable(w *waiter) (ctx context.Context, end func()) {
 	ctx, cancel := context.WithCancel(f.ctx)
-	defer cancel()
 	w.cancel = cancel
 	f.mu.Lock()
 	f.waiting[w] = struct{}{}
 	f.mu.Unlock()
-	defer func() {
+	return ctx, func() {
 		f.mu.Lock()
 		delete(f.waiting, w)
 		f.mu.Unlock()
-	}()
+		cancel()
+	}
+}
+
+// target asks getTarget while the handler counts as waiting for CloseAll.
+func (f *Forwarder) target(w *waiter) (port int, ok, cancelled bool) {
+	ctx, end := f.cancellable(w)
+	defer end()
 	type result struct {
 		port int
 		ok   bool

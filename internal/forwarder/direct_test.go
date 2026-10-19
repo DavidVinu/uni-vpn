@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"io"
 	"net"
+	"strings"
 	"testing"
 	"time"
 )
@@ -147,4 +148,34 @@ func TestRefusedLoneVersionByteClosesSoon(t *testing.T) {
 		t.Fatal(time.Since(started))
 	}
 	eventually(t, func() bool { return e.fwd.Rejected() == 1 })
+}
+
+// A security page that does not answer (no network): stopping the service does not wait for
+// the dial.
+func TestStopEndsADirectDial(t *testing.T) {
+	e, logs := setup(t)
+	e.setTarget(func(context.Context) (int, bool) { return 0, false })
+	e.setDirect("localhost")
+	dialing := make(chan struct{})
+	e.mu.Lock()
+	e.dialer = func(ctx context.Context, _, _ string) (net.Conn, error) {
+		close(dialing)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	e.mu.Unlock()
+	c := e.dialRaw(t)
+	c.Write([]byte{socksVersion, 1, 0})
+	readWithin(t, c, 2, 2*time.Second)
+	c.Write(append(append([]byte{socksVersion, 1, 0, 3, 9}, "localhost"...), 0, 80))
+	select {
+	case <-dialing:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no dial")
+	}
+	started := time.Now()
+	e.fwd.Stop()
+	if time.Since(started) > 2*time.Second || strings.Contains(logs.String(), "not closed in time") {
+		t.Fatal(time.Since(started), logs.String())
+	}
 }
