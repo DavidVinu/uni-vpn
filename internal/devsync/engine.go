@@ -86,6 +86,9 @@ type savedHash struct {
 	H string `json:"h"`
 	T int64  `json:"t"`
 	D string `json:"d"`
+	// Drop: a website a join could not drop (its list not written), dropped again each round
+	// until the list is written.
+	Drop bool `json:"drop,omitempty"`
 }
 
 // state is the file next to config.toml: what was last in step, as hashes, so a local
@@ -805,6 +808,16 @@ func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, s
 			incoming = append(incoming, key)
 		}
 	}
+	// A website a join could not drop (its list not written) is dropped again until the list is
+	// written: kept, it would go to the group as this device's own once a later round no longer
+	// has it in sync.json.
+	for key, old := range st.Hashes {
+		if _, listed := merged[key]; !listed && old.Drop {
+			if _, here := snap[key]; here && !slices.Contains(incoming, key) {
+				incoming = append(incoming, key)
+			}
+		}
+	}
 	// failed: what Apply could not take over; refused: those but a newer version's settings,
 	// which wait for an update without a note.
 	var failed, refused map[string]error
@@ -899,7 +912,7 @@ func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, s
 	for key := range failed {
 		if _, ok := merged[key]; !ok && strings.HasPrefix(key, DomainPrefix) {
 			if hv, ok := local(key); ok {
-				saved.Hashes[key] = savedHash{H: hv}
+				saved.Hashes[key] = savedHash{H: hv, Drop: true}
 			}
 		}
 	}

@@ -2768,11 +2768,26 @@ func TestJoinThatCouldNotDropAWebsiteKeepsItHere(t *testing.T) {
 	own.reject = nil
 	own.domains = []string{"sogo.uni-heidelberg.de", "heico.uni-heidelberg.de", "own.example.org"} // the write failed
 	own.mu.Unlock()
-	for _, d := range []device{desktop, laptop, desktop} {
-		d.Sync(ctx)
+	// Not only in the round after the link: until the list is written, the website is dropped
+	// again in each round (once here, while the write still fails).
+	for i, d := range []device{desktop, laptop, desktop, laptop, desktop, laptop} {
+		own.mu.Lock()
+		if i == 0 {
+			own.reject = map[string]bool{DomainPrefix + "own.example.org": true}
+		} else {
+			own.reject = nil
+		}
+		own.mu.Unlock()
+		var ae *ApplyError
+		if err := d.Sync(ctx); err != nil && !errors.As(err, &ae) {
+			t.Fatal(err)
+		}
+		if slices.Contains(laptop.local.getDomains(), "own.example.org") {
+			t.Fatalf("after round %d the website the join dropped went to the group: %v", i+1, laptop.local.getDomains())
+		}
 	}
-	if slices.Contains(laptop.local.getDomains(), "own.example.org") {
-		t.Fatal("the website the join dropped went to the group:", laptop.local.getDomains())
+	if got := own.getDomains(); slices.Contains(got, "own.example.org") {
+		t.Fatal("the desktop kept the website once its list could be written:", got)
 	}
 }
 
