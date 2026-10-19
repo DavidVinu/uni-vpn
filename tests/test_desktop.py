@@ -1,5 +1,6 @@
 import hashlib
 import io
+import json
 import os
 import plistlib
 import subprocess
@@ -50,6 +51,14 @@ class SourcesTests(unittest.TestCase):
 
     def test_linux_shell_compiles(self):
         compile((ROOT / "app" / "linux" / "uni-vpn-app.py").read_text(encoding="utf-8"), "uni-vpn-app.py", "exec")
+
+    def test_mac_background_hint_matches_the_catalogs(self):
+        # The Mac app carries these texts itself: they show when the service cannot run.
+        swift = (ROOT / "app" / "macos" / "main.swift").read_text(encoding="utf-8")
+        for lang in ("en", "de", "fr", "es", "zh-Hans", "zh-Hant"):
+            catalog = json.loads((ROOT / "uni_vpn" / "locales" / f"{lang}.json").read_text(encoding="utf-8"))
+            for key in ("menu.background_off", "menu.background_hint", "menu.background_open", "menu.not_now"):
+                self.assertTrue(json.dumps(catalog[key], ensure_ascii=False) in swift, f"{lang} {key}")
 
     def test_shells_open_the_same_pages(self):
         # The page knows #main and #settings and the ?app=1 mode; every shell has to use them.
