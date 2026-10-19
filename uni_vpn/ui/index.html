@@ -500,10 +500,10 @@ function render() {
   renderDevices();
 }
 
-// The whole list in view (Heidelberg starts with 7), and a line to add one.
+// The whole list in view (Heidelberg starts with 12), and a line to add one.
 function fitDomains() {
   const box = $("domains");
-  box.rows = Math.max(5, Math.min(12, box.value.split("\n").length + 1));
+  box.rows = Math.max(5, Math.min(14, box.value.split("\n").length + 1));
 }
 
 // Connected, or a connect loop still trying (offline, blocked, error): the button stops it.
