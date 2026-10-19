@@ -54,7 +54,8 @@ int uni_vpn_trust(struct openconnect_info *vpninfo, const char *host)
 		CFRelease(name);
 		return -EINVAL;
 	}
-	certs = CFArrayCreateMutable(NULL, n, &kCFTypeArrayCallBacks);
+	/* 0: no limit (a capacity is a maximum), the extra certificates come after the chain. */
+	certs = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
 	for (i = 0; i < n; i++) {
 		CFDataRef der = CFDataCreate(NULL, chain[i].der_data, chain[i].der_len);
 		SecCertificateRef cert = der ? SecCertificateCreateWithData(NULL, der) : NULL;
