@@ -64,6 +64,19 @@ struct ErrorText: View {
     }
 }
 
+/// A page laid out as it is when it fits, scrolling when it does not: at the largest
+/// accessibility text sizes on a small iPhone its texts would otherwise be cut off.
+struct FitPage<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        ViewThatFits(in: .vertical) {
+            content
+            ScrollView { content }
+        }
+    }
+}
+
 /// The big button at the bottom of a setup page.
 struct BottomButton: View {
     let title: String
