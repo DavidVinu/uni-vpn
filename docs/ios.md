@@ -31,7 +31,7 @@ thin SwiftUI shell around the core.
   to whichever runs.
 - **Only university websites.** The extension tunnels nothing: one unused address and route
   (TEST-NET-1, 192.0.2.1 and 192.0.2.2), no DNS settings, and the core's proxy rule
-  (`NEProxySettings`, `http://127.0.0.1:1081/proxy.pac?v=<hash of the websites>`). Safari and
+  (`NEProxySettings`, `http://127.0.0.1:1081/proxy.pac?v=<hash of the rule>`). Safari and
   other browsers send the listed websites to the core's SOCKS port, the core opens the tunnel on
   demand, everything else stays as it is. A changed website list re-applies the settings with a
   new `?v=` (at once when changed in the app, within 30 s when changed on another device).

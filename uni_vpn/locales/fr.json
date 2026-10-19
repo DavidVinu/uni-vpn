@@ -265,6 +265,6 @@
   "phone.uni.hku-students.mfa.3": "Passez à la page suivante et saisissez-y le code de test affiché ici.",
   "phone.uni.ugr.mfa.1": "Ouvrez la {portal} et connectez-vous. Choisissez « Doble Factor Autenticación para Servicios TIC UGR » puis touchez « Generar nuevo token ».",
   "phone.uni.ugr.mfa.2": "Scannez le code QR affiché, ou copiez la ligne qui commence par otpauth://, et collez-la ci-dessous. Ajoutez-le aussi à votre générateur de codes.",
-  "phone.uni.w-hs.mfa.1": "Ouvrez la {portal} et connectez-vous sans @w-hs.de. La page ne s’ouvre que sur le réseau de l’université. Si vous avez déjà un jeton, saisissez un code qu’il affiche. Touchez « Token ausrollen », puis à nouveau « Token ausrollen » en bas (pas « Neuen Token ausrollen »).",
+  "phone.uni.w-hs.mfa.1": "Ouvrez la {portal} et connectez-vous sans @w-hs.de. La page ne s’ouvre que sur le réseau de l’université, ou via Uni VPN une fois celui-ci configuré. Si vous avez déjà un jeton, saisissez un code qu’il affiche. Touchez « Token ausrollen », puis à nouveau « Token ausrollen » en bas (pas « Neuen Token ausrollen »).",
   "phone.uni.w-hs.mfa.2": "Scannez le code QR affiché, ou copiez la ligne qui commence par otpauth://, et collez-la ci-dessous. Ajoutez-le aussi à votre générateur de codes."
 }

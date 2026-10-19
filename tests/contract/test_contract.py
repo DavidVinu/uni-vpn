@@ -270,9 +270,9 @@ class ContractTest(unittest.TestCase):
         code, headers, payload = self.request("GET", "/proxy.pac")
         self.assertEqual(code, 200)
         self.assertIn("application/x-ns-proxy-autoconfig", headers["Content-Type"])
-        # Once set up, Heidelberg's security page goes through Uni VPN too (it opens only there).
-        self.assertEqual(payload.decode(), pac.build_pac(status["domains"] + ["mfa.uni-heidelberg.de"],
-                                                         self.socks_port))
+        # Once set up, Heidelberg's security page goes via Uni VPN too, or directly when it refuses.
+        self.assertEqual(payload.decode(), pac.build_pac(status["domains"], self.socks_port,
+                                                         ["mfa.uni-heidelberg.de"]))
 
         code, payload = self.post("/api/domains", {"text": "Example.org\n*.uni-heidelberg.de # all\n\nexample.org"})
         self.assertEqual(code, 200)

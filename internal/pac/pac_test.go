@@ -14,7 +14,8 @@ import (
 
 func TestDefaults(t *testing.T) {
 	want := []string{"sogo.uni-heidelberg.de", "elearning-med.uni-heidelberg.de", "cip.dmed.uni-heidelberg.de",
-		"heico.uni-heidelberg.de", "moodle.uni-heidelberg.de", "yoki.urz.uni-heidelberg.de", "m365.urz.uni-heidelberg.de"}
+		"heico.uni-heidelberg.de", "moodle.uni-heidelberg.de", "yoki.urz.uni-heidelberg.de", "m365.urz.uni-heidelberg.de",
+		"lsf.uni-heidelberg.de", "telefonbuch.uni-heidelberg.de", "heibot-it.urz.uni-heidelberg.de"}
 	if !reflect.DeepEqual(DefaultDomains, want) {
 		t.Fatal(DefaultDomains)
 	}
@@ -147,6 +148,34 @@ console.log(JSON.stringify(cases.map(h => FindProxyForURL("https://" + h + "/", 
 		t.Fatal(err)
 	}
 	want := []string{"SOCKS5 127.0.0.1:1080", "SOCKS5 127.0.0.1:1080", "SOCKS5 127.0.0.1:1080", "DIRECT", "DIRECT", "DIRECT"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatal(got)
+	}
+}
+
+// A campus-only portal goes via Uni VPN or, when it refuses, directly; the listed websites only
+// via Uni VPN.
+func TestPACOrDirectEvaluates(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node missing")
+	}
+	if BuildPACOrDirect([]string{"a.de"}, nil, 1080) != BuildPAC([]string{"a.de"}, 1080) {
+		t.Fatal("not the same rule without hosts")
+	}
+	script := BuildPACOrDirect([]string{"sogo.uni-heidelberg.de"}, []string{"mfa.za.w-hs.de"}, 1080) + `
+const cases = ["mfa.za.w-hs.de", "MFA.za.w-hs.de.", "za.w-hs.de", "sogo.uni-heidelberg.de", "ifconfig.me"];
+console.log(JSON.stringify(cases.map(h => FindProxyForURL("https://" + h + "/", h))));
+`
+	out, err := exec.Command(node, "-e", script).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"SOCKS5 127.0.0.1:1080; DIRECT", "SOCKS5 127.0.0.1:1080; DIRECT", "DIRECT", "SOCKS5 127.0.0.1:1080", "DIRECT"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatal(got)
 	}

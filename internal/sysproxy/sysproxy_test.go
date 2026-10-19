@@ -148,6 +148,36 @@ func TestLinuxRefreshBumpsURLVersionSoBrowsersRefetch(t *testing.T) {
 	}
 }
 
+// Two changes within a second (a sync join: the account, then the websites) each give a new
+// address; the browsers read the rule again only when it changes.
+func TestRefreshTwiceInASecondChangesTheAddressTwice(t *testing.T) {
+	now := func() time.Time { return time.Unix(1700000000, 0) }
+	reg := &registry{url: "http://127.0.0.1:1081/proxy.pac?v=1700000000"}
+	s := windowsSystem(reg)
+	s.Now = now
+	s.Refresh(1081)
+	if reg.url != "http://127.0.0.1:1081/proxy.pac?v=1700000001" {
+		t.Fatal(reg.url)
+	}
+	r := &runner{answers: gsettings("auto", "http://127.0.0.1:1081/proxy.pac?v=1700000000")}
+	g := gnome(r.run)
+	g.Now = now
+	g.Refresh(1081)
+	if !r.called("gsettings", "set", "org.gnome.system.proxy", "autoconfig-url", "http://127.0.0.1:1081/proxy.pac?v=1700000001") {
+		t.Fatal(r.calls)
+	}
+	r = &runner{answers: append([]answer{
+		{"/usr/bin/kreadconfig6 --file kioslaverc --group Proxy Settings --key ProxyType", 0, "2\n"},
+		{"/usr/bin/kreadconfig6 --file kioslaverc --group Proxy Settings --key Proxy Config Script", 0, "http://127.0.0.1:1081/proxy.pac?v=1700000000\n"},
+	}, kdeAnswers()...)}
+	k := kde(r)
+	k.Now = now
+	k.Refresh(1081)
+	if !r.called("/usr/bin/kwriteconfig6", "--file", "kioslaverc", "--group", "Proxy Settings", "--key", "Proxy Config Script", "http://127.0.0.1:1081/proxy.pac?v=1700000001") {
+		t.Fatal(r.calls)
+	}
+}
+
 func TestLinuxRefreshLeavesAForeignSettingAlone(t *testing.T) {
 	for _, c := range [][2]string{{"auto", "http://corp/wpad.dat"}, {"manual", "http://127.0.0.1:1081/proxy.pac"}, {"none", ""}} {
 		r := &runner{answers: gsettings(c[0], c[1])}

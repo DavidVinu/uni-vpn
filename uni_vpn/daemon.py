@@ -370,21 +370,20 @@ class Daemon:
         await self.request_connect()
 
     def pac(self) -> str:
-        return pac.build_pac(self.rule_domains(), self.cfg.socks_port)
-
-    def rule_domains(self) -> list[str]:
-        """The websites the proxy rule sends through Uni VPN: the list, plus the security page of
-        a university in VPN_ONLY_PORTALS once set up (as the Go core does)."""
         domains = pac.read_domains(self.domains_path, self.cfg.default_domains)
+        portal = self.portal_host(domains)
+        return pac.build_pac(domains, self.cfg.socks_port, [portal] if portal else [])
+
+    def portal_host(self, domains: list[str]) -> str:
+        """The security page of a university in VPN_ONLY_PORTALS once set up, "" for none: via
+        Uni VPN or, when it refuses, directly (as the Go core does)."""
         if self.needs_setup or self.config_error or self.cfg.university not in VPN_ONLY_PORTALS:
-            return domains
+            return ""
         try:
             host = pac.normalize_host(urllib.parse.urlsplit(self.cfg.mfa_portal_url or "").hostname)
         except ValueError:
-            return domains
-        if host and not pac.matches(host, domains):
-            domains.append(host)
-        return domains
+            return ""
+        return "" if not host or pac.matches(host, domains) else host
 
     async def set_domains(self, text: str) -> list[str]:
         domains, errors = pac.parse_domain_list(text)

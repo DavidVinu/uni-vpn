@@ -69,7 +69,7 @@ func TestSavedListGetsANewDefaultWebsiteOnce(t *testing.T) {
 	}
 	d := h.start(nil, firstStart)
 	want := []string{"sogo.uni-heidelberg.de", "example.org", "moodle.uni-heidelberg.de", "yoki.urz.uni-heidelberg.de",
-		"m365.urz.uni-heidelberg.de"}
+		"m365.urz.uni-heidelberg.de", "lsf.uni-heidelberg.de", "telefonbuch.uni-heidelberg.de", "heibot-it.urz.uni-heidelberg.de"}
 	if got := websites(t, h); !slices.Equal(got, want) {
 		t.Fatal(got)
 	}
@@ -126,7 +126,8 @@ func TestNewDefaultWebsiteTheGroupKnowsIsNotAdded(t *testing.T) {
 				t.Fatal(err)
 			}
 			h.start(syncOptions("http://127.0.0.1:9", dir, nil), firstStart)
-			want := []string{"sogo.uni-heidelberg.de", "yoki.urz.uni-heidelberg.de", "m365.urz.uni-heidelberg.de"}
+			want := []string{"sogo.uni-heidelberg.de", "yoki.urz.uni-heidelberg.de", "m365.urz.uni-heidelberg.de",
+				"lsf.uni-heidelberg.de", "telefonbuch.uni-heidelberg.de", "heibot-it.urz.uni-heidelberg.de"}
 			if got := websites(t, h); !slices.Equal(got, want) {
 				t.Fatal(got)
 			}
@@ -202,7 +203,9 @@ func TestVPNOnlyPortalGoesThroughOnceSetUp(t *testing.T) {
 	if status, data := h.postSetup(`{"user": "ab123", "password": "pw", "secret": "GEZDGNBVGY3TQOJQ", "university": "heidelberg"}`); status != 200 {
 		t.Fatal(status, data)
 	}
-	if got := rule(); strings.Count(got, `"mfa.uni-heidelberg.de"`) != 1 {
+	// Directly when Uni VPN refuses (a code no longer accepted, Cisco connected): on campus.
+	want := pac.BuildPACOrDirect(pac.DefaultDomains, []string{"mfa.uni-heidelberg.de"}, h.cfg.SocksPort)
+	if got := rule(); got != want {
 		t.Fatal(got)
 	}
 	h.waitRefreshed([]int{h.cfg.HTTPPort})

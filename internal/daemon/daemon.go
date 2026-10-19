@@ -998,31 +998,49 @@ func (d *Daemon) secretsChanged() {
 func (d *Daemon) PAC() (string, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	domains, err := d.ruleDomainsLocked()
+	domains, err := pac.ReadDomains(d.opts.DomainsPath, d.cfg.DefaultDomains)
 	if err != nil {
 		return "", err
 	}
-	return pac.BuildPAC(domains, d.cfg.SocksPort), nil
+	var portal []string
+	if host := d.portalHostLocked(domains); host != "" {
+		portal = []string{host}
+	}
+	return pac.BuildPACOrDirect(domains, portal, d.cfg.SocksPort), nil
 }
 
 // vpnOnlyPortals: universities whose MFA portal opens only on the university network or over
 // the VPN (Heidelberg's URZ, W-HS). Once the device is set up, the rule sends it through Uni VPN,
-// so a new phone's code generator can be added from home. Not before: the listed websites wait
-// for the setup then, and the guide's way by hand opens the portal on campus.
+// so a new phone's code generator can be added from home, and directly when Uni VPN refuses (a
+// code no longer accepted, Cisco connected): the guide then sends the user to the portal, which
+// opens on campus. Not before the setup: the listed websites wait for it.
 var vpnOnlyPortals = map[string]bool{"heidelberg": true, "w-hs": true}
 
 // ruleDomainsLocked: the websites the proxy rule sends through Uni VPN.
 func (d *Daemon) ruleDomainsLocked() ([]string, error) {
 	domains, err := pac.ReadDomains(d.opts.DomainsPath, d.cfg.DefaultDomains)
-	if err != nil || d.needsSetup || d.configError != "" || !vpnOnlyPortals[d.cfg.University] {
+	if err != nil {
 		return domains, err
 	}
-	if u, err := url.Parse(d.cfg.MFAPortalURL); err == nil {
-		if host := pac.NormalizeHost(u.Hostname()); host != "" && !pac.Matches(host, domains) {
-			domains = append(domains, host)
-		}
+	if host := d.portalHostLocked(domains); host != "" {
+		domains = append(domains, host)
 	}
 	return domains, nil
+}
+
+// portalHostLocked: the host of the vpnOnlyPortals portal the rule adds, "" for none.
+func (d *Daemon) portalHostLocked(domains []string) string {
+	if d.needsSetup || d.configError != "" || !vpnOnlyPortals[d.cfg.University] {
+		return ""
+	}
+	u, err := url.Parse(d.cfg.MFAPortalURL)
+	if err != nil {
+		return ""
+	}
+	if host := pac.NormalizeHost(u.Hostname()); host != "" && !pac.Matches(host, domains) {
+		return host
+	}
+	return ""
 }
 
 // SetDomains saves the website list. Invalid lines are a *httpapi.ValueError.
@@ -1055,7 +1073,8 @@ func (d *Daemon) SetDomains(text string) ([]string, error) {
 // existed. A saved list (domains.txt) keeps the defaults of its day, so each is added to it
 // once, by the first core that knows it.
 var addedDefaults = map[string][]string{
-	"heidelberg": {"moodle.uni-heidelberg.de", "yoki.urz.uni-heidelberg.de", "m365.urz.uni-heidelberg.de"},
+	"heidelberg": {"moodle.uni-heidelberg.de", "yoki.urz.uni-heidelberg.de", "m365.urz.uni-heidelberg.de",
+		"lsf.uni-heidelberg.de", "telefonbuch.uni-heidelberg.de", "heibot-it.urz.uni-heidelberg.de"},
 }
 
 // addedDefaultsName lists the websites of addedDefaults this device dealt with, in the state

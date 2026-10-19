@@ -265,6 +265,6 @@
   "phone.uni.hku-students.mfa.3": "前往下一頁，在那裡輸入這裡顯示的測試碼。",
   "phone.uni.ugr.mfa.1": "開啟{portal}並登入。選擇「Doble Factor Autenticación para Servicios TIC UGR」，然後點按「Generar nuevo token」。",
   "phone.uni.ugr.mfa.2": "掃描顯示的 QR 碼，或複製以 otpauth:// 開頭的那一行，並貼到下方。也把它加入你的驗證碼產生器。",
-  "phone.uni.w-hs.mfa.1": "開啟{portal}，登入時不要加 @w-hs.de。此頁面只能在校園網路內開啟。如果你已經有令牌，請輸入它產生的驗證碼。點按「Token ausrollen」，然後再點按下方的「Token ausrollen」（不要點按「Neuen Token ausrollen」）。",
+  "phone.uni.w-hs.mfa.1": "開啟{portal}，登入時不要加 @w-hs.de。此頁面只能在校園網路內開啟，或在 Uni VPN 設定完成後透過它開啟。如果你已經有令牌，請輸入它產生的驗證碼。點按「Token ausrollen」，然後再點按下方的「Token ausrollen」（不要點按「Neuen Token ausrollen」）。",
   "phone.uni.w-hs.mfa.2": "掃描顯示的 QR 碼，或複製以 otpauth:// 開頭的那一行，並貼到下方。也把它加入你的驗證碼產生器。"
 }

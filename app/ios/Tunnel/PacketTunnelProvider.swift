@@ -62,14 +62,14 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
 
-    /// (Re)applies the settings when the website list changed, so browsers reload the rule.
+    /// (Re)applies the settings when the rule changed, so browsers reload it.
     @MainActor
     private func applyRule(force: Bool) async throws {
-        let status = await API.get("/status.json").json
-        // Without an answer the list is unknown: keep the rule as it is.
-        if status == nil && !force { return }
-        let domains = status?.strings("domains") ?? []
-        let version = Self.hash(domains.joined(separator: ","))
+        let rule = await API.get("/proxy.pac")
+        // Without an answer the rule is unknown: keep it as it is.
+        if !rule.ok && !force { return }
+        // The rule itself: new websites or another university's security page, a new address.
+        let version = Self.hash(rule.ok ? rule.text : "")
         if !force && version == pacVersion { return }
 
         // An address nothing uses (TEST-NET-1) and one route to its neighbour: nothing is
@@ -89,7 +89,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         pacVersion = version
     }
 
-    /// FNV-1a: short, and the same for the same list in every process.
+    /// FNV-1a: short, and the same for the same rule in every process.
     static func hash(_ text: String) -> String {
         var h: UInt32 = 2_166_136_261
         for byte in text.utf8 {

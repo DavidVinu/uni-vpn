@@ -358,6 +358,8 @@ fun LicensesScreen(model: AppModel) {
         }
     }
     var open by rememberSaveable { mutableStateOf<String?>(null) }
+    // The second tap of a double tap on the arrow would leave the list too (App.kt doubleTapGuard).
+    LaunchedEffect(open) { model.screenChanged() }
     // Android's back closes the text first, like the arrow.
     BackHandler(enabled = open != null) { open = null }
     Column(Modifier.fillMaxSize()) {

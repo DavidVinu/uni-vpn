@@ -359,22 +359,29 @@ func (s *System) Refresh(httpPort int) {
 	if s.macOS() {
 		return // networksetup requires admin rights; the user restarts the browser
 	}
-	url := PacURLVersion(httpPort, s.Now().Unix())
+	version := s.Now().Unix()
+	// A new address each time, also for a second change within the same second.
+	fresh := func(now string) string {
+		if url := PacURLVersion(httpPort, version); url != now {
+			return url
+		}
+		return PacURLVersion(httpPort, version+1)
+	}
 	if s.windows() {
 		if now, err := s.WinGet(); err == nil && IsOurs(now, httpPort) {
-			_ = s.WinSet(url)
+			_ = s.WinSet(fresh(now))
 		}
 		return
 	}
 	if mode, _ := s.gsettingsGet("mode"); mode == "auto" {
 		if now, _ := s.gsettingsGet("autoconfig-url"); IsOurs(now, httpPort) {
-			if _, err := s.run("gsettings", "set", Schema, "autoconfig-url", url); err != nil {
+			if _, err := s.run("gsettings", "set", Schema, "autoconfig-url", fresh(now)); err != nil {
 				return
 			}
 		}
 	}
 	if kde := s.kdeGet(); kde != nil && kde.Type == KDEPAC && IsOurs(kde.URL, httpPort) {
-		_ = s.kdeSet(KDEPAC, url, true)
+		_ = s.kdeSet(KDEPAC, fresh(kde.URL), true)
 	}
 }
 

@@ -91,7 +91,7 @@ enum API {
         await call("POST", path, body: body, timeout: timeout)
     }
 
-    /// The proxy rule's address; the version changes with the website list, so browsers load
-    /// the new rule.
+    /// The proxy rule's address; the version changes with the rule, so browsers load the new
+    /// one.
     static func pacURL(version: String) -> URL? { URL(string: "\(base)/proxy.pac?v=\(version)") }
 }

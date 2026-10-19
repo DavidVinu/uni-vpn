@@ -28,6 +28,11 @@ DEFAULT_DOMAINS = [
     # network or over the VPN (URZ).
     "yoki.urz.uni-heidelberg.de",
     "m365.urz.uni-heidelberg.de",
+    # The people, institutions and rooms search and the phone book in the search panel of every
+    # university page, and URZ's IT chatbot: only on the university network or over the VPN.
+    "lsf.uni-heidelberg.de",
+    "telefonbuch.uni-heidelberg.de",
+    "heibot-it.urz.uni-heidelberg.de",
 ]
 _LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
 HOST_RE = re.compile(rf"^(?=.{{1,253}}$){_LABEL}(?:\.{_LABEL})+$")
@@ -65,18 +70,28 @@ def matches(host: str, domains: list[str]) -> bool:
     return any(h == d or h.endswith("." + d) for d in domains)
 
 
-def build_pac(domains: list[str], port: int) -> str:
+def build_pac(domains: list[str], port: int, or_direct: list[str] | tuple[str, ...] = ()) -> str:
+    """or_direct: hosts that go via the port or, when it refuses, directly (as the Go core)."""
+    socks = f"SOCKS5 127.0.0.1:{int(port)}"
+
+    def loop(name: str, result: str) -> list[str]:
+        return [
+            f"  for (var i = 0; i < {name}.length; i++) {{",
+            f"    var d = {name}[i];",
+            '    if (host === d || (host.length > d.length && host.slice(-(d.length + 1)) === "." + d)) {',
+            f'      return "{result}";',
+            "    }",
+            "  }",
+        ]
+
     return "\n".join([
         "function FindProxyForURL(url, host) {",
+        *([f"  var orDirect = {json.dumps(list(or_direct))};"] if or_direct else []),
         f"  var domains = {json.dumps(list(domains))};",
         "  host = host.toLowerCase();",
         '  if (host.charAt(host.length - 1) === ".") host = host.slice(0, -1);',
-        "  for (var i = 0; i < domains.length; i++) {",
-        "    var d = domains[i];",
-        '    if (host === d || (host.length > d.length && host.slice(-(d.length + 1)) === "." + d)) {',
-        f'      return "SOCKS5 127.0.0.1:{int(port)}";',
-        "    }",
-        "  }",
+        *(loop("orDirect", socks + "; DIRECT") if or_direct else []),
+        *loop("domains", socks),
         '  return "DIRECT";',
         "}",
         "",
