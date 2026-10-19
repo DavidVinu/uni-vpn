@@ -21,6 +21,8 @@ type env struct {
 	activity atomic.Int64
 	mu       sync.Mutex
 	target   func(ctx context.Context) (int, bool)
+	direct   []string
+	dialer   func(ctx context.Context, network, address string) (net.Conn, error)
 }
 
 func freePort(t *testing.T) int {
@@ -77,6 +79,17 @@ func setup(t *testing.T) (*env, *syncBuffer) {
 	logs := &syncBuffer{}
 	log := slog.New(slog.NewTextHandler(logs, nil))
 	e.fwd = New("127.0.0.1", freePort(t), e.getTarget, func() { e.activity.Add(1) }, 500*time.Millisecond, log)
+	e.fwd.Direct = e.getDirect
+	real := e.fwd.dialDirect
+	e.fwd.dialDirect = func(ctx context.Context, network, address string) (net.Conn, error) {
+		e.mu.Lock()
+		fn := e.dialer
+		e.mu.Unlock()
+		if fn != nil {
+			return fn(ctx, network, address)
+		}
+		return real(ctx, network, address)
+	}
 	if err := e.fwd.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -88,6 +101,18 @@ func (e *env) setTarget(fn func(ctx context.Context) (int, bool)) {
 	e.mu.Lock()
 	e.target = fn
 	e.mu.Unlock()
+}
+
+func (e *env) setDirect(hosts ...string) {
+	e.mu.Lock()
+	e.direct = hosts
+	e.mu.Unlock()
+}
+
+func (e *env) getDirect() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.direct
 }
 
 func (e *env) getTarget(ctx context.Context) (int, bool) {

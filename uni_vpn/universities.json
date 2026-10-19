@@ -20,7 +20,7 @@
         "Click \"Abschließen\" to finish."
       ],
       "mfa_pictures": ["heidelberg-1.svg", "heidelberg-2.svg", "heidelberg-3.svg", "heidelberg-4.svg", "heidelberg-5.svg", "heidelberg-6.svg"],
-      "default_domains": ["sogo.uni-heidelberg.de", "elearning-med.uni-heidelberg.de", "cip.dmed.uni-heidelberg.de", "heico.uni-heidelberg.de", "moodle.uni-heidelberg.de", "yoki.urz.uni-heidelberg.de", "m365.urz.uni-heidelberg.de"],
+      "default_domains": ["sogo.uni-heidelberg.de", "elearning-med.uni-heidelberg.de", "cip.dmed.uni-heidelberg.de", "heico.uni-heidelberg.de", "moodle.uni-heidelberg.de", "yoki.urz.uni-heidelberg.de", "m365.urz.uni-heidelberg.de", "lsf.uni-heidelberg.de", "telefonbuch.uni-heidelberg.de", "heibot-it.urz.uni-heidelberg.de", "doktoranden.uni-heidelberg.de"],
       "aliases": ["Universitaet Heidelberg", "Ruprecht-Karls-Universitaet", "URZ"],
       "verified": true,
       "notes": "Tested end to end, see docs/e2e.md. The OTP form comes after the password form."
@@ -361,9 +361,10 @@
       "mfa_steps": [
         "Open the {portal} and sign in. Add a sign-in method: the authenticator app, then the option to use a different authenticator app.",
         "Take a screenshot of the QR code ({shot}) and drop or paste it here.{secret}",
-        "Go to the next page and type this code there.{code}"
+        "Go to the next page and type this code there.{code}",
+        "If the page's default sign-in method is a text message or a call, click Change and pick the authenticator app with a code."
       ],
-      "mfa_pictures": ["generic-1.svg", "generic-2.svg", "generic-3.svg"],
+      "mfa_pictures": ["generic-1.svg", "generic-2.svg", "generic-3.svg", "generic-3.svg"],
       "aliases": ["HKU", "香港大學", "香港大学", "港大", "The University of Hong Kong"],
       "notes": "Profile from the university's documentation, not tested. Checked 2026-10-19: after the password the gateway asks for a Microsoft one-time code; the code generator is added as \"a different authenticator app\" in Microsoft's security info. Students: hku-students."
     },
@@ -378,9 +379,10 @@
       "mfa_steps": [
         "Open the {portal} and sign in. Add a sign-in method: the authenticator app, then the option to use a different authenticator app.",
         "Take a screenshot of the QR code ({shot}) and drop or paste it here.{secret}",
-        "Go to the next page and type this code there.{code}"
+        "Go to the next page and type this code there.{code}",
+        "If the page's default sign-in method is a text message or a call, click Change and pick the authenticator app with a code."
       ],
-      "mfa_pictures": ["generic-1.svg", "generic-2.svg", "generic-3.svg"],
+      "mfa_pictures": ["generic-1.svg", "generic-2.svg", "generic-3.svg", "generic-3.svg"],
       "aliases": ["HKU", "香港大學", "香港大学", "港大", "The University of Hong Kong"],
       "notes": "Staff: hku (uid@hku.hk). Steps as hku."
     },

@@ -3,6 +3,7 @@
 package daemon
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -68,7 +69,8 @@ func TestSavedListGetsANewDefaultWebsiteOnce(t *testing.T) {
 	}
 	d := h.start(nil, firstStart)
 	want := []string{"sogo.uni-heidelberg.de", "example.org", "moodle.uni-heidelberg.de", "yoki.urz.uni-heidelberg.de",
-		"m365.urz.uni-heidelberg.de"}
+		"m365.urz.uni-heidelberg.de", "lsf.uni-heidelberg.de", "telefonbuch.uni-heidelberg.de", "heibot-it.urz.uni-heidelberg.de",
+		"doktoranden.uni-heidelberg.de"}
 	if got := websites(t, h); !slices.Equal(got, want) {
 		t.Fatal(got)
 	}
@@ -125,7 +127,9 @@ func TestNewDefaultWebsiteTheGroupKnowsIsNotAdded(t *testing.T) {
 				t.Fatal(err)
 			}
 			h.start(syncOptions("http://127.0.0.1:9", dir, nil), firstStart)
-			want := []string{"sogo.uni-heidelberg.de", "yoki.urz.uni-heidelberg.de", "m365.urz.uni-heidelberg.de"}
+			want := []string{"sogo.uni-heidelberg.de", "yoki.urz.uni-heidelberg.de", "m365.urz.uni-heidelberg.de",
+				"lsf.uni-heidelberg.de", "telefonbuch.uni-heidelberg.de", "heibot-it.urz.uni-heidelberg.de",
+				"doktoranden.uni-heidelberg.de"}
 			if got := websites(t, h); !slices.Equal(got, want) {
 				t.Fatal(got)
 			}
@@ -179,5 +183,72 @@ func TestListWithoutSetupWaitsForIt(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(h.tokenDir, addedDefaultsName)); err == nil {
 		t.Fatal("marked done")
+	}
+}
+
+// Heidelberg's portal for code generators opens only on the university network or over the
+// VPN: once the device is set up, the rule sends it through Uni VPN, and the browsers are told.
+// Not before the setup (the listed websites wait for it), and not in the user's website list.
+func TestVPNOnlyPortalGoesThroughOnceSetUp(t *testing.T) {
+	h := newHarness(t)
+	h.startSetup()
+	rule := func() string {
+		r := h.http("GET", "/proxy.pac", nil, "")
+		if r.status != 200 {
+			t.Fatal(r.status)
+		}
+		return string(r.body)
+	}
+	if got := rule(); strings.Contains(got, "mfa.uni-heidelberg.de") {
+		t.Fatal("listed before the setup:", got)
+	}
+	if status, data := h.postSetup(`{"user": "ab123", "password": "pw", "secret": "GEZDGNBVGY3TQOJQ", "university": "heidelberg"}`); status != 200 {
+		t.Fatal(status, data)
+	}
+	// Directly when Uni VPN refuses (a code no longer accepted, Cisco connected): on campus.
+	want := pac.BuildPACOrDirect(pac.DefaultDomains, []string{"mfa.uni-heidelberg.de"}, h.cfg.SocksPort)
+	if got := rule(); got != want {
+		t.Fatal(got)
+	}
+	h.waitRefreshed([]int{h.cfg.HTTPPort})
+	if data := h.http("GET", "/status.json", nil, "").json(t); strings.Contains(fmt.Sprint(data["domains"]), "mfa.") {
+		t.Fatal(data["domains"])
+	}
+}
+
+// Refused, the core itself connects the browsers to the security page: some ignore the
+// rule's "; DIRECT".
+func TestVPNOnlyPortalReachedDirectlyWhenRefused(t *testing.T) {
+	h := newHarness(t)
+	d, _ := h.startSetup()
+	if hosts := d.forwarder.Direct(); len(hosts) != 0 {
+		t.Fatal(hosts)
+	}
+	if status, data := h.postSetup(`{"user": "ab123", "password": "pw", "secret": "GEZDGNBVGY3TQOJQ", "university": "heidelberg"}`); status != 200 {
+		t.Fatal(status, data)
+	}
+	if hosts := d.forwarder.Direct(); !slices.Equal(hosts, []string{"mfa.uni-heidelberg.de"}) {
+		t.Fatal(hosts)
+	}
+}
+
+// A saved list that already covers the portal (uni-heidelberg.de): the list stays as it is, and
+// the portal alone still goes directly when Uni VPN refuses.
+func TestVPNOnlyPortalCoveredByTheSavedList(t *testing.T) {
+	h := newHarness(t)
+	if err := pac.WriteDomains(h.domainsPath, []string{"uni-heidelberg.de"}); err != nil {
+		t.Fatal(err)
+	}
+	h.startSetup()
+	if status, data := h.postSetup(`{"user": "ab123", "password": "pw", "secret": "GEZDGNBVGY3TQOJQ", "university": "heidelberg"}`); status != 200 {
+		t.Fatal(status, data)
+	}
+	want := pac.BuildPACOrDirect([]string{"uni-heidelberg.de"}, []string{"mfa.uni-heidelberg.de"}, h.cfg.SocksPort)
+	if r := h.http("GET", "/proxy.pac", nil, ""); string(r.body) != want {
+		t.Fatal(string(r.body))
+	}
+	h.waitRefreshed([]int{h.cfg.HTTPPort})
+	if list, err := pac.ReadDomains(h.domainsPath, nil); err != nil || !slices.Equal(list, []string{"uni-heidelberg.de"}) {
+		t.Fatal(list, err)
 	}
 }

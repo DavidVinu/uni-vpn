@@ -19,6 +19,7 @@ import (
 	"math"
 	"math/rand/v2"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -299,7 +300,7 @@ func New(cfg *config.Config, log *slog.Logger, opts Options) *Daemon {
 	if opts.ProxyRefresh == nil {
 		opts.ProxyRefresh = sysproxy.Refresh
 		if platform.IsAndroid || platform.IsIOS {
-			// The app's VPN carries the PAC address and notices new websites in status.json.
+			// The app's VPN carries the PAC address and notices a new rule in GET /proxy.pac.
 			opts.ProxyRefresh = func(int) {}
 		}
 	}
@@ -358,6 +359,7 @@ func New(cfg *config.Config, log *slog.Logger, opts Options) *Daemon {
 	d.state, d.message, d.since = Idle, messages.NotConnected, d.wall()
 	d.lastActivity = d.mono()
 	d.forwarder = forwarder.New("127.0.0.1", cfg.SocksPort, d.acquire, d.noteActivity, seconds(cfg.HalfcloseGrace), log)
+	d.forwarder.Direct = d.directHosts
 	d.closeAll = d.forwarder.CloseAll
 	if opts.NeedsSetup {
 		d.message = messages.SetupNeeded
@@ -906,10 +908,8 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 		}
 	}
 	d.mu.Lock()
-	websites := d.cfg.DefaultDomains
+	before, _ := d.ruleLocked()
 	config.CopyProfile(d.cfg, &profile)
-	// Another university's websites (no list of the user's own): a new proxy rule.
-	newRule := !slices.Equal(websites, d.cfg.DefaultDomains)
 	port := d.cfg.HTTPPort
 	d.switching = false
 	d.accountGen++
@@ -919,6 +919,9 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 	d.logf(slog.LevelInfo, "Setup completed for %s (%s)", user, profile.UniversityName)
 	d.needsSetup = false
 	d.configError = ""
+	// Another university's websites (no list of the user's own), or its portal: a new rule.
+	after, _ := d.ruleLocked()
+	newRule := before != after
 	if once {
 		d.startEnrollLocked(code, profile.MFAPortalURL)
 	}
@@ -996,11 +999,51 @@ func (d *Daemon) secretsChanged() {
 func (d *Daemon) PAC() (string, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	return d.ruleLocked()
+}
+
+// vpnOnlyPortals: universities whose MFA portal opens only on the university network or over
+// the VPN (Heidelberg's URZ, W-HS). Once the device is set up, the rule sends it through Uni VPN,
+// so a new phone's code generator can be added from home, and directly when Uni VPN refuses (a
+// code no longer accepted, Cisco connected): the guide then sends the user to the portal, which
+// opens on campus. Not before the setup: the listed websites wait for it.
+var vpnOnlyPortals = map[string]bool{"heidelberg": true, "w-hs": true}
+
+// ruleLocked is the proxy rule. The portal comes first, also when the list covers it
+// (uni-heidelberg.de, the help's example): only it goes directly when Uni VPN refuses.
+func (d *Daemon) ruleLocked() (string, error) {
 	domains, err := pac.ReadDomains(d.opts.DomainsPath, d.cfg.DefaultDomains)
 	if err != nil {
 		return "", err
 	}
-	return pac.BuildPAC(domains, d.cfg.SocksPort), nil
+	var portal []string
+	if host := d.portalHostLocked(); host != "" {
+		portal = []string{host}
+	}
+	return pac.BuildPACOrDirect(domains, portal, d.cfg.SocksPort), nil
+}
+
+// directHosts: what a browser still reaches when Uni VPN refuses, as the rule's "; DIRECT"
+// says. The core connects it itself, for browsers that ignore that.
+func (d *Daemon) directHosts() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if host := d.portalHostLocked(); host != "" {
+		return []string{host}
+	}
+	return nil
+}
+
+// portalHostLocked: the host of the vpnOnlyPortals portal the rule adds, "" for none.
+func (d *Daemon) portalHostLocked() string {
+	if d.needsSetup || d.configError != "" || !vpnOnlyPortals[d.cfg.University] {
+		return ""
+	}
+	u, err := url.Parse(d.cfg.MFAPortalURL)
+	if err != nil {
+		return ""
+	}
+	return pac.NormalizeHost(u.Hostname())
 }
 
 // SetDomains saves the website list. Invalid lines are a *httpapi.ValueError.
@@ -1033,7 +1076,9 @@ func (d *Daemon) SetDomains(text string) ([]string, error) {
 // existed. A saved list (domains.txt) keeps the defaults of its day, so each is added to it
 // once, by the first core that knows it.
 var addedDefaults = map[string][]string{
-	"heidelberg": {"moodle.uni-heidelberg.de", "yoki.urz.uni-heidelberg.de", "m365.urz.uni-heidelberg.de"},
+	"heidelberg": {"moodle.uni-heidelberg.de", "yoki.urz.uni-heidelberg.de", "m365.urz.uni-heidelberg.de",
+		"lsf.uni-heidelberg.de", "telefonbuch.uni-heidelberg.de", "heibot-it.urz.uni-heidelberg.de",
+		"doktoranden.uni-heidelberg.de"},
 }
 
 // addedDefaultsName lists the websites of addedDefaults this device dealt with, in the state

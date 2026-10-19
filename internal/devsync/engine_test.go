@@ -2659,3 +2659,37 @@ func TestOwnChangeAfterClockSetBackStays(t *testing.T) {
 		t.Errorf("password the user just typed on this device was put back to %s", got)
 	}
 }
+
+// The later change wins, also when the group already has its value: the laptop adds a website
+// after the desktop removed it offline, while the group still lists it from the desktop's
+// addition before.
+func TestLaterChangeToTheGroupsValueWins(t *testing.T) {
+	ctx := context.Background()
+	_, url := startRelay(t)
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	laptop := newDevice(t, url, "Laptop", setUpLaptop(), c)
+	desktop := newDevice(t, url, "Desktop", newLocal(false, nil), c)
+	pair(t, ctx, laptop, desktop)
+	if err := desktop.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	desktop.local.setDomains("sogo.uni-heidelberg.de", "heico.uni-heidelberg.de", "example.org")
+	desktop.Notify()
+	if err := desktop.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	desktop.local.setDomains("sogo.uni-heidelberg.de", "heico.uni-heidelberg.de") // offline
+	desktop.Notify()
+	laptop.local.setDomains("sogo.uni-heidelberg.de", "heico.uni-heidelberg.de", "example.org")
+	laptop.Notify()
+	for _, d := range []device{laptop, desktop, laptop} {
+		if err := d.Sync(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, d := range []device{laptop, desktop} {
+		if got := d.local.getDomains(); !slices.Contains(got, "example.org") {
+			t.Fatalf("%s: %v, though the laptop's addition was the later change", d.opts.Name, got)
+		}
+	}
+}

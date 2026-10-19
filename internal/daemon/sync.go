@@ -182,7 +182,8 @@ func (l syncLocal) Apply(ctx context.Context, all map[string]devsync.Entry, keys
 		return s
 	}
 	secrets := []string{devsync.KeyAccount, devsync.KeyPassword, devsync.KeyTOTP}
-	if changed(devsync.KeyAccount) || !l.SetupDone() {
+	wasSetUp := l.SetupDone()
+	if changed(devsync.KeyAccount) || !wasSetUp {
 		if err := l.applyAccount(all, text(devsync.KeyPassword), text(devsync.KeyTOTP)); err != nil {
 			fail(err, secrets...)
 			if !l.SetupDone() {
@@ -251,7 +252,9 @@ func (l syncLocal) Apply(ctx context.Context, all map[string]devsync.Entry, keys
 			fail(devsync.ErrNotKnown, key)
 		}
 	}
-	if len(domainKeys) > 0 {
+	// Set up just now: its empty snapshot said nothing about websites, the group's list it is
+	// (also an empty one).
+	if len(domainKeys) > 0 || !wasSetUp && failed[devsync.KeyAccount] == nil && l.SetupDone() {
 		if err := l.applyDomains(all); err != nil {
 			fail(err, domainKeys...)
 		}

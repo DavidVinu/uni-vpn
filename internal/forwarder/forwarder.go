@@ -1,9 +1,11 @@
 // Package forwarder is the SOCKS passthrough: it accepts browser connections and passes the
-// bytes on to ocproxy. It mirrors uni_vpn/forwarder.py.
+// bytes on to ocproxy. It mirrors uni_vpn/forwarder.py, apart from Direct.
 package forwarder
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +15,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/DavidVinu/uni-vpn/internal/pac"
 )
 
 // TargetFunc is called for each browser connection and returns the ocproxy port, or
@@ -28,6 +32,11 @@ const (
 	// socksVersion starts every SOCKS5 greeting, the only SOCKS that ocproxy and
 	// internal/socks speak (the PAC file says SOCKS5).
 	socksVersion = 5
+	// directWait: connecting to a host that Direct names.
+	directWait = 15 * time.Second
+	// methodsWait: the rest of the greeting, which browsers send in one piece with the
+	// version. Short: other refused connections close at once, as before.
+	methodsWait = 50 * time.Millisecond
 )
 
 // Forwarder accepts on Host:Port and forwards to 127.0.0.1:<target>.
@@ -36,7 +45,12 @@ type Forwarder struct {
 	Host string
 	Port int
 
+	// Direct names the hosts a refused connection still reaches directly (nil: none). Set
+	// it before Start.
+	Direct func() []string
+
 	getTarget      TargetFunc
+	dialDirect     func(ctx context.Context, network, address string) (net.Conn, error)
 	onActivity     func()
 	halfcloseGrace time.Duration
 	log            *slog.Logger
@@ -65,7 +79,7 @@ func New(host string, port int, getTarget TargetFunc, onActivity func(), halfclo
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Forwarder{Host: host, Port: port, getTarget: getTarget, onActivity: onActivity,
-		halfcloseGrace: halfcloseGrace, log: log}
+		halfcloseGrace: halfcloseGrace, log: log, dialDirect: (&net.Dialer{Timeout: directWait}).DialContext}
 }
 
 // Active is the number of open browser connections, including those waiting for a target.
@@ -213,17 +227,17 @@ func (f *Forwarder) handle(client net.Conn) {
 	}
 	f.active.Add(1)
 	w := &waiter{done: make(chan struct{})}
+	port, ok, cancelled := f.target(w)
+	if !ok {
+		f.active.Add(-1) // a direct connection is no demand for the VPN
+		close(w.done)
+		if !cancelled && !f.direct(client) {
+			f.rejected.Add(1)
+		}
+		return
+	}
 	defer close(w.done)
 	defer f.active.Add(-1)
-
-	port, ok, cancelled := f.target(w)
-	if cancelled {
-		return
-	}
-	if !ok {
-		f.rejected.Add(1)
-		return
-	}
 	var d net.Dialer
 	upstream, err := d.DialContext(f.ctx, "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
 	if err != nil {
@@ -233,10 +247,95 @@ func (f *Forwarder) handle(client net.Conn) {
 	}
 	f.track(upstream)
 	defer f.untrack(upstream)
+	f.splice(client, upstream, &f.bytesOut, &f.bytesIn, []byte{socksVersion})
+}
 
+// direct serves a refused connection to a host that Direct names: the security page that
+// opens only on campus, which the rule gives as "SOCKS5 ...; DIRECT". The core answers the
+// SOCKS request itself and connects from this device, so the page also opens in browsers
+// that ignore "; DIRECT" (WebKitGTK with libproxy 0.5), and no browser takes Uni VPN for
+// broken. False: refused, the connection is closed.
+func (f *Forwarder) direct(client net.Conn) bool {
+	if f.Direct == nil {
+		return false
+	}
+	hosts := f.Direct()
+	if len(hosts) == 0 {
+		return false
+	}
+	host, port, ok := connectRequest(client)
+	if !ok {
+		return false
+	}
+	if !pac.Matches(host, hosts) {
+		client.Write(socksReply(2)) // not allowed
+		return false
+	}
+	host = pac.NormalizeHost(host)
+	// Like a handler waiting for a target, so that CloseAll and Stop end the dial.
+	w := &waiter{done: make(chan struct{})}
+	ctx, end := f.cancellable(w)
+	upstream, err := f.dialDirect(ctx, "tcp", net.JoinHostPort(host, strconv.Itoa(port)))
+	end()
+	close(w.done)
+	if err != nil {
+		f.log.Info(fmt.Sprintf("%s not reachable directly: %s", host, err))
+		client.Write(socksReply(4)) // host unreachable
+		return true
+	}
+	client.SetReadDeadline(time.Time{})
+	f.track(upstream)
+	defer f.untrack(upstream)
+	if _, err := client.Write(socksReply(0)); err == nil {
+		f.splice(client, upstream, nil, nil, nil)
+	}
+	return true
+}
+
+// connectRequest reads the rest of a SOCKS5 greeting, whose version greets read, accepts
+// "no authentication" and reads a CONNECT to a host name.
+func connectRequest(c net.Conn) (host string, port int, ok bool) {
+	c.SetReadDeadline(time.Now().Add(methodsWait))
+	var n [1]byte
+	if _, err := io.ReadFull(c, n[:]); err != nil {
+		return "", 0, false
+	}
+	methods := make([]byte, n[0])
+	if _, err := io.ReadFull(c, methods); err != nil {
+		return "", 0, false
+	}
+	if bytes.IndexByte(methods, 0) < 0 {
+		c.Write([]byte{socksVersion, 0xFF})
+		return "", 0, false
+	}
+	if _, err := c.Write([]byte{socksVersion, 0}); err != nil {
+		return "", 0, false
+	}
+	c.SetReadDeadline(time.Now().Add(greetWait))
+	var head [5]byte // version, command, reserved, address type, name length
+	if _, err := io.ReadFull(c, head[:]); err != nil || head[0] != socksVersion {
+		return "", 0, false
+	}
+	if head[1] != 1 || head[3] != 3 { // CONNECT to a name: the rule names hosts
+		c.Write(socksReply(2))
+		return "", 0, false
+	}
+	rest := make([]byte, int(head[4])+2)
+	if _, err := io.ReadFull(c, rest); err != nil {
+		return "", 0, false
+	}
+	return string(rest[:head[4]]), int(binary.BigEndian.Uint16(rest[head[4]:])), true
+}
+
+// socksReply is a SOCKS5 reply with code rep and no bound address.
+func socksReply(rep byte) []byte { return []byte{socksVersion, rep, 0, 1, 0, 0, 0, 0, 0, 0} }
+
+// splice copies both ways until both end, or halfcloseGrace after the first has. out and in
+// count the bytes to and from upstream (nil: not counted, and no activity).
+func (f *Forwarder) splice(client, upstream net.Conn, out, in *atomic.Int64, head []byte) {
 	done := make(chan struct{}, 2)
-	go func() { f.pipe(client, upstream, &f.bytesOut, []byte{socksVersion}); done <- struct{}{} }()
-	go func() { f.pipe(upstream, client, &f.bytesIn, nil); done <- struct{}{} }()
+	go func() { f.pipe(client, upstream, out, head); done <- struct{}{} }()
+	go func() { f.pipe(upstream, client, in, nil); done <- struct{}{} }()
 	<-done
 	timer := time.NewTimer(f.halfcloseGrace)
 	defer timer.Stop()
@@ -258,19 +357,25 @@ func greets(c net.Conn) bool {
 	return err == nil && first[0] == socksVersion
 }
 
-// target asks getTarget while the handler counts as waiting for CloseAll.
-func (f *Forwarder) target(w *waiter) (port int, ok, cancelled bool) {
+// cancellable is a context that CloseAll cancels while w counts as waiting; end stops that.
+func (f *Forwarder) cancellable(w *waiter) (ctx context.Context, end func()) {
 	ctx, cancel := context.WithCancel(f.ctx)
-	defer cancel()
 	w.cancel = cancel
 	f.mu.Lock()
 	f.waiting[w] = struct{}{}
 	f.mu.Unlock()
-	defer func() {
+	return ctx, func() {
 		f.mu.Lock()
 		delete(f.waiting, w)
 		f.mu.Unlock()
-	}()
+		cancel()
+	}
+}
+
+// target asks getTarget while the handler counts as waiting for CloseAll.
+func (f *Forwarder) target(w *waiter) (port int, ok, cancelled bool) {
+	ctx, end := f.cancellable(w)
+	defer end()
 	type result struct {
 		port int
 		ok   bool
@@ -297,9 +402,11 @@ func (f *Forwarder) pipe(src, dst net.Conn, counter *atomic.Int64, head []byte) 
 	for {
 		n, err := src.Read(buf[held:])
 		n, held = n+held, 0
-		if n > 0 {
+		if n > 0 && counter != nil {
 			counter.Add(int64(n))
 			f.onActivity()
+		}
+		if n > 0 {
 			if _, werr := dst.Write(buf[:n]); werr != nil {
 				break
 			}

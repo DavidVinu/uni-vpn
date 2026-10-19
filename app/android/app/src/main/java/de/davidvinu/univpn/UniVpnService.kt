@@ -78,7 +78,7 @@ class UniVpnService : VpnService() {
         }
     }
 
-    /** (Re)establishes the VPN when the website list changed, so browsers reload the rule. */
+    /** (Re)establishes the VPN when the rule changed, so browsers reload it. */
     @Synchronized
     private fun applyRule(force: Boolean) {
         if (stopped) return
@@ -97,11 +97,12 @@ class UniVpnService : VpnService() {
             blocking.value = false
             return
         }
-        // Without an answer the list is unknown: keep the rule as it is (the first start still
-        // hands Android the address, which answers once the core listens).
-        if (status == null && !force) return
-        val domains = status?.optJSONArray("domains")?.join(",") ?: ""
-        val version = Integer.toHexString(domains.hashCode())
+        // Without an answer the rule is unknown: keep it as it is (the first start still hands
+        // Android the address, which answers once the core listens).
+        val rule = if (status != null) core.get("/proxy.pac").takeIf { it.ok } else null
+        if (rule == null && !force) return
+        // The rule itself: new websites or another university's security page, a new address.
+        val version = Integer.toHexString((rule?.text ?: "").hashCode())
         if (!force && version == pacVersion && tun != null) return
         val builder = Builder()
             .setSession(getString(R.string.app_name))
@@ -226,6 +227,3 @@ class UniVpnService : VpnService() {
         }
     }
 }
-
-private fun org.json.JSONArray.join(separator: String) =
-    (0 until length()).joinToString(separator) { optString(it) }

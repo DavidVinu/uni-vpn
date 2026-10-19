@@ -152,8 +152,15 @@ in the terminal.
 At Heidelberg, `https://sogo.uni-heidelberg.de` and `https://elearning-med.uni-heidelberg.de`
 now go through the university, along with `cip.dmed.uni-heidelberg.de`, which elearning-med
 embeds for its statistics, the heiCO login at `heico.uni-heidelberg.de`, Moodle at
-`https://moodle.uni-heidelberg.de`, the AI platform YoKI at `https://yoki.urz.uni-heidelberg.de` and
-the Microsoft 365 license portal at `https://m365.urz.uni-heidelberg.de`. Everything else does not.
+`https://moodle.uni-heidelberg.de`, the AI platform YoKI at `https://yoki.urz.uni-heidelberg.de`,
+the Microsoft 365 license portal at `https://m365.urz.uni-heidelberg.de`, the people, institutions
+and rooms search at `https://lsf.uni-heidelberg.de`, the phone book at
+`https://telefonbuch.uni-heidelberg.de`, URZ's IT chatbot at
+`https://heibot-it.urz.uni-heidelberg.de` and heiDOCS, the doctoral candidates' online file, at
+`https://doktoranden.uni-heidelberg.de`. Everything else does not.
+Once Uni VPN is set up, the security page `https://mfa.uni-heidelberg.de` goes through it too
+(W-HS: `https://mfa.za.w-hs.de`), so a new phone's code generator can be added from home. When
+Uni VPN cannot sign in, the page opens directly (on campus, or with the Cisco VPN).
 For other universities the list starts empty. Domains go under Settings, Websites.
 
 Without a desktop, `--university ID` (`-University ID` on Windows) picks the university, for

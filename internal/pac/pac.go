@@ -40,6 +40,14 @@ var DefaultDomains = []string{
 	// network or over the VPN (URZ).
 	"yoki.urz.uni-heidelberg.de",
 	"m365.urz.uni-heidelberg.de",
+	// The people, institutions and rooms search and the phone book ("auf Campusnetz
+	// beschränkt") in the search panel of every university page, and URZ's IT chatbot in every
+	// URZ page's footer: they open only on the university network or over the VPN.
+	"lsf.uni-heidelberg.de",
+	"telefonbuch.uni-heidelberg.de",
+	"heibot-it.urz.uni-heidelberg.de",
+	// heiDOCS, the doctoral candidates' online file: behind the same campus-only proxy as LSF.
+	"doktoranden.uni-heidelberg.de",
 }
 
 const label = `[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?`
@@ -118,22 +126,35 @@ func Matches(host string, domains []string) bool {
 }
 
 // BuildPAC returns the PAC script for domains via SOCKS5 127.0.0.1:port.
-func BuildPAC(domains []string, port int) string {
-	return strings.Join([]string{
-		"function FindProxyForURL(url, host) {",
-		"  var domains = " + jsonList(domains) + ";",
+func BuildPAC(domains []string, port int) string { return BuildPACOrDirect(domains, nil, port) }
+
+// BuildPACOrDirect is BuildPAC plus hosts that go via the port or, when it refuses, directly
+// ("SOCKS5 127.0.0.1:port; DIRECT").
+func BuildPACOrDirect(domains, orDirect []string, port int) string {
+	socks := "SOCKS5 127.0.0.1:" + strconv.Itoa(port)
+	lines := []string{"function FindProxyForURL(url, host) {"}
+	if len(orDirect) > 0 {
+		lines = append(lines, "  var orDirect = "+jsonList(orDirect)+";")
+	}
+	lines = append(lines,
+		"  var domains = "+jsonList(domains)+";",
 		"  host = host.toLowerCase();",
-		`  if (host.charAt(host.length - 1) === ".") host = host.slice(0, -1);`,
-		"  for (var i = 0; i < domains.length; i++) {",
-		"    var d = domains[i];",
-		`    if (host === d || (host.length > d.length && host.slice(-(d.length + 1)) === "." + d)) {`,
-		`      return "SOCKS5 127.0.0.1:` + strconv.Itoa(port) + `";`,
-		"    }",
-		"  }",
-		`  return "DIRECT";`,
-		"}",
-		"",
-	}, "\n")
+		`  if (host.charAt(host.length - 1) === ".") host = host.slice(0, -1);`)
+	loop := func(list, result string) {
+		lines = append(lines,
+			"  for (var i = 0; i < "+list+".length; i++) {",
+			"    var d = "+list+"[i];",
+			`    if (host === d || (host.length > d.length && host.slice(-(d.length + 1)) === "." + d)) {`,
+			`      return "`+result+`";`,
+			"    }",
+			"  }")
+	}
+	if len(orDirect) > 0 {
+		loop("orDirect", socks+"; DIRECT")
+	}
+	loop("domains", socks)
+	lines = append(lines, `  return "DIRECT";`, "}", "")
+	return strings.Join(lines, "\n")
 }
 
 // DomainsPath is domains.txt in the config directory.

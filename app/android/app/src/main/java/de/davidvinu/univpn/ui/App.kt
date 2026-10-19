@@ -89,7 +89,7 @@ fun App(model: AppModel, vpnOn: Boolean, activity: MainActivity) {
     if (model.vpnRefused && model.strings.loaded) {
         DialogShown(model)
         AlertDialog(
-            onDismissRequest = { model.vpnRefused = false },
+            onDismissRequest = { if (!model.justChanged) model.vpnRefused = false },
             text = { Text(model.t("phone.vpn_refused")) },
             dismissButton = { TextButton(onClick = { model.vpnRefused = false }) { Text(model.t("app.back")) } },
             confirmButton = {

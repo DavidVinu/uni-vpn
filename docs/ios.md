@@ -31,7 +31,7 @@ thin SwiftUI shell around the core.
   to whichever runs.
 - **Only university websites.** The extension tunnels nothing: one unused address and route
   (TEST-NET-1, 192.0.2.1 and 192.0.2.2), no DNS settings, and the core's proxy rule
-  (`NEProxySettings`, `http://127.0.0.1:1081/proxy.pac?v=<hash of the websites>`). Safari and
+  (`NEProxySettings`, `http://127.0.0.1:1081/proxy.pac?v=<hash of the rule>`). Safari and
   other browsers send the listed websites to the core's SOCKS port, the core opens the tunnel on
   demand, everything else stays as it is. A changed website list re-applies the settings with a
   new `?v=` (at once when changed in the app, within 30 s when changed on another device).
@@ -153,6 +153,7 @@ and sends it to TestFlight from main.
 Everything that needs a phone and a signed build: the extension starting and taking over the
 core, Safari and other browsers following the proxy rule, connect on demand after a restart and
 a network change, the Control Center button, the camera scanner, a full sign-in with a real
-account and a second factor, the one-code second factor, Duo push, and the memory limit of the
-extension. The simulator tests cover the core, libopenconnect and the gateway, the API token and
-the secrets.
+account and a second factor, the one-code second factor, Duo push, the memory limit of the
+extension, and Safari opening the security page when Uni VPN refuses (the extension connects
+it directly; try a wrong code on campus Wi-Fi, then open `mfa.za.w-hs.de`). The simulator tests
+cover the core, libopenconnect and the gateway, the API token and the secrets.
