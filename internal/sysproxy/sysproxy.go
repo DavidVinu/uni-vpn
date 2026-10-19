@@ -354,11 +354,9 @@ func (s *System) Restore(saved *Snapshot) error {
 }
 
 // Refresh sets a new URL version: GNOME, KDE and Windows announce the change, Chrome and
-// Firefox reload the PAC. Errors are ignored.
+// Firefox reload the PAC. On macOS a new address is the only way: the system keeps the PAC it
+// loaded per address until the user signs out, for Safari too. Errors are ignored.
 func (s *System) Refresh(httpPort int) {
-	if s.macOS() {
-		return // networksetup requires admin rights; the user restarts the browser
-	}
 	version := s.Now().Unix()
 	// A new address each time, also for more changes within one second: past the one set now.
 	fresh := func(now string) string {
@@ -373,6 +371,16 @@ func (s *System) Refresh(httpPort int) {
 	if s.windows() {
 		if now, err := s.WinGet(); err == nil && IsOurs(now, httpPort) {
 			_ = s.WinSet(fresh(now))
+		}
+		return
+	}
+	if s.macOS() {
+		if snap := s.Current(); snap != nil && snap.Mac != nil {
+			for _, svc := range snap.Mac.Services {
+				if svc.Enabled && IsOurs(svc.URL, httpPort) {
+					_ = s.set("networksetup", "-setautoproxyurl", svc.Name, fresh(svc.URL))
+				}
+			}
 		}
 		return
 	}
@@ -394,7 +402,14 @@ func (s *System) Refresh(httpPort int) {
 func (s *System) Unversioned(httpPort int) bool {
 	plain := PacURL(httpPort)
 	if s.macOS() {
-		return false // no refresh there
+		if snap := s.Current(); snap != nil && snap.Mac != nil {
+			for _, svc := range snap.Mac.Services {
+				if svc.Enabled && svc.URL == plain {
+					return true
+				}
+			}
+		}
+		return false
 	}
 	if s.windows() {
 		now, err := s.WinGet()

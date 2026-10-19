@@ -389,10 +389,19 @@ func TestMacStateOKWhenOurURLIsEnabled(t *testing.T) {
 	}
 }
 
-func TestMacRefreshIsNoop(t *testing.T) {
+func TestMacRefreshSetsANewAddressOnlyWhereOurs(t *testing.T) {
 	r := &runner{answers: macAnswers()}
 	mac(r).Refresh(1081)
-	if len(r.calls) != 0 {
+	for _, c := range r.calls {
+		if len(c) > 1 && c[1] == "-setautoproxyurl" {
+			t.Fatal(r.calls)
+		}
+	}
+	r = &runner{answers: append([]answer{{"networksetup -getautoproxyurl Wi-Fi", 0, "URL: http://127.0.0.1:1081/proxy.pac\nEnabled: Yes\n"}}, macAnswers()...)}
+	s := mac(r)
+	s.Now = func() time.Time { return time.Unix(100, 0) }
+	s.Refresh(1081)
+	if !r.called("networksetup", "-setautoproxyurl", "Wi-Fi", "http://127.0.0.1:1081/proxy.pac?v=100") {
 		t.Fatal(r.calls)
 	}
 }
@@ -558,8 +567,14 @@ func TestUnversionedIsThePlainAddressInUse(t *testing.T) {
 			t.Errorf("KDE %s %q: %v", c.typ, c.url, got)
 		}
 	}
-	if mac(&runner{}).Unversioned(1081) {
-		t.Error("macOS")
+	for url, want := range map[string]bool{plain: true, versioned: false} {
+		r := &runner{answers: append([]answer{{"networksetup -getautoproxyurl Wi-Fi", 0, "URL: " + url + "\nEnabled: Yes\n"}}, macAnswers()...)}
+		if got := mac(r).Unversioned(1081); got != want {
+			t.Errorf("macOS %q: %v", url, got)
+		}
+	}
+	if mac(&runner{answers: macAnswers()}).Unversioned(1081) {
+		t.Error("macOS without our rule")
 	}
 }
 
