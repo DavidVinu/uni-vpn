@@ -39,6 +39,7 @@
   "uni.bonn.sign_in": "Deine Uni-ID ohne @uni-bonn.de und ihr Passwort.",
   "uni.hs-flensburg.sign_in": "Dein Benutzername (wie abcd1234) und sein Passwort, nicht deine E-Mail-Adresse.",
   "uni.uni-jena.sign_in": "Dein URZ-Loginkürzel (wie ab12cde) und sein Passwort, nicht deine E-Mail-Adresse.",
+  "uni.w-hs.sign_in": "Dein Benutzername (wie ma12345) ohne @w-hs.de und sein Passwort.",
   "uni.ugr.sign_in": "Deine vollständige UGR-E-Mail-Adresse (name@ugr.es oder name@correo.ugr.es) und ihr Passwort.",
   "setup.enter_user": "Gib deinen Benutzernamen ein, zum Beispiel ab123",
   "setup.enter_password": "Gib dein Passwort ein",

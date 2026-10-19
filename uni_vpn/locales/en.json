@@ -37,6 +37,7 @@
   "uni.bonn.sign_in": "Your Uni-ID without @uni-bonn.de, and its password.",
   "uni.hs-flensburg.sign_in": "Your user name (like abcd1234) and its password, not your email address.",
   "uni.uni-jena.sign_in": "Your URZ login (like ab12cde) and its password, not your email address.",
+  "uni.w-hs.sign_in": "Your user name (like ma12345) without @w-hs.de, and its password.",
   "uni.ugr.sign_in": "Your full UGR email address (name@ugr.es or name@correo.ugr.es) and its password.",
   "setup.enter_user": "Enter your username, for example ab123",
   "setup.enter_password": "Enter your password",
