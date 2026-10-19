@@ -27,15 +27,29 @@
     },
     {
       "id": "ethz",
-      "name": "ETH Zurich",
+      "name": "ETH Zurich (staff)",
       "country": "CH",
       "host": "sslvpn.ethz.ch",
       "authgroup": "staff-net",
       "username_suffix": "@staff-net.ethz.ch",
       "useragent": "AnyConnect",
       "mfa": "totp_field",
+      "mfa_portal_url": "https://www.password.ethz.ch/",
       "aliases": ["ETH Zuerich", "Eidgenoessische Technische Hochschule"],
-      "notes": "Students: authgroup = \"student-net\", username_suffix = \"@student-net.ethz.ch\"."
+      "notes": "Students: ethz-students (authgroup \"student-net\", username_suffix \"@student-net.ethz.ch\"). The second factor is set up at www.password.ethz.ch (\"Automatic OTP Registration\")."
+    },
+    {
+      "id": "ethz-students",
+      "name": "ETH Zurich (students)",
+      "country": "CH",
+      "host": "sslvpn.ethz.ch",
+      "authgroup": "student-net",
+      "username_suffix": "@student-net.ethz.ch",
+      "useragent": "AnyConnect",
+      "mfa": "totp_field",
+      "mfa_portal_url": "https://www.password.ethz.ch/",
+      "aliases": ["ETH Zuerich", "Eidgenoessische Technische Hochschule"],
+      "notes": "Staff: ethz. The second factor is set up at www.password.ethz.ch (\"Automatic OTP Registration\")."
     },
     {
       "id": "bremen",
@@ -60,14 +74,25 @@
     },
     {
       "id": "marburg",
-      "name": "University of Marburg",
+      "name": "University of Marburg (staff)",
       "country": "DE",
       "host": "vpn.uni-marburg.de",
       "authgroup": "unimr-vpn-staff-Passwort+2FA",
       "mfa": "totp_append",
       "mfa_portal_url": "https://2fa.hrz.uni-marburg.de/",
       "aliases": ["Philipps-Universitaet Marburg"],
-      "notes": "Students: authgroup = \"unimr-vpn-students-Passwort+2FA\". Checked 2026-10-19: app tokens give 8-digit HMAC-SHA512 codes; Google and Microsoft Authenticator cannot make them, the Uni-Marburg app and 2FAS can."
+      "notes": "Students: marburg-students. Checked 2026-10-19: app tokens give 8-digit HMAC-SHA512 codes; Google and Microsoft Authenticator cannot make them, the Uni-Marburg app and 2FAS can."
+    },
+    {
+      "id": "marburg-students",
+      "name": "University of Marburg (students)",
+      "country": "DE",
+      "host": "vpn.uni-marburg.de",
+      "authgroup": "unimr-vpn-students-Passwort+2FA",
+      "mfa": "totp_append",
+      "mfa_portal_url": "https://2fa.hrz.uni-marburg.de/",
+      "aliases": ["Philipps-Universitaet Marburg"],
+      "notes": "Staff: marburg. Checked 2026-10-19: app tokens give 8-digit HMAC-SHA512 codes; Google and Microsoft Authenticator cannot make them, the Uni-Marburg app and 2FAS can."
     },
     {
       "id": "stanford",
@@ -85,17 +110,28 @@
       "host": "vpn.rc.fas.harvard.edu",
       "username_suffix": "@fasrc",
       "mfa": "totp_field",
+      "mfa_portal_url": "https://two-factor.rc.fas.harvard.edu/",
       "aliases": ["Harvard University", "FASRC"]
     },
     {
       "id": "stuttgart",
-      "name": "University of Stuttgart",
+      "name": "University of Stuttgart (staff)",
       "country": "DE",
       "host": "vpn.tik.uni-stuttgart.de",
       "username_suffix": "@uni-stuttgart.de",
       "mfa": "none",
       "aliases": ["Universitaet Stuttgart"],
-      "notes": "Students type the whole name, st123456@stud.uni-stuttgart.de."
+      "notes": "Students: stuttgart-students (st123456@stud.uni-stuttgart.de)."
+    },
+    {
+      "id": "stuttgart-students",
+      "name": "University of Stuttgart (students)",
+      "country": "DE",
+      "host": "vpn.tik.uni-stuttgart.de",
+      "username_suffix": "@stud.uni-stuttgart.de",
+      "mfa": "none",
+      "aliases": ["Universitaet Stuttgart"],
+      "notes": "Staff: stuttgart (ac123456@uni-stuttgart.de)."
     },
     {
       "id": "bonn",
@@ -125,7 +161,7 @@
       "os": "win",
       "mfa": "none",
       "aliases": ["Universitaet Kassel"],
-      "notes": "Needs a Windows client identity; the exact user agent is a guess."
+      "notes": "Needs a Windows client identity; the exact user agent is a guess. Since 2025-09-16 staff confirm each VPN sign-in in the NetIQ Advanced Authentication app (60 s); students are not affected."
     },
     {
       "id": "fu-berlin",
@@ -245,13 +281,23 @@
     },
     {
       "id": "ncsu",
-      "name": "North Carolina State University",
+      "name": "North Carolina State University (faculty and staff)",
       "country": "US",
       "host": "vpn.ncsu.edu",
       "authgroup": "1-Faculty-and-Staff",
       "mfa": "duo_push",
       "aliases": ["NC State"],
-      "notes": "Profile from the university's documentation, not tested. Students: authgroup = \"2-Student\"."
+      "notes": "Profile from the university's documentation, not tested. Students: ncsu-students."
+    },
+    {
+      "id": "ncsu-students",
+      "name": "North Carolina State University (students)",
+      "country": "US",
+      "host": "vpn.ncsu.edu",
+      "authgroup": "2-Student",
+      "mfa": "duo_push",
+      "aliases": ["NC State"],
+      "notes": "Profile from the university's documentation, not tested. Faculty and staff: ncsu."
     },
     {
       "id": "uwaterloo",
@@ -265,13 +311,23 @@
     },
     {
       "id": "uottawa",
-      "name": "University of Ottawa",
+      "name": "University of Ottawa (employees)",
       "country": "CA",
       "host": "uovpn.uottawa.ca",
       "usergroup": "uottawa",
       "mfa": "duo_push",
       "aliases": ["Universite d'Ottawa"],
-      "notes": "Profile from the university's documentation, not tested. Microsoft Authenticator push. Graduate students: usergroup students."
+      "notes": "Profile from the university's documentation, not tested. Microsoft Authenticator push. Graduate students: uottawa-students."
+    },
+    {
+      "id": "uottawa-students",
+      "name": "University of Ottawa (graduate students)",
+      "country": "CA",
+      "host": "uovpn.uottawa.ca",
+      "usergroup": "students",
+      "mfa": "duo_push",
+      "aliases": ["Universite d'Ottawa"],
+      "notes": "Profile from the university's documentation, not tested. Microsoft Authenticator push. Employees: uottawa."
     },
     {
       "id": "carleton",
@@ -284,7 +340,7 @@
     },
     {
       "id": "hku",
-      "name": "University of Hong Kong",
+      "name": "University of Hong Kong (staff)",
       "country": "HK",
       "host": "vpn2fa.hku.hk",
       "username_suffix": "@hku.hk",
@@ -297,7 +353,24 @@
       ],
       "mfa_pictures": ["generic-1.svg", "generic-2.svg", "generic-3.svg"],
       "aliases": ["HKU"],
-      "notes": "Profile from the university's documentation, not tested. Checked 2026-10-19: after the password the gateway asks for a Microsoft one-time code; the code generator is added as \"a different authenticator app\" in Microsoft's security info. Students type uid@connect.hku.hk."
+      "notes": "Profile from the university's documentation, not tested. Checked 2026-10-19: after the password the gateway asks for a Microsoft one-time code; the code generator is added as \"a different authenticator app\" in Microsoft's security info. Students: hku-students."
+    },
+    {
+      "id": "hku-students",
+      "name": "University of Hong Kong (students)",
+      "country": "HK",
+      "host": "vpn2fa.hku.hk",
+      "username_suffix": "@connect.hku.hk",
+      "mfa": "totp_field",
+      "mfa_portal_url": "https://mysignins.microsoft.com/security-info",
+      "mfa_steps": [
+        "Open the {portal} and sign in. Add a sign-in method: the authenticator app, then the option to use a different authenticator app.",
+        "Take a screenshot of the QR code ({shot}) and drop or paste it here.{secret}",
+        "Go to the next page and type this code there.{code}"
+      ],
+      "mfa_pictures": ["generic-1.svg", "generic-2.svg", "generic-3.svg"],
+      "aliases": ["HKU"],
+      "notes": "Staff: hku (uid@hku.hk). Steps as hku."
     },
     {
       "id": "ugr",
@@ -332,7 +405,7 @@
       "authgroup": "HSFL-Studierende",
       "mfa": "none",
       "aliases": ["Hochschule Flensburg"],
-      "notes": "Profile from the university's documentation, not tested. No second factor is mentioned in its documentation. User name without the e-mail domain. Staff: authgroup = \"HSFL-Angehoerige\" (not in the documentation)."
+      "notes": "Profile from the university's documentation, not tested. No second factor is mentioned in its documentation. User name without the e-mail domain. Checked 2026-10-19: every other group (HSFL-Angehoerige, HSFL-Verwaltung, HSFL-WETI, LNSH-Benutzer, ZHB) answers \"Certificate Validation Failure\" without a device certificate, so only students can sign in with uni-vpn."
     },
     {
       "id": "w-hs",
@@ -342,6 +415,11 @@
       "authgroup": "VPN+MFA",
       "mfa": "totp_field",
       "mfa_portal_url": "https://mfa.za.w-hs.de/",
+      "mfa_steps": [
+        "Open the {portal} and sign in without @w-hs.de. Click \"Token ausrollen\" on the left, then \"Token ausrollen\" again below.",
+        "Take a screenshot of the QR code ({shot}) and drop or paste it here. Also scan it with the app on your phone.{secret}"
+      ],
+      "mfa_pictures": ["generic-1.svg", "generic-2.svg"],
       "aliases": ["Westfaelische Hochschule", "Gelsenkirchen"],
       "notes": "Profile from the university's documentation, not tested. Checked 2026-10-19: the gateway lists Sec-Groups (its default), Secure-RZ, VPN+MFA and zAlle; the guide signs in with VPN+MFA and a second password. User name without @w-hs.de. The token page opens only on campus or over the VPN."
     },

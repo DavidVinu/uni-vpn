@@ -169,6 +169,29 @@ func TestUnsupportedLoginMethodsSaySoWithoutNamingAUniversity(t *testing.T) {
 	}
 }
 
+// Real openconnect 9.01 at a gateway whose default group signs in on a web page (pass 24): the
+// form's message, then openconnect's own lines. Not a wrong password.
+func TestSingleSignOnFormIsAWebSignIn(t *testing.T) {
+	for _, lines := range [][]string{
+		{"XML POST enabled", "Please complete the authentication process in the AnyConnect Login window.",
+			"No SSO handler", "Failed to complete authentication"},
+		{"XML POST enabled", "Please complete the authentication process in the browser window.",
+			"Failed to spawn external browser for https://vpn.example.edu/+CSCOE+/saml/sp/login?ctx=1"},
+		{"XML POST enabled", "Please complete the authentication process in the browser window.",
+			"Failed to listen on local port 29786: Address family not supported by protocol",
+			"Failed to complete authentication"},
+		{"XML POST enabled", "No SSO handler", "Failed to complete authentication"}, // a form without a message
+	} {
+		c := NewClassifier("duo_push")
+		for _, line := range lines {
+			c.Feed(line)
+		}
+		if v, _ := c.Verdict(); v != (Verdict{StateAuthFailed, SAMLRequired}) {
+			t.Fatal(lines, v)
+		}
+	}
+}
+
 func TestTunnelClassifierFollowsTheProfile(t *testing.T) {
 	tn := New(Config{LoginName: "u", MFA: "duo_push"}, "openconnect", "/w", nil, "", t.TempDir())
 	if tn.ClassifierMFA() != "duo_push" {

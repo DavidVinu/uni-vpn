@@ -66,6 +66,10 @@ var Markers = []Marker{
 	{"Cisco Secure Desktop", StateAuthFailed, HostScanRequired},
 	{"SAML", StateAuthFailed, SAMLRequired},
 	{"external browser", StateAuthFailed, SAMLRequired},
+	// Cisco's web sign-in form (both browser modes) and openconnect without a browser for it;
+	// "Failed to complete authentication" follows.
+	{"Please complete the authentication process", StateAuthFailed, SAMLRequired},
+	{"No SSO handler", StateAuthFailed, SAMLRequired},
 	// Gateway or network trouble: openconnect prints these before its closing
 	// "Failed to complete authentication"; the password was never checked.
 	{"result from server", StateError, messages.ConnectFailed.Text}, // "Unexpected 503 result from server"

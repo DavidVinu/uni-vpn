@@ -17,9 +17,11 @@ class RegistryTests(unittest.TestCase):
     def test_shipped_registry_loads(self):
         profiles = unis.load()
         self.assertEqual(set(profiles), {
-            "heidelberg", "ethz", "bremen", "muenster", "marburg", "stanford", "harvard-fasrc", "stuttgart",
+            "heidelberg", "ethz", "ethz-students", "bremen", "muenster", "marburg", "marburg-students", "stanford",
+            "harvard-fasrc", "stuttgart", "stuttgart-students",
             "bonn", "mannheim", "kassel", "fu-berlin", "oxford", "tamu", "ucf", "osu", "utexas",
-            "asu", "ufl", "umn", "uiuc", "uga", "unc", "ncsu", "uwaterloo", "uottawa", "carleton", "hku", "ugr", "uni-halle",
+            "asu", "ufl", "umn", "uiuc", "uga", "unc", "ncsu", "ncsu-students", "uwaterloo", "uottawa",
+            "uottawa-students", "carleton", "hku", "hku-students", "ugr", "uni-halle",
             "hs-flensburg", "w-hs", "hs-offenburg", "uni-hamburg", "uni-jena", "uni-weimar", "th-koeln", "thu",
             "tu-braunschweig"})
 
@@ -59,6 +61,15 @@ class RegistryTests(unittest.TestCase):
             self.assertEqual(unis.get(uni_id).authgroup, group)
         self.assertEqual(unis.get("hku").mfa, "totp_field")
         self.assertEqual(unis.get("hku").username_suffix, "@hku.hk")
+        # Students sign in with their own group or user name ending.
+        for uni_id, field, value in [("ethz-students", "authgroup", "student-net"),
+                                     ("ethz-students", "username_suffix", "@student-net.ethz.ch"),
+                                     ("marburg-students", "authgroup", "unimr-vpn-students-Passwort+2FA"),
+                                     ("stuttgart-students", "username_suffix", "@stud.uni-stuttgart.de"),
+                                     ("ncsu-students", "authgroup", "2-Student"),
+                                     ("uottawa-students", "usergroup", "students"),
+                                     ("hku-students", "username_suffix", "@connect.hku.hk")]:
+            self.assertEqual(getattr(unis.get(uni_id), field), value, uni_id)
         for uni_id, suffix in [("uni-jena", "@uni-jena.de"), ("uni-weimar", "@uni-weimar.de"), ("thu", "@thu.de")]:
             self.assertEqual(unis.get(uni_id).username_suffix, suffix)
         self.assertEqual(unis.get("tu-braunschweig").host, "vpngate.tu-braunschweig.de")
@@ -81,8 +92,9 @@ class RegistryTests(unittest.TestCase):
         json.dumps(entries)  # served as JSON as it is
 
     def test_search_ignores_case_and_umlauts_and_prefers_an_exact_id(self):
-        self.assertEqual([p.id for p in unis.search("Zürich")], ["ethz"])
-        self.assertEqual([p.id for p in unis.search("zuerich")], ["ethz"])
+        self.assertEqual([p.id for p in unis.search("Zürich")], ["ethz", "ethz-students"])
+        self.assertEqual([p.id for p in unis.search("zuerich")], ["ethz", "ethz-students"])
+        self.assertEqual([p.id for p in unis.search("ethz")], ["ethz"])
         self.assertEqual([p.id for p in unis.search("MÜNSTER")], ["muenster"])
         self.assertEqual([p.id for p in unis.search("fasrc")], ["harvard-fasrc"])
         self.assertEqual([p.id for p in unis.search("bonn")], ["bonn"])

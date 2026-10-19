@@ -1079,7 +1079,7 @@ func TestPortalCheckAsksOnlyForListedPortals(t *testing.T) {
 	if r.status != 200 || r.json(t)["reachable"] != false {
 		t.Fatal(r.status, string(r.body))
 	}
-	for _, body := range []string{`{"university": "ethz"}`, `{"university": "nope"}`, `{}`, `[]`} {
+	for _, body := range []string{`{"university": "bonn"}`, `{"university": "nope"}`, `{}`, `[]`} {
 		if r := h.post("/api/portal-check", body); r.status == 200 {
 			t.Fatal(body)
 		}

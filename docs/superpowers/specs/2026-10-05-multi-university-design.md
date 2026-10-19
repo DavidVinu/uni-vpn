@@ -129,20 +129,22 @@ Initial entries (values from findings.md, corrected by the probes in 2):
 |---|---|---|---|---|---|---|
 | heidelberg | vpn-ac.uni-heidelberg.de | | | default | totp_field | yes |
 | ethz | sslvpn.ethz.ch | staff-net | @staff-net.ethz.ch | AnyConnect | totp_field | no |
-| bremen | vpn.uni-bremen.de | | | AnyConnect | totp_field | no |
+| bremen | vpn.uni-bremen.de | Tunnel-All-Traffic | | AnyConnect | totp_field | no |
 | muenster | vpn.uni-muenster.de | | | default | totp_field | no |
 | marburg | vpn.uni-marburg.de | unimr-vpn-staff-Passwort+2FA | | default | totp_append | no |
 | stanford | su-vpn.stanford.edu | Stanford | | default | duo_push | no |
 | harvard-fasrc | vpn.rc.fas.harvard.edu | | @fasrc | default | totp_field | no |
 | stuttgart | vpn.tik.uni-stuttgart.de | | @uni-stuttgart.de | default | none | no |
 | bonn | unibn-vpn.uni-bonn.de | | | AnyConnect | none | no |
-| mannheim | vpn.uni-mannheim.de | | | default | none | no |
+| mannheim | vpn.uni-mannheim.de | WebVPN | | default | none | no |
 | kassel | univpn.uni-kassel.de | | | AnyConnect Windows 5.1.18.314, win | none | no |
 | fu-berlin | vpn.fu-berlin.de | | | AnyConnectLinux | saml | no |
 | oxford | vpn.ox.ac.uk | | | default | saml | no |
 
-Only Heidelberg has default domains and an MFA portal; the others start with empty lists
-until someone contributes them.
+Only Heidelberg has default domains; the others start with empty lists until someone
+contributes them. Where students sign in with another group or user name ending (ETH Zurich,
+Marburg, Stuttgart, NC State, Ottawa, HKU), they have their own entry `<id>-students` since
+2026-10-19.
 
 TU Dresden was on this list until 2026-10-19 and was removed: its general VPN resource
 `tu-dresden.de` left the Cisco gateway in 05/2025 and is reachable over eduVPN only.

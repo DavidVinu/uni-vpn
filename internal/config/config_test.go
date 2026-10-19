@@ -177,7 +177,7 @@ func TestDefaultConfigEqualsTheHeidelbergProfile(t *testing.T) {
 func TestProfileValuesApply(t *testing.T) {
 	cfg := load(t, write(t, "university = \"ethz\"\nuser = \"jdoe\"\n"))
 	if cfg.Host != "sslvpn.ethz.ch" || cfg.Authgroup != "staff-net" || cfg.Useragent != "AnyConnect" ||
-		!cfg.NoExternalAuth || cfg.LoginName() != "jdoe@staff-net.ethz.ch" || cfg.UniversityName != "ETH Zurich" ||
+		!cfg.NoExternalAuth || cfg.LoginName() != "jdoe@staff-net.ethz.ch" || cfg.UniversityName != "ETH Zurich (staff)" ||
 		len(cfg.DefaultDomains) != 0 {
 		t.Errorf("cfg = %+v", cfg)
 	}

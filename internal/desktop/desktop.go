@@ -602,7 +602,8 @@ func DesktopQuote(text string) string {
 }
 
 // menuComment is the app menu's description in the languages of uni_vpn/locales (the download
-// site's tagline), as in packaging/linux/de.davidvinu.UniVPN.desktop.
+// site's tagline), as in packaging/linux/de.davidvinu.UniVPN.desktop. Every Chinese region
+// internal/i18n knows has its own line: a menu in zh_SG looks for zh_SG, then zh, not zh_CN.
 var menuComment = []string{
 	"Comment=Your university's websites from home, as if you were on campus.",
 	"Comment[de]=Die Webseiten deiner Uni von zu Hause, als wärst du auf dem Campus.",
@@ -611,6 +612,8 @@ var menuComment = []string{
 	"Comment[zh_CN]=在家访问学校网站，就像在校园里一样。",
 	"Comment[zh_TW]=在家存取學校網站，就像在校園裡一樣。",
 	"Comment[zh_HK]=在家存取學校網站，就像在校園裡一樣。",
+	"Comment[zh_MO]=在家存取學校網站，就像在校園裡一樣。",
+	"Comment[zh_SG]=在家访问学校网站，就像在校园里一样。",
 }
 
 // DesktopEntry is the app entry (or with hidden the login item) for the GTK shell.

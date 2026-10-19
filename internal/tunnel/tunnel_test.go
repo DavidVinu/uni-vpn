@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -40,17 +41,28 @@ func heidelberg() Config {
 
 func fixedCode(string, time.Time) (string, error) { return "123456", nil }
 
-// fakeUsage: knowsNoExternalAuth asks text (nil: the real openconnect) and forgets earlier answers.
+// fakeUsage: helpText asks text (nil: the real openconnect) and forgets earlier answers.
 func fakeUsage(t *testing.T, text func(string) []byte) {
 	old := usage
 	if text != nil {
 		usage = text
 	}
-	noExternalAuth.Clear()
+	usages.Clear()
 	t.Cleanup(func() {
 		usage = old
-		noExternalAuth.Clear()
+		usages.Clear()
 	})
+}
+
+// externalArgs are the options about the web sign-in in args.
+func externalArgs(args []string) []string {
+	var out []string
+	for _, a := range args {
+		if strings.Contains(a, "external") {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 // makeProfile: the command lines of a current openconnect, whatever this machine has installed.
@@ -108,6 +120,29 @@ func TestProfileFlags(t *testing.T) {
 	}
 	if cmd[len(cmd)-1] != "sslvpn.ethz.ch" {
 		t.Fatal(cmd)
+	}
+}
+
+// A failed probe (no fork, the 10 s timeout) is not kept: that start passes the option as
+// before, the next one asks again.
+func TestEmptyUsageIsAskedAgain(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("only the distribution's openconnect is asked")
+	}
+	answers := [][]byte{nil, []byte("      --external-browser=BROWSER  Set external browser executable\n")}
+	calls := 0
+	fakeUsage(t, func(string) []byte {
+		calls++
+		return answers[min(calls, len(answers))-1]
+	})
+	tn := New(Config{Host: "vpn.example", LoginName: "u", NoExternalAuth: true}, "/usr/bin/openconnect", wrapper, nil, "", t.TempDir())
+	for i, want := range []string{"--no-external-auth", "--external-browser=/bin/false", "--external-browser=/bin/false"} {
+		if got := externalArgs(tn.AuthArgs()); !slices.Equal(got, []string{want}) {
+			t.Fatal(i, got)
+		}
+	}
+	if calls != 2 {
+		t.Fatal(calls)
 	}
 }
 

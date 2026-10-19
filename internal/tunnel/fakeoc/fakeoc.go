@@ -6,7 +6,9 @@
 //
 //	FAKE_MODE           ok (default) | auth_fail | input_required | totp_rejected | totp_replayed | never_ready |
 //	                    ignore_sigterm | exit_after_ready | clientcert_auth_fail | gateway_503 | cstp_503 |
-//	                    second_password
+//	                    second_password | sso_browser | sso_embedded
+//	FAKE_VERSION        9.01 or 8.20: an openconnect without --no-external-auth (8.20 also without
+//	                    --external-browser); default: a current one with both
 //	FAKE_DELAY          seconds until the port listens (default 0.2)
 //	FAKE_EXIT_AFTER     with exit_after_ready: seconds after becoming ready (default 0.5)
 //	FAKE_PASSWORD_FILE  file every line read from stdin is appended to (password, "push" for Duo,
@@ -19,6 +21,7 @@ package fakeoc
 
 import (
 	"bufio"
+	"cmp"
 	"fmt"
 	"io"
 	"net"
@@ -149,21 +152,28 @@ func openconnect(args []string) int {
 	if mode == "" {
 		mode = "ok"
 	}
-	if slices.Contains(args, "--help") && os.Getenv("FAKE_VERSION") != "9.01" {
-		os.Stdout.WriteString("Usage:  openconnect [options] <server>\n      --no-external-auth          Do not offer or use auth methods requiring external browser\n")
+	// openconnect before 9.10 (Debian 12: 9.01, Ubuntu 22.04: 8.20) has no --no-external-auth,
+	// 8.20 no --external-browser either: getopt's complaint, then usage() on stdout and exit(1).
+	version := os.Getenv("FAKE_VERSION")
+	usage := "Usage:  openconnect [options] <server>\nOpen client for multiple VPN protocols, version v" + cmp.Or(version, "9.21") + "\n"
+	var unknown []string
+	switch version {
+	case "9.01":
+		usage += "      --external-browser=BROWSER  Set external browser executable\n"
+		unknown = []string{"--no-external-auth"}
+	case "8.20":
+		unknown = []string{"--no-external-auth", "--external-browser"}
+	default:
+		usage += "      --external-browser=BROWSER  Set external browser executable\n" +
+			"      --no-external-auth          Do not offer or use auth methods requiring external browser\n"
+	}
+	if slices.Contains(args, "--help") {
+		os.Stdout.WriteString(usage)
 		return 1
 	}
-	if os.Getenv("FAKE_VERSION") == "9.01" {
-		// openconnect before 9.10 (Debian 12: 9.01, Ubuntu 22.04: 8.20) has no --no-external-auth:
-		// getopt's complaint, then usage() on stdout and exit(1).
-		usage := "Usage:  openconnect [options] <server>\nOpen client for multiple VPN protocols, version v9.01\n" +
-			"      --external-browser=BROWSER  Set external browser executable\n"
-		if slices.Contains(args, "--help") {
-			os.Stdout.WriteString(usage)
-			return 1
-		}
-		if slices.Contains(args, "--no-external-auth") {
-			log("openconnect: unrecognized option '--no-external-auth'")
+	for _, arg := range args {
+		if name, _, _ := strings.Cut(arg, "="); slices.Contains(unknown, name) {
+			log("openconnect: unrecognized option '" + arg + "'")
 			os.Stdout.WriteString(usage)
 			return 1
 		}
@@ -189,6 +199,12 @@ func openconnect(args []string) int {
 			if mode == "ignore_sigterm" {
 				log("SIGTERM ignored")
 				continue
+			}
+			if mode == "sso_browser" {
+				// openconnect 9.01 waiting for the browser (ssl.c cancellable_accept, main.c).
+				log("Socket accept cancelled")
+				log("Failed to complete authentication")
+				os.Exit(1)
 			}
 			log("User cancelled (SIGINT/SIGTERM); exiting.")
 			os.Exit(0)
@@ -286,6 +302,21 @@ func openconnect(args []string) int {
 	case "input_required":
 		log("User input required in non-interactive mode")
 		log("Failed to complete authentication")
+		return 1
+	case "sso_browser", "sso_embedded":
+		// openconnect 9.00-9.09 offers single sign-on, and Stanford (embedded browser) and UIUC
+		// (external browser) answer with the web sign-in of their default group although
+		// --authgroup names another (pass 24). 9.01 does not switch the group: Stanford's ends
+		// at once, UIUC's opens the browser and waits for it on port 29786.
+		log("XML POST enabled")
+		if mode == "sso_embedded" {
+			log("Please complete the authentication process in the AnyConnect Login window.")
+			log("No SSO handler")
+			log("Failed to complete authentication")
+			return 1
+		}
+		log("Please complete the authentication process in the browser window.")
+		time.Sleep(time.Hour)
 		return 1
 	case "totp_rejected":
 		// Wrong secret (measured 2026-09-08): the password was accepted, the code rejected;

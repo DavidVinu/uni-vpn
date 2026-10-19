@@ -144,6 +144,9 @@ class Core(private val context: Context) {
             pem.append(Base64.encodeToString(cert.encoded, Base64.DEFAULT))
             pem.append("-----END CERTIFICATE-----\n")
         }
+        // Android 13 and older lack HARICA's 2021 roots, where the GEANT certificates of many
+        // university gateways end: HARICA's cross-certificates from its 2015 roots, which they have.
+        pem.append(context.assets.open(EXTRA_CERTIFICATES).bufferedReader().use { it.readText() })
         File(context.filesDir, "ca.pem").apply { writeText(pem.toString()) }
     } catch (e: Exception) {
         Log.e(TAG, "certificates not written", e)
@@ -255,6 +258,8 @@ class Core(private val context: Context) {
         private const val KEY_ALIAS = "uni-vpn-secrets"
         /** The core's exit code when another app holds its port (cmd/uni-vpn exitPortsTaken). */
         private const val EXIT_PORTS_TAKEN = 3
+        /** Certificates the phone may lack, appended to its own (assets/extra-ca.pem). */
+        internal const val EXTRA_CERTIFICATES = "extra-ca.pem"
 
         private fun randomHex(bytes: Int) = ByteArray(bytes).also { SecureRandom().nextBytes(it) }.toHex()
         private fun ByteArray.toHex() = joinToString("") { "%02x".format(it) }

@@ -92,7 +92,7 @@ class UniversityTests(unittest.TestCase):
         self.assertEqual(cfg.useragent, "AnyConnect")
         self.assertTrue(cfg.no_external_auth)
         self.assertEqual(cfg.login_name, "jdoe@staff-net.ethz.ch")
-        self.assertEqual(cfg.university_name, "ETH Zurich")
+        self.assertEqual(cfg.university_name, "ETH Zurich (staff)")
         self.assertEqual(cfg.default_domains, [])
 
     def test_overrides_win_wherever_they_stand(self):

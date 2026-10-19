@@ -311,6 +311,28 @@ func TestInputRequiredMessage(t *testing.T) {
 	}
 }
 
+// openconnect 9.01 at Stanford or UIUC (pass 24): the web sign-in of the default group ends the
+// attempt at once with a final message, without Duo's 75 s wait and without another try.
+func TestWebSignInIsFinal(t *testing.T) {
+	for _, mode := range []string{"sso_browser", "sso_embedded"} {
+		t.Run(mode, func(t *testing.T) {
+			h, args := profileHarness(t)
+			h.cfg.MFA = "duo_push"
+			t.Setenv("FAKE_MODE", mode)
+			d := h.start(nil)
+			d.RequestConnect()
+			waitState(t, d, AuthFailed, 5*time.Second)
+			if statusValue(t, d, "message_id") != "saml_required" || statusValue(t, d, "action") != nil {
+				t.Fatal(statusValue(t, d, "message_id"), statusValue(t, d, "action"))
+			}
+			time.Sleep(600 * time.Millisecond)
+			if data, _ := os.ReadFile(args); strings.Count(string(data), "\n") != 1 {
+				t.Fatalf("%d starts", strings.Count(string(data), "\n"))
+			}
+		})
+	}
+}
+
 func TestGatewayTroubleIsRetriedNotTakenForAWrongPassword(t *testing.T) {
 	// The gateway answered 503 (busy, maintenance), before or after the login: the password was
 	// never checked, so no "check your password" that stops all further attempts.
