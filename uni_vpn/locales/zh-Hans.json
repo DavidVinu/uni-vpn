@@ -41,6 +41,7 @@
   "uni.uni-jena.sign_in": "你的 URZ 登录名（例如 ab12cde）及其密码，不是邮箱地址。",
   "uni.w-hs.sign_in": "你的用户名（例如 ma12345，不带 @w-hs.de）及其密码。",
   "uni.ugr.sign_in": "你的完整 UGR 邮箱地址（name@ugr.es 或 name@correo.ugr.es）及其密码。",
+  "uni.uwaterloo.sign_in": "你的 WatIAM ID（不带 @uwaterloo.ca）及其密码。",
   "setup.enter_user": "请输入用户名，例如 ab123",
   "setup.enter_password": "请输入密码",
   "setup.invalid_user": "请检查用户名",

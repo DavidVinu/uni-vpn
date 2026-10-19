@@ -200,6 +200,14 @@ func (l syncLocal) Apply(ctx context.Context, all map[string]devsync.Entry, keys
 				}
 			}
 		}
+	} else if (changed(devsync.KeyPassword) || changed(devsync.KeyTOTP)) && l.changedSinceRead() {
+		// Typed here since the round read this device's settings (a setup by hand): the next
+		// round sends what was typed.
+		for _, key := range []string{devsync.KeyPassword, devsync.KeyTOTP} {
+			if changed(key) {
+				fail(devsync.ErrBusy, key)
+			}
+		}
 	} else {
 		// Not SetPassword and SetTOTP: those connect, and a synced secret is for the next
 		// connection (secretsSynced).
@@ -264,6 +272,14 @@ func (l syncLocal) Apply(ctx context.Context, all map[string]devsync.Entry, keys
 		}
 	}
 	return failed
+}
+
+// changedSinceRead: a setup by hand noted a change since the round read this device's
+// settings. It holds setupMu until its Notify, so this waits for one under way.
+func (l syncLocal) changedSinceRead() bool {
+	l.d.setupMu.Lock()
+	defer l.d.setupMu.Unlock()
+	return l.d.sync.ChangedSinceRead()
 }
 
 // applyAccount is the setup assistant with the group's answers.

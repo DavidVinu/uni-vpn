@@ -318,7 +318,7 @@
       "authgroup": "UW-General-Campus",
       "mfa": "duo_push",
       "aliases": ["Waterloo"],
-      "notes": "Profile from the university's documentation, not tested. "
+      "notes": "Profile from the university's documentation, not tested. User name: the WatIAM ID without @uwaterloo.ca."
     },
     {
       "id": "uottawa",

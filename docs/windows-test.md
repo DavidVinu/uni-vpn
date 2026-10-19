@@ -27,7 +27,7 @@ Note: Windows version and build, CPU, Python version, Chrome, Edge and Firefox v
    uni-vpn` shows no servers; `Test-NetConnection example.com` still goes over the normal
    adapter. Normal browsing and Teams or Zoom keep working.
 7. Restart Edge or Chrome, open `https://sogo.uni-heidelberg.de`: loads through the university.
-   Settings, Network, Proxy shows "Use setup script" with `http://127.0.0.1:1081/proxy.pac`.
+   Settings, Network, Proxy shows "Use setup script" with `http://127.0.0.1:1081/proxy.pac?v=` and a number.
 8. Firefox with "Use system proxy settings": the same.
 9. In the app, Disconnect: the adapter disappears within a few seconds, the log shows a
    clean logout (no "killed").

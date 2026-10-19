@@ -359,15 +359,7 @@ func (s *System) Restore(saved *Snapshot) error {
 func (s *System) Refresh(httpPort int) {
 	version := s.Now().Unix()
 	// A new address each time, also for more changes within one second: past the one set now.
-	fresh := func(now string) string {
-		v := version
-		if _, set, ok := strings.Cut(now, "?v="); ok {
-			if n, err := strconv.ParseInt(set, 10, 64); err == nil && n >= v {
-				v = n + 1
-			}
-		}
-		return PacURLVersion(httpPort, v)
-	}
+	fresh := func(now string) string { return PacURLVersion(httpPort, past(version, now)) }
 	if s.windows() {
 		if now, err := s.WinGet(); err == nil && IsOurs(now, httpPort) {
 			_ = s.WinSet(fresh(now))
@@ -396,9 +388,107 @@ func (s *System) Refresh(httpPort int) {
 	}
 }
 
-// Unversioned: the system uses our rule at its plain address, as setup writes it (Refresh
-// adds ?v=), so the browsers have the rule of whichever version answered then: an installer
-// run again, maybe an older one.
+// Cover gives our rule to macOS network services added since the install (a dock's Ethernet,
+// an iPhone over USB): each service has its own setting, and the browsers follow the one in
+// use. Only while another service uses our rule, and only services without an automatic proxy
+// that the backup does not know, each backed up first, so that uninstalling turns it off again.
+// Errors are ignored. backup "" means BackupPath().
+func (s *System) Cover(httpPort int, backup string) {
+	if !s.macOS() {
+		return
+	}
+	now := s.Current()
+	if now == nil || now.Mac == nil {
+		return
+	}
+	ours := ""
+	for _, svc := range now.Mac.Services {
+		if svc.Enabled && IsOurs(svc.URL, httpPort) {
+			ours = svc.URL
+			break
+		}
+	}
+	if ours == "" {
+		return
+	}
+	unset := func(svc Service) bool { return !svc.Enabled && svc.URL == "" }
+	for _, name := range backUpNew(backup, now, httpPort, unset) {
+		_ = s.set("networksetup", "-setautoproxyurl", name, ours)
+	}
+}
+
+// backUpNew adds the macOS services in now that the backup does not know and that keep
+// passes, as they are (off where they use our rule), so that uninstalling restores them too.
+// It returns their names; none when the backup could not be read or written.
+func backUpNew(backup string, now *Snapshot, httpPort int, keep func(Service) bool) []string {
+	if backup == "" {
+		backup = BackupPath()
+	}
+	data, err := os.ReadFile(backup)
+	if err != nil {
+		return nil
+	}
+	var saved Snapshot
+	if err := saved.UnmarshalJSON(data); err != nil || saved.Mac == nil || now.Mac == nil {
+		return nil
+	}
+	known := map[string]bool{}
+	for _, svc := range saved.Mac.Services {
+		known[svc.Name] = true
+	}
+	var added []string
+	for _, svc := range now.Mac.Services {
+		if known[svc.Name] || !keep(svc) {
+			continue
+		}
+		if IsOurs(svc.URL, httpPort) {
+			svc = Service{Name: svc.Name}
+		}
+		saved.Mac.Services = append(saved.Mac.Services, svc)
+		added = append(added, svc.Name)
+	}
+	if len(added) == 0 {
+		return nil
+	}
+	data, _ = saved.MarshalJSON()
+	if err := os.WriteFile(backup, data, 0o666); err != nil {
+		return nil
+	}
+	return added
+}
+
+// past: version, or past the version in url when that is as new or newer.
+func past(version int64, url string) int64 {
+	if _, set, ok := strings.Cut(url, "?v="); ok {
+		if n, err := strconv.ParseInt(set, 10, 64); err == nil && n >= version {
+			return n + 1
+		}
+	}
+	return version
+}
+
+// urls: the proxy rule addresses in a snapshot.
+func (snap *Snapshot) urls() []string {
+	var urls []string
+	if snap.Windows != nil {
+		urls = append(urls, snap.Windows.URL)
+	}
+	if snap.Mac != nil {
+		for _, svc := range snap.Mac.Services {
+			urls = append(urls, svc.URL)
+		}
+	}
+	if snap.GNOME != nil {
+		urls = append(urls, snap.GNOME.URL)
+	}
+	if snap.KDE != nil {
+		urls = append(urls, snap.KDE.URL)
+	}
+	return urls
+}
+
+// Unversioned: the system uses our rule at its plain address, as older installers wrote it,
+// so the browsers have the rule of whichever version answered then.
 func (s *System) Unversioned(httpPort int) bool {
 	plain := PacURL(httpPort)
 	if s.macOS() {
@@ -468,8 +558,19 @@ func (s *System) Install(httpPort int, backup string) (string, error) {
 		if err := os.WriteFile(backup, data, 0o666); err != nil {
 			return "", err
 		}
+	} else {
+		// Repair, or the installer again: macOS services added since are backed up too.
+		backUpNew(backup, before, httpPort, func(Service) bool { return true })
 	}
-	if err := s.Apply(PacURL(httpPort)); err != nil {
+	// A new address: macOS keeps the rule it loaded per address until the user signs out, and
+	// the core answering now is the one setup just restarted.
+	version := s.Now().Unix()
+	for _, url := range before.urls() {
+		if IsOurs(url, httpPort) {
+			version = past(version, url)
+		}
+	}
+	if err := s.Apply(PacURLVersion(httpPort, version)); err != nil {
 		return "failed", nil
 	}
 	if s.isForeign(before, httpPort) {
@@ -570,6 +671,7 @@ func Apply(url string) error                              { return Default().App
 func Restore(saved *Snapshot) error                       { return Default().Restore(saved) }
 func Refresh(httpPort int)                                { Default().Refresh(httpPort) }
 func Unversioned(httpPort int) bool                       { return Default().Unversioned(httpPort) }
+func Cover(httpPort int)                                  { Default().Cover(httpPort, "") }
 func Install(httpPort int, backup string) (string, error) { return Default().Install(httpPort, backup) }
 func Uninstall(backup string) (string, error)             { return Default().Uninstall(backup) }
 func State(httpPort int) string                           { return Default().State(httpPort) }

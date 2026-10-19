@@ -103,9 +103,9 @@ fun SettingRow(title: String, value: String? = null, onClick: (() -> Unit)? = nu
 }
 
 @Composable
-fun ErrorText(text: String?) {
+fun ErrorText(text: String?, modifier: Modifier = Modifier) {
     if (!text.isNullOrEmpty()) {
-        Text(text, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+        Text(text, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium, modifier = modifier)
     }
 }
 

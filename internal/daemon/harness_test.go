@@ -64,6 +64,7 @@ type harness struct {
 	wallOffset  atomic.Int64 // seconds added to the wall clock (Python mocks time.time)
 	probeResult atomic.Bool
 	unversioned atomic.Bool
+	covered     atomic.Int64 // ProxyCover calls
 	cisco       atomic.Bool
 
 	mu          sync.Mutex
@@ -187,6 +188,7 @@ func (h *harness) start(edit func(*Options), before ...func(*Daemon)) *Daemon {
 			h.refreshed = append(h.refreshed, port)
 		},
 		ProxyUnversioned: func(int) bool { return h.unversioned.Load() },
+		ProxyCover:       func(int) { h.covered.Add(1) },
 		RepairStart:      func() (Process, error) { panic("no repair in tests") },
 		Elevated:         func() *bool { return nil },
 	}

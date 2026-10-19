@@ -27,6 +27,7 @@ import (
 	"github.com/DavidVinu/uni-vpn/internal/credentials"
 	"github.com/DavidVinu/uni-vpn/internal/i18n"
 	"github.com/DavidVinu/uni-vpn/internal/messages"
+	"github.com/DavidVinu/uni-vpn/internal/pac"
 	"github.com/DavidVinu/uni-vpn/internal/pyjson"
 	"github.com/DavidVinu/uni-vpn/internal/tunnel"
 )
@@ -614,6 +615,10 @@ func TestChangedPasswordIsNotTriedTwiceByTheNextCore(t *testing.T) {
 	if err := app.SetPassword("new-pw"); err != nil {
 		t.Fatal(err)
 	}
+	// The new password starts a connection: let it end before the core stops, or an
+	// openconnect still being started can hold the ports while the next core binds them.
+	app.RequestDisconnect()
+	waitState(t, app, Idle)
 	h.teardown()
 	h.d = nil
 	os.Remove(h.pwfile)
@@ -1098,6 +1103,46 @@ func TestOfflineAPageLoadLooksForTheNetworkAgain(t *testing.T) {
 	echo(t, h.client(), "x")
 	if probes.Load() != 2 {
 		t.Fatal(probes.Load())
+	}
+}
+
+// Some universities' gateways cannot be reached from their own network (Halle, HS Flensburg):
+// there the listed websites open directly instead of failing while the gateway is away.
+func TestListedWebsitesGoDirectlyWhileTheGatewayCannotBeReached(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.RetryInterval = 30
+	h.probeResult.Store(false)
+	if err := pac.WriteDomains(h.domainsPath, []string{"uni-halle.de"}); err != nil {
+		t.Fatal(err)
+	}
+	d := h.start(nil)
+	if hosts := d.forwarder.Direct(); slices.Contains(hosts, "uni-halle.de") {
+		t.Fatal(hosts)
+	}
+	d.RequestConnect()
+	waitState(t, d, Offline)
+	if hosts := d.forwarder.Direct(); !slices.Contains(hosts, "uni-halle.de") {
+		t.Fatal(hosts)
+	}
+	h.probeResult.Store(true)
+	h.wallOffset.Store(120)
+	waitState(t, d, Connected, 3*time.Second)
+	if hosts := d.forwarder.Direct(); slices.Contains(hosts, "uni-halle.de") {
+		t.Fatal(hosts)
+	}
+}
+
+// A dock or an iPhone plugged in later brings a new network service on macOS: the core looks
+// for one at the start and again every few minutes.
+func TestNewNetworkServicesGetTheRule(t *testing.T) {
+	h := newHarness(t)
+	h.start(nil)
+	deadline := time.Now().Add(5 * time.Second)
+	for h.covered.Load() < 2 && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if n := h.covered.Load(); n < 2 {
+		t.Fatal(n)
 	}
 }
 

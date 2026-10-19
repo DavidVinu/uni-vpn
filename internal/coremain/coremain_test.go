@@ -230,6 +230,7 @@ func TestReadyFileStaysWithTheNextCore(t *testing.T) {
 	phone := func(o *daemon.Options) {
 		o.ProxyRefresh = func(int) {}
 		o.ProxyUnversioned = func(int) bool { return false }
+		o.ProxyCover = func(int) {}
 	}
 	var release func()
 	first := start(t, Options{APIToken: "t0ken", Release: func(f func()) { release = f },
