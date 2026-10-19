@@ -32,7 +32,7 @@ const (
 	// greetWait: browsers send their SOCKS greeting as soon as they are connected.
 	greetWait = 10 * time.Second
 	// socksVersion starts every SOCKS5 greeting, the only SOCKS that ocproxy and
-	// internal/socks speak (the PAC file says SOCKS5).
+	// internal/socks speak (the PAC file says SOCKS5, and SOCKS for Safari, which speaks 5 there).
 	socksVersion = 5
 	// directWait: connecting to a host that Direct names.
 	directWait = 15 * time.Second
@@ -278,7 +278,7 @@ func (f *Forwarder) handle(client net.Conn) {
 }
 
 // direct serves a refused connection to a host that Direct names: the security page that
-// opens only on campus, which the rule gives as "SOCKS5 ...; DIRECT". The core answers the
+// opens only on campus, which the rule gives as "SOCKS5 ...; SOCKS ...; DIRECT". The core answers the
 // SOCKS request itself and connects from this device, so the page also opens in browsers
 // that ignore "; DIRECT" (WebKitGTK with libproxy 0.5), and no browser takes Uni VPN for
 // broken. False: refused, the connection is closed.
