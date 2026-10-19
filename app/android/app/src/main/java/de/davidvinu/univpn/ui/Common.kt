@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Info
@@ -60,7 +62,9 @@ fun Info(model: AppModel, text: String) {
             // The second tap of a double tap on the icon lands beside the dialog.
             onDismissRequest = { if (!model.justChanged) open = false },
             confirmButton = { TextButton(onClick = { open = false }) { Text(model.t("app.done")) } },
-            text = { Text(text) },
+            // Long help (a university's steps) at a large font size: the dialog does not scroll
+            // by itself and would cut off the end.
+            text = { Text(text, Modifier.verticalScroll(rememberScrollState())) },
         )
     }
 }

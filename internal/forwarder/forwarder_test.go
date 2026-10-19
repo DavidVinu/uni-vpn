@@ -23,6 +23,7 @@ type env struct {
 	target   func(ctx context.Context) (int, bool)
 	direct   []string
 	dialer   func(ctx context.Context, network, address string) (net.Conn, error)
+	local    bool // whether direct dials refuse this computer (the test websites listen on it)
 }
 
 func freePort(t *testing.T) int {
@@ -80,6 +81,11 @@ func setup(t *testing.T) (*env, *syncBuffer) {
 	log := slog.New(slog.NewTextHandler(logs, nil))
 	e.fwd = New("127.0.0.1", freePort(t), e.getTarget, func() { e.activity.Add(1) }, 500*time.Millisecond, log)
 	e.fwd.Direct = e.getDirect
+	e.fwd.refuseLocal = func(address string) bool {
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		return e.local && thisComputer(address)
+	}
 	real := e.fwd.dialDirect
 	e.fwd.dialDirect = func(ctx context.Context, network, address string) (net.Conn, error) {
 		e.mu.Lock()
@@ -106,6 +112,12 @@ func (e *env) setTarget(fn func(ctx context.Context) (int, bool)) {
 func (e *env) setDirect(hosts ...string) {
 	e.mu.Lock()
 	e.direct = hosts
+	e.mu.Unlock()
+}
+
+func (e *env) refuseThisComputer() {
+	e.mu.Lock()
+	e.local = true
 	e.mu.Unlock()
 }
 

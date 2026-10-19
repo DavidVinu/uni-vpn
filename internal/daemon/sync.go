@@ -20,6 +20,7 @@ import (
 	"github.com/DavidVinu/uni-vpn/internal/pac"
 	"github.com/DavidVinu/uni-vpn/internal/platform"
 	"github.com/DavidVinu/uni-vpn/internal/pyjson"
+	unis "github.com/DavidVinu/uni-vpn/internal/universities"
 )
 
 // SyncRelay is the relay this build syncs through (relay/, docs/sync.md); "" hides
@@ -252,9 +253,9 @@ func (l syncLocal) Apply(ctx context.Context, all map[string]devsync.Entry, keys
 			fail(devsync.ErrNotKnown, key)
 		}
 	}
-	// Set up just now: its empty snapshot said nothing about websites, the group's list it is
-	// (also an empty one).
-	if len(domainKeys) > 0 || !wasSetUp && failed[devsync.KeyAccount] == nil && l.SetupDone() {
+	// Not set up before: its empty snapshot said nothing about websites, the group's list it is
+	// (also an empty one), also when its account could not be used and setup by hand follows.
+	if len(domainKeys) > 0 || !wasSetUp {
 		if err := l.applyDomains(all); err != nil {
 			fail(err, domainKeys...)
 		}
@@ -306,6 +307,16 @@ func (l syncLocal) applyDomains(all map[string]devsync.Entry) error {
 	d.mu.Lock()
 	defaults := slices.Clone(d.cfg.DefaultDomains)
 	d.mu.Unlock()
+	if !l.SetupDone() {
+		// The account could not be used here (setup by hand follows): without a list of its own
+		// this device would then have the group's university's defaults.
+		var account syncAccount
+		if e, ok := all[devsync.KeyAccount]; ok && json.Unmarshal(e.V, &account) == nil {
+			if p, ok := unis.Get(account.University); ok {
+				defaults = p.DefaultDomains
+			}
+		}
+	}
 	current, err := pac.ReadDomains(d.opts.DomainsPath, defaults)
 	if err != nil {
 		return err

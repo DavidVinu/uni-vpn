@@ -878,6 +878,15 @@ func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, s
 		}
 		saved.Hashes[key] = savedHash{H: hv, T: ent.T, D: ent.D}
 	}
+	// A website a join could not drop (the list not written) counts as seen too: it is not sent
+	// to the group as this device's own.
+	for key := range failed {
+		if _, ok := merged[key]; !ok && strings.HasPrefix(key, DomainPrefix) {
+			if hv, ok := local(key); ok {
+				saved.Hashes[key] = savedHash{H: hv}
+			}
+		}
+	}
 	if err := e.saveState(saved); err != nil {
 		return false, err
 	}

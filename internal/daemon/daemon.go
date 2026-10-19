@@ -1078,7 +1078,7 @@ func (d *Daemon) SetDomains(text string) ([]string, error) {
 var addedDefaults = map[string][]string{
 	"heidelberg": {"moodle.uni-heidelberg.de", "yoki.urz.uni-heidelberg.de", "m365.urz.uni-heidelberg.de",
 		"lsf.uni-heidelberg.de", "telefonbuch.uni-heidelberg.de", "heibot-it.urz.uni-heidelberg.de",
-		"doktoranden.uni-heidelberg.de"},
+		"doktoranden.uni-heidelberg.de", "myprint.uni-heidelberg.de"},
 }
 
 // addedDefaultsName lists the websites of addedDefaults this device dealt with, in the state

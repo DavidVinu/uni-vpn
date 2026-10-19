@@ -156,8 +156,9 @@ embeds for its statistics, the heiCO login at `heico.uni-heidelberg.de`, Moodle 
 the Microsoft 365 license portal at `https://m365.urz.uni-heidelberg.de`, the people, institutions
 and rooms search at `https://lsf.uni-heidelberg.de`, the phone book at
 `https://telefonbuch.uni-heidelberg.de`, URZ's IT chatbot at
-`https://heibot-it.urz.uni-heidelberg.de` and heiDOCS, the doctoral candidates' online file, at
-`https://doktoranden.uni-heidelberg.de`. Everything else does not.
+`https://heibot-it.urz.uni-heidelberg.de`, heiDOCS, the doctoral candidates' online file, at
+`https://doktoranden.uni-heidelberg.de` and the web print portal at
+`https://myprint.uni-heidelberg.de`. Everything else does not.
 Once Uni VPN is set up, the security page `https://mfa.uni-heidelberg.de` goes through it too
 (W-HS: `https://mfa.za.w-hs.de`), so a new phone's code generator can be added from home. When
 Uni VPN cannot sign in, the page opens directly (on campus, or with the Cisco VPN).

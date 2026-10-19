@@ -70,7 +70,7 @@ func TestSavedListGetsANewDefaultWebsiteOnce(t *testing.T) {
 	d := h.start(nil, firstStart)
 	want := []string{"sogo.uni-heidelberg.de", "example.org", "moodle.uni-heidelberg.de", "yoki.urz.uni-heidelberg.de",
 		"m365.urz.uni-heidelberg.de", "lsf.uni-heidelberg.de", "telefonbuch.uni-heidelberg.de", "heibot-it.urz.uni-heidelberg.de",
-		"doktoranden.uni-heidelberg.de"}
+		"doktoranden.uni-heidelberg.de", "myprint.uni-heidelberg.de"}
 	if got := websites(t, h); !slices.Equal(got, want) {
 		t.Fatal(got)
 	}
@@ -129,7 +129,7 @@ func TestNewDefaultWebsiteTheGroupKnowsIsNotAdded(t *testing.T) {
 			h.start(syncOptions("http://127.0.0.1:9", dir, nil), firstStart)
 			want := []string{"sogo.uni-heidelberg.de", "yoki.urz.uni-heidelberg.de", "m365.urz.uni-heidelberg.de",
 				"lsf.uni-heidelberg.de", "telefonbuch.uni-heidelberg.de", "heibot-it.urz.uni-heidelberg.de",
-				"doktoranden.uni-heidelberg.de"}
+				"doktoranden.uni-heidelberg.de", "myprint.uni-heidelberg.de"}
 			if got := websites(t, h); !slices.Equal(got, want) {
 				t.Fatal(got)
 			}

@@ -99,6 +99,33 @@ func TestRefusedSecurityPageUnreachable(t *testing.T) {
 	expectEOF(t, c, 2*time.Second)
 }
 
+// A network whose DNS answers the security page's name with this computer's own address: the
+// core never connects there for whoever uses the port (a program of another account would reach
+// the app's own API), as internal/socks refuses too. "localhost" stands in for that answer.
+func TestRefusedSecurityPageNeverReachesThisComputer(t *testing.T) {
+	e, _ := setup(t)
+	e.setTarget(func(context.Context) (int, bool) { return 0, false })
+	e.setDirect("localhost")
+	e.refuseThisComputer()
+	c, rep := socksConnect(t, e, "localhost", website(t))
+	if rep != 4 { // host unreachable
+		t.Fatal(rep)
+	}
+	expectEOF(t, c, 2*time.Second)
+}
+
+func TestThisComputer(t *testing.T) {
+	for address, want := range map[string]bool{
+		"127.0.0.1": true, "127.1.2.3": true, "0.0.0.0": true, "0.1.2.3": true, "::1": true,
+		"::": true, "::ffff:127.0.0.1": true, "129.206.100.1": false, "10.0.0.1": false,
+		"2001:db8::1": false, "fe80::1%eth0": false, "": false, "localhost": false,
+	} {
+		if got := thisComputer(address); got != want {
+			t.Error(address, got)
+		}
+	}
+}
+
 // With the tunnel up, the security page goes through it like every listed website.
 func TestSecurityPageThroughTheTunnelWhenUp(t *testing.T) {
 	e, _ := setup(t)

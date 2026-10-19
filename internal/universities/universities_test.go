@@ -61,7 +61,7 @@ func TestHeidelbergKeepsTodaysValues(t *testing.T) {
 	want := []string{"sogo.uni-heidelberg.de", "elearning-med.uni-heidelberg.de", "cip.dmed.uni-heidelberg.de",
 		"heico.uni-heidelberg.de", "moodle.uni-heidelberg.de", "yoki.urz.uni-heidelberg.de", "m365.urz.uni-heidelberg.de",
 		"lsf.uni-heidelberg.de", "telefonbuch.uni-heidelberg.de", "heibot-it.urz.uni-heidelberg.de",
-		"doktoranden.uni-heidelberg.de"}
+		"doktoranden.uni-heidelberg.de", "myprint.uni-heidelberg.de"}
 	if !slices.Equal(hd.DefaultDomains, want) {
 		t.Errorf("default_domains = %v", hd.DefaultDomains)
 	}
@@ -143,6 +143,9 @@ func TestProfilesFromTheProbes(t *testing.T) {
 		{"ncsu-students", "authgroup", mustGet(t, "ncsu-students").Authgroup, "2-Student"},
 		{"uottawa-students", "usergroup", mustGet(t, "uottawa-students").Usergroup, "students"},
 		{"hku-students", "username_suffix", mustGet(t, "hku-students").UsernameSuffix, "@connect.hku.hk"},
+		// The last step is a link in a list (Change), not a field to type in.
+		{"hku", "mfa_pictures", strings.Join(mustGet(t, "hku").MFAPictures, " "), "generic-1.svg generic-2.svg generic-3.svg hku-4.svg"},
+		{"hku-students", "mfa_pictures", strings.Join(mustGet(t, "hku-students").MFAPictures, " "), "generic-1.svg generic-2.svg generic-3.svg hku-4.svg"},
 		{"kassel", "mfa", mustGet(t, "kassel").MFA, "duo_push"},
 		{"kassel-students", "mfa", mustGet(t, "kassel-students").MFA, "none"},
 		{"kassel-students", "os", mustGet(t, "kassel-students").OS, "win"},

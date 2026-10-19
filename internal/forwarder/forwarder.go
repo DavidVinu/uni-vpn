@@ -11,9 +11,11 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/netip"
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/DavidVinu/uni-vpn/internal/pac"
@@ -51,6 +53,7 @@ type Forwarder struct {
 
 	getTarget      TargetFunc
 	dialDirect     func(ctx context.Context, network, address string) (net.Conn, error)
+	refuseLocal    func(address string) bool // thisComputer; the tests' websites listen on it
 	onActivity     func()
 	halfcloseGrace time.Duration
 	log            *slog.Logger
@@ -78,8 +81,32 @@ func New(host string, port int, getTarget TargetFunc, onActivity func(), halfclo
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	return &Forwarder{Host: host, Port: port, getTarget: getTarget, onActivity: onActivity,
-		halfcloseGrace: halfcloseGrace, log: log, dialDirect: (&net.Dialer{Timeout: directWait}).DialContext}
+	f := &Forwarder{Host: host, Port: port, getTarget: getTarget, onActivity: onActivity,
+		halfcloseGrace: halfcloseGrace, log: log, refuseLocal: thisComputer}
+	f.dialDirect = (&net.Dialer{Timeout: directWait, Control: f.notThisComputer}).DialContext
+	return f
+}
+
+var errThisComputer = errors.New("an address of this computer")
+
+// notThisComputer stops a direct dial to this computer itself: a network whose DNS answers the
+// security page's name with such an address would otherwise let a program of another account
+// on this computer reach the app's own API through the port (internal/socks refuses it too).
+func (f *Forwarder) notThisComputer(_, address string, _ syscall.RawConn) error {
+	if host, _, err := net.SplitHostPort(address); err == nil && f.refuseLocal(host) {
+		return errThisComputer
+	}
+	return nil
+}
+
+// thisComputer: a loopback or "this network" (0.0.0.0/8, ::) address.
+func thisComputer(address string) bool {
+	a, err := netip.ParseAddr(address)
+	if err != nil {
+		return false
+	}
+	a = a.Unmap()
+	return a.IsLoopback() || a.IsUnspecified() || a.Is4() && a.As4()[0] == 0
 }
 
 // Active is the number of open browser connections, including those waiting for a target.

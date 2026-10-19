@@ -2660,6 +2660,37 @@ func TestOwnChangeAfterClockSetBackStays(t *testing.T) {
 	}
 }
 
+// A set-up desktop joins and drops a website the group does not list, but writing its list
+// fails: the website stays here and is not sent to the group as the desktop's own.
+func TestJoinThatCouldNotDropAWebsiteKeepsItHere(t *testing.T) {
+	ctx := context.Background()
+	_, url := startRelay(t)
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	laptop := newDevice(t, url, "Laptop", setUpLaptop(), c)
+	own := newLocal(true, map[string]any{KeyAccount: account, KeyPassword: "secret", KeyTOTP: "JBSWY3DP",
+		KeyLanguage: "", KeyAutoUpdate: true}, "sogo.uni-heidelberg.de", "heico.uni-heidelberg.de", "own.example.org")
+	own.reject = map[string]bool{DomainPrefix + "own.example.org": true}
+	desktop := newDevice(t, url, "Desktop", own, c)
+	p, err := laptop.Offer(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := desktop.Enter(ctx, p.Code); !partly(err) {
+		t.Fatal(err)
+	}
+	waitState(t, laptop.Engine, "done")
+	own.mu.Lock()
+	own.reject = nil
+	own.domains = []string{"sogo.uni-heidelberg.de", "heico.uni-heidelberg.de", "own.example.org"} // the write failed
+	own.mu.Unlock()
+	for _, d := range []device{desktop, laptop, desktop} {
+		d.Sync(ctx)
+	}
+	if slices.Contains(laptop.local.getDomains(), "own.example.org") {
+		t.Fatal("the website the join dropped went to the group:", laptop.local.getDomains())
+	}
+}
+
 // The later change wins, also when the group already has its value: the laptop adds a website
 // after the desktop removed it offline, while the group still lists it from the desktop's
 // addition before.
