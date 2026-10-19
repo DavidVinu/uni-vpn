@@ -366,7 +366,11 @@ func (e *Engine) Notify(typed ...string) {
 	// A setting from another device being taken over is not a change made here. A password or
 	// second factor is: Apply stores those without a Notify, so one now was typed on this device.
 	if applying && !secrets {
-		e.Wake()
+		// A device not set up yet (linked while the group's account could not be used here) only
+		// took the group's websites: another round now would only try that account again.
+		if e.opts.Local.SetupDone() {
+			e.Wake()
+		}
 		return
 	}
 	now := e.nowMS()

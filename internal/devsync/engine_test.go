@@ -1133,6 +1133,53 @@ func TestTakenOverValueIsNotSentBackAfterAConflict(t *testing.T) {
 }
 
 // A password typed on this device while it takes over a setting from another one goes out.
+// Linked while the group's account cannot be used here (not set up): the websites a round takes
+// over start no other round at once, which would only try that account again (one more keyring
+// prompt). A device set up still asks for one.
+func TestTakingOverWithoutAnAccountStartsNoOtherRound(t *testing.T) {
+	ctx := context.Background()
+	_, url := startRelay(t)
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	laptop := newDevice(t, url, "Laptop", setUpLaptop(), c)
+	desktop := newDevice(t, url, "Desktop", newLocal(false, nil), c)
+	desktop.local.reject = map[string]bool{KeyAccount: true}
+	p, err := laptop.Offer(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ae *ApplyError
+	if err := desktop.Enter(ctx, p.Code); !errors.As(err, &ae) {
+		t.Fatalf("enter: %v", err)
+	}
+	waitState(t, laptop.Engine, "done")
+	// rounds is how many rounds d asks for when a round's Apply writes the website list.
+	rounds := func(d device) int {
+		var e *Engine
+		opts := d.opts
+		opts.Local = &hookLocal{fakeLocal: d.local, onApply: func() { e.Notify() }}
+		e = New(opts)
+		if err := e.Sync(ctx); err != nil && !errors.As(err, &ae) {
+			t.Fatal(err)
+		}
+		return len(e.wake)
+	}
+	if n := rounds(desktop); n != 0 {
+		t.Errorf("desktop without an account: %d rounds asked for", n)
+	}
+	// Set up after all, the desktop changes the language: the laptop takes it over.
+	desktop.local.mu.Lock()
+	desktop.local.setup, desktop.local.reject = true, nil
+	desktop.local.mu.Unlock()
+	desktop.local.set(KeyLanguage, "de")
+	desktop.Notify()
+	if err := desktop.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := rounds(laptop); n != 1 {
+		t.Errorf("laptop: %d rounds asked for, want 1", n)
+	}
+}
+
 // A change noted here while a round takes settings over (an account set up by hand meanwhile)
 // makes what that round read of this device old; the next round reads it again.
 func TestChangeNotedDuringARoundMakesItsReadOld(t *testing.T) {
