@@ -831,3 +831,130 @@ func TestSyncSettingOfANewerVersion(t *testing.T) {
 		t.Fatalf("%d group reads in a second", n)
 	}
 }
+
+// pairWith joins the not set up device to the laptop's group.
+func pairWith(t *testing.T, laptop, device *Daemon) {
+	t.Helper()
+	offer, err := laptop.Sync("offer", pyjson.O())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pairing, _ := offer.Get("pairing")
+	code, _ := pairing.(pyjson.Object).Get("code")
+	if _, err := device.Sync("enter", pyjson.O("code", code)); err != nil {
+		t.Fatal(err)
+	}
+	if !waitFor(5*time.Second, func() bool { laptop.sync.Sync(context.Background()); return len(syncDevices(t, laptop)) == 2 }) {
+		t.Fatal("the laptop does not see the other device")
+	}
+}
+
+func syncRound(t *testing.T, devices ...*Daemon) {
+	t.Helper()
+	for _, d := range devices {
+		if err := d.sync.Sync(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// A laptop without a saved list syncs the removal of websites it does not have yet; then it
+// updates to the version that has them as defaults: they do not come back.
+func TestNewDefaultsTheGroupRemovedStayRemovedWithoutAList(t *testing.T) {
+	_, url := relaytest.Start(t)
+	older := []string{"sogo.uni-heidelberg.de", "elearning-med.uni-heidelberg.de",
+		"cip.dmed.uni-heidelberg.de", "heico.uni-heidelberg.de", "moodle.uni-heidelberg.de"}
+	added := []string{"yoki.urz.uni-heidelberg.de", "m365.urz.uni-heidelberg.de"}
+	lh := newHarness(t)
+	lh.cfg.User = "ab123"
+	lh.cfg.DefaultDomains = slices.Clone(older)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := config.WriteInitial(path, "ab123", "heidelberg", nil); err != nil {
+		t.Fatal(err)
+	}
+	laptopOptions := syncOptions(url, dir, func(o *Options) { o.ConfigPath = path })
+	store := &memSyncStore{}
+	withStore := func(o *Options) { laptopOptions(o); o.SyncStore = store }
+	laptop := lh.start(withStore)
+	dh := newHarness(t)
+	ddir := t.TempDir()
+	desktop := dh.start(syncOptions(url, ddir, func(o *Options) {
+		o.NeedsSetup, o.ConfigPath = true, filepath.Join(ddir, "config.toml")
+	}))
+	pairWith(t, laptop, desktop)
+	syncRound(t, desktop, laptop)
+	// While the laptop is off: the desktop's update adds the new websites to its saved list,
+	// the user removes them there.
+	for _, list := range [][]string{append(slices.Clone(older), added...), older} {
+		if _, err := desktop.SetDomains(strings.Join(list, "\n")); err != nil {
+			t.Fatal(err)
+		}
+		syncRound(t, desktop)
+	}
+	syncRound(t, laptop)
+	if exists(lh.domainsPath) {
+		t.Fatal("the laptop saved a list") // it has its defaults
+	}
+	noted := func() string { // what the laptop's sync.json has for one of them
+		var st struct{ Hashes map[string]struct{ H string } }
+		data, _ := os.ReadFile(filepath.Join(dir, "sync.json"))
+		json.Unmarshal(data, &st)
+		return st.Hashes[devsync.DomainPrefix+added[0]].H
+	}
+	removed := noted()
+	lh.teardown()
+	lh.cfg.DefaultDomains = append(slices.Clone(older), added...)
+	laptop = lh.start(withStore, firstStart)
+	// Once the core is up, the laptop notes them as its defaults (before its first round).
+	if !waitFor(5*time.Second, func() bool { return noted() != removed }) {
+		t.Fatal("not noted as defaults")
+	}
+	for range 2 {
+		syncRound(t, laptop, desktop)
+	}
+	for name, d := range map[string]*Daemon{"laptop": laptop, "desktop": desktop} {
+		if got := statusValue(t, d, "domains").([]string); !slices.Equal(got, older) {
+			t.Errorf("%s: %v", name, got)
+		}
+	}
+}
+
+// Joining a group with the password this device has: the sign-in with it still counts.
+func TestJoinWithTheSamePasswordKeepsTheSignIn(t *testing.T) {
+	_, url := relaytest.Start(t)
+	newDevice := func() (*harness, string, string) {
+		h := newHarness(t)
+		h.cfg.User = "ab123"
+		dir := t.TempDir()
+		path := filepath.Join(dir, "config.toml")
+		if err := config.WriteInitial(path, "ab123", "heidelberg", nil); err != nil {
+			t.Fatal(err)
+		}
+		return h, dir, path
+	}
+	lh, dir, path := newDevice()
+	laptop := lh.start(syncOptions(url, dir, func(o *Options) { o.ConfigPath = path }))
+	dh, ddir, dpath := newDevice()
+	if err := os.WriteFile(filepath.Join(dh.tokenDir, signedInName), []byte("ab123\n"+dh.cfg.Host), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	desktop := dh.start(syncOptions(url, ddir, func(o *Options) { o.ConfigPath = dpath }))
+	pairWith(t, laptop, desktop)
+	syncRound(t, desktop)
+	dh.mu.Lock()
+	stored := slices.Clone(dh.stored)
+	dh.mu.Unlock()
+	if len(stored) > 0 {
+		t.Error("stored again:", stored)
+	}
+	if !exists(filepath.Join(dh.tokenDir, signedInName)) {
+		t.Error("the sign-in was forgotten")
+	}
+	desktop.mu.Lock()
+	signedIn, want := desktop.signedIn, [2]int{desktop.secretsGen + 1, desktop.accountGen + 1}
+	desktop.mu.Unlock()
+	if signedIn != want {
+		t.Error(signedIn, want)
+	}
+}

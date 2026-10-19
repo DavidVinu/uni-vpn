@@ -20,6 +20,7 @@ struct SetupView: View {
                     if let back = back(setup) {
                         ToolbarItem(placement: .topBarLeading) {
                             Button {
+                                guard !setup.justChanged else { return }
                                 back()
                             } label: {
                                 Label(model.t("app.back"), systemImage: "chevron.left")
@@ -33,6 +34,8 @@ struct SetupView: View {
             setup.prepare(model)
             await setup.loadUniversities(model)
         }
+        .onChange(of: setup.step) { setup.pageChanged() }
+        .onChange(of: setup.byHand) { setup.pageChanged() }
     }
 
     private func title(_ setup: SetupState) -> String {
@@ -129,8 +132,8 @@ private struct WelcomePage: View {
                         InfoButton(model: model, text: model.t("phone.scan_code_help"))
                     }
                 }
-                Button(model.t("sync.enter")) { setup.go(.code) }
-                Button(model.t("phone.setup_here")) { setup.go(.university) }
+                Button(model.t("sync.enter")) { if !setup.justChanged { setup.go(.code) } }
+                Button(model.t("phone.setup_here")) { if !setup.justChanged { setup.go(.university) } }
             }
             .padding(.bottom, 24)
         }
@@ -160,6 +163,7 @@ private struct CodePage: View {
             BottomButton(title: model.t("app.next"),
                          enabled: !setup.pairCode.trimmingCharacters(in: .whitespaces).isEmpty,
                          busy: setup.busy) {
+                guard !setup.justChanged else { return }
                 Task { await setup.enterCode(model) }
             }
         }
@@ -232,7 +236,9 @@ private struct UniversityPage: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            BottomButton(title: model.t("app.next"), busy: setup.detecting) { next() }
+            BottomButton(title: model.t("app.next"), busy: setup.detecting) {
+                if !setup.justChanged { next() }
+            }
         }
     }
 
@@ -275,7 +281,9 @@ private struct SignInPage: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            BottomButton(title: model.t("app.next"), busy: setup.sending) { next() }
+            BottomButton(title: model.t("app.next"), busy: setup.sending) {
+                if !setup.justChanged { next() }
+            }
         }
     }
 
@@ -325,7 +333,9 @@ private struct SecondFactorPage: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            BottomButton(title: model.t("app.next"), enabled: setup.secretValid) { setup.submit(model) }
+            BottomButton(title: model.t("app.next"), enabled: setup.secretValid) {
+                if !setup.justChanged { setup.submit(model) }
+            }
         }
     }
 }
@@ -382,6 +392,7 @@ private struct DonePage: View {
             Spacer()
             // Tailscale: the system's VPN prompt follows the sign-in.
             BottomButton(title: model.t("app.done")) {
+                guard !model.setup.justChanged else { return }
                 model.finishSetup()
                 Task { await model.turnOn() }
             }

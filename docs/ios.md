@@ -53,6 +53,9 @@ thin SwiftUI shell around the core.
   XChaCha20-Poly1305. The key and the API token live in the Keychain
   (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, shared by app and extension through the
   App Group), so reconnects work in a pocket and nothing goes into backups or to another phone.
+  A backup restored on another iPhone brings the settings without the key: the password is asked
+  again, and the old phone's code generator (`mfa-token-serial`) is forgotten, so setting one up
+  on the new phone leaves the old one, which synced devices may use, in place.
 - **Certificates.** OpenSSL on iOS has no CA file, so openconnect asks its certificate callback,
   which checks the gateway's chain with the phone's own trust store. The cross-certificates in
   `internal/certs/extra.pem` go along as intermediates, for gateways whose chain ends at a newer

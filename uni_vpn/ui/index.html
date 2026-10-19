@@ -495,8 +495,15 @@ function render() {
   if (!domainsShown || ($("domains").value === domainsBase && domains !== domainsBase)) {
     $("domains").value = domainsBase = domains;
     domainsShown = true;
+    fitDomains();
   }
   renderDevices();
+}
+
+// The whole list in view (Heidelberg starts with 7), and a line to add one.
+function fitDomains() {
+  const box = $("domains");
+  box.rows = Math.max(5, Math.min(12, box.value.split("\n").length + 1));
 }
 
 // Connected, or a connect loop still trying (offline, blocked, error): the button stops it.
@@ -1351,7 +1358,10 @@ $("domform").onsubmit = async (e) => {
     text = [...lines, ...now.filter((d) => !before.includes(d) && !lines.some((l) => l.trim() === d))].join("\n");
   }
   const r = await send("/api/domains", {text});
-  if (r.ok) $("domains").value = domainsBase = r.data.domains.join("\n");
+  if (r.ok) {
+    $("domains").value = domainsBase = r.data.domains.join("\n");
+    fitDomains();
+  }
   saved("dommsg", r, t(S && S.pac_refresh === "manual" ? "app.saved_restart" : "app.saved"));
   refresh();
 };
@@ -1506,11 +1516,19 @@ document.addEventListener("click", (e) => {
   const again = e.detail > 1 && (switched || performance.now() - lastClick < 800);
   lastClick = performance.now();
   switched = false;
-  if (again && e.target.closest("button, summary, label")) {
+  if (again && e.target.closest("a, button, summary, label")) {
     e.preventDefault();
     e.stopPropagation();
   }
 }, true);
+// On a Mac the click that brings the window forward never reaches the page, but it counts:
+// the next click there arrives as the second of a double click.
+window.addEventListener("focus", (e) => {
+  if (e.target === window) {
+    switched = false;
+    lastClick = -Infinity;
+  }
+});
 
 const closePops = () => { for (const p of document.querySelectorAll(".pop")) p.hidden = true; };
 document.addEventListener("click", closePops);

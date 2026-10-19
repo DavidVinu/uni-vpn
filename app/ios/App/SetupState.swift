@@ -58,6 +58,14 @@ final class SetupState {
     /// The gateway check asked last: an answer for an earlier address or group no longer counts
     /// (the desktop page's detectSeq).
     @ObservationIgnored private var detectSeq = 0
+    /// When the page last changed in place (no navigation animation that swallows taps).
+    @ObservationIgnored private var changedAt = -TimeInterval.infinity
+
+    func pageChanged() { changedAt = ProcessInfo.processInfo.systemUptime }
+
+    /// A tap right after the page changed is the second of a double tap meant for the page
+    /// before: it would go back once more, or show the next page's error (Android: justChanged).
+    var justChanged: Bool { ProcessInfo.processInfo.systemUptime - changedAt < 0.35 }
 
     var uni: University? { universities.first { $0.id == uniId } }
 

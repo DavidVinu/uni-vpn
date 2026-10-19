@@ -63,6 +63,7 @@ type harness struct {
 	logs        *syncBuffer
 	wallOffset  atomic.Int64 // seconds added to the wall clock (Python mocks time.time)
 	probeResult atomic.Bool
+	unversioned atomic.Bool
 	cisco       atomic.Bool
 
 	mu          sync.Mutex
@@ -185,8 +186,9 @@ func (h *harness) start(edit func(*Options), before ...func(*Daemon)) *Daemon {
 			defer h.mu.Unlock()
 			h.refreshed = append(h.refreshed, port)
 		},
-		RepairStart: func() (Process, error) { panic("no repair in tests") },
-		Elevated:    func() *bool { return nil },
+		ProxyUnversioned: func(int) bool { return h.unversioned.Load() },
+		RepairStart:      func() (Process, error) { panic("no repair in tests") },
+		Elevated:         func() *bool { return nil },
 	}
 	if edit != nil {
 		edit(&opts)

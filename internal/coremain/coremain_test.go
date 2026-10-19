@@ -225,18 +225,23 @@ func TestReadyFileStaysWithTheNextCore(t *testing.T) {
 	ready := filepath.Join(t.TempDir(), "api-ready")
 	store := blockingStore{make(chan struct{})}
 	// Like the iPhone's: a program started at that moment (here the browsers' proxy
-	// refresh) would hold a copy of the lock and the ports until it runs.
-	noRefresh := func(int) {}
+	// refresh, or the look at the system's proxy setting) would hold a copy of the lock and
+	// the ports until it runs.
+	phone := func(o *daemon.Options) {
+		o.ProxyRefresh = func(int) {}
+		o.ProxyUnversioned = func(int) bool { return false }
+	}
 	var release func()
 	first := start(t, Options{APIToken: "t0ken", Release: func(f func()) { release = f },
 		Extend: func(_ *slog.Logger, o *daemon.Options) {
-			o.ReadyFile, o.SyncStore, o.ProxyRefresh = ready, store, noRefresh
+			o.ReadyFile, o.SyncStore = ready, store
+			phone(o)
 		}})
 	release()
 	if _, err := os.Stat(ready); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal("ready file kept after the lock was let go", err)
 	}
-	second := start(t, Options{APIToken: "t0ken", Extend: func(_ *slog.Logger, o *daemon.Options) { o.ReadyFile, o.ProxyRefresh = ready, noRefresh }})
+	second := start(t, Options{APIToken: "t0ken", Extend: func(_ *slog.Logger, o *daemon.Options) { o.ReadyFile = ready; phone(o) }})
 	close(store.release)
 	select {
 	case err := <-first.done:

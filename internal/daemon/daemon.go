@@ -127,7 +127,9 @@ type Options struct {
 	TokenDir     string
 	DomainsPath  string
 	ProxyRefresh func(httpPort int)
-	RepairStart  func() (Process, error)
+	// ProxyUnversioned: the system has the rule's plain address (sysproxy.Unversioned).
+	ProxyUnversioned func(httpPort int) bool
+	RepairStart      func() (Process, error)
 	// Elevated is is_admin() on Windows, nil elsewhere (status "elevated": null).
 	Elevated func() *bool
 	// Updater is the self-updater; nil means updater.New(Commit).
@@ -299,6 +301,12 @@ func New(cfg *config.Config, log *slog.Logger, opts Options) *Daemon {
 		if platform.IsAndroid || platform.IsIOS {
 			// The app's VPN carries the PAC address and notices new websites in status.json.
 			opts.ProxyRefresh = func(int) {}
+		}
+	}
+	if opts.ProxyUnversioned == nil {
+		opts.ProxyUnversioned = sysproxy.Unversioned
+		if platform.IsAndroid || platform.IsIOS {
+			opts.ProxyUnversioned = func(int) bool { return false }
 		}
 	}
 	if opts.Probe == nil {
@@ -1034,7 +1042,9 @@ const addedDefaultsName = "defaults-added"
 
 // addNewDefaults adds the websites of addedDefaults to a saved list once. Not one the user's
 // devices already know (sync.json): another device added it, or the user removed it there.
-func (d *Daemon) addNewDefaults() {
+// Without a saved list the defaults apply, these with them; it returns the sync keys of those
+// the user's devices know, for Defaulted: no change made here, the group's value stays.
+func (d *Daemon) addNewDefaults() (known []string) {
 	marker := filepath.Join(d.opts.TokenDir, addedDefaultsName)
 	data, _ := os.ReadFile(marker)
 	done := strings.Fields(string(data))
@@ -1043,17 +1053,23 @@ func (d *Daemon) addNewDefaults() {
 		all = append(all, hosts...)
 	}
 	if !slices.ContainsFunc(all, func(host string) bool { return !slices.Contains(done, host) }) {
-		return
+		return nil
 	}
 	d.mu.Lock()
 	setUp := !d.needsSetup && d.configError == ""
 	university, defaults := d.cfg.University, slices.Clone(d.cfg.DefaultDomains)
 	d.mu.Unlock()
-	// Without a saved list the defaults apply, these with them: a list saved from now on has
-	// them (or the user removed them).
+	if !exists(d.opts.DomainsPath) && setUp {
+		for _, host := range addedDefaults[university] {
+			if key := devsync.DomainPrefix + host; !slices.Contains(done, host) && slices.Contains(defaults, host) && d.sync.Knows(key) {
+				known = append(known, key)
+			}
+		}
+	}
+	// A list saved from now on has them (or the user removed them).
 	if exists(d.opts.DomainsPath) {
 		if !setUp {
-			return // the university is not known yet
+			return nil // the university is not known yet
 		}
 		list, err := pac.ReadDomains(d.opts.DomainsPath, defaults)
 		if err != nil {
@@ -1068,12 +1084,13 @@ func (d *Daemon) addNewDefaults() {
 		if len(add) > 0 {
 			if _, err := d.SetDomains(strings.Join(append(list, add...), "\n")); err != nil {
 				d.logf(slog.LevelWarn, "Could not add %s to the websites: %s", strings.Join(add, ", "), err)
-				return
+				return nil
 			}
 		}
 	}
 	slices.Sort(all)
 	_ = os.WriteFile(marker, []byte(strings.Join(slices.Compact(all), "\n")+"\n"), 0o600)
+	return known
 }
 
 // pacSumName keeps the proxy rule the browsers were last told about, in the state folder.
@@ -1097,13 +1114,14 @@ func (d *Daemon) refreshProxy(port int) {
 }
 
 // refreshIfRuleChanged: an update can bring new default websites, so a rule other than the
-// one the browsers were last told about is announced at start.
+// one the browsers were last told about is announced at start; so is the rule after an
+// installer set the plain address again (the browsers then loaded the installed version's).
 func (d *Daemon) refreshIfRuleChanged(port int) {
 	sum, err := d.pacSum()
 	if err != nil {
 		return
 	}
-	if old, err := os.ReadFile(filepath.Join(d.opts.TokenDir, pacSumName)); err == nil && string(old) == sum {
+	if old, err := os.ReadFile(filepath.Join(d.opts.TokenDir, pacSumName)); err == nil && string(old) == sum && !d.opts.ProxyUnversioned(port) {
 		return
 	}
 	d.refreshProxy(port)
@@ -1227,7 +1245,7 @@ func (d *Daemon) Run() {
 		}
 		defer d.dropReady()
 	}
-	d.addNewDefaults()
+	knownDefaults := d.addNewDefaults()
 	refreshDone := make(chan struct{})
 	go func() {
 		if server != nil {
@@ -1243,6 +1261,9 @@ func (d *Daemon) Run() {
 	syncDone := make(chan struct{})
 	go func() {
 		d.sync.Load(context.Background())
+		if len(knownDefaults) > 0 {
+			d.sync.Defaulted(knownDefaults...) // reads the keyring: not before the core is up
+		}
 		d.sync.Run(d.stop)
 		close(syncDone)
 	}()

@@ -21,6 +21,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,11 +55,25 @@ fun Info(model: AppModel, text: String) {
         Icon(Icons.Outlined.Info, contentDescription = model.t("app.help"))
     }
     if (open) {
+        DialogShown(model)
         AlertDialog(
-            onDismissRequest = { open = false },
+            // The second tap of a double tap on the icon lands beside the dialog.
+            onDismissRequest = { if (!model.justChanged) open = false },
             confirmButton = { TextButton(onClick = { open = false }) { Text(model.t("app.done")) } },
             text = { Text(text) },
         )
+    }
+}
+
+/**
+ * A dialog that opens or closes on a tap changes what is on screen, like a new screen: the second
+ * tap of a double tap would land beside it, or on what was under its button (App.kt doubleTapGuard).
+ */
+@Composable
+fun DialogShown(model: AppModel) {
+    DisposableEffect(Unit) {
+        model.screenChanged()
+        onDispose { model.screenChanged() }
     }
 }
 
