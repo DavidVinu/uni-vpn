@@ -29,6 +29,7 @@ from pathlib import Path
 from uni_vpn import config as config_mod
 from uni_vpn import i18n, messages, pac, totp
 from uni_vpn import universities as unis
+from tests import free_ports
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
@@ -58,12 +59,6 @@ def message_id(text: str) -> str | None:
     return None
 
 
-def free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
-
-
 def core_command() -> list[str]:
     custom = os.environ.get("UNI_VPN_CORE")
     if custom:
@@ -88,8 +83,7 @@ class ContractTest(unittest.TestCase):
         ocproxy.write_text("#!/bin/sh\nexit 1\n")
         ocproxy.chmod(0o755)
         self.config_dir = self.config_home / "uni-vpn"
-        self.socks_port = free_port()
-        self.http_port = free_port()
+        self.socks_port, self.http_port = free_ports(2)
         self.process = None
 
     def write_config(self, extra: str = "", user: str = "ab123") -> None:

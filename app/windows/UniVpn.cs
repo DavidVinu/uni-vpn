@@ -581,6 +581,24 @@ class MainWindow : Form
         if (!Visible) Show();
         if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
         Activate();
+        ShowView();
+    }
+
+    // WebView2 is not told when its window is hidden or minimized (CoreWebView2Controller.IsVisible):
+    // the page would stay "visible" and keep checking sign-in codes. Its own Visible tells it.
+    void ShowView()
+    {
+        if (view.Visible) return;
+        view.Visible = true;
+        view.Focus();  // hiding it took the keyboard focus from the page
+    }
+
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        if (!Visible) return;
+        if (WindowState == FormWindowState.Minimized) view.Visible = false;
+        else ShowView();
     }
 
     public void Quit()
@@ -595,6 +613,7 @@ class MainWindow : Form
         if (!quitting && e.CloseReason == CloseReason.UserClosing)
         {
             e.Cancel = true;
+            view.Visible = false;  // first: hidden with the window, the page would not be told
             Hide();
             return;
         }

@@ -14,7 +14,6 @@ import io
 import json
 import os
 import shutil
-import socket
 import subprocess
 import sys
 import tempfile
@@ -26,6 +25,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from tests import free_ports  # noqa: E402
 from uni_vpn import updater  # noqa: E402
 
 OLD = "a" * 40
@@ -56,12 +56,6 @@ def source_files() -> dict[str, bytes]:
             if path.is_file() and "__pycache__" not in path.parts and not path.name.startswith("uni-vpn-core"):
                 files[path.relative_to(ROOT).as_posix()] = path.read_bytes()
     return files
-
-
-def free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
 
 
 def go_core_running(pid: int) -> bool:
@@ -106,7 +100,7 @@ def main() -> int:
     assert updater.installed_commit(app) == commit
     print("installed", commit, "with", binary)
 
-    http_port, socks_port = free_port(), free_port()
+    http_port, socks_port = free_ports(2)
     env = dict(os.environ, XDG_CONFIG_HOME=str(tmp / "config"), XDG_STATE_HOME=str(tmp / "state"),
                XDG_DATA_HOME=str(tmp / "data"))
     env.pop("UNI_VPN_PYTHON", None)

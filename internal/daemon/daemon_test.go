@@ -1586,3 +1586,44 @@ func TestSavingIntoABrokenKeyringIsTranslated(t *testing.T) {
 		t.Error("keyring's own words not logged")
 	}
 }
+
+// phoneClock is the phone's clock (monoClock) in the harness: it moves on with the wall clock
+// while the phone sleeps.
+func phoneClock(h *harness) func(*Daemon) {
+	return func(d *Daemon) {
+		awake := d.mono
+		d.mono = func() float64 { return awake() + float64(h.wallOffset.Load()) }
+	}
+}
+
+// A phone sleeps whenever its screen is off: that is no resume, and the tunnel is still there for
+// the next page, without a new sign-in (a Duo push for some universities).
+func TestPhoneScreenOffKeepsTheTunnel(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.IdleMinutes = 5
+	d := h.start(nil, phoneClock(h))
+	c := h.client()
+	echo(t, c, "x")
+	h.wallOffset.Store(120) // two minutes with the screen off
+	time.Sleep(400 * time.Millisecond)
+	echo(t, c, "y")
+	if s, _ := d.snapshot(); s != Connected || len(h.pwLines()) != 1 || strings.Contains(h.logs.String(), "Resume detected") {
+		t.Fatal(s, h.pwLines(), h.logs.String())
+	}
+}
+
+// ... but the time asleep counts towards the idle limit.
+func TestPhoneScreenOffCountsTowardsIdle(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.IdleMinutes = 1
+	d := h.start(nil, phoneClock(h))
+	c := h.client()
+	echo(t, c, "x")
+	c.Close()
+	h.wallOffset.Store(120)
+	waitState(t, d, Idle, 3*time.Second)
+	time.Sleep(300 * time.Millisecond)
+	if s, _ := d.snapshot(); s != Idle || len(h.pwLines()) != 1 || !strings.Contains(h.logs.String(), "Idle for") {
+		t.Fatal(s, h.pwLines(), h.logs.String())
+	}
+}

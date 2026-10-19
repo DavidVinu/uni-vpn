@@ -50,7 +50,12 @@ struct TotpEntry: View {
         if trimmed.isEmpty { return }
         try? await Task.sleep(nanoseconds: 300_000_000)
         if Task.isCancelled { return }
-        let result = await model.post("/api/totp/check", ["secret": trimmed, "mfa": mfa])
+        var result = await model.post("/api/totp/check", ["secret": trimmed, "mfa": mfa])
+        // Back from another app, the app's core may still be starting (it stops in the background).
+        for _ in 0..<10 where result.reply.status == 0 && !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            result = await model.post("/api/totp/check", ["secret": trimmed, "mfa": mfa])
+        }
         if Task.isCancelled { return }
         guard result.ok else {
             checkError = result.error
@@ -58,11 +63,17 @@ struct TotpEntry: View {
         }
         valid = true
         code = result.json?.string("code")
-        left = result.json?.int("remaining", 30) ?? 30
-        while left > 0 {
+        // By the clock: iOS suspends the app in the background, and a sleep then ends only once
+        // it is back, so counting sleeps would show an old code as current.
+        let remaining = Double(result.json?.int("remaining", 30) ?? 30)
+        let end = Date().addingTimeInterval(remaining)
+        while true {
+            // A clock set back meanwhile (corrected by hand) ends the code too.
+            let rest = end.timeIntervalSinceNow
+            left = rest > remaining ? 0 : max(0, Int(rest.rounded(.up)))
+            if left == 0 { break }
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             if Task.isCancelled { return }
-            left -= 1
         }
         checks += 1 // the next code
     }
