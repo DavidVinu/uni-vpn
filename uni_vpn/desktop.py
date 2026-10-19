@@ -36,7 +36,9 @@ WEBVIEW2_URL = (f"https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/
 WEBVIEW2_SHA256 = "56f7f4b8bf9aee4b8efefbbdd4f67d5f74ebd1b100ed0806da71bf76af481aa9"
 WEBVIEW2_FILES = {"lib/net462/Microsoft.Web.WebView2.Core.dll": "Microsoft.Web.WebView2.Core.dll",
                   "lib/net462/Microsoft.Web.WebView2.WinForms.dll": "Microsoft.Web.WebView2.WinForms.dll",
-                  "runtimes/win-x64/native/WebView2Loader.dll": "WebView2Loader.dll"}
+                  "runtimes/win-x64/native/WebView2Loader.dll": "WebView2Loader.dll",
+                  # Its licence and third-party notices go with the files.
+                  "LICENSE.txt": "WebView2-LICENSE.txt", "NOTICE.txt": "WebView2-NOTICE.txt"}
 GTK_CHECK = ("import gi; gi.require_version('Gtk', '3.0')\n"
              "for v in ('4.1', '4.0'):\n"
              "    try:\n"
@@ -317,7 +319,7 @@ def csc_path() -> Path | None:
 
 
 def extract_webview2(data: bytes, target: Path) -> None:
-    """The three files of the WebView2 SDK the app needs, after checking the package's hash."""
+    """The files of the WebView2 SDK the app needs, after checking the package's hash."""
     digest = hashlib.sha256(data).hexdigest()
     if digest != WEBVIEW2_SHA256:
         raise ValueError(f"WebView2 SDK has SHA-256 {digest}, expected {WEBVIEW2_SHA256}")

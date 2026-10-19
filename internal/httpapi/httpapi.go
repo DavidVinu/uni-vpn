@@ -686,6 +686,10 @@ func (s *Server) totp(body []byte) (int, string, []byte, error) {
 		return problem(400, err)
 	}
 	if err := s.daemon.SetTOTP(token); err != nil {
+		var ve *ValueError
+		if errors.As(err, &ve) {
+			return problem(400, ve) // a key whose codes this university's sign-in can't use
+		}
 		return problem(500, err)
 	}
 	code, err := totp.Code(token)
@@ -696,7 +700,9 @@ func (s *Server) totp(body []byte) (int, string, []byte, error) {
 }
 
 // totpCheck: the check code for a secret without storing it. The setup assistant shows it for
-// the portal's "Testen" step before anything is saved.
+// the portal's "Testen" step before anything is saved. With "mfa" (the sign-in mode the user is
+// setting up) a key whose codes that mode can't use is refused here, before the user registers
+// it in the portal, not only when it is saved.
 func (s *Server) totpCheck(body []byte) (int, string, []byte, error) {
 	data, utf8OK, err := loads(body)
 	if !utf8OK {
@@ -713,6 +719,11 @@ func (s *Server) totpCheck(body []byte) (int, string, []byte, error) {
 	token, err := totp.Normalize(secret)
 	if err != nil {
 		return problem(400, err)
+	}
+	if value, ok := item(data, "mfa"); ok {
+		if mfa, _ := value.(string); !totp.Fits(mfa, token) {
+			return problem(400, i18n.T("totp.digits"))
+		}
 	}
 	remaining := totp.Step - int(time.Now().Unix())%totp.Step
 	s.daemon.NoteCodeShown()
@@ -742,7 +753,7 @@ func (s *Server) totpPicture(body []byte) (int, string, []byte, error) {
 		if _, err := totp.Normalize(text); err == nil {
 			return jsonReply(200, pyjson.O("ok", true, "secret", text))
 		} else if first == nil && strings.HasPrefix(strings.ToLower(text), "otpauth:") {
-			first = err // a sign-in QR code, but one we can't use (an HOTP or 8-digit one)
+			first = err // a sign-in QR code, but one we can't use (an HOTP one, or 60-second codes)
 		}
 	}
 	if first != nil {

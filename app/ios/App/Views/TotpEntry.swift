@@ -2,9 +2,12 @@ import SwiftUI
 
 /// The setup key of the second factor, role model Google Authenticator: scan the QR code of the
 /// university's security page, or type the key. A valid key shows the current test code with
-/// the time it has left, for the security page's "test" step. Rows of a Form section.
+/// the time it has left, for the security page's "test" step. Rows of a Form section. `mfa` is
+/// the sign-in mode being set up: a key whose codes it can't use is refused before the user
+/// registers it.
 struct TotpEntry: View {
     let model: AppModel
+    let mfa: String
     @Binding var secret: String
     @Binding var valid: Bool
     let error: String?
@@ -16,7 +19,7 @@ struct TotpEntry: View {
     var body: some View {
         ScanButton(model: model, title: model.t("phone.scan_qr")) { secret = $0 }
         PasswordField(model: model, label: model.t("setup.token_secret"), text: $secret, showLabel: "setup.show_secret")
-            .task(id: "\(secret)|\(checks)") { await check() }
+            .task(id: "\(secret)|\(mfa)|\(checks)") { await check() }
         ErrorText(text: checkError ?? error)
         if let code {
             HStack(spacing: 12) {
@@ -29,7 +32,8 @@ struct TotpEntry: View {
                         .animation(.linear(duration: 1), value: left)
                 }
                 .frame(width: 24, height: 24)
-                Text(String(code.prefix(3)) + " " + String(code.dropFirst(3)))
+                // In halves: 123 456, or 1234 5678 (Marburg).
+                Text(String(code.prefix(code.count / 2)) + " " + String(code.dropFirst(code.count / 2)))
                     .font(.title.monospacedDigit())
                 Spacer()
                 Text(model.t("setup.check_code"))
@@ -46,7 +50,7 @@ struct TotpEntry: View {
         if trimmed.isEmpty { return }
         try? await Task.sleep(nanoseconds: 300_000_000)
         if Task.isCancelled { return }
-        let result = await model.post("/api/totp/check", ["secret": trimmed])
+        let result = await model.post("/api/totp/check", ["secret": trimmed, "mfa": mfa])
         if Task.isCancelled { return }
         guard result.ok else {
             checkError = result.error

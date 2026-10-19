@@ -25,6 +25,7 @@ import (
 	"github.com/DavidVinu/uni-vpn/internal/credentials"
 	"github.com/DavidVinu/uni-vpn/internal/desktop"
 	"github.com/DavidVinu/uni-vpn/internal/detect"
+	"github.com/DavidVinu/uni-vpn/internal/i18n"
 	"github.com/DavidVinu/uni-vpn/internal/messages"
 	"github.com/DavidVinu/uni-vpn/internal/platform"
 	"github.com/DavidVinu/uni-vpn/internal/service"
@@ -883,6 +884,9 @@ func (s *Setup) askSecrets(cfg *config.Config) error {
 		return nil
 	}
 	token, err := totp.Normalize(text)
+	if err == nil && !totp.Fits(cfg.MFA, token) {
+		err = i18n.T("totp.digits")
+	}
 	if err != nil {
 		s.printf("   %s. Add it later in the app, under Settings.", err)
 		return nil

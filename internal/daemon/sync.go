@@ -175,6 +175,15 @@ func (l syncLocal) Apply(ctx context.Context, all map[string]devsync.Entry, keys
 	if changed(devsync.KeyAccount) || !l.SetupDone() {
 		if err := l.applyAccount(all, text(devsync.KeyPassword), text(devsync.KeyTOTP)); err != nil {
 			fail(err, secrets...)
+			if !l.SetupDone() {
+				// Language and automatic updates come with the account. Set without one (config.toml
+				// unreadable), each would wake syncing for the same round again, without end.
+				for _, key := range []string{devsync.KeyLanguage, devsync.KeyAutoUpdate} {
+					if changed(key) {
+						fail(err, key)
+					}
+				}
+			}
 		}
 	} else {
 		// Not SetPassword and SetTOTP: those connect, and a synced secret is for the next
@@ -201,12 +210,12 @@ func (l syncLocal) Apply(ctx context.Context, all map[string]devsync.Entry, keys
 			d.secretsSynced(false)
 		}
 	}
-	if changed(devsync.KeyLanguage) {
+	if changed(devsync.KeyLanguage) && failed[devsync.KeyLanguage] == nil {
 		if err := d.SetLanguage(text(devsync.KeyLanguage)); err != nil {
 			fail(err, devsync.KeyLanguage)
 		}
 	}
-	if changed(devsync.KeyAutoUpdate) {
+	if changed(devsync.KeyAutoUpdate) && failed[devsync.KeyAutoUpdate] == nil {
 		var on bool
 		err := json.Unmarshal(all[devsync.KeyAutoUpdate].V, &on)
 		if err == nil {

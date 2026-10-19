@@ -73,9 +73,9 @@ done
 # with its dependencies only. Homebrew makes no new bottles for older macOS, so the next rebuild
 # of openconnect leaves none for the minimum, and its newer ones call strchrnul (macOS 15.4).
 # brew fetch tries the formula's mirrors and checks the source against its sha256; again a minute
-# later when the runner cannot reach them for a moment.
+# later when the runner cannot reach them for a moment. ocproxy's source has lwIP's licence.
 for try in 1 2 3; do
-  brew fetch --quiet --build-from-source openconnect && break
+  brew fetch --quiet --build-from-source openconnect ocproxy && break
   if [ "$try" = 3 ]; then exit 1; fi
   sleep 60
 done
@@ -117,6 +117,10 @@ dylibbundler -cd -of -b -s "$prefix/lib" -x "$out/bin/openconnect" -x "$out/bin/
 # keeps each formula's licence files.
 mkdir -p "$out/licenses"
 cp "$src/COPYING.LGPL" "$out/licenses/openconnect-COPYING.LGPL"
+cp "$src/json/LICENSE" "$out/licenses/openconnect-json-parser-LICENSE"
+# lwIP, built into ocproxy, has its licence only in ocproxy's source.
+tar -xzOf "$(brew --cache --build-from-source ocproxy)" '*/lwip/COPYING' >"$out/licenses/lwip-COPYING"
+[ -s "$out/licenses/lwip-COPYING" ]
 for f in ocproxy $(brew deps --union openconnect ocproxy); do
   for file in "$prefix/opt/$f"/COPYING* "$prefix/opt/$f"/LICENSE* "$prefix/opt/$f"/LICENCE*; do
     if [ -f "$file" ]; then cp "$file" "$out/licenses/$f-$(basename "$file")"; fi

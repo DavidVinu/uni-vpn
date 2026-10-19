@@ -746,6 +746,9 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 	if listed, _ := unis.Get(university); once && (listed.MFAEnroll != "linotp" || profile.MFAPortalURL == "") {
 		return unis.TextError("totp", i18n.T("enroll.not_here"))
 	}
+	if profile.NeedsTOTP() && !once && !totp.Fits(profile.MFA, token) {
+		return unis.TextError("totp", i18n.T("totp.digits"))
+	}
 	d.mu.Lock()
 	path := d.configPath
 	if path == "" {
@@ -1373,6 +1376,12 @@ func (d *Daemon) SetPassword(password string) error {
 
 // SetTOTP stores a new TOTP secret and connects with it.
 func (d *Daemon) SetTOTP(token string) error {
+	d.mu.Lock()
+	mfa := d.cfg.MFA
+	d.mu.Unlock()
+	if !totp.Fits(mfa, token) {
+		return httpapi.TextValueError(i18n.T("totp.digits"))
+	}
 	if err := d.opts.TOTPSetter(token); err != nil {
 		return d.keyringFailed(err)
 	}
@@ -1543,6 +1552,13 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 				d.final(Keyring, messages.TOTPMissing)
 				return
 			}
+			if !totp.Fits(cfg.MFA, secret) {
+				// An 8-digit token, for example after mfa changed in config.toml: openconnect would
+				// take it for a raw key and send wrong codes.
+				d.logf(slog.LevelError, "TOTP secret unusable: openconnect makes 6-digit codes only")
+				d.final(AuthFailed, messages.TOTPUnusable)
+				return
+			}
 		}
 
 		if d.switching || account != d.accountGen {
@@ -1598,8 +1614,14 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 		freshCode := !d.hasOTPStep || step != d.lastOTPStep
 		d.lastOTPStep, d.hasOTPStep = step, true
 
+		wait := seconds(cfg.ReadyTimeout)
+		if cfg.MFA == "duo_push" {
+			// A Duo push stays open for 60 s and the gateway waits for it; then it says whether
+			// the push was confirmed (DuoRejected). Giving up sooner sends a new push each try.
+			wait = max(wait, 75*time.Second)
+		}
 		var ready bool
-		d.unlocked(func() { ready = tun.WaitReady(seconds(cfg.ReadyTimeout)) })
+		d.unlocked(func() { ready = tun.WaitReady(wait) })
 		if ctx.Err() != nil {
 			return
 		}

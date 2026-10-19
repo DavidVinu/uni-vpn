@@ -181,7 +181,6 @@ settings. `uni-vpn doctor` prints it.
 | University of Bonn | unibn-vpn.uni-bonn.de | none | profile only |
 | University of Mannheim | vpn.uni-mannheim.de | none | profile only |
 | University of Kassel | univpn.uni-kassel.de | none | profile only |
-| TU Dresden | vpn2.zih.tu-dresden.de | none | profile only |
 | Texas A&M University | connect.tamu.edu | Duo push | profile only |
 | University of Central Florida | secure.vpn.ucf.edu | sign-in on a web page (SAML) | not supported yet |
 | Ohio State University | vpn.service.osu.edu | Duo push | profile only |

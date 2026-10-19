@@ -141,6 +141,11 @@ cd "$src/openconnect-$openconnect_ver"
 patch_literal script.c 'execl("/bin/sh", "/bin/sh", "-c"' 'execl("/system/bin/sh", "/system/bin/sh", "-c"'
 patch_literal tun.c 'execl("/bin/sh", "/bin/sh", "-c"' 'execl("/system/bin/sh", "/system/bin/sh", "-c"'
 if grep -rn --include='*.c' '"/bin/sh"' . >&2; then die "openconnect still references /bin/sh"; fi
+# OpenSSL 3 refuses a gateway without secure renegotiation (RFC 5746, vpn-gateway.w-hs.de);
+# GnuTLS, which the computers' openconnect uses, allows the first handshake, and so does this.
+# Renegotiation itself stays refused. --allow-insecure-crypto would set it too, with weak ciphers.
+patch_literal openssl.c 'SSL_CTX_set_options(vpninfo->https_ctx, SSL_OP_TLSEXT_PADDING);' \
+  'SSL_CTX_set_options(vpninfo->https_ctx, SSL_OP_TLSEXT_PADDING | SSL_OP_LEGACY_SERVER_CONNECT);'
 run ./configure "${autoconf_args[@]}" --with-openssl --without-gnutls --disable-nls \
   --without-libpskc --without-stoken --without-libpcsclite --without-gssapi \
   --without-libproxy --without-lz4 --disable-docs --with-builtin-json \
@@ -163,6 +168,7 @@ chmod 755 "$out/libopenconnect.so" "$out/libocproxy.so"
 rm -rf "$out/licenses"
 mkdir -p "$out/licenses"
 cp "$src/openconnect-$openconnect_ver/COPYING.LGPL" "$out/licenses/openconnect-COPYING.LGPL"
+cp "$src/openconnect-$openconnect_ver/json/LICENSE" "$out/licenses/openconnect-json-parser-LICENSE"
 cp "$src/ocproxy-$ocproxy_ver/LICENSE" "$out/licenses/ocproxy-LICENSE"
 cp "$src/ocproxy-$ocproxy_ver/lwip/COPYING" "$out/licenses/lwip-COPYING"
 cp "$src/openssl-$openssl_ver/LICENSE.txt" "$out/licenses/openssl-LICENSE.txt"

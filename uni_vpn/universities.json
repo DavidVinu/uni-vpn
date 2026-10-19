@@ -45,6 +45,7 @@
       "authgroup": "Tunnel-All-Traffic",
       "useragent": "AnyConnect",
       "mfa": "totp_field",
+      "mfa_portal_url": "https://onlinetools.zfn.uni-bremen.de/server/content/onlinetools/2fa/index.php",
       "aliases": ["Universitaet Bremen"],
       "notes": "Without 2FA the second field stays empty, which uni-vpn cannot send yet. Checked 2026-10-19: the gateway lists two groups; Tunnel-All-Traffic (its default) reaches the library's e-books, Tunnel-Uni-Bremen only the campus."
     },
@@ -54,6 +55,7 @@
       "country": "DE",
       "host": "vpn.uni-muenster.de",
       "mfa": "totp_field",
+      "mfa_portal_url": "https://it-portal.uni-muenster.de/",
       "aliases": ["University of Muenster", "Universitaet Muenster", "WWU"]
     },
     {
@@ -63,8 +65,9 @@
       "host": "vpn.uni-marburg.de",
       "authgroup": "unimr-vpn-staff-Passwort+2FA",
       "mfa": "totp_append",
+      "mfa_portal_url": "https://2fa.hrz.uni-marburg.de/",
       "aliases": ["Philipps-Universitaet Marburg"],
-      "notes": "Students: authgroup = \"unimr-vpn-students-Passwort+2FA\"."
+      "notes": "Students: authgroup = \"unimr-vpn-students-Passwort+2FA\". Checked 2026-10-19: app tokens give 8-digit HMAC-SHA512 codes; Google and Microsoft Authenticator cannot make them, the Uni-Marburg app and 2FAS can."
     },
     {
       "id": "stanford",
@@ -123,17 +126,6 @@
       "mfa": "none",
       "aliases": ["Universitaet Kassel"],
       "notes": "Needs a Windows client identity; the exact user agent is a guess."
-    },
-    {
-      "id": "tu-dresden",
-      "name": "TU Dresden",
-      "country": "DE",
-      "host": "vpn2.zih.tu-dresden.de",
-      "authgroup": "A-Tunnel-TU-Networks",
-      "username_suffix": "@tu-dresden.de",
-      "mfa": "none",
-      "aliases": ["Technische Universitaet Dresden", "ZIH"],
-      "notes": "Checked 2026-10-19: the gateway lists 12 groups, A-Tunnel-TU-Networks is its default. The user name is ZIH-Login@tu-dresden.de. ZIH moves its VPN to eduVPN, so this gateway may be switched off."
     },
     {
       "id": "fu-berlin",
@@ -298,6 +290,12 @@
       "username_suffix": "@hku.hk",
       "mfa": "totp_field",
       "mfa_portal_url": "https://mysignins.microsoft.com/security-info",
+      "mfa_steps": [
+        "Open the {portal} and sign in. Add a sign-in method: the authenticator app, then the option to use a different authenticator app.",
+        "Take a screenshot of the QR code ({shot}) and drop or paste it here.{secret}",
+        "Go to the next page and type this code there.{code}"
+      ],
+      "mfa_pictures": ["generic-1.svg", "generic-2.svg", "generic-3.svg"],
       "aliases": ["HKU"],
       "notes": "Profile from the university's documentation, not tested. Checked 2026-10-19: after the password the gateway asks for a Microsoft one-time code; the code generator is added as \"a different authenticator app\" in Microsoft's security info. Students type uid@connect.hku.hk."
     },
@@ -334,17 +332,18 @@
       "authgroup": "HSFL-Studierende",
       "mfa": "none",
       "aliases": ["Hochschule Flensburg"],
-      "notes": "Profile from the university's documentation, not tested. No second factor is mentioned in its documentation. User name without the e-mail domain."
+      "notes": "Profile from the university's documentation, not tested. No second factor is mentioned in its documentation. User name without the e-mail domain. Staff: authgroup = \"HSFL-Angehoerige\" (not in the documentation)."
     },
     {
       "id": "w-hs",
       "name": "Westphalian University of Applied Sciences",
       "country": "DE",
       "host": "vpn-gateway.w-hs.de",
-      "authgroup": "Sec-Groups",
+      "authgroup": "VPN+MFA",
       "mfa": "totp_field",
+      "mfa_portal_url": "https://mfa.za.w-hs.de/",
       "aliases": ["Westfaelische Hochschule", "Gelsenkirchen"],
-      "notes": "Profile from the university's documentation, not tested. User name without @w-hs.de."
+      "notes": "Profile from the university's documentation, not tested. Checked 2026-10-19: the gateway lists Sec-Groups (its default), Secure-RZ, VPN+MFA and zAlle; the guide signs in with VPN+MFA and a second password. User name without @w-hs.de. The token page opens only on campus or over the VPN."
     },
     {
       "id": "hs-offenburg",
@@ -369,18 +368,20 @@
       "name": "Friedrich Schiller University Jena",
       "country": "DE",
       "host": "vpn.uni-jena.de",
+      "username_suffix": "@uni-jena.de",
       "mfa": "none",
       "aliases": ["Universitaet Jena"],
-      "notes": "Profile from the university's documentation, not tested. No second factor is mentioned in its documentation. "
+      "notes": "Profile from the university's documentation, not tested. No second factor is mentioned in its documentation. The user name is the URZ login with @uni-jena.de (not the e-mail address); without it the sign-in fails."
     },
     {
       "id": "uni-weimar",
       "name": "Bauhaus-Universität Weimar",
       "country": "DE",
       "host": "vpngate.uni-weimar.de",
+      "username_suffix": "@uni-weimar.de",
       "mfa": "none",
       "aliases": ["Bauhaus-Universitaet Weimar", "Bauhaus University Weimar"],
-      "notes": "Profile from the university's documentation, not tested. No second factor is mentioned in its documentation. "
+      "notes": "Profile from the university's documentation, not tested. No second factor is mentioned in its documentation. The user name is the login with @uni-weimar.de, for example abcd1234@uni-weimar.de."
     },
     {
       "id": "th-koeln",
@@ -396,9 +397,10 @@
       "name": "Technische Hochschule Ulm",
       "country": "DE",
       "host": "vpn.thu.de",
+      "username_suffix": "@thu.de",
       "mfa": "none",
       "aliases": ["THU", "Ulm University of Applied Sciences"],
-      "notes": "Profile from the university's documentation, not tested. No second factor is mentioned in its documentation. "
+      "notes": "Profile from the university's documentation, not tested. No second factor is mentioned in its documentation. The user name is the UPN, for example mustma01@thu.de. Checked 2026-10-19: the VPN is blocked from China, India, the Netherlands, North Korea, Russia, the UK, the USA and Vietnam."
     },
     {
       "id": "tu-braunschweig",

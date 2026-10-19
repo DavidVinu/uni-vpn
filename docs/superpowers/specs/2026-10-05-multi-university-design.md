@@ -138,12 +138,14 @@ Initial entries (values from findings.md, corrected by the probes in 2):
 | bonn | unibn-vpn.uni-bonn.de | | | AnyConnect | none | no |
 | mannheim | vpn.uni-mannheim.de | | | default | none | no |
 | kassel | univpn.uni-kassel.de | | | AnyConnect Windows 5.1.18.314, win | none | no |
-| tu-dresden | vpn2.zih.tu-dresden.de | | | default | none | no |
 | fu-berlin | vpn.fu-berlin.de | | | AnyConnectLinux | saml | no |
 | oxford | vpn.ox.ac.uk | | | default | saml | no |
 
 Only Heidelberg has default domains and an MFA portal; the others start with empty lists
 until someone contributes them.
+
+TU Dresden was on this list until 2026-10-19 and was removed: its general VPN resource
+`tu-dresden.de` left the Cisco gateway in 05/2025 and is reachable over eduVPN only.
 
 ## 4. Configuration
 

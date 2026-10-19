@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -34,6 +35,7 @@ func newFlow(t *testing.T) *flow {
 		t.Fatal(err)
 	}
 	t.Setenv(fakeoc.EnvVar, "openconnect")
+	fakeUsage(t, nil) // the fake's own usage, for this test's FAKE_VERSION
 	// A race-enabled fake would sleep a second before every exit.
 	t.Setenv("GORACE", "atexit_sleep_ms=0")
 	t.Setenv("FAKE_PASSWORD_FILE", f.pwfile)
@@ -543,4 +545,28 @@ func TestOpenconnectKeepsTheCharacterSet(t *testing.T) {
 	if len(ctype) != 1 || ctype[0] != "LC_CTYPE=de_DE.ISO-8859-1" {
 		t.Fatal(ctype)
 	}
+}
+
+// The Linux packages use the distribution's openconnect: Ubuntu 22.04 and Mint 21 have 8.20,
+// Debian 12 has 9.01, both without --no-external-auth (9.10). Every profile but Heidelberg's
+// sets no_external_auth, so the sign-in must not depend on it there.
+// Linux runs the distribution's openconnect, which may be older than --no-external-auth (9.10).
+// The Mac ships its own, which knows it: there the option is always passed.
+func TestOpenconnectWithoutNoExternalAuth(t *testing.T) {
+	f := newFlow(t)
+	f.cfg.NoExternalAuth = true
+	t.Setenv("FAKE_VERSION", "9.01")
+	tn := f.make()
+	if runtime.GOOS != "linux" {
+		if !slices.Contains(tn.AuthArgs(), "--no-external-auth") {
+			t.Fatal("--no-external-auth missing:", tn.AuthArgs())
+		}
+		return
+	}
+	f.start(tn, "secret", token)
+	if !tn.WaitReady(3 * time.Second) {
+		v, _ := tn.Classification()
+		t.Fatal("not ready:", v, tn.StderrTail())
+	}
+	tn.Stop(2 * time.Second)
 }

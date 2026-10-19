@@ -6,8 +6,9 @@
   <summary xml:lang="de">Die Webseiten deiner Uni von zu Hause, als wärst du auf dem Campus</summary>
   <summary xml:lang="fr">Les sites de votre université depuis chez vous, comme sur le campus</summary>
   <summary xml:lang="es">Las webs de tu universidad desde casa, como si estuvieras en el campus</summary>
-  <summary xml:lang="zh-Hans">在家访问学校网站，就像在校园里一样</summary>
-  <summary xml:lang="zh-Hant">在家存取學校網站，就像在校園裡一樣</summary>
+  <summary xml:lang="zh_CN">在家访问学校网站，就像在校园里一样</summary>
+  <summary xml:lang="zh_TW">在家存取學校網站，就像在校園裡一樣</summary>
+  <summary xml:lang="zh_HK">在家存取學校網站，就像在校園裡一樣</summary>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>AGPL-3.0-or-later</project_license>
   <description>
@@ -15,8 +16,9 @@
     <p xml:lang="de">Öffnet die Webseiten deiner Uni über ihr VPN, wenn du sie brauchst. Alles andere bleibt auf deiner normalen Verbindung.</p>
     <p xml:lang="fr">Ouvre les sites de votre université par son VPN quand vous en avez besoin. Tout le reste passe par votre connexion habituelle.</p>
     <p xml:lang="es">Abre las webs de tu universidad a través de su VPN cuando las necesitas. Todo lo demás sigue por tu conexión normal.</p>
-    <p xml:lang="zh-Hans">需要时通过学校的 VPN 打开学校网站，其他内容仍走你平常的网络连接。</p>
-    <p xml:lang="zh-Hant">需要時透過學校的 VPN 開啟學校網站，其他內容仍走你平常的網路連線。</p>
+    <p xml:lang="zh_CN">需要时通过学校的 VPN 打开学校网站，其他内容仍走你平常的网络连接。</p>
+    <p xml:lang="zh_TW">需要時透過學校的 VPN 開啟學校網站，其他內容仍走你平常的網路連線。</p>
+    <p xml:lang="zh_HK">需要時透過學校的 VPN 開啟學校網站，其他內容仍走你平常的網路連線。</p>
   </description>
   <launchable type="desktop-id">de.davidvinu.UniVPN.desktop</launchable>
   <url type="homepage">https://github.com/DavidVinu/uni-vpn</url>

@@ -26,6 +26,7 @@ make -s -j"$(nproc)" >/dev/null
 mkdir -p "$out/licenses"
 cp .libs/openconnect.exe .libs/libopenconnect-5.dll "$out/"
 cp COPYING.LGPL "$out/licenses/openconnect-COPYING.LGPL"
+cp json/LICENSE "$out/licenses/openconnect-json-parser-LICENSE"
 # The DLLs it loads, and theirs, from Fedora; Windows' own ones are not in $root/bin and stay out.
 todo=("$out/openconnect.exe" "$out/libopenconnect-5.dll")
 while ((${#todo[@]})); do

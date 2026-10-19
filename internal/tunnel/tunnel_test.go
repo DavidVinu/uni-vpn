@@ -40,7 +40,22 @@ func heidelberg() Config {
 
 func fixedCode(string, time.Time) (string, error) { return "123456", nil }
 
+// fakeUsage: knowsNoExternalAuth asks text (nil: the real openconnect) and forgets earlier answers.
+func fakeUsage(t *testing.T, text func(string) []byte) {
+	old := usage
+	if text != nil {
+		usage = text
+	}
+	noExternalAuth.Clear()
+	t.Cleanup(func() {
+		usage = old
+		noExternalAuth.Clear()
+	})
+}
+
+// makeProfile: the command lines of a current openconnect, whatever this machine has installed.
 func makeProfile(t *testing.T, edit func(*Config)) *Tunnel {
+	fakeUsage(t, func(string) []byte { return []byte("--no-external-auth") })
 	cfg := heidelberg()
 	if edit != nil {
 		edit(&cfg)
