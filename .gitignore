@@ -3,7 +3,9 @@ __pycache__/
 .pytest_cache/
 *.log
 *.pem
-# Public CA certificates the Android app adds to the phone's own.
+# Public CA certificates uni-vpn adds to the system's own (and test chains).
 !app/android/app/src/main/assets/extra-ca.pem
+!internal/certs/extra.pem
+!internal/certs/testdata/*.pem
 web-ext-artifacts/
 .DS_Store
