@@ -21,6 +21,9 @@ class ExtraCertificatesTest {
                 "HARICA TLS ECC Root CA 2021",
                 "emSign Root TLS CA - G1",
                 "DigiCert TLS RSA4096 Root G5",
+                "DigiCert TLS ECC P384 Root G5",
+                "GlobalSign Root R46",
+                "GlobalSign Root E46",
             ),
             certs.map { cn(it.subjectX500Principal.name) },
         )
@@ -30,6 +33,9 @@ class ExtraCertificatesTest {
                 "Hellenic Academic and Research Institutions ECC RootCA 2015",
                 "emSign Root CA - G1",
                 "DigiCert Global Root CA",
+                "DigiCert Global Root G3",
+                "GlobalSign",
+                "GlobalSign",
             ),
             certs.map { cn(it.issuerX500Principal.name) },
         )
