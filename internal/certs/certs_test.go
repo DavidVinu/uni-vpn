@@ -33,6 +33,9 @@ func TestExtraCertificates(t *testing.T) {
 		{"HARICA TLS ECC Root CA 2021", "Hellenic Academic and Research Institutions ECC RootCA 2015"},
 		{"emSign Root TLS CA - G1", "emSign Root CA - G1"},
 		{"DigiCert TLS RSA4096 Root G5", "DigiCert Global Root CA"},
+		{"DigiCert TLS ECC P384 Root G5", "DigiCert Global Root G3"},
+		{"GlobalSign Root R46", "GlobalSign"},
+		{"GlobalSign Root E46", "GlobalSign"},
 	}
 	got := parse(t, PEM)
 	if len(got) != len(want) {
