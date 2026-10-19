@@ -110,7 +110,7 @@ func TestMatchesHostAndSubdomainsOnly(t *testing.T) {
 func TestPACListsDomainsAndPort(t *testing.T) {
 	text := BuildPAC([]string{"sogo.uni-heidelberg.de", "example.org"}, 1080)
 	for _, part := range []string{"function FindProxyForURL(url, host)", `["sogo.uni-heidelberg.de", "example.org"]`,
-		`"SOCKS5 127.0.0.1:1080"`, `"DIRECT"`} {
+		`"SOCKS5 127.0.0.1:1080; SOCKS 127.0.0.1:1080"`, `"DIRECT"`} {
 		if !strings.Contains(text, part) {
 			t.Errorf("missing %s", part)
 		}
@@ -148,7 +148,7 @@ console.log(JSON.stringify(cases.map(h => FindProxyForURL("https://" + h + "/", 
 	if err := json.Unmarshal(out, &got); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"SOCKS5 127.0.0.1:1080", "SOCKS5 127.0.0.1:1080", "SOCKS5 127.0.0.1:1080", "DIRECT", "DIRECT", "DIRECT"}
+	want := []string{"SOCKS5 127.0.0.1:1080; SOCKS 127.0.0.1:1080", "SOCKS5 127.0.0.1:1080; SOCKS 127.0.0.1:1080", "SOCKS5 127.0.0.1:1080; SOCKS 127.0.0.1:1080", "DIRECT", "DIRECT", "DIRECT"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatal(got)
 	}
@@ -176,7 +176,7 @@ console.log(JSON.stringify(cases.map(h => FindProxyForURL("https://" + h + "/", 
 	if err := json.Unmarshal(out, &got); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"SOCKS5 127.0.0.1:1080; DIRECT", "SOCKS5 127.0.0.1:1080; DIRECT", "DIRECT", "SOCKS5 127.0.0.1:1080", "DIRECT"}
+	want := []string{"SOCKS5 127.0.0.1:1080; SOCKS 127.0.0.1:1080; DIRECT", "SOCKS5 127.0.0.1:1080; SOCKS 127.0.0.1:1080; DIRECT", "DIRECT", "SOCKS5 127.0.0.1:1080; SOCKS 127.0.0.1:1080", "DIRECT"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatal(got)
 	}

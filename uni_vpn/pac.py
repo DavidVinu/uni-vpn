@@ -76,7 +76,10 @@ def matches(host: str, domains: list[str]) -> bool:
 
 def build_pac(domains: list[str], port: int, or_direct: list[str] | tuple[str, ...] = ()) -> str:
     """or_direct: hosts that go via the port or, when it refuses, directly (as the Go core)."""
-    socks = f"SOCKS5 127.0.0.1:{int(port)}"
+    # macOS (Safari, CFNetwork) drops "SOCKS5" and needs "SOCKS", which it speaks as SOCKS5;
+    # Chrome and Firefox read "SOCKS" as SOCKS4 and take the first entry.
+    addr = f"127.0.0.1:{int(port)}"
+    socks = f"SOCKS5 {addr}; SOCKS {addr}"
 
     def loop(name: str, result: str) -> list[str]:
         return [

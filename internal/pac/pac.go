@@ -134,7 +134,10 @@ func BuildPAC(domains []string, port int) string { return BuildPACOrDirect(domai
 // BuildPACOrDirect is BuildPAC plus hosts that go via the port or, when it refuses, directly
 // ("SOCKS5 127.0.0.1:port; DIRECT").
 func BuildPACOrDirect(domains, orDirect []string, port int) string {
-	socks := "SOCKS5 127.0.0.1:" + strconv.Itoa(port)
+	// macOS (Safari, CFNetwork) drops "SOCKS5" and needs "SOCKS", which it speaks as SOCKS5;
+	// Chrome and Firefox read "SOCKS" as SOCKS4 and take the first entry.
+	addr := "127.0.0.1:" + strconv.Itoa(port)
+	socks := "SOCKS5 " + addr + "; SOCKS " + addr
 	lines := []string{"function FindProxyForURL(url, host) {"}
 	if len(orDirect) > 0 {
 		lines = append(lines, "  var orDirect = "+jsonList(orDirect)+";")

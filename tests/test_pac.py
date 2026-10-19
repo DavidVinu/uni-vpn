@@ -48,7 +48,7 @@ class BuildPacTests(unittest.TestCase):
         text = pac.build_pac(["sogo.uni-heidelberg.de", "example.org"], 1080)
         self.assertIn("function FindProxyForURL(url, host)", text)
         self.assertIn(json.dumps(["sogo.uni-heidelberg.de", "example.org"]), text)
-        self.assertIn('"SOCKS5 127.0.0.1:1080"', text)
+        self.assertIn('"SOCKS5 127.0.0.1:1080; SOCKS 127.0.0.1:1080"', text)
         self.assertIn('"DIRECT"', text)
 
     @unittest.skipUnless(shutil.which("node"), "node missing")
@@ -58,7 +58,7 @@ const cases = ["sogo.uni-heidelberg.de", "SOGO.uni-heidelberg.de.", "mail.exampl
 console.log(JSON.stringify(cases.map(h => FindProxyForURL("https://" + h + "/", h))));
 """
         out = subprocess.run(["node", "-e", script], capture_output=True, text=True, check=True).stdout
-        self.assertEqual(json.loads(out), ["SOCKS5 127.0.0.1:1080", "SOCKS5 127.0.0.1:1080", "SOCKS5 127.0.0.1:1080",
+        self.assertEqual(json.loads(out), ["SOCKS5 127.0.0.1:1080; SOCKS 127.0.0.1:1080", "SOCKS5 127.0.0.1:1080; SOCKS 127.0.0.1:1080", "SOCKS5 127.0.0.1:1080; SOCKS 127.0.0.1:1080",
                                            "DIRECT", "DIRECT", "DIRECT"])
 
 
