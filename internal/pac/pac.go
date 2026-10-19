@@ -48,6 +48,9 @@ var DefaultDomains = []string{
 	"heibot-it.urz.uni-heidelberg.de",
 	// heiDOCS, the doctoral candidates' online file: behind the same campus-only proxy as LSF.
 	"doktoranden.uni-heidelberg.de",
+	// The web print portal (Ricoh myPrint) on URZ's printing page, where students upload a job to
+	// print at any campus printer: it opens only on the university network.
+	"myprint.uni-heidelberg.de",
 }
 
 const label = `[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?`
