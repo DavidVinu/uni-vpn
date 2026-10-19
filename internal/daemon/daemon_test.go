@@ -513,6 +513,63 @@ func TestTOTPUsedByAnotherDeviceIsTriedOnceMoreWithTheNextCode(t *testing.T) {
 	}
 }
 
+// The same as TestTOTPUsedByAnotherDeviceIsTriedOnceMoreWithTheNextCode, for a gateway whose
+// code field is in the password's form (secondary_password): ethz, bremen, muenster,
+// harvard-fasrc, ugr, w-hs; and marburg's totp_append. This password signed in before; another
+// synced device signed in with this window's code a moment ago.
+func TestCodeInPasswordFormUsedByAnotherDeviceIsTriedOnceMore(t *testing.T) {
+	h := newHarness(t)
+	args := filepath.Join(t.TempDir(), "args")
+	t.Setenv("FAKE_ARGS_FILE", args)
+	d := h.start(nil, func(d *Daemon) {
+		waits := []float64{0, 0, 0.8}
+		d.otpWait = func(float64) float64 {
+			if len(waits) == 0 {
+				return 0
+			}
+			w := waits[0]
+			waits = waits[1:]
+			return w
+		}
+	})
+	d.RequestConnect()
+	waitState(t, d, Connected)
+	d.RequestDisconnect()
+	waitState(t, d, Idle)
+	os.Remove(args)
+	d.mu.Lock()
+	d.hasOTPStep = false // the last sign-in was in an earlier window (minutes ago)
+	d.mu.Unlock()
+	t.Setenv("FAKE_MODE", "append_replayed")
+	d.RequestConnect()
+	deadline := time.Now().Add(6 * time.Second)
+	for time.Now().Before(deadline) {
+		st, m := d.snapshot()
+		if st == Connected {
+			return
+		}
+		if st == AuthFailed {
+			time.Sleep(500 * time.Millisecond)
+			t.Fatalf("stranded in %s (%s); the next window's code was never tried", st, m.ID)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal(d.snapshot())
+}
+
+// A password never accepted here: no second attempt (the account may lock).
+func TestCodeInPasswordFormWithoutEarlierSignInIsNotTriedAgain(t *testing.T) {
+	h := newHarness(t)
+	t.Setenv("FAKE_MODE", "append_rejected")
+	d := h.start(nil)
+	d.RequestConnect()
+	waitState(t, d, AuthFailed)
+	time.Sleep(500 * time.Millisecond)
+	if len(h.pwLines()) != 1 {
+		t.Fatal(h.pwLines())
+	}
+}
+
 func TestSuccessfulLoginRecordsOTPWindow(t *testing.T) {
 	h := newHarness(t)
 	d := h.start(nil)

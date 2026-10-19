@@ -192,6 +192,14 @@ func openconnect(args []string) int {
 		log("         override is necessary to connect to a server")
 		log("         to <openconnect-devel@lists.infradead.org>.")
 	}
+	if mode == "append_replayed" {
+		// The same with the code in the password's form (secondary_password, as ethz, bremen,
+		// muenster, harvard-fasrc, ugr, w-hs): only the first start is rejected.
+		mode = "ok"
+		if data, _ := os.ReadFile(os.Getenv("FAKE_ARGS_FILE")); len(data) == 0 {
+			mode = "append_rejected"
+		}
+	}
 	if mode == "totp_replayed" {
 		// Another device of the account used this window's code (LinOTP takes each code once):
 		// only the first start is rejected. FAKE_ARGS_FILE counts the starts.
@@ -331,6 +339,18 @@ func openconnect(args []string) int {
 		}
 		log("Please complete the authentication process in the browser window.")
 		time.Sleep(time.Hour)
+		return 1
+	case "append_rejected":
+		log("XML POST enabled")
+		log("Please enter your username and password.")
+		log("Generating OATH TOTP token code")
+		log("POST https://fake.example/")
+		log("Login failed.")
+		log("Please enter your username and password.")
+		log("Password:")
+		log("***")
+		log("User input required in non-interactive mode")
+		log("Failed to complete authentication")
 		return 1
 	case "totp_rejected":
 		// Wrong secret (measured 2026-09-08): the password was accepted, the code rejected;

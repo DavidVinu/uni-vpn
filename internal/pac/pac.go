@@ -33,6 +33,9 @@ var DefaultDomains = []string{
 	// heiCO login uses the UHDLOGINTERNAL realm, which answers 403 "Nur intern zugaenglich"
 	// outside the university network.
 	"heico.uni-heidelberg.de",
+	// Moodle (and exam.moodle) open only on the university network or over the VPN since
+	// July 2024 (URZ).
+	"moodle.uni-heidelberg.de",
 }
 
 const label = `[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?`

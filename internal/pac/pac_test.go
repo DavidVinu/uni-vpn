@@ -14,9 +14,17 @@ import (
 
 func TestDefaults(t *testing.T) {
 	want := []string{"sogo.uni-heidelberg.de", "elearning-med.uni-heidelberg.de", "cip.dmed.uni-heidelberg.de",
-		"heico.uni-heidelberg.de"}
+		"heico.uni-heidelberg.de", "moodle.uni-heidelberg.de"}
 	if !reflect.DeepEqual(DefaultDomains, want) {
 		t.Fatal(DefaultDomains)
+	}
+}
+
+func TestDefaultsRouteMoodle(t *testing.T) {
+	for _, host := range []string{"moodle.uni-heidelberg.de", "exam.moodle.uni-heidelberg.de"} {
+		if !Matches(host, DefaultDomains) {
+			t.Error(host)
+		}
 	}
 }
 

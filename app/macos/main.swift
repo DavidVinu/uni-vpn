@@ -59,11 +59,23 @@ var texts: [String: String] = [
 func t(_ key: String) -> String { texts[key] ?? key }
 
 // The background-items hint (askBackgroundIfOff) comes when the service cannot run, so it cannot
-// send it: the same texts as uni_vpn/locales, in the first of the user's languages.
+// send it: the same texts as uni_vpn/locales, in the first of the user's languages that has them
+// (as internal/i18n Negotiate picks the menus' language).
 func backgroundTexts() -> [String: String] {
-    let language = (Locale.preferredLanguages.first ?? "en").lowercased()
-    let code = !language.hasPrefix("zh") ? String(language.prefix(2))
-        : ["zh-hant", "zh-tw", "zh-hk", "zh-mo"].contains(where: { language.hasPrefix($0) }) ? "zh-hant" : "zh-hans"
+    var code = "en"
+    for tag in Locale.preferredLanguages {
+        let parts = tag.lowercased().replacingOccurrences(of: "_", with: "-").split(separator: "-").map(String.init)
+        guard let base = parts.first else { continue }
+        if base == "zh" {
+            let hant = !parts.contains("hans") && parts.contains(where: { ["hant", "tw", "hk", "mo"].contains($0) })
+            code = hant ? "zh-hant" : "zh-hans"
+            break
+        }
+        if ["en", "de", "fr", "es"].contains(base) {
+            code = base
+            break
+        }
+    }
     let all: [String: [String]] = [
         "de": ["Uni VPN war nach der Anmeldung aus",
                "Damit es von selbst startet, erlaube Uni VPN und uni-vpn-core im Hintergrund.",
@@ -441,6 +453,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         if let win = window, win.isVisible {
             alert.beginSheetModal(for: win, completionHandler: answer)
         } else {
+            // Started hidden at login: not the active app, so the alert would open behind other
+            // windows and the menu bar icon would wait for it unseen.
+            NSApp.activate(ignoringOtherApps: true)
+            alert.window.level = .floating
             answer(alert.runModal())
         }
     }

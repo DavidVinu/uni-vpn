@@ -177,7 +177,8 @@ type Daemon struct {
 	since         float64
 	lastError     *lastError
 	failures      int
-	totpRetried   bool // a rejected one-time code was tried again with the next one
+	totpRetried   bool   // a rejected one-time code was tried again with the next one
+	signedIn      [2]int // secretsGen+1 and accountGen+1 of the last sign-in that went through
 	explicit      bool
 	demandUntil   float64
 	lastActivity  float64
@@ -1721,7 +1722,11 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 			if state == AuthFailed {
 				// Synced devices share the secret, and LinOTP takes each code only once: another
 				// device may have signed in with this window's code. Once more with the next one.
-				if _, once := tunnel.IsOnce(secret); message == messages.TOTPRejected && freshCode && !once && !d.totpRetried {
+				// A form with password and code together cannot say which one: the code, when this
+				// password signed in before.
+				codeOnly := message == messages.TOTPRejected ||
+					message == messages.AppendRejected && d.signedIn == [2]int{generation + 1, account + 1}
+				if _, once := tunnel.IsOnce(secret); codeOnly && freshCode && !once && !d.totpRetried {
 					d.totpRetried = true
 					d.logf(slog.LevelInfo, "One-time code rejected, trying once more with the next one")
 					continue
@@ -1745,7 +1750,7 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 			continue
 		}
 
-		d.failures, d.totpRetried = 0, false
+		d.failures, d.totpRetried, d.signedIn = 0, false, [2]int{generation + 1, account + 1}
 		d.logf(slog.LevelInfo, "Tunnel ready after %.1f s", elapsed(tun.StartedAt(), tun.ReadyAt()))
 		d.set(Connected, messages.Connected)
 		// The "connect now" request is fulfilled. From here on only real use counts, the idle

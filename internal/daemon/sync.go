@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -57,6 +58,15 @@ func deviceName() string {
 	// Android's host name is "localhost"; the app passes the phone's name.
 	if name := os.Getenv("UNI_VPN_DEVICE_NAME"); name != "" {
 		return name
+	}
+	// A Mac's host name comes from the network it is on (macOS leaves HostName unset): the
+	// computer's name from System Settings instead.
+	if platform.IsMacOS {
+		if out, err := exec.Command("/usr/sbin/scutil", "--get", "ComputerName").Output(); err == nil {
+			if name := strings.TrimSpace(string(out)); name != "" {
+				return name
+			}
+		}
 	}
 	name, err := os.Hostname()
 	if err != nil || name == "" {

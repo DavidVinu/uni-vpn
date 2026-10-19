@@ -12,7 +12,7 @@ class DomainListTests(unittest.TestCase):
     def test_defaults(self):
         self.assertEqual(pac.DEFAULT_DOMAINS,
                          ["sogo.uni-heidelberg.de", "elearning-med.uni-heidelberg.de", "cip.dmed.uni-heidelberg.de",
-                          "heico.uni-heidelberg.de"])
+                          "heico.uni-heidelberg.de", "moodle.uni-heidelberg.de"])
 
     def test_defaults_route_heico_login(self):
         self.assertTrue(pac.matches("heico.uni-heidelberg.de", pac.DEFAULT_DOMAINS))
