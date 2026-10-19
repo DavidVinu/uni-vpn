@@ -1138,10 +1138,12 @@ function finish() {
   step("step4");
 }
 $("s3-skip").onclick = () => { if (setupDone) { if (changing) endChange(); else finish(); } };
-$("s4-done").onclick = () => { show("main"); render(); refresh(); };
+// The second click of a double click lands on what the next screen has there (Disconnect).
+$("s4-done").onclick = (e) => { if (e.detail > 1) return; show("main"); render(); refresh(); };
 
 // --- main and settings -----------------------------------------------------
-$("toggle").onclick = async () => {
+$("toggle").onclick = async (e) => {
+  if (e.detail > 1) return;  // the second click of a double click on the button before (Done)
   const on = isOn();
   press($("toggle"));
   try { await post(on ? "/api/disconnect" : "/api/connect"); } catch (e) { /* the banner says it */ }
@@ -1449,7 +1451,8 @@ function closePair() {
 $("s-use-other").onmousedown = (e) => e.preventDefault();
 $("s-use-other").onclick = () => startPair("request", "setup");
 $("close-pair").onclick = closePair;
-$("pair-ok").onclick = () => {
+$("pair-ok").onclick = (e) => {
+  if (e.detail > 1) return;
   if (!S || S.setup_needed) { closePair(); return; }
   // Set up from another device: "All set", which says to reopen the browser, as after the assistant.
   if (pairFrom === "setup") { setupSent = true; show("setup"); finish(); return; }
