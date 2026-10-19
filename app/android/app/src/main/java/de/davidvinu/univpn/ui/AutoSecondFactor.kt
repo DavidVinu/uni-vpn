@@ -64,7 +64,8 @@ fun AutoSecondFactor(
                 }
                 null, "failed" -> {
                     model.enrollSentAt = 0
-                    onFailed(enroll?.optJSONObject("error_t")?.let { model.strings.t(it) } ?: "")
+                    // No run at all: the core started again meanwhile, the code is used up.
+                    onFailed(enroll?.optJSONObject("error_t")?.let { model.strings.t(it) } ?: model.t("enroll.failed"))
                 }
             }
         }

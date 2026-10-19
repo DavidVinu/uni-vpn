@@ -91,7 +91,11 @@ struct SettingsView: View {
             Button(model.t("app.back"), role: .cancel) { password = "" }
             Button(model.t("app.save")) { savePassword() }
         } message: {
-            if let passwordError { Text(passwordError) }
+            if let passwordError {
+                Text(passwordError)
+            } else if let hint = SetupState.signInHint(model, uniId: status.string("university")) {
+                Text(hint)
+            }
         }
     }
 

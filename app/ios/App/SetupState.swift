@@ -324,6 +324,14 @@ final class SetupState {
         otherMfa = suggested.isEmpty ? "totp_field" : suggested
     }
 
+    /// What a university wants on sign-in when it is not the usual account (ETH's network
+    /// password), else nil.
+    static func signInHint(_ model: AppModel, uniId: String) -> String? {
+        let key = "uni.\(uniId).sign_in"
+        let text = model.t(key)
+        return text == key ? nil : text
+    }
+
     /// A university's own steps, translated where the catalog has them, else the general ones.
     func mfaSteps(_ model: AppModel) -> [String] { Self.mfaSteps(model, uni: uni) }
 

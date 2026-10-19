@@ -155,6 +155,9 @@ private fun PasswordDialog(model: AppModel) {
         title = { Text(model.t("app.password")) },
         text = {
             Column {
+                signInHint(model, model.status?.optString("university").orEmpty())?.let {
+                    Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 12.dp))
+                }
                 PasswordField(model, password) { password = it }
                 ErrorText(error)
             }

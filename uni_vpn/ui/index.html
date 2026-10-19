@@ -175,7 +175,7 @@ input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
       <form id="step1" autocomplete="on" hidden>
         <p class="step"></p>
         <h2 data-t="setup.sign_in"></h2>
-        <p class="sub" data-t="setup.sign_in_sub"></p>
+        <p class="sub" id="s1-sub"></p>
         <label class="field"><span data-t="app.username"></span>
           <input id="s-user" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="ab123"></label>
         <label class="field"><span data-t="app.password"></span>
@@ -407,6 +407,7 @@ function applyLanguage(code) {
   OTHER.name = t("setup.not_listed");
   if (uni && uni.id === "other") $("s-uni").value = OTHER.name;
   if (UNIS) numberSteps();
+  signInSub();
   if (!$("step2").hidden) renderGuide();
 }
 
@@ -619,6 +620,12 @@ function renderList() {
   return found;
 }
 
+// Some universities want another password than the usual one, or the full address.
+function signInSub() {
+  const own = uni && `uni.${uni.id}.sign_in`;
+  $("s1-sub").textContent = own && L.catalogs.en?.[own] ? t(own) : t("setup.sign_in_sub");
+}
+
 function pick(u) {
   uni = u;
   // A detection still running was for the address before (startChange fills it in after this).
@@ -629,6 +636,7 @@ function pick(u) {
   $("s-other").hidden = u.id !== "other";
   err("s0-err", u.mfa === "saml" ? t("setup.saml") : "");
   numberSteps();
+  signInSub();
   if (u.id === "other") $("s-host").focus();
 }
 
@@ -743,7 +751,8 @@ function autoProgress() {
     autoRunning = false;
     // A refused password: back to it like setupProgress, another code would not help.
     if (e && S.error_kind === "password" && !changingTotp) { step("step1", "s-pw"); err("s1-err", tr(e.error, e.error_t)); return; }
-    renderAuto(e ? tr(e.error, e.error_t) : "");
+    // No run at all: the service started again meanwhile, the code is used up (like the iPhone).
+    renderAuto(e ? tr(e.error, e.error_t) : t("enroll.failed"));
     $("a-code").focus();
     return;
   }
