@@ -373,9 +373,30 @@ func (s *System) Refresh(httpPort int) {
 			}
 		}
 	}
-	if kde := s.kdeGet(); kde != nil && IsOurs(kde.URL, httpPort) {
+	if kde := s.kdeGet(); kde != nil && kde.Type == KDEPAC && IsOurs(kde.URL, httpPort) {
 		_ = s.kdeSet(KDEPAC, url, true)
 	}
+}
+
+// Unversioned: the system uses our rule at its plain address, as setup writes it (Refresh
+// adds ?v=), so the browsers have the rule of whichever version answered then: an installer
+// run again, maybe an older one.
+func (s *System) Unversioned(httpPort int) bool {
+	plain := PacURL(httpPort)
+	if s.macOS() {
+		return false // no refresh there
+	}
+	if s.windows() {
+		now, err := s.WinGet()
+		return err == nil && now == plain
+	}
+	if mode, _ := s.gsettingsGet("mode"); mode == "auto" {
+		if now, _ := s.gsettingsGet("autoconfig-url"); now == plain {
+			return true
+		}
+	}
+	kde := s.kdeGet()
+	return kde != nil && kde.Type == KDEPAC && kde.URL == plain
 }
 
 func (s *System) isForeign(before *Snapshot, httpPort int) bool {
@@ -523,6 +544,7 @@ func Current() *Snapshot                                  { return Default().Cur
 func Apply(url string) error                              { return Default().Apply(url) }
 func Restore(saved *Snapshot) error                       { return Default().Restore(saved) }
 func Refresh(httpPort int)                                { Default().Refresh(httpPort) }
+func Unversioned(httpPort int) bool                       { return Default().Unversioned(httpPort) }
 func Install(httpPort int, backup string) (string, error) { return Default().Install(httpPort, backup) }
 func Uninstall(backup string) (string, error)             { return Default().Uninstall(backup) }
 func State(httpPort int) string                           { return Default().State(httpPort) }

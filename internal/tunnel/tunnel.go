@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand/v2"
 	"net"
 	"os"
 	"os/exec"
@@ -978,8 +979,18 @@ func RemoveStaleTokenFiles(directory string) int {
 	return removed
 }
 
-// FreePort returns a port on 127.0.0.1 nobody listens on right now.
+// FreePort returns a port on 127.0.0.1 nobody listens on right now, for openconnect's proxy,
+// which listens on it after the sign-in. Not one of the system's own ports for outgoing
+// connections (Linux and Android from 32768, macOS, iOS and Windows from 49152): a browser's
+// connection to Uni VPN could take that one meanwhile, and the proxy could not listen.
 func FreePort() (int, error) {
+	for range 20 {
+		port := 20000 + rand.IntN(12000)
+		if l, err := net.Listen("tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(port))); err == nil {
+			l.Close()
+			return port, nil
+		}
+	}
 	l, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		return 0, err

@@ -151,7 +151,7 @@ private fun PasswordDialog(model: AppModel) {
     var password by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     // Opened by a tap (Home's "Update password"): the second tap of a double tap lands beside it.
-    LaunchedEffect(Unit) { model.screenChanged() }
+    DialogShown(model)
     AlertDialog(
         onDismissRequest = { if (!model.justChanged) model.passwordDialog = false },
         title = { Text(model.t("app.password")) },

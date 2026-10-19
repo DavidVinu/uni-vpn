@@ -84,6 +84,10 @@ final class CoreHost: @unchecked Sendable {
             // A new key cannot open the old secrets: drop them, so the core asks for them again
             // instead of reporting a broken store.
             try? FileManager.default.removeItem(at: Self.secretsFile)
+            // A new key also means this folder may come from another iPhone (a restored
+            // backup): the code generator noted there is that phone's, which synced devices may
+            // still use, so one set up here must not remove it.
+            try? FileManager.default.removeItem(at: Self.stateHome.appendingPathComponent("uni-vpn/mfa-token-serial"))
         }
         let fm = FileManager.default
         try? fm.createDirectory(at: Self.configHome, withIntermediateDirectories: true)

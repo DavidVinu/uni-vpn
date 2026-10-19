@@ -410,6 +410,22 @@ func TestKDEStateFollowsKDE(t *testing.T) {
 	}
 }
 
+// KDE's settings page keeps "Proxy Config Script" when the user picks no proxy, the system's
+// or their own: like GNOME's, only a setting that still uses our rule is refreshed.
+func TestKDERefreshOnlyWhileOurRuleIsOn(t *testing.T) {
+	for _, typ := range []string{"2", "0", "1", "4"} {
+		r := &runner{answers: append([]answer{
+			{"/usr/bin/kreadconfig6 --file kioslaverc --group Proxy Settings --key ProxyType", 0, typ + "\n"},
+			{"/usr/bin/kreadconfig6 --file kioslaverc --group Proxy Settings --key Proxy Config Script", 0, "http://127.0.0.1:1081/proxy.pac?v=3\n"},
+		}, kdeAnswers()...)}
+		kde(r).Refresh(1081)
+		wrote := r.called("/usr/bin/kwriteconfig6", "--file", "kioslaverc", "--group", "Proxy Settings", "--key", "ProxyType", "2")
+		if wrote != (typ == KDEPAC) {
+			t.Errorf("ProxyType %s: %v", typ, r.calls)
+		}
+	}
+}
+
 func TestKDEWithoutToolsAndGsettingsIsUnavailable(t *testing.T) {
 	s := kde(&runner{answers: []answer{{"gsettings get", 1, ""}}})
 	s.FindBinary = func(string) string { return "" }
@@ -472,6 +488,39 @@ func TestWindowsForeignPACIsReplacedAndRestored(t *testing.T) {
 	}
 	if reg.url != "http://corp/wpad.dat" {
 		t.Fatal(reg.url)
+	}
+}
+
+// Only setup writes the plain address; Refresh always adds a version.
+func TestUnversionedIsThePlainAddressInUse(t *testing.T) {
+	plain, versioned := "http://127.0.0.1:1081/proxy.pac", "http://127.0.0.1:1081/proxy.pac?v=3"
+	for url, want := range map[string]bool{plain: true, versioned: false, "http://corp/wpad.dat": false, "": false} {
+		if got := windowsSystem(&registry{url: url}).Unversioned(1081); got != want {
+			t.Errorf("Windows %q: %v", url, got)
+		}
+	}
+	for _, c := range []struct {
+		mode, url string
+		want      bool
+	}{{"auto", plain, true}, {"auto", versioned, false}, {"manual", plain, false}, {"none", "", false}} {
+		if got := gnome((&runner{answers: gsettings(c.mode, c.url)}).run).Unversioned(1081); got != c.want {
+			t.Errorf("GNOME %s %q: %v", c.mode, c.url, got)
+		}
+	}
+	for _, c := range []struct {
+		typ, url string
+		want     bool
+	}{{"2", plain, true}, {"2", versioned, false}, {"0", plain, false}} {
+		r := &runner{answers: append([]answer{
+			{"/usr/bin/kreadconfig6 --file kioslaverc --group Proxy Settings --key ProxyType", 0, c.typ + "\n"},
+			{"/usr/bin/kreadconfig6 --file kioslaverc --group Proxy Settings --key Proxy Config Script", 0, c.url + "\n"},
+		}, kdeAnswers()...)}
+		if got := kde(r).Unversioned(1081); got != c.want {
+			t.Errorf("KDE %s %q: %v", c.typ, c.url, got)
+		}
+	}
+	if mac(&runner{}).Unversioned(1081) {
+		t.Error("macOS")
 	}
 }
 

@@ -146,6 +146,17 @@ func TestBrowsersToldAboutARuleChangedByAnUpdate(t *testing.T) {
 	h.waitRefreshed(nil) // the same rule
 }
 
+// An installer run again (maybe an older one) set the rule's plain address: the browsers have
+// the rule of whichever version answered then.
+func TestBrowsersToldAfterAnInstallerSetThePlainAddress(t *testing.T) {
+	h := newHarness(t)
+	h.start(nil)
+	h.waitRefreshed(nil)
+	h.unversioned.Store(true)
+	h.restart()
+	h.waitRefreshed([]int{h.cfg.HTTPPort})
+}
+
 // A new install (not set up yet, no list): a list the user saves later has these websites, or
 // they removed them, so none comes back.
 func TestNewInstallNeedsNoNewDefaultWebsites(t *testing.T) {

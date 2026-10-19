@@ -42,6 +42,7 @@ struct AutoEntry: View {
         .safeAreaInset(edge: .bottom) {
             if !busy {
                 BottomButton(title: model.t("app.next")) {
+                    if setup?.justChanged == true { return }
                     Task { await auto.send(model, setup: setup) }
                 }
             }

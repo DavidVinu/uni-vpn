@@ -58,7 +58,7 @@ fun App(model: AppModel, vpnOn: Boolean, activity: MainActivity) {
                     if (vpnOn || model.core.setupDone) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                             Text(stringResource(R.string.app_name), style = MaterialTheme.typography.titleMedium)
-                            Switch(checked = vpnOn, onCheckedChange = { on -> if (on) activity.turnOn() else activity.turnOff() })
+                            Switch(checked = vpnOn, onCheckedChange = { on -> model.screenChanged(); if (on) activity.turnOn() else activity.turnOff() })
                         }
                     }
                 }
@@ -87,6 +87,7 @@ fun App(model: AppModel, vpnOn: Boolean, activity: MainActivity) {
     // Wherever the switch was: Home, or the page about the busy port. It needs the core's texts,
     // so it waits for them when the core has not answered yet.
     if (model.vpnRefused && model.strings.loaded) {
+        DialogShown(model)
         AlertDialog(
             onDismissRequest = { model.vpnRefused = false },
             text = { Text(model.t("phone.vpn_refused")) },

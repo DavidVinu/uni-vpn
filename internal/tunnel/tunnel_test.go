@@ -318,6 +318,9 @@ func TestFreePortIsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if port < 20000 || port >= 32000 {
+		t.Fatal("among the ports for outgoing connections:", port)
+	}
 	if PortOpen(port) {
 		t.Fatal("free port is open")
 	}

@@ -106,7 +106,7 @@ fun HomeScreen(model: AppModel, vpnOn: Boolean, activity: MainActivity) {
                         Spacer(Modifier.width(12.dp))
                         Switch(
                             checked = vpnOn,
-                            onCheckedChange = { on -> if (on) activity.turnOn() else activity.turnOff() },
+                            onCheckedChange = { on -> model.screenChanged(); if (on) activity.turnOn() else activity.turnOff() },
                             modifier = Modifier.semantics { contentDescription = "Uni VPN" },
                         )
                     }

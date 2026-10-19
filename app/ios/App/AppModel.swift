@@ -59,6 +59,7 @@ final class AppModel {
     @ObservationIgnored private var lastStart = -TimeInterval.infinity
     /// The VPN was just started: the app leaves the lock to the extension until then (uptime).
     @ObservationIgnored private var handOverUntil = -TimeInterval.infinity
+    @ObservationIgnored private var switchedAt = -TimeInterval.infinity
 
     init() {
         // The Control Center button turns the VPN on from this process too.
@@ -177,6 +178,9 @@ final class AppModel {
     var vpnSwitch: Bool {
         get { vpn.isOn }
         set {
+            // The second tap of a double tap would turn it straight back (as on the desktop).
+            guard Self.uptime - switchedAt >= 0.35 else { return }
+            switchedAt = Self.uptime
             Task {
                 if newValue { await turnOn() } else { await turnOff() }
             }

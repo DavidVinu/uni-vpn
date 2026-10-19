@@ -199,16 +199,21 @@ func (l syncLocal) Apply(ctx context.Context, all map[string]devsync.Entry, keys
 		// Not SetPassword and SetTOTP: those connect, and a synced secret is for the next
 		// connection (secretsSynced).
 		stored := false
-		if changed(devsync.KeyPassword) && text(devsync.KeyPassword) != "" {
-			if err := d.opts.PasswordSetter(text(devsync.KeyPassword)); err != nil {
+		// The same secret (joined with it, sync.json lost) changes nothing: the sign-in stays good.
+		same := func(get func(context.Context) ([]byte, error), value string) bool {
+			old, err := get(ctx)
+			return err == nil && string(old) == value
+		}
+		if pw := text(devsync.KeyPassword); changed(devsync.KeyPassword) && pw != "" && !same(d.opts.PasswordGetter, pw) {
+			if err := d.opts.PasswordSetter(pw); err != nil {
 				fail(err, devsync.KeyPassword)
 			} else {
 				d.logf(slog.LevelInfo, "Password stored in the keyring")
 				stored = true
 			}
 		}
-		if changed(devsync.KeyTOTP) && text(devsync.KeyTOTP) != "" {
-			if err := d.opts.TOTPSetter(text(devsync.KeyTOTP)); err != nil {
+		if token := text(devsync.KeyTOTP); changed(devsync.KeyTOTP) && token != "" && !same(d.opts.TOTPGetter, token) {
+			if err := d.opts.TOTPSetter(token); err != nil {
 				fail(err, devsync.KeyTOTP)
 			} else {
 				d.logf(slog.LevelInfo, "TOTP secret stored in the keyring")
