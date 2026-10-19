@@ -336,7 +336,7 @@ const $ = (id) => document.getElementById(id);
 const H = {"X-Uni-VPN": "1", "Content-Type": "application/json"};
 let S = null, view = null, setupDone = false, submitting = false, setupSent = false, domainsShown = false, connectRequested = 0,
   codeTimer = null, refreshing = false, autoUpdateSaving = false, changing = false, languageSaving = false,
-  domainsBase = "", removeError = null, removeSeen = false, changeWebsites = "", pageCore;
+  switched = false, domainsBase = "", removeError = null, removeSeen = false, changeWebsites = "", pageCore;
 // Inside the Uni VPN app window (not a browser tab): no page title, no browser context menu.
 if (new URLSearchParams(location.search).has("app")) {
   document.body.classList.add("app");
@@ -414,6 +414,7 @@ function applyLanguage(code) {
 }
 
 function show(id) {
+  if (view !== id) switched = true;
   for (const s of ["setup", "main", "settings", "pair"]) $(s).hidden = s !== id;
   view = id;
   // The app's menu opens #main or #settings; cleared so that the next request is a change again.
@@ -423,7 +424,10 @@ function show(id) {
 function step(id, focusId) {
   if (id === "step2a" && offeredKey) id = "step2";  // a key from a link: the guide's test step
   autoRepair = !!(S && S.repairing);  // each visit starts without a Repair, unless one still runs
-  for (const s of ["step0", "step1", "step2a", "step2", "step3", "step4"]) $(s).hidden = s !== id;
+  for (const s of ["step0", "step1", "step2a", "step2", "step3", "step4"]) {
+    if (s === id && $(s).hidden) switched = true;
+    $(s).hidden = s !== id;
+  }
   if (id === "step2a") renderAuto();
   if (id === "step2") {
     renderGuide();
@@ -911,8 +915,12 @@ $("g-back").onclick = () => {
   if (autoOK()) step("step2a"); else if (changingTotp) endChange(); else { setupDone = false; step("step1"); }
 };
 
-// The second click of a double click on Next would skip a picture (or send the setup).
-$("step2").querySelector("[type=submit]").onclick = (e) => { if (e.detail > 1) e.preventDefault(); };
+// A click on Next meant for the picture's slide, which went on by itself just before, would
+// skip the test code (or send the setup).
+let advancedAt = -Infinity;
+$("step2").querySelector("[type=submit]").onclick = (e) => {
+  if (performance.now() - advancedAt < 600) e.preventDefault();
+};
 $("step2").onsubmit = async (e) => {
   e.preventDefault();
   if (slide < guide.length - 1) { slide++; renderGuide(); return; }
@@ -966,7 +974,9 @@ async function useKey(secret, refresh, keep) {
   if (slide < at) slide = at;
   renderGuide();
   if (slide === at && at < guide.length - 1) {
-    setTimeout(() => { if (keyRead && slide === at && guideOpen()) { slide++; renderGuide(); } }, 700);
+    setTimeout(() => {
+      if (keyRead && slide === at && guideOpen()) { slide++; advancedAt = performance.now(); renderGuide(); }
+    }, 700);
   }
 }
 
@@ -1140,12 +1150,10 @@ function finish() {
   step("step4");
 }
 $("s3-skip").onclick = () => { if (setupDone) { if (changing) endChange(); else finish(); } };
-// The second click of a double click lands on what the next screen has there (Disconnect).
-$("s4-done").onclick = (e) => { if (e.detail > 1) return; show("main"); render(); refresh(); };
+$("s4-done").onclick = () => { show("main"); render(); refresh(); };
 
 // --- main and settings -----------------------------------------------------
-$("toggle").onclick = async (e) => {
-  if (e.detail > 1) return;  // the second click of a double click on the button before (Done)
+$("toggle").onclick = async () => {
   const on = isOn();
   press($("toggle"));
   try { await post(on ? "/api/disconnect" : "/api/connect"); } catch (e) { /* the banner says it */ }
@@ -1301,8 +1309,6 @@ function saved(id, r, okText) {
   $(id).textContent = r.ok ? okText : errText(r);
 }
 
-// The second click of a double click on Save: the first one emptied the field when it saved.
-$("pwform").querySelector("[type=submit]").onclick = (e) => { if (e.detail > 1) e.preventDefault(); };
 $("pwform").onsubmit = async (e) => {
   e.preventDefault();
   if (!$("pw").value) { saved("pwmsg", {ok: false, data: null, text: t("setup.enter_password")}); return; }
@@ -1455,8 +1461,7 @@ function closePair() {
 $("s-use-other").onmousedown = (e) => e.preventDefault();
 $("s-use-other").onclick = () => startPair("request", "setup");
 $("close-pair").onclick = closePair;
-$("pair-ok").onclick = (e) => {
-  if (e.detail > 1) return;
+$("pair-ok").onclick = () => {
   if (!S || S.setup_needed) { closePair(); return; }
   // Set up from another device: "All set", which says to reopen the browser, as after the assistant.
   if (pairFrom === "setup") { setupSent = true; show("setup"); finish(); return; }
@@ -1492,6 +1497,21 @@ for (const info of document.querySelectorAll(".info")) {
     if (over > 0) pop.style.left = (-12 - over) + "px";
   };
 }
+// The second click of a double click is no action of its own: the first one may have changed the
+// screen under the pointer (the guide's Save opens Settings with a device's Remove there, Done
+// the main screen with Disconnect), or emptied the field it saved. With the system's double-click
+// speed slowed down, separate clicks count as one too: a later one on the same screen acts.
+let lastClick = -Infinity;
+document.addEventListener("click", (e) => {
+  const again = e.detail > 1 && (switched || performance.now() - lastClick < 800);
+  lastClick = performance.now();
+  switched = false;
+  if (again && e.target.closest("button, summary, label")) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+}, true);
+
 const closePops = () => { for (const p of document.querySelectorAll(".pop")) p.hidden = true; };
 document.addEventListener("click", closePops);
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePops(); });

@@ -1062,6 +1062,23 @@ func (e *Engine) Status() Status {
 	return s
 }
 
+// Knows: this device's sync.json, or a change of it not sent yet, has key. A website the group
+// lists, or one removed in it (Notify keeps removed websites as such).
+func (e *Engine) Knows(key string) bool {
+	if e.relay == nil {
+		return false
+	}
+	e.mu.Lock()
+	e.loadPendingLocked()
+	_, pending := e.pending.Changes[key]
+	e.mu.Unlock()
+	if pending {
+		return true
+	}
+	_, known := e.loadState().Hashes[key]
+	return known
+}
+
 // Load reads the keys once so Status knows whether syncing is on.
 func (e *Engine) Load(ctx context.Context) {
 	if e.relay == nil {

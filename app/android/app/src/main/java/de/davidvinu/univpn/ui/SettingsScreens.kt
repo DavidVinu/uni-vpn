@@ -150,8 +150,10 @@ private fun PasswordDialog(model: AppModel) {
     val scope = rememberCoroutineScope()
     var password by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    // Opened by a tap (Home's "Update password"): the second tap of a double tap lands beside it.
+    LaunchedEffect(Unit) { model.screenChanged() }
     AlertDialog(
-        onDismissRequest = { model.passwordDialog = false },
+        onDismissRequest = { if (!model.justChanged) model.passwordDialog = false },
         title = { Text(model.t("app.password")) },
         text = {
             Column {
@@ -183,6 +185,8 @@ fun WebsitesScreen(model: AppModel) {
     val domains = status.optJSONArray("domains")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
     var adding by rememberSaveable { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    // The rows move up under the finger after a remove.
+    LaunchedEffect(domains) { model.screenChanged() }
     fun save(list: List<String>, then: () -> Unit = {}) {
         scope.launch {
             val result = model.post("/api/domains", JSONObject().put("text", list.joinToString("\n")))

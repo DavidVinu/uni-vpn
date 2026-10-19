@@ -9,6 +9,7 @@ package daemon
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -284,6 +285,11 @@ func New(cfg *config.Config, log *slog.Logger, opts Options) *Daemon {
 		if step, err := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64); err == nil {
 			d.lastOTPStep, d.hasOTPStep = step, true
 		}
+	}
+	// This account's password signed in with a core before this one (the iPhone's app and its
+	// tunnel extension hand over; a restarted service), and nothing changed since.
+	if b, err := os.ReadFile(filepath.Join(opts.TokenDir, signedInName)); err == nil && string(b) == cfg.User+"\n"+cfg.Host {
+		d.signedIn = [2]int{1, 1}
 	}
 	if opts.DomainsPath == "" {
 		opts.DomainsPath = pac.DomainsPath()
@@ -861,6 +867,7 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 		d.cfg.User = previousUser
 		d.switching = false
 		d.accountGen++ // an attempt may have read the new user's secrets meanwhile
+		d.forgetSignIn()
 		d.wakeUp()
 		d.mu.Unlock()
 		var ce *config.ConfigError
@@ -898,6 +905,7 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 	port := d.cfg.HTTPPort
 	d.switching = false
 	d.accountGen++
+	d.forgetSignIn()
 	d.wakeUp()
 	d.configPath = path
 	d.logf(slog.LevelInfo, "Setup completed for %s (%s)", user, profile.UniversityName)
@@ -908,7 +916,7 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 	}
 	d.mu.Unlock()
 	if newRule {
-		d.opts.ProxyRefresh(port)
+		d.refreshProxy(port)
 	}
 	if quiet {
 		d.secretsSynced(teardown)
@@ -939,6 +947,12 @@ func (d *Daemon) NoteCodeShown() {
 	d.markOTPStepLocked(int64(math.Floor(d.wall() / OTPStep)))
 }
 
+// signedInName: the account (user and gateway) whose password signed in last, for the next core.
+const signedInName = "signed-in"
+
+// forgetSignIn: the password or the account changed, the next core knows no sign-in with it.
+func (d *Daemon) forgetSignIn() { _ = os.Remove(filepath.Join(d.opts.TokenDir, signedInName)) }
+
 // otpStepName keeps the last used code window for the next core in the state folder.
 const otpStepName = "otp-step"
 
@@ -952,6 +966,7 @@ func (d *Daemon) markOTPStepLocked(step int64) {
 func (d *Daemon) secretsChanged() {
 	d.mu.Lock()
 	d.secretsGen++
+	d.forgetSignIn()
 	tun := d.tun
 	if tun != nil && d.state == Connecting && !tun.HasExited() {
 		d.logf(slog.LevelInfo, "Secrets changed while connecting, starting over")
@@ -1001,9 +1016,97 @@ func (d *Daemon) SetDomains(text string) ([]string, error) {
 	d.mu.Lock()
 	port := d.cfg.HTTPPort
 	d.mu.Unlock()
-	d.opts.ProxyRefresh(port)
+	d.refreshProxy(port)
 	d.syncChanged()
 	return domains, nil
+}
+
+// addedDefaults: websites that became a university's defaults after lists of the user's own
+// existed. A saved list (domains.txt) keeps the defaults of its day, so each is added to it
+// once, by the first core that knows it.
+var addedDefaults = map[string][]string{
+	"heidelberg": {"moodle.uni-heidelberg.de", "yoki.urz.uni-heidelberg.de", "m365.urz.uni-heidelberg.de"},
+}
+
+// addedDefaultsName lists the websites of addedDefaults this device dealt with, in the state
+// folder.
+const addedDefaultsName = "defaults-added"
+
+// addNewDefaults adds the websites of addedDefaults to a saved list once. Not one the user's
+// devices already know (sync.json): another device added it, or the user removed it there.
+func (d *Daemon) addNewDefaults() {
+	marker := filepath.Join(d.opts.TokenDir, addedDefaultsName)
+	data, _ := os.ReadFile(marker)
+	done := strings.Fields(string(data))
+	var all []string
+	for _, hosts := range addedDefaults {
+		all = append(all, hosts...)
+	}
+	if !slices.ContainsFunc(all, func(host string) bool { return !slices.Contains(done, host) }) {
+		return
+	}
+	d.mu.Lock()
+	setUp := !d.needsSetup && d.configError == ""
+	university, defaults := d.cfg.University, slices.Clone(d.cfg.DefaultDomains)
+	d.mu.Unlock()
+	// Without a saved list the defaults apply, these with them: a list saved from now on has
+	// them (or the user removed them).
+	if exists(d.opts.DomainsPath) {
+		if !setUp {
+			return // the university is not known yet
+		}
+		list, err := pac.ReadDomains(d.opts.DomainsPath, defaults)
+		if err != nil {
+			return
+		}
+		var add []string
+		for _, host := range addedDefaults[university] {
+			if !slices.Contains(done, host) && !pac.Matches(host, list) && !d.sync.Knows(devsync.DomainPrefix+host) {
+				add = append(add, host)
+			}
+		}
+		if len(add) > 0 {
+			if _, err := d.SetDomains(strings.Join(append(list, add...), "\n")); err != nil {
+				d.logf(slog.LevelWarn, "Could not add %s to the websites: %s", strings.Join(add, ", "), err)
+				return
+			}
+		}
+	}
+	slices.Sort(all)
+	_ = os.WriteFile(marker, []byte(strings.Join(slices.Compact(all), "\n")+"\n"), 0o600)
+}
+
+// pacSumName keeps the proxy rule the browsers were last told about, in the state folder.
+const pacSumName = "pac-sum"
+
+func (d *Daemon) pacSum() (string, error) {
+	text, err := d.PAC()
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(text))), nil
+}
+
+// refreshProxy tells the browsers that the proxy rule changed: they keep the one they loaded
+// until its address changes.
+func (d *Daemon) refreshProxy(port int) {
+	if sum, err := d.pacSum(); err == nil {
+		_ = os.WriteFile(filepath.Join(d.opts.TokenDir, pacSumName), []byte(sum), 0o600)
+	}
+	d.opts.ProxyRefresh(port)
+}
+
+// refreshIfRuleChanged: an update can bring new default websites, so a rule other than the
+// one the browsers were last told about is announced at start.
+func (d *Daemon) refreshIfRuleChanged(port int) {
+	sum, err := d.pacSum()
+	if err != nil {
+		return
+	}
+	if old, err := os.ReadFile(filepath.Join(d.opts.TokenDir, pacSumName)); err == nil && string(old) == sum {
+		return
+	}
+	d.refreshProxy(port)
 }
 
 // SetLanguage stores the app's language; "" follows the system.
@@ -1123,6 +1226,10 @@ func (d *Daemon) Run() {
 			d.logf(slog.LevelError, "Could not write %s: %s", ready, err)
 		}
 		defer d.dropReady()
+	}
+	d.addNewDefaults()
+	if server != nil {
+		go d.refreshIfRuleChanged(httpPort)
 	}
 	tickerDone := make(chan struct{})
 	go func() { d.ticker(); close(tickerDone) }()
@@ -1731,6 +1838,11 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 					d.logf(slog.LevelInfo, "One-time code rejected, trying once more with the next one")
 					continue
 				}
+				if message == messages.AppendRejected {
+					// Also refused with a new code: the password is what changed, no more retries.
+					d.signedIn = [2]int{}
+					d.forgetSignIn()
+				}
 				d.final(state, message)
 				return
 			}
@@ -1751,6 +1863,7 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 		}
 
 		d.failures, d.totpRetried, d.signedIn = 0, false, [2]int{generation + 1, account + 1}
+		_ = os.WriteFile(filepath.Join(d.opts.TokenDir, signedInName), []byte(d.cfg.User+"\n"+d.cfg.Host), 0o600)
 		d.logf(slog.LevelInfo, "Tunnel ready after %.1f s", elapsed(tun.StartedAt(), tun.ReadyAt()))
 		d.set(Connected, messages.Connected)
 		// The "connect now" request is fulfilled. From here on only real use counts, the idle

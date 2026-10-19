@@ -27,6 +27,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -41,7 +43,9 @@ fun App(model: AppModel, vpnOn: Boolean, activity: MainActivity) {
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
         // Turned sideways, the camera cutout sits at one side: nothing goes under it. The top
         // bars keep clear of it themselves and do not add it twice.
-        Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))) {
+        val setupShown = model.setupNeeded || model.changingAccount || model.setupFinishing
+        LaunchedEffect(model.visit, setupShown) { model.screenChanged() }
+        Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal)).doubleTapGuard(model)) {
             when {
                 // Instead of a spinner that never ends. The core's texts need the core: this one
                 // comes with the app. The switch stays, so Uni VPN can still be turned off here.
@@ -112,5 +116,17 @@ internal fun Pages(setup: Boolean, visit: String, setupFlow: @Composable () -> U
     } else {
         LaunchedEffect(Unit) { setupVisit = UUID.randomUUID().toString() }
         key(visit) { screen() }
+    }
+}
+
+/** Drops a tap that starts within the double-tap time after the screen changed. */
+internal fun Modifier.doubleTapGuard(model: AppModel): Modifier = pointerInput(Unit) {
+    awaitPointerEventScope {
+        while (true) {
+            val event = awaitPointerEvent(PointerEventPass.Initial)
+            if (model.justChanged) {
+                event.changes.forEach { it.consume() }
+            }
+        }
     }
 }

@@ -14,7 +14,7 @@ import (
 
 func TestDefaults(t *testing.T) {
 	want := []string{"sogo.uni-heidelberg.de", "elearning-med.uni-heidelberg.de", "cip.dmed.uni-heidelberg.de",
-		"heico.uni-heidelberg.de", "moodle.uni-heidelberg.de"}
+		"heico.uni-heidelberg.de", "moodle.uni-heidelberg.de", "yoki.urz.uni-heidelberg.de", "m365.urz.uni-heidelberg.de"}
 	if !reflect.DeepEqual(DefaultDomains, want) {
 		t.Fatal(DefaultDomains)
 	}

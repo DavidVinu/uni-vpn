@@ -163,6 +163,8 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
     val total = if (needsTotp) 4 else 3
     val auto = needsTotp && uni?.enroll == true
 
+    LaunchedEffect(step, byHand) { model.screenChanged() }
+
     fun go(next: Int) {
         error = null
         step = next

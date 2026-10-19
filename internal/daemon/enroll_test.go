@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -525,5 +526,25 @@ func TestSetupWithACodeFromTheApp(t *testing.T) {
 	}
 	if r := h.post("/api/totp/auto", `{"code": "abc"}`); r.status != 400 {
 		t.Fatal(r.status)
+	}
+}
+
+// The portal's list names each code generator after the device it is on.
+func TestTokenNamedAfterTheDevice(t *testing.T) {
+	t.Setenv("UNI_VPN_DEVICE_NAME", "Anna’s iPhone (2)")
+	if got := description(); got != "Uni VPN Annas iPhone 2" {
+		t.Fatal(got)
+	}
+	t.Setenv("UNI_VPN_DEVICE_NAME", "张三 的 iPhone")
+	if got := description(); got != "Uni VPN iPhone" {
+		t.Fatal(got)
+	}
+	host, err := os.Hostname()
+	if err != nil || !strings.Contains(host, ".") {
+		return
+	}
+	t.Setenv("UNI_VPN_DEVICE_NAME", host) // a host name: its first part
+	if got := description(); strings.Contains(got, ".") {
+		t.Fatal(got)
 	}
 }

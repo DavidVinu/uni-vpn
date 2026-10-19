@@ -59,7 +59,7 @@ func TestHeidelbergKeepsTodaysValues(t *testing.T) {
 		t.Errorf("portal = %q", hd.MFAPortalURL)
 	}
 	want := []string{"sogo.uni-heidelberg.de", "elearning-med.uni-heidelberg.de", "cip.dmed.uni-heidelberg.de",
-		"heico.uni-heidelberg.de", "moodle.uni-heidelberg.de"}
+		"heico.uni-heidelberg.de", "moodle.uni-heidelberg.de", "yoki.urz.uni-heidelberg.de", "m365.urz.uni-heidelberg.de"}
 	if !slices.Equal(hd.DefaultDomains, want) {
 		t.Errorf("default_domains = %v", hd.DefaultDomains)
 	}
