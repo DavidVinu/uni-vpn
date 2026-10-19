@@ -3,6 +3,11 @@
 //
 // The browsers fetch the rule from the daemon (/proxy.pac): listed hosts and their
 // subdomains go via SOCKS5 127.0.0.1:<socks_port>, everything else direct.
+//
+// Each proxy is given twice, "SOCKS5 127.0.0.1:<port>; SOCKS 127.0.0.1:<port>": Safari (and
+// everything else on CFNetwork, also on iPhone) drops the SOCKS5 keyword without a word and
+// would connect directly, but speaks SOCKS5 behind plain SOCKS. Chrome and Firefox take
+// SOCKS5; their SOCKS is SOCKS4, which Uni VPN refuses, so they never fall back to it.
 package pac
 
 import (
@@ -132,9 +137,10 @@ func Matches(host string, domains []string) bool {
 func BuildPAC(domains []string, port int) string { return BuildPACOrDirect(domains, nil, port) }
 
 // BuildPACOrDirect is BuildPAC plus hosts that go via the port or, when it refuses, directly
-// ("SOCKS5 127.0.0.1:port; DIRECT").
+// ("SOCKS5 127.0.0.1:port; SOCKS 127.0.0.1:port; DIRECT").
 func BuildPACOrDirect(domains, orDirect []string, port int) string {
-	socks := "SOCKS5 127.0.0.1:" + strconv.Itoa(port)
+	address := "127.0.0.1:" + strconv.Itoa(port)
+	socks := "SOCKS5 " + address + "; SOCKS " + address
 	lines := []string{"function FindProxyForURL(url, host) {"}
 	if len(orDirect) > 0 {
 		lines = append(lines, "  var orDirect = "+jsonList(orDirect)+";")
