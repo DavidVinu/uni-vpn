@@ -161,7 +161,8 @@ private fun PasswordDialog(model: AppModel) {
                     Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(bottom = 12.dp))
                 }
                 PasswordField(model, password) { password = it }
-                ErrorText(error)
+                // Shares the room left with the hint: both scroll when the keyboard or large text leaves too little.
+                ErrorText(error, Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()))
             }
         },
         dismissButton = { TextButton(onClick = { model.passwordDialog = false }) { Text(model.t("app.back")) } },
