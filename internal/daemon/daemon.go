@@ -1228,9 +1228,13 @@ func (d *Daemon) Run() {
 		defer d.dropReady()
 	}
 	d.addNewDefaults()
-	if server != nil {
-		go d.refreshIfRuleChanged(httpPort)
-	}
+	refreshDone := make(chan struct{})
+	go func() {
+		if server != nil {
+			d.refreshIfRuleChanged(httpPort)
+		}
+		close(refreshDone)
+	}()
 	tickerDone := make(chan struct{})
 	go func() { d.ticker(); close(tickerDone) }()
 	updatesDone := make(chan struct{})
@@ -1247,6 +1251,7 @@ func (d *Daemon) Run() {
 	<-tickerDone
 	<-updatesDone
 	<-syncDone
+	<-refreshDone
 	d.mu.Lock()
 	if d.loopRunning {
 		d.loopCancel()
