@@ -29,9 +29,11 @@ func mustGet(t *testing.T, id string) Profile {
 
 func TestShippedRegistryLoads(t *testing.T) {
 	want := []string{
-		"heidelberg", "ethz", "bremen", "muenster", "marburg", "stanford", "harvard-fasrc", "stuttgart",
+		"heidelberg", "ethz", "ethz-students", "bremen", "muenster", "marburg", "marburg-students", "stanford",
+		"harvard-fasrc", "stuttgart", "stuttgart-students",
 		"bonn", "mannheim", "kassel", "fu-berlin", "oxford", "tamu", "ucf", "osu", "utexas",
-		"asu", "ufl", "umn", "uiuc", "uga", "unc", "ncsu", "uwaterloo", "uottawa", "carleton", "hku", "ugr", "uni-halle",
+		"asu", "ufl", "umn", "uiuc", "uga", "unc", "ncsu", "ncsu-students", "uwaterloo", "uottawa",
+		"uottawa-students", "carleton", "hku", "hku-students", "ugr", "uni-halle",
 		"hs-flensburg", "w-hs", "hs-offenburg", "uni-hamburg", "uni-jena", "uni-weimar", "th-koeln", "thu",
 		"tu-braunschweig"}
 	got := ids(Registry())
@@ -129,6 +131,14 @@ func TestProfilesFromTheProbes(t *testing.T) {
 		{"w-hs", "authgroup", mustGet(t, "w-hs").Authgroup, "VPN+MFA"},
 		{"hku", "mfa", mustGet(t, "hku").MFA, "totp_field"},
 		{"hku", "username_suffix", mustGet(t, "hku").UsernameSuffix, "@hku.hk"},
+		// Students sign in with their own group or user name ending.
+		{"ethz-students", "authgroup", mustGet(t, "ethz-students").Authgroup, "student-net"},
+		{"ethz-students", "username_suffix", mustGet(t, "ethz-students").UsernameSuffix, "@student-net.ethz.ch"},
+		{"marburg-students", "authgroup", mustGet(t, "marburg-students").Authgroup, "unimr-vpn-students-Passwort+2FA"},
+		{"stuttgart-students", "username_suffix", mustGet(t, "stuttgart-students").UsernameSuffix, "@stud.uni-stuttgart.de"},
+		{"ncsu-students", "authgroup", mustGet(t, "ncsu-students").Authgroup, "2-Student"},
+		{"uottawa-students", "usergroup", mustGet(t, "uottawa-students").Usergroup, "students"},
+		{"hku-students", "username_suffix", mustGet(t, "hku-students").UsernameSuffix, "@connect.hku.hk"},
 		// Gateways that refuse the bare login.
 		{"uni-jena", "username_suffix", mustGet(t, "uni-jena").UsernameSuffix, "@uni-jena.de"},
 		{"uni-weimar", "username_suffix", mustGet(t, "uni-weimar").UsernameSuffix, "@uni-weimar.de"},
@@ -207,8 +217,9 @@ func TestSearchIgnoresCaseAndUmlautsAndPrefersAnExactID(t *testing.T) {
 		query string
 		want  []string
 	}{
-		{"Zürich", []string{"ethz"}},
-		{"zuerich", []string{"ethz"}},
+		{"Zürich", []string{"ethz", "ethz-students"}},
+		{"zuerich", []string{"ethz", "ethz-students"}},
+		{"ethz", []string{"ethz"}},
 		{"MÜNSTER", []string{"muenster"}},
 		{"fasrc", []string{"harvard-fasrc"}},
 		{"bonn", []string{"bonn"}},

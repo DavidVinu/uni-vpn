@@ -171,13 +171,16 @@ settings. `uni-vpn doctor` prints it.
 | University | Gateway | Second factor | State |
 |---|---|---|---|
 | Heidelberg University | vpn-ac.uni-heidelberg.de | one-time code | tested end to end |
-| ETH Zurich | sslvpn.ethz.ch | one-time code | profile only |
+| ETH Zurich (staff) | sslvpn.ethz.ch | one-time code | profile only |
+| ETH Zurich (students) | sslvpn.ethz.ch | one-time code | profile only |
 | University of Bremen | vpn.uni-bremen.de | one-time code | profile only |
 | University of Münster | vpn.uni-muenster.de | one-time code | profile only |
 | Harvard FAS Research Computing | vpn.rc.fas.harvard.edu | one-time code | profile only |
-| University of Marburg | vpn.uni-marburg.de | one-time code after the password | profile only |
+| University of Marburg (staff) | vpn.uni-marburg.de | one-time code after the password | profile only |
+| University of Marburg (students) | vpn.uni-marburg.de | one-time code after the password | profile only |
 | Stanford University | su-vpn.stanford.edu | Duo push | profile only |
-| University of Stuttgart | vpn.tik.uni-stuttgart.de | none | profile only |
+| University of Stuttgart (staff) | vpn.tik.uni-stuttgart.de | none | profile only |
+| University of Stuttgart (students) | vpn.tik.uni-stuttgart.de | none | profile only |
 | University of Bonn | unibn-vpn.uni-bonn.de | none | profile only |
 | University of Mannheim | vpn.uni-mannheim.de | none | profile only |
 | University of Kassel | univpn.uni-kassel.de | none | profile only |
@@ -191,11 +194,14 @@ settings. `uni-vpn doctor` prints it.
 | University of Illinois Urbana-Champaign | vpn.illinois.edu | Duo push | profile only |
 | University of Georgia | remote.uga.edu | sign-in on a web page (SAML) | not supported yet |
 | University of North Carolina at Chapel Hill | vpn.unc.edu | sign-in on a web page (SAML) | not supported yet |
-| North Carolina State University | vpn.ncsu.edu | Duo push | profile only |
+| North Carolina State University (faculty and staff) | vpn.ncsu.edu | Duo push | profile only |
+| North Carolina State University (students) | vpn.ncsu.edu | Duo push | profile only |
 | University of Waterloo | cn-vpn.uwaterloo.ca | Duo push | profile only |
-| University of Ottawa | uovpn.uottawa.ca | Microsoft push | profile only |
+| University of Ottawa (employees) | uovpn.uottawa.ca | Microsoft push | profile only |
+| University of Ottawa (graduate students) | uovpn.uottawa.ca | Microsoft push | profile only |
 | Carleton University | cuvpn.carleton.ca | sign-in on a web page (SAML) | not supported yet |
-| University of Hong Kong | vpn2fa.hku.hk | one-time code | profile only |
+| University of Hong Kong (staff) | vpn2fa.hku.hk | one-time code | profile only |
+| University of Hong Kong (students) | vpn2fa.hku.hk | one-time code | profile only |
 | University of Granada | vpn.ugr.es | one-time code | profile only |
 | Martin Luther University Halle-Wittenberg | vpn.uni-halle.de | none | profile only |
 | Flensburg University of Applied Sciences | vpn.hs-flensburg.de | none | profile only |

@@ -32,6 +32,9 @@ PrivilegesRequired=admin
 ; wintun.dll installs Wintun's ARM driver itself.
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+; Windows 10 1809 or newer: Go's runtime does not start on Windows 7 and 8, and the task's
+; headless conhost needs 1809. Older Windows gets Inno's own translated "needs a newer Windows".
+MinVersion=10.0.17763
 DisableWelcomePage=yes
 DisableDirPage=yes
 DisableProgramGroupPage=yes
@@ -50,12 +53,10 @@ Name: "de"; MessagesFile: "compiler:Languages\German.isl"
 Name: "fr"; MessagesFile: "compiler:Languages\French.isl"
 Name: "es"; MessagesFile: "compiler:Languages\Spanish.isl"
 Name: "ja"; MessagesFile: "compiler:Languages\Japanese.isl"
-#ifexist AddBackslash(CompilerPath) + "Languages\ChineseSimplified.isl"
-Name: "zh"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
-#endif
-#ifexist AddBackslash(CompilerPath) + "Languages\ChineseTraditional.isl"
-Name: "zhtw"; MessagesFile: "compiler:Languages\ChineseTraditional.isl"
-#endif
+; Inno Setup 6 has no Chinese translations: these two are its official ones from 7.0.2
+; (jrsoftware/issrc, tag is-7_0_2, Files/Languages), with the same messages as 6.7.1.
+Name: "zh"; MessagesFile: "ChineseSimplified.isl"
+Name: "zhtw"; MessagesFile: "ChineseTraditional.isl"
 
 [CustomMessages]
 ; In plain words, like the app's own texts (uni_vpn/locales).
@@ -69,14 +70,10 @@ es.OtherAccount=Uni VPN debe instalarse desde la cuenta que lo va a usar. Inicia
 es.SetupFailed=No se pudo configurar Uni VPN. Reinicia el ordenador y vuelve a abrir el instalador.
 ja.OtherAccount=Uni VPN は、使うアカウントからインストールする必要があります。アプリをインストールできるアカウントで Windows にサインインしてから、もう一度インストーラーを開いてください。
 ja.SetupFailed=Uni VPN を設定できませんでした。コンピューターを再起動してから、もう一度インストーラーを開いてください。
-#ifexist AddBackslash(CompilerPath) + "Languages\ChineseSimplified.isl"
 zh.OtherAccount=Uni VPN 必须从要使用它的账户安装。请用可以安装应用的账户登录 Windows，然后重新打开安装程序。
 zh.SetupFailed=无法设置 Uni VPN。请重启电脑，然后重新打开安装程序。
-#endif
-#ifexist AddBackslash(CompilerPath) + "Languages\ChineseTraditional.isl"
 zhtw.OtherAccount=Uni VPN 必須從要使用它的帳戶安裝。請用可以安裝應用程式的帳戶登入 Windows，然後重新開啟安裝程式。
 zhtw.SetupFailed=無法設定 Uni VPN。請重新啟動電腦，然後重新開啟安裝程式。
-#endif
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Excludes: "\bin\uni-vpn-core.exe,\bin\arm64"; Flags: recursesubdirs createallsubdirs ignoreversion

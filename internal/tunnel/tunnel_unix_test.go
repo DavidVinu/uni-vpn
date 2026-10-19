@@ -3,6 +3,7 @@
 package tunnel
 
 import (
+	"cmp"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -549,24 +550,86 @@ func TestOpenconnectKeepsTheCharacterSet(t *testing.T) {
 
 // The Linux packages use the distribution's openconnect: Ubuntu 22.04 and Mint 21 have 8.20,
 // Debian 12 has 9.01, both without --no-external-auth (9.10). Every profile but Heidelberg's
-// sets no_external_auth, so the sign-in must not depend on it there.
-// Linux runs the distribution's openconnect, which may be older than --no-external-auth (9.10).
-// The Mac ships its own, which knows it: there the option is always passed.
+// sets no_external_auth, so the sign-in must not depend on it there. 9.01 opens the desktop's
+// browser by itself for a web sign-in unless --external-browser names another program.
+// The Mac ships its own, which knows the option: there it is always passed.
 func TestOpenconnectWithoutNoExternalAuth(t *testing.T) {
-	f := newFlow(t)
-	f.cfg.NoExternalAuth = true
-	t.Setenv("FAKE_VERSION", "9.01")
-	tn := f.make()
-	if runtime.GOOS != "linux" {
-		if !slices.Contains(tn.AuthArgs(), "--no-external-auth") {
-			t.Fatal("--no-external-auth missing:", tn.AuthArgs())
-		}
-		return
+	for _, c := range []struct {
+		version string
+		want    []string
+	}{
+		{"9.01", []string{"--external-browser=/bin/false"}},
+		{"8.20", nil},
+		{"", []string{"--no-external-auth"}},
+	} {
+		t.Run(cmp.Or(c.version, "current"), func(t *testing.T) {
+			f := newFlow(t)
+			f.cfg.NoExternalAuth = true
+			t.Setenv("FAKE_VERSION", c.version)
+			tn := f.make()
+			want := c.want
+			if runtime.GOOS != "linux" {
+				want = []string{"--no-external-auth"}
+			}
+			if got := externalArgs(tn.AuthArgs()); !slices.Equal(got, want) {
+				t.Fatal(got)
+			}
+			if runtime.GOOS != "linux" {
+				return
+			}
+			f.start(tn, "secret", token)
+			if !tn.WaitReady(3 * time.Second) {
+				v, _ := tn.Classification()
+				t.Fatal("not ready:", v, tn.StderrTail())
+			}
+			tn.Stop(2 * time.Second)
+		})
 	}
-	f.start(tn, "secret", token)
+}
+
+// Stanford and UIUC answer openconnect 9.01 with the web sign-in of their default group
+// (pass 24). UIUC's then waits for the browser for ever: the verdict ends the run, so neither
+// the timeout (75 s with Duo) nor the daemon's next try (another browser tab) comes.
+func TestWebSignInEndsTheRun(t *testing.T) {
+	for _, mode := range []string{"sso_browser", "sso_embedded"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newFlow(t)
+			f.cfg.MFA, f.cfg.NoExternalAuth = "duo_push", true
+			if runtime.GOOS == "linux" { // elsewhere openconnect is current
+				t.Setenv("FAKE_VERSION", "9.01")
+			}
+			t.Setenv("FAKE_MODE", mode)
+			tn := f.make()
+			start := time.Now()
+			f.start(tn, "secret", "")
+			if tn.WaitReady(6 * time.Second) {
+				t.Fatal("ready")
+			}
+			if d := time.Since(start); d > 3*time.Second {
+				t.Error("took", d)
+			}
+			if !tn.HasExited() || tn.StoppedByUs() {
+				t.Fatal("exited", tn.HasExited(), "stopped by us", tn.StoppedByUs())
+			}
+			if v, _ := tn.Classification(); v != (Verdict{StateAuthFailed, SAMLRequired}) {
+				t.Fatal(v, tn.StderrTail())
+			}
+		})
+	}
+}
+
+// Once the tunnel is up, a line that reads like a web sign-in does not end it.
+func TestWebSignInLineAfterReadyKeepsTheTunnel(t *testing.T) {
+	f := newFlow(t)
+	tn := f.make()
+	f.start(tn, "secret", "")
 	if !tn.WaitReady(3 * time.Second) {
-		v, _ := tn.Classification()
-		t.Fatal("not ready:", v, tn.StderrTail())
+		t.Fatal("not ready")
+	}
+	tn.handleLine("SAML sign-in is available at https://vpn.example/")
+	time.Sleep(500 * time.Millisecond)
+	if tn.HasExited() {
+		t.Fatal("ended", tn.StderrTail())
 	}
 	tn.Stop(2 * time.Second)
 }

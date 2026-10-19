@@ -156,13 +156,13 @@ func (t *Tunnel) AuthArgs() []string {
 		// desktop, and gateways that check both should see what a Linux computer sends.
 		args = append(args, "--os=linux-64")
 	}
-	if cfg.NoExternalAuth && (runtime.GOOS != "linux" || knowsNoExternalAuth(t.OpenConnect)) {
-		args = append(args, "--no-external-auth")
+	if cfg.NoExternalAuth {
+		args = append(args, noExternalAuthArgs(t.OpenConnect)...)
 	}
 	return args
 }
 
-var noExternalAuth sync.Map // openconnect path and its file's time -> usage lists --no-external-auth
+var usages sync.Map // openconnect path and its file's time -> its usage text
 
 // usage is openconnect's --help text, empty when it can't be run; tests replace it.
 var usage = func(openconnect string) []byte {
@@ -174,22 +174,41 @@ var usage = func(openconnect string) []byte {
 	return out
 }
 
-// knowsNoExternalAuth: the option came with openconnect 9.10. The Linux packages use the
-// distribution's openconnect (Ubuntu 22.04 and Mint 21: 8.20, Debian 12: 9.01), which stops at
-// an unknown option with its usage text. 8.20 never offers the browser sign-in, 9.01 always
-// does; without the option both sign in as they can.
-func knowsNoExternalAuth(openconnect string) bool {
+// helpText asks each openconnect binary once. An empty answer (no fork, the timeout) is not
+// kept, so the next start asks again.
+func helpText(openconnect string) []byte {
 	key := openconnect
 	if info, err := os.Stat(openconnect); err == nil {
 		key += "\x00" + info.ModTime().String() // asked again after the distribution updates it
 	}
-	if v, ok := noExternalAuth.Load(key); ok {
-		return v.(bool)
+	if v, ok := usages.Load(key); ok {
+		return v.([]byte)
 	}
 	out := usage(openconnect)
-	known := len(out) == 0 || bytes.Contains(out, []byte("--no-external-auth"))
-	noExternalAuth.Store(key, known)
-	return known
+	if len(out) > 0 {
+		usages.Store(key, out)
+	}
+	return out
+}
+
+// noExternalAuthArgs: --no-external-auth came with openconnect 9.10. The Linux packages use the
+// distribution's openconnect (Ubuntu 22.04 and Mint 21: 8.20, Debian 12: 9.01), which stops at
+// an unknown option with its usage text. 8.20 never offers the web sign-in. 9.00 to 9.09 always
+// offer it, and some gateways answer with the web sign-in of their default group although
+// --authgroup names another (Stanford, UIUC); then 9.01 opens the desktop's browser itself
+// unless --external-browser names another program. /bin/false opens nothing.
+func noExternalAuthArgs(openconnect string) []string {
+	if runtime.GOOS != "linux" {
+		return []string{"--no-external-auth"}
+	}
+	help := helpText(openconnect)
+	switch {
+	case len(help) == 0 || bytes.Contains(help, []byte("--no-external-auth")):
+		return []string{"--no-external-auth"}
+	case bytes.Contains(help, []byte("--external-browser")):
+		return []string{"--external-browser=/bin/false"}
+	}
+	return nil
 }
 
 // TokenArgs: the secret is passed via a 0600 file, never via the process list. openconnect
@@ -604,6 +623,10 @@ func (t *Tunnel) handleLine(text string) {
 	if t.classification == nil {
 		if v, ok := t.classifier.Feed(text); ok {
 			t.classification = &v
+			if v == (Verdict{StateAuthFailed, SAMLRequired}) && t.readyAt.IsZero() && t.cmd != nil {
+				// A web sign-in never succeeds here, and openconnect may wait for one for ever.
+				go t.abort(t.cmd.Process)
+			}
 		}
 	}
 	if t.classifier.OTPGenerated && t.otpGeneratedAt.IsZero() {
@@ -611,6 +634,21 @@ func (t *Tunnel) handleLine(text string) {
 	}
 	if t.classifier.OTPGenerated || t.classification != nil {
 		t.releaseCodeLocked()
+	}
+}
+
+// abortGrace is how long openconnect has to end a sign-in that cannot succeed.
+const abortGrace = 5 * time.Second
+
+// abort ends openconnect without counting as stopped by us: WaitReady returns once it exited
+// and the daemon reports the verdict.
+func (t *Tunnel) abort(proc *os.Process) {
+	_ = terminate(proc)
+	select {
+	case <-t.exited:
+	case <-time.After(abortGrace):
+		t.logf(slog.LevelWarn, "openconnect does not respond to SIGTERM, sending SIGKILL")
+		_ = proc.Kill()
 	}
 }
 

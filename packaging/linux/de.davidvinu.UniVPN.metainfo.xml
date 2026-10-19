@@ -9,6 +9,8 @@
   <summary xml:lang="zh_CN">在家访问学校网站，就像在校园里一样</summary>
   <summary xml:lang="zh_TW">在家存取學校網站，就像在校園裡一樣</summary>
   <summary xml:lang="zh_HK">在家存取學校網站，就像在校園裡一樣</summary>
+  <summary xml:lang="zh_MO">在家存取學校網站，就像在校園裡一樣</summary>
+  <summary xml:lang="zh_SG">在家访问学校网站，就像在校园里一样</summary>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>AGPL-3.0-or-later</project_license>
   <description>
@@ -19,6 +21,8 @@
     <p xml:lang="zh_CN">需要时通过学校的 VPN 打开学校网站，其他内容仍走你平常的网络连接。</p>
     <p xml:lang="zh_TW">需要時透過學校的 VPN 開啟學校網站，其他內容仍走你平常的網路連線。</p>
     <p xml:lang="zh_HK">需要時透過學校的 VPN 開啟學校網站，其他內容仍走你平常的網路連線。</p>
+    <p xml:lang="zh_MO">需要時透過學校的 VPN 開啟學校網站，其他內容仍走你平常的網路連線。</p>
+    <p xml:lang="zh_SG">需要时通过学校的 VPN 打开学校网站，其他内容仍走你平常的网络连接。</p>
   </description>
   <launchable type="desktop-id">de.davidvinu.UniVPN.desktop</launchable>
   <url type="homepage">https://github.com/DavidVinu/uni-vpn</url>

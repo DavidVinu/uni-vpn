@@ -3,5 +3,7 @@ __pycache__/
 .pytest_cache/
 *.log
 *.pem
+# Public CA certificates the Android app adds to the phone's own.
+!app/android/app/src/main/assets/extra-ca.pem
 web-ext-artifacts/
 .DS_Store
