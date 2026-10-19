@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -548,11 +549,19 @@ func TestOpenconnectKeepsTheCharacterSet(t *testing.T) {
 // The Linux packages use the distribution's openconnect: Ubuntu 22.04 and Mint 21 have 8.20,
 // Debian 12 has 9.01, both without --no-external-auth (9.10). Every profile but Heidelberg's
 // sets no_external_auth, so the sign-in must not depend on it there.
+// Linux runs the distribution's openconnect, which may be older than --no-external-auth (9.10).
+// The Mac ships its own, which knows it: there the option is always passed.
 func TestOpenconnectWithoutNoExternalAuth(t *testing.T) {
 	f := newFlow(t)
 	f.cfg.NoExternalAuth = true
 	t.Setenv("FAKE_VERSION", "9.01")
 	tn := f.make()
+	if runtime.GOOS != "linux" {
+		if !slices.Contains(tn.AuthArgs(), "--no-external-auth") {
+			t.Fatal("--no-external-auth missing:", tn.AuthArgs())
+		}
+		return
+	}
 	f.start(tn, "secret", token)
 	if !tn.WaitReady(3 * time.Second) {
 		v, _ := tn.Classification()
