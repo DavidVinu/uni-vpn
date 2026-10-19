@@ -282,20 +282,32 @@ const CAFileName = "ca.pem"
 // against Homebrew's certificate file, which a Mac without Homebrew does not have, so on macOS
 // the file starts with the certificates macOS itself ships. "" for none.
 func (t *Tunnel) caFile() string {
-	if platform.IsAndroid {
+	path := filepath.Join(t.TokenDir, CAFileName)
+	switch {
+	case platform.IsAndroid:
 		return platform.AndroidCAFile()
+	case platform.IsMacOS && platform.IsBundled(t.OpenConnect):
+		return withSystemCAFile(path, platform.MacOSCAFile)
 	}
-	var system []byte
-	if platform.IsMacOS && platform.IsBundled(t.OpenConnect) {
-		st, err := os.Stat(platform.MacOSCAFile)
-		if err != nil || !st.Mode().IsRegular() {
-			return ""
-		}
-		if system, err = os.ReadFile(platform.MacOSCAFile); err != nil {
-			return ""
-		}
+	return certs.WriteFile(path, nil)
+}
+
+// withSystemCAFile writes system's certificates and certs.PEM to path. When path cannot be
+// written it returns system itself, which an openconnect without certificates of its own needs
+// at least; "" when system is missing.
+func withSystemCAFile(path, system string) string {
+	st, err := os.Stat(system)
+	if err != nil || !st.Mode().IsRegular() {
+		return ""
 	}
-	return certs.WriteFile(filepath.Join(t.TokenDir, CAFileName), system)
+	data, err := os.ReadFile(system)
+	if err != nil {
+		return ""
+	}
+	if p := certs.WriteFile(path, data); p != "" {
+		return p
+	}
+	return system
 }
 
 // script is the --script value. Android has no file for a wrapper script that it would run (only

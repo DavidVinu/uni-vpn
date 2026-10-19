@@ -465,3 +465,29 @@ func arg(text i18n.Text, name string) any {
 func notCiscoHTTP(d Detection, code int) bool {
 	return d.Error.Key == "detect.not_cisco_http" && arg(d.Error, "code") == code
 }
+
+// error_t is {"key", "args"} like every other text the page and the phones translate, not a
+// list of the ordered object's members.
+func TestErrorTextJSON(t *testing.T) {
+	d := Detection{Host: "vpn.example.invalid", Error: i18n.T("detect.unreachable", "host", "vpn.example.invalid")}
+	var got struct {
+		Error  string `json:"error"`
+		ErrorT struct {
+			Key  string            `json:"key"`
+			Args map[string]string `json:"args"`
+		} `json:"error_t"`
+	}
+	data, err := json.Marshal(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err, string(data))
+	}
+	if got.ErrorT.Key != "detect.unreachable" || got.ErrorT.Args["host"] != "vpn.example.invalid" || got.Error == "" {
+		t.Fatal(string(data))
+	}
+	if data, _ := json.Marshal(Detection{}); !strings.Contains(string(data), `"error_t":null`) {
+		t.Fatal(string(data))
+	}
+}

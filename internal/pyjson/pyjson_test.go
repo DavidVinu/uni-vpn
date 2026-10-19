@@ -1,6 +1,7 @@
 package pyjson
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 )
@@ -94,5 +95,22 @@ func TestErrorsLikePython(t *testing.T) {
 		if got != want {
 			t.Errorf("%q: %q, want %q", text, got, want)
 		}
+	}
+}
+
+func TestObjectInsideEncodingJSON(t *testing.T) {
+	data, err := json.Marshal(struct {
+		T any `json:"t"`
+	}{O("key", "x", "args", Object{{"b", 1}, {"a", []any{"\u00e9"}}})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(data); got != `{"t":{"key":"x","args":{"b":1,"a":["\u00e9"]}}}` {
+		t.Fatal(got)
+	}
+	if got := string(Marshal(struct {
+		T Object `json:"t"`
+	}{Object{{"z", true}, {"y", nil}}})); got != `{"t": {"z": true, "y": null}}` {
+		t.Fatal(got)
 	}
 }

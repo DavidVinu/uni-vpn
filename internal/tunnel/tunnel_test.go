@@ -110,6 +110,37 @@ func TestCAFileHoldsTheExtraCertificates(t *testing.T) {
 	}
 }
 
+// The .pkg's openconnect trusts no certificates of its own: macOS's file comes first, and is
+// used alone when the combined file cannot be written.
+func TestCAFileStartsWithTheSystemsOnMacOS(t *testing.T) {
+	dir := t.TempDir()
+	system := filepath.Join(dir, "cert.pem")
+	pem := []byte("-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n")
+	if err := os.WriteFile(system, pem, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "state", CAFileName)
+	if got := withSystemCAFile(path, system); got != path {
+		t.Fatal(got)
+	}
+	if data, _ := os.ReadFile(path); !bytes.Equal(data, append(append([]byte{}, pem...), certs.PEM...)) {
+		t.Errorf("%q", data)
+	}
+	blocked := filepath.Join(dir, "file")
+	if err := os.WriteFile(blocked, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := withSystemCAFile(filepath.Join(blocked, CAFileName), system); got != system {
+		t.Error("cannot write:", got)
+	}
+	if got := withSystemCAFile(path, filepath.Join(dir, "missing.pem")); got != "" {
+		t.Error("no system file:", got)
+	}
+	if got := withSystemCAFile(path, dir); got != "" {
+		t.Error("a folder:", got)
+	}
+}
+
 func TestAndroidCommand(t *testing.T) {
 	// No wrapper script on a phone: openconnect starts the app's ocproxy, and uses the
 	// certificates file the app wrote.

@@ -1,6 +1,7 @@
 #ifndef UNI_VPN_SHIM_H
 #define UNI_VPN_SHIM_H
 
+#include <stddef.h>
 #include <stdint.h>
 #include <openconnect.h>
 
@@ -32,7 +33,9 @@ int uni_vpn_write_cmd(int fd, char cmd);
 void uni_vpn_test_trust(struct uni_vpn *u, int accept);
 const char *uni_vpn_last_trust_host(void);
 
-/* Defined on iOS (trust_ios.c): 0 when the phone's trust store accepts the server's chain. */
+/* Defined on iOS (trust_ios.c): 0 when the phone's trust store accepts the server's chain;
+ * uni_vpn_trust_add adds a DER certificate it may use to link that chain to a root. */
 int uni_vpn_trust(struct openconnect_info *vpninfo, const char *host);
+void uni_vpn_trust_add(const void *der, size_t len);
 
 #endif

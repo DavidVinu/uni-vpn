@@ -535,11 +535,26 @@ async function refresh() {
   // A reload or the reopened app while the core still runs the short way: back to its code page,
   // the main screen has nowhere to type the next code.
   if (view === null && S.enroll && ["connecting", "code", "working"].includes(S.enroll.stage)) await resumeAuto();
-  if (view === "setup") { autoProgress(); setupProgress(); return; }
+  if (view === "setup") { autoProgress(); setupProgress(); restoreFocus(); return; }
   if (view === null) {
     if (location.hash === "#settings") openSettings(); else show("main");
   }
   render();
+  restoreFocus();
+}
+
+// A button disabled while it has the focus (Connect, Repair) drops it to the page, WebKit a
+// moment later: once enabled again it gets it back, so Enter and Tab go on from there.
+let refocus = null;
+function press(button) {
+  if (document.activeElement === button) refocus = button;
+  button.disabled = true;
+}
+function restoreFocus() {
+  const b = refocus, active = document.activeElement;
+  if (!b || b.disabled) return;
+  refocus = null;
+  if ((!active || active === document.body) && b.offsetParent !== null) b.focus();
 }
 
 // --- setup assistant ---------------------------------------------------------
@@ -791,7 +806,7 @@ $("a-back").onclick = async () => {
 for (const id of ["a-fix", "s3-fix"]) {
   $(id).onclick = async () => {
     if (id === "a-fix") autoRepair = true;
-    $(id).disabled = true;
+    press($(id));
     await send("/api/repair");  // like the main screen's Repair button
     $(id).disabled = false;
     refresh();
@@ -850,7 +865,10 @@ function renderGuide() {
   $("g-dots").replaceChildren(...guide.map((_, i) => { const d = document.createElement("i"); if (i === slide) d.className = "on"; return d; }));
   $("step2").querySelector(".step").hidden = changingTotp;
   const next = $("step2").querySelector("[type=submit]"), last = slide === guide.length - 1;
+  const had = document.activeElement === next;
   next.disabled = slide >= secretAt() && !keyRead;
+  // Disabled with the focus (Enter on Next to the picture slide): on to the drop zone instead.
+  if (had && next.disabled) ($("g-drop").hidden ? $("step2").querySelector("h2") : $("g-drop")).focus();
   next.textContent = t(last && changingTotp ? "app.save" : "app.next");
 }
 
@@ -901,7 +919,7 @@ async function useKey(secret, refresh, keep) {
   if (!r) {
     // No answer: the core is restarting for an update (the banner says so). The same key again
     // in a moment, not a tight loop; a paste or picture is not lost.
-    setTimeout(() => { if (seq === checkSeq && !$("step2").hidden) useKey(secret, refresh, previous); }, 3000);
+    setTimeout(() => { if (seq === checkSeq && guideOpen()) useKey(secret, refresh, previous); }, 3000);
     return;
   }
   if (!r.ok) {
@@ -924,7 +942,7 @@ async function useKey(secret, refresh, keep) {
   if (slide < at) slide = at;
   renderGuide();
   if (slide === at && at < guide.length - 1) {
-    setTimeout(() => { if (keyRead && slide === at && !$("step2").hidden) { slide++; renderGuide(); } }, 700);
+    setTimeout(() => { if (keyRead && slide === at && guideOpen()) { slide++; renderGuide(); } }, 700);
   }
 }
 
@@ -952,7 +970,7 @@ $("g-file").onchange = () => { readPicture($("g-file").files[0]); $("g-file").va
 $("g-drop").onkeydown = (e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); $("g-file").click(); } };
 // A picture or the key's text, pasted anywhere in the guide.
 document.addEventListener("paste", async (e) => {
-  if (view !== "setup" || $("step2").hidden || !e.clipboardData) return;
+  if (!guideOpen() || !e.clipboardData) return;
   const file = [...e.clipboardData.items].find((i) => i.kind === "file" && i.type.startsWith("image/"));
   const text = e.clipboardData.getData("text/plain");
   if (file || text.trim()) {
@@ -980,7 +998,7 @@ for (const type of ["dragover", "drop"]) {
       $("g-drop").classList.toggle("over", type === "dragover");
       if (type === "dragover" || !e.dataTransfer || !e.dataTransfer.getData("text/plain")) return;
     }
-    const over = view === "setup" && !$("step2").hidden;
+    const over = guideOpen();
     const files = e.dataTransfer && [...e.dataTransfer.types].includes("Files");
     if (!over && !files) return;
     e.preventDefault();
@@ -993,6 +1011,10 @@ for (const type of ["dragover", "drop"]) {
 }
 document.addEventListener("dragleave", (e) => { if (!e.relatedTarget) $("g-drop").classList.remove("over"); });
 
+// The guide on screen: step2 stays unhidden when the page leaves setup without step() (set up
+// in another window, the back arrow of a change).
+function guideOpen() { return view === "setup" && !$("step2").hidden; }
+
 function showCode(code, remaining, secret) {
   $("s-code").querySelector("b").textContent = code.slice(0, code.length / 2) + " " + code.slice(code.length / 2); // 123 456, 1234 5678
   const fg = $("s-code").querySelector(".fg");
@@ -1000,7 +1022,7 @@ function showCode(code, remaining, secret) {
   const tick = () => {
     fg.style.strokeDashoffset = String(62.8 * (1 - left / 30));
     // A new code only while the guide is open: each check marks its window as used (MFA portal).
-    if (left-- <= 0) { clearInterval(codeTimer); if (!$("step2").hidden && $("s-totp").value.trim() === secret) useKey(secret, true); }
+    if (left-- <= 0) { clearInterval(codeTimer); if (guideOpen() && $("s-totp").value.trim() === secret) useKey(secret, true); }
   };
   tick();
   codeTimer = setInterval(tick, 1000);
@@ -1084,13 +1106,13 @@ $("s4-done").onclick = () => { show("main"); render(); refresh(); };
 // --- main and settings -----------------------------------------------------
 $("toggle").onclick = async () => {
   const on = isOn();
-  $("toggle").disabled = true;
+  press($("toggle"));
   try { await post(on ? "/api/disconnect" : "/api/connect"); } catch (e) { /* the banner says it */ }
   refresh();
 };
 $("fix").onclick = async () => {
   if (fixAction() === "repair") {
-    $("fix").disabled = true;
+    press($("fix"));
     await send("/api/repair");  // the status says how it goes
     refresh();
     return;
