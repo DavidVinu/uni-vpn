@@ -85,9 +85,12 @@ fun TotpEntry(model: AppModel, mfa: String, secret: String, onSecret: (String) -
         code = result.json?.optString("code")
         // By the clock: a delay stops while the phone sleeps or the app is frozen in the
         // background, so counting delays would show an old code as current.
-        val end = System.currentTimeMillis() + (result.json?.optInt("remaining", 30) ?: 30) * 1000L
+        val remaining = (result.json?.optInt("remaining", 30) ?: 30) * 1000L
+        val end = System.currentTimeMillis() + remaining
         while (true) {
-            left = ((end - System.currentTimeMillis() + 999) / 1000).coerceAtLeast(0).toInt()
+            // A clock set back meanwhile (corrected by hand) ends the code too.
+            val rest = end - System.currentTimeMillis()
+            left = if (rest > remaining) 0 else ((rest + 999) / 1000).coerceAtLeast(0).toInt()
             if (left == 0) break
             delay(1000)
         }

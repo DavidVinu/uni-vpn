@@ -65,9 +65,12 @@ struct TotpEntry: View {
         code = result.json?.string("code")
         // By the clock: iOS suspends the app in the background, and a sleep then ends only once
         // it is back, so counting sleeps would show an old code as current.
-        let end = Date().addingTimeInterval(Double(result.json?.int("remaining", 30) ?? 30))
+        let remaining = Double(result.json?.int("remaining", 30) ?? 30)
+        let end = Date().addingTimeInterval(remaining)
         while true {
-            left = max(0, Int(end.timeIntervalSinceNow.rounded(.up)))
+            // A clock set back meanwhile (corrected by hand) ends the code too.
+            let rest = end.timeIntervalSinceNow
+            left = rest > remaining ? 0 : max(0, Int(rest.rounded(.up)))
             if left == 0 { break }
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             if Task.isCancelled { return }
