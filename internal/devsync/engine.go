@@ -135,6 +135,9 @@ type Engine struct {
 	cancelPair    context.CancelFunc
 	wake          chan struct{}
 	bg            sync.WaitGroup // the sync after a device joined (tests wait for it)
+	// wall is the wall clock without Go's monotonic reading, which stops while the device sleeps
+	// (except on Windows): the relay's lifetimes and the user's minutes go on meanwhile.
+	wall func() time.Time
 }
 
 // New builds an engine; Run starts its background loop.
@@ -154,7 +157,7 @@ func New(opts Options) *Engine {
 	if opts.CodeLifetime == 0 {
 		opts.CodeLifetime = 10 * time.Minute
 	}
-	e := &Engine{opts: opts, wake: make(chan struct{}, 1)}
+	e := &Engine{opts: opts, wake: make(chan struct{}, 1), wall: func() time.Time { return time.Now().Round(0) }}
 	if opts.Relay != "" {
 		e.relay = newRelay(opts.Relay)
 	}
@@ -540,7 +543,9 @@ func (e *Engine) Refresh(ctx context.Context) error {
 		return err
 	}
 	e.mu.Lock()
-	recent := !e.lastAttempt.IsZero() && e.opts.Now().Sub(e.lastAttempt) < time.Minute
+	// By the wall clock: Settings opened after a sleep syncs (also after the clock was set back).
+	since := e.opts.Now().Round(0).Sub(e.lastAttempt.Round(0))
+	recent := !e.lastAttempt.IsZero() && since >= 0 && since < time.Minute
 	err := e.lastError
 	e.mu.Unlock()
 	if recent {

@@ -145,16 +145,20 @@ func (e *Engine) show(mode, code string, p pairing) Pairing {
 	shown := Pairing{Mode: mode, Code: FormatCode(code), QR: QRSVG(QRPrefix + code), State: "waiting"}
 	p.close = new(sync.Once) // shared by the cancel and the expiry: the code is closed once
 	ctx, cancel := context.WithTimeout(context.Background(), e.opts.CodeLifetime)
+	// The relay counts the code's ten minutes by its clock, which goes on while this device sleeps
+	// (a phone's screen off, a laptop's lid closed); Go's timers stop meanwhile (not on Windows).
+	until := e.wall().Add(e.opts.CodeLifetime)
 	e.cancelPairing() // a new code replaces the one on screen
 	e.mu.Lock()
 	e.pairing, e.cancelPair, e.pairSlots = &shown, cancel, p
 	e.mu.Unlock()
-	go e.await(ctx, cancel, &shown, p)
+	go e.await(ctx, cancel, &shown, p, until)
 	return shown
 }
 
-func (e *Engine) await(ctx context.Context, cancel context.CancelFunc, shown *Pairing, p pairing) {
+func (e *Engine) await(ctx context.Context, cancel context.CancelFunc, shown *Pairing, p pairing, until time.Time) {
 	defer cancel()
+	expired := false
 	finish := func(st string, err error) {
 		e.mu.Lock()
 		defer e.mu.Unlock()
@@ -165,7 +169,7 @@ func (e *Engine) await(ctx context.Context, cancel context.CancelFunc, shown *Pa
 		}
 	}
 	defer func() {
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		if expired || errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			if shown.Mode == "request" {
 				e.closeSlots(shown.Mode, p) // an answer sent after the last look
 			}
@@ -180,6 +184,11 @@ func (e *Engine) await(ctx context.Context, cancel context.CancelFunc, shown *Pa
 		}
 		m, err := e.takeSlot(ctx, p, "b")
 		if ctx.Err() != nil {
+			return
+		}
+		if errors.Is(err, errNotFound) && !e.wall().Before(until) {
+			// Back from a sleep: the relay let go of the code meanwhile, nobody can enter it now.
+			expired = true
 			return
 		}
 		if errors.Is(err, errNotFound) || (err != nil && !errors.Is(err, errDecrypt)) {

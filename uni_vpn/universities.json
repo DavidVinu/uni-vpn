@@ -70,7 +70,7 @@
       "host": "vpn.uni-muenster.de",
       "mfa": "totp_field",
       "mfa_portal_url": "https://it-portal.uni-muenster.de/",
-      "aliases": ["University of Muenster", "Universitaet Muenster", "WWU"]
+      "aliases": ["University of Muenster", "Universitaet Muenster", "WWU", "Westfaelische Wilhelms-Universitaet"]
     },
     {
       "id": "marburg",
@@ -140,7 +140,7 @@
       "host": "unibn-vpn.uni-bonn.de",
       "useragent": "AnyConnect",
       "mfa": "none",
-      "aliases": ["Universitaet Bonn"]
+      "aliases": ["Universitaet Bonn", "Rheinische Friedrich-Wilhelms-Universitaet"]
     },
     {
       "id": "mannheim",
@@ -226,7 +226,7 @@
       "country": "US",
       "host": "vpn.utexas.edu",
       "mfa": "saml",
-      "aliases": ["UT Austin"],
+      "aliases": ["UT Austin", "UT-Austin"],
       "notes": "Profile from the university's documentation. Checked 2026-10-18: the gateway signs in only through a web page (SAML)."
     },
     {
@@ -287,7 +287,7 @@
       "host": "vpn.unc.edu",
       "authgroup": "UNCCampus",
       "mfa": "saml",
-      "aliases": ["UNC"],
+      "aliases": ["UNC", "UNC-Chapel Hill"],
       "notes": "Profile from the university's documentation. Checked 2026-10-18: the gateway signs in only through a web page (SAML). A client without web sign-in only gets the group UNCCampus-SBL."
     },
     {
@@ -406,7 +406,7 @@
       "host": "vpn.uni-halle.de",
       "authgroup": "VPN",
       "mfa": "none",
-      "aliases": ["Universitaet Halle", "MLU"],
+      "aliases": ["Universitaet Halle", "MLU", "Martin-Luther-Universitaet Halle-Wittenberg"],
       "notes": "Profile from the university's documentation, not tested. No second factor is mentioned in its documentation. "
     },
     {
@@ -460,7 +460,7 @@
       "host": "vpn.uni-jena.de",
       "username_suffix": "@uni-jena.de",
       "mfa": "none",
-      "aliases": ["Universitaet Jena"],
+      "aliases": ["Universitaet Jena", "FSU Jena", "Friedrich-Schiller-Universitaet Jena"],
       "notes": "Profile from the university's documentation, not tested. No second factor is mentioned in its documentation. The user name is the URZ login with @uni-jena.de (not the e-mail address); without it the sign-in fails."
     },
     {
@@ -498,7 +498,7 @@
       "country": "DE",
       "host": "vpngate.tu-braunschweig.de",
       "mfa": "duo_push",
-      "aliases": ["Technische Universitaet Braunschweig"],
+      "aliases": ["Technische Universitaet Braunschweig", "TUBS"],
       "notes": "Profile from the university's documentation, not tested. Checked 2026-10-19: the IT center's guides name vpngate.tu-braunschweig.de and Duo for the VPN."
     }
   ]
