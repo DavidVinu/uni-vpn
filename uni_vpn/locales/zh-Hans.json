@@ -35,6 +35,7 @@
   "uni.ethz-students.sign_in": "你的 ETH 用户名和 ETH 网络密码，不是邮箱密码。",
   "uni.harvard-fasrc.sign_in": "你的 FASRC 用户名和 FASRC 密码，不是 HarvardKey。",
   "uni.muenster.sign_in": "你的 Uni-Kennung 和网络访问密码（Netzzugangspasswort，在 IT-Portal 中设置），不是大学密码。",
+  "uni.mannheim.sign_in": "你的 Uni-ID 及其密码。如果你在 MyUni-ID 中设置了单独的 Wi-Fi 和 VPN 密码，请使用那个密码。",
   "uni.ugr.sign_in": "你的完整 UGR 邮箱地址（name@ugr.es 或 name@correo.ugr.es）及其密码。",
   "setup.enter_user": "请输入用户名，例如 ab123",
   "setup.enter_password": "请输入密码",

@@ -30,9 +30,12 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import de.davidvinu.univpn.AppModel
 import de.davidvinu.univpn.Scanner
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import org.json.JSONObject
 
 /**
@@ -49,6 +52,7 @@ fun TotpEntry(model: AppModel, mfa: String, secret: String, onSecret: (String) -
     var left by remember { mutableIntStateOf(0) }
     var checkError by remember { mutableStateOf<String?>(null) }
     var checks by remember { mutableIntStateOf(0) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
     FilledTonalButton(onClick = {
         Scanner.scanQr(context, { checkError = model.t("phone.scan_failed") }) { value -> if (value != null) onSecret(value) }
     }, modifier = Modifier.fillMaxWidth()) {
@@ -94,6 +98,10 @@ fun TotpEntry(model: AppModel, mfa: String, secret: String, onSecret: (String) -
             if (left == 0) break
             delay(1000)
         }
+        // The next code only while the app is on screen, like the page: each check marks its
+        // sign-in window as used (the next connect waits for a new one), and in the background
+        // the VPN keeps the app running. Back on screen, a fresh code at once.
+        lifecycle.currentStateFlow.first { it.isAtLeast(Lifecycle.State.STARTED) }
         checks++ // the next code
     }
     ErrorText(checkError ?: error)

@@ -35,6 +35,7 @@
   "uni.ethz-students.sign_in": "Votre nom d’utilisateur ETH et votre mot de passe réseau ETH, pas celui de vos e-mails.",
   "uni.harvard-fasrc.sign_in": "Votre nom d’utilisateur FASRC et votre mot de passe FASRC, pas votre HarvardKey.",
   "uni.muenster.sign_in": "Votre Uni-Kennung et votre mot de passe d’accès au réseau (Netzzugangspasswort, défini dans l’IT-Portal), pas votre mot de passe de l’université.",
+  "uni.mannheim.sign_in": "Votre Uni-ID et son mot de passe. Si vous avez défini un mot de passe Wi-Fi et VPN distinct dans MyUni-ID, utilisez celui-ci.",
   "uni.ugr.sign_in": "Votre adresse e-mail UGR complète (nom@ugr.es ou nom@correo.ugr.es) et son mot de passe.",
   "setup.enter_user": "Saisissez votre nom d’utilisateur, par exemple ab123",
   "setup.enter_password": "Saisissez votre mot de passe",
