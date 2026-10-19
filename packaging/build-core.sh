@@ -43,6 +43,7 @@ for target in linux/amd64 linux/arm64 darwin/arm64 darwin/amd64 windows/amd64 wi
   exe=uni-vpn-core
   [ "$goos" = windows ] && exe=uni-vpn-core.exe
   rm -rf "${stage:?}"/* && mkdir -p "$stage/bin"
+  packaging/go-licenses.sh "$goos" "$goarch" "$stage/licenses"
   if [ "$goos" = darwin ]; then
     cp "$mac/uni-vpn-core" "$stage/bin/"
   else

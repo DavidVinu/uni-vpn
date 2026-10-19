@@ -11,7 +11,8 @@ import (
 // ("Generating OATH TOTP token code"), then "Login failed.". In both cases it shows the form
 // again, stdin is closed, "User input required", then "Failed to complete authentication".
 // So the order decides which factor was wrong; without a separate OTP step the profile's
-// second factor decides how to word it.
+// second factor decides how to word it. A code generated before the login form was sent
+// (ugr, ethz: the code field is in the password's form) can be either.
 // The texts come from package messages, like uni_vpn/tunnel.py takes them from messages.py.
 var (
 	PasswordRejected = messages.PasswordRejected.Text
@@ -96,6 +97,11 @@ type Classifier struct {
 	OTPGenerated bool
 	verdict      Verdict
 	has          bool
+	// The login form came ("XML POST enabled" follows each init request) and how many forms
+	// were sent since: a code generated before any was sent is in the password's form.
+	formShown  bool
+	formsSent  int
+	codeInForm bool
 }
 
 func NewClassifier(mfa string) *Classifier {
@@ -113,15 +119,25 @@ func (c *Classifier) Feed(line string) (Verdict, bool) {
 		return c.verdict, true
 	}
 	lowered := strings.ToLower(line)
+	if strings.Contains(lowered, "xml post enabled") {
+		c.formShown, c.formsSent = true, 0
+	} else if strings.HasPrefix(line, "POST ") && c.formShown {
+		c.formsSent++
+	}
 	// The OTP form: the password was accepted. With a typed code (OncePrefix) openconnect
 	// generates nothing, so the form's own text counts too.
 	if strings.Contains(lowered, strings.ToLower(OTPGenerated)) || strings.Contains(lowered, OTPForm) {
+		if !c.OTPGenerated {
+			c.codeInForm = c.formShown && c.formsSent == 0
+		}
 		c.OTPGenerated = true
 		return Verdict{}, false
 	}
 	if strings.Contains(lowered, strings.ToLower(LoginFailed)) {
 		message := PasswordRejected
-		if c.OTPGenerated {
+		if c.OTPGenerated && c.codeInForm {
+			message = AppendRejected // one form with both: either can be wrong
+		} else if c.OTPGenerated {
 			message = TOTPRejected
 		} else if m, ok := LoginRejected[c.MFA]; ok {
 			message = m

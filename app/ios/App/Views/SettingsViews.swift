@@ -200,6 +200,8 @@ struct SecondFactorView: View {
     /// The university takes one code instead of the key (AutoEnroll); nil until known.
     @State private var offersAuto: Bool?
     @State private var byHand = false
+    /// Its portal and steps for the key, as in setup and on the desktop.
+    @State private var uni: University?
 
     var body: some View {
         Group {
@@ -215,7 +217,8 @@ struct SecondFactorView: View {
         .task {
             let id = model.status?.string("university") ?? ""
             let list = await model.get("/universities.json")?.objects("universities") ?? []
-            offersAuto = list.contains { $0.string("id") == id && $0.string("mfa_enroll") == "linotp" }
+            uni = list.first { $0.string("id") == id }.map { University(json: $0) }
+            offersAuto = uni?.enroll == "linotp"
         }
         // Leaving stops a run started here, as Back does on the desktop page, and drops a typed
         // code and its error (a finished setup's run leaves inSetup set).
@@ -225,12 +228,15 @@ struct SecondFactorView: View {
     private var keyForm: some View {
         Form {
             Section {
+                if let portal = uni?.portal, let url = URL(string: portal), !portal.isEmpty {
+                    Link(model.t("setup.mfa_portal"), destination: url)
+                }
                 TotpEntry(model: model, secret: $secret, valid: $valid, error: error)
             }
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                InfoButton(model: model, text: model.t("setup.totp_help"))
+                InfoButton(model: model, text: SetupState.mfaSteps(model, uni: uni).joined(separator: "\n") + "\n\n" + model.t("setup.totp_help"))
             }
         }
         .safeAreaInset(edge: .bottom) {

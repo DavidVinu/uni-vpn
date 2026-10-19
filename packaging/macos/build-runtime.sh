@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Builds what the .pkg ships for this Mac's processor (arm64 or x86_64) into OUT/<arch>:
-# openconnect and ocproxy with their libraries. The Go core comes from packaging/stage-app.sh.
+# openconnect and ocproxy with their libraries and licences. The Go core comes from
+# packaging/stage-app.sh.
 # Runs on a GitHub macOS runner of the matching processor; needs Homebrew.
 # Usage: packaging/macos/build-runtime.sh OUT
 set -euo pipefail
@@ -112,6 +113,17 @@ cp "$prefix/bin/openconnect" "$prefix/bin/ocproxy" "$out/bin/"
 chmod u+w "$out/bin/"*
 # Copies every Homebrew library they load next to them and points them there.
 dylibbundler -cd -of -b -s "$prefix/lib" -x "$out/bin/openconnect" -x "$out/bin/ocproxy" -d "$out/lib" -p @executable_path/../lib/
+# Their licences: openconnect's from its source, the others' from their kegs, where Homebrew
+# keeps each formula's licence files.
+mkdir -p "$out/licenses"
+cp "$src/COPYING.LGPL" "$out/licenses/openconnect-COPYING.LGPL"
+for f in ocproxy $(brew deps --union openconnect ocproxy); do
+  for file in "$prefix/opt/$f"/COPYING* "$prefix/opt/$f"/LICENSE* "$prefix/opt/$f"/LICENCE*; do
+    if [ -f "$file" ]; then cp "$file" "$out/licenses/$f-$(basename "$file")"; fi
+  done
+done
+chmod 644 "$out/licenses/"*
+ls "$out/licenses"
 
 # The rest is for the runner's newer macOS (what Homebrew has no bottle for the minimum for, or
 # builds itself), and dyld on the minimum refuses such a library. Marked for the minimum instead;

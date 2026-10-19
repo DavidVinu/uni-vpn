@@ -195,6 +195,8 @@
   "uni.heidelberg.mfa.4": "截取二维码的屏幕截图（{shot}），拖到这里或粘贴。{secret}",
   "uni.heidelberg.mfa.5": "点击“Weiter”，再点击“Testen”。输入这个验证码并点击“Absenden”。{code}",
   "uni.heidelberg.mfa.6": "最后点击“Abschließen”。",
+  "uni.ugr.mfa.1": "打开{portal}并登录。选择“Doble Factor Autenticación para Servicios TIC UGR”，然后点击“Generar nuevo token”。",
+  "uni.ugr.mfa.2": "截取二维码的屏幕截图（{shot}），拖到这里或粘贴。也用手机上的应用扫描它。{secret}",
   "phone.off": "已关闭",
   "phone.edit_websites": "添加网站",
   "phone.scan_qr": "扫描二维码",
@@ -232,5 +234,7 @@
   "phone.uni.heidelberg.mfa.3": "输入一个名称（例如“手机”），然后点按“Weiter”。",
   "phone.uni.heidelberg.mfa.4": "点按“Tokendetails einblenden”，复制以 otpauth:// 开头的那一行，并粘贴到下方。",
   "phone.uni.heidelberg.mfa.5": "点按“Weiter”，再点按“Testen”。输入这里显示的验证码并点按“Absenden”。",
-  "phone.uni.heidelberg.mfa.6": "最后点按“Abschließen”。"
+  "phone.uni.heidelberg.mfa.6": "最后点按“Abschließen”。",
+  "phone.uni.ugr.mfa.1": "打开{portal}并登录。选择“Doble Factor Autenticación para Servicios TIC UGR”，然后点按“Generar nuevo token”。",
+  "phone.uni.ugr.mfa.2": "扫描显示的二维码，或复制以 otpauth:// 开头的那一行，并粘贴到下方。也把它添加到你的验证码生成器中。"
 }

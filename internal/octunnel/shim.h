@@ -22,7 +22,8 @@ struct uni_vpn {
 };
 
 struct uni_vpn *uni_vpn_new(uintptr_t handle, const char *useragent, const char *user,
-			    const char *authgroup, const char *password, const char *queued);
+			    const char *authgroup, const char *password, const char *queued,
+			    int no_external_auth);
 void uni_vpn_free(struct uni_vpn *u);
 int uni_vpn_ip_info(struct uni_vpn *u, char *addr, int addrlen, char *dns, int dnslen, int *mtu);
 int uni_vpn_write_cmd(int fd, char cmd);

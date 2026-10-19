@@ -4,6 +4,7 @@ package octunnel
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -158,5 +159,65 @@ func TestQuitReasonOnExit(t *testing.T) {
 	s = newSession(o)
 	if s.exitCode(-5000); got[len(got)-1] != "Unknown error; exiting." {
 		t.Fatal(got)
+	}
+}
+
+// asa answers every login with a password form (with secondary_password when second is set),
+// and every answer with "Login failed."; it records the request bodies.
+func asa(t *testing.T, second bool) (host string, bodies func() []string) {
+	field := ""
+	if second {
+		field = `<input type="password" name="secondary_password" label="Second Password:"></input>`
+	}
+	var mu sync.Mutex
+	var seen []string
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		seen = append(seen, string(data))
+		mu.Unlock()
+		failed := ""
+		if !strings.Contains(string(data), `type="init"`) {
+			failed = `<error id="88" param1="" param2="">Login failed.</error>`
+		}
+		w.Header().Set("Content-Type", "text/xml")
+		_, _ = io.WriteString(w, `<?xml version="1.0" encoding="UTF-8"?>
+<config-auth client="vpn" type="auth-request" aggregate-auth-version="2">
+<opaque is-for="sg"><tunnel-group>G</tunnel-group><config-hash>1</config-hash></opaque>
+<auth id="main"><message>Please enter your username and password.</message>`+failed+`
+<form><input type="text" name="username" label="Username:"></input>
+<input type="password" name="password" label="Password:"></input>`+field+`</form></auth></config-auth>`)
+	}))
+	t.Cleanup(srv.Close)
+	return strings.TrimPrefix(srv.URL, "https://"), func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), seen...)
+	}
+}
+
+// Duo's "push" answers its field in the password's form, but never the form shown again after
+// "Login failed.", where it would go in as the password (a second failed sign-in).
+func TestPushIsNeverSentAsThePassword(t *testing.T) {
+	old := testTrust
+	testTrust = trustAccept
+	t.Cleanup(func() { testTrust = old })
+	for _, second := range []bool{false, true} {
+		host, bodies := asa(t, second)
+		var lines []string
+		_, err := Connect(Options{Host: host, UserAgent: "AnyConnect Linux_64 5.1.18.314", User: "u",
+			Password: []byte("wrongpw"), SecondPassword: "push", NoExternalAuth: true,
+			Line: func(l string) { lines = append(lines, l) }})
+		var exit *ExitError
+		if !errors.As(err, &exit) || exit.Code != 1 {
+			t.Fatal(second, err)
+		}
+		all := strings.Join(bodies(), "\n")
+		if strings.Contains(all, "<password>push</password>") || strings.Count(all, "<password>wrongpw</password>") != 1 {
+			t.Fatalf("%v: %s\n%q", second, all, lines)
+		}
+		if second != strings.Contains(all, "<secondary_password>push</secondary_password>") {
+			t.Fatalf("%v: %s", second, all)
+		}
 	}
 }

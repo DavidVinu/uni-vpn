@@ -32,7 +32,7 @@ func TestShippedRegistryLoads(t *testing.T) {
 		"heidelberg", "ethz", "bremen", "muenster", "marburg", "stanford", "harvard-fasrc", "stuttgart",
 		"bonn", "mannheim", "kassel", "tu-dresden", "fu-berlin", "oxford", "tamu", "ucf", "osu", "utexas",
 		"asu", "ufl", "umn", "uiuc", "uga", "unc", "ncsu", "uwaterloo", "uottawa", "carleton", "hku", "ugr", "uni-halle",
-		"hs-flensburg", "w-hs", "hs-offenburg", "uni-hamburg", "fau", "uni-jena", "uni-weimar", "th-koeln", "thu",
+		"hs-flensburg", "w-hs", "hs-offenburg", "uni-hamburg", "uni-jena", "uni-weimar", "th-koeln", "thu",
 		"tu-braunschweig"}
 	got := ids(Registry())
 	sort.Strings(got)
@@ -121,6 +121,17 @@ func TestProfilesFromTheProbes(t *testing.T) {
 		{"umn", "host", mustGet(t, "umn").Host, "tc-vpn-1.vpn.umn.edu"},
 		{"umn", "authgroup", mustGet(t, "umn").Authgroup, "AnyConnect-UofMSplit"},
 		{"ugr", "mfa", mustGet(t, "ugr").MFA, "totp_field"},
+		// Gateways that list several groups: without one openconnect asks, and sign-in fails.
+		{"bremen", "authgroup", mustGet(t, "bremen").Authgroup, "Tunnel-All-Traffic"},
+		{"mannheim", "authgroup", mustGet(t, "mannheim").Authgroup, "WebVPN"},
+		{"tu-dresden", "authgroup", mustGet(t, "tu-dresden").Authgroup, "A-Tunnel-TU-Networks"},
+		{"ncsu", "authgroup", mustGet(t, "ncsu").Authgroup, "1-Faculty-and-Staff"},
+		{"uni-halle", "authgroup", mustGet(t, "uni-halle").Authgroup, "VPN"},
+		{"w-hs", "authgroup", mustGet(t, "w-hs").Authgroup, "Sec-Groups"},
+		{"hku", "mfa", mustGet(t, "hku").MFA, "totp_field"},
+		{"hku", "username_suffix", mustGet(t, "hku").UsernameSuffix, "@hku.hk"},
+		{"tu-braunschweig", "host", mustGet(t, "tu-braunschweig").Host, "vpngate.tu-braunschweig.de"},
+		{"tu-braunschweig", "mfa", mustGet(t, "tu-braunschweig").MFA, "duo_push"},
 	}
 	for _, tt := range tests {
 		if tt.got != tt.want {

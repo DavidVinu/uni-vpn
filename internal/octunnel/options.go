@@ -16,8 +16,9 @@ type Options struct {
 	Password                                        []byte
 	SecondPassword                                  string // "push" for duo_push, "" otherwise
 	TOTPSecret                                      string // "base32:..." for totp_field, "" otherwise
-	// NoExternalAuth is always in effect: the library offers browser logins only to a program
-	// that sets an external browser callback, which this package does not.
+	// NoExternalAuth offers no web sign-in, like the program's --no-external-auth. Only the
+	// iPhone's library can be told (build-native.sh adds the call), as can AuthGroup's going
+	// into the first request; elsewhere the login forms pick the group.
 	NoExternalAuth   bool
 	ReconnectTimeout int          // 60
 	Line             func(string) // every progress and form line, like openconnect's stderr

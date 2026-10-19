@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# openconnect.exe for Windows with every DLL it loads and Wintun, into OUT-DIR.
+# openconnect.exe for Windows with every DLL it loads and Wintun, into OUT-DIR, and their
+# licences into OUT-DIR/licenses.
 # OpenConnect-GUI's installer has no openconnect.exe and neither MSYS2 nor Fedora package one,
 # so uni-vpn cross-builds the release the way OpenConnect's own Windows CI does.
 # Runs in a Fedora container (see ci.yml).
@@ -22,9 +23,9 @@ mingw64-configure --disable-nls --without-libpskc --without-stoken --without-lib
   --with-vpnc-script=vpnc-script-win.js >/dev/null
 touch vpnc-script-win.js  # else make downloads the latest one
 make -s -j"$(nproc)" >/dev/null
-mkdir -p "$out"
+mkdir -p "$out/licenses"
 cp .libs/openconnect.exe .libs/libopenconnect-5.dll "$out/"
-cp COPYING.LGPL "$out/openconnect-COPYING.LGPL"
+cp COPYING.LGPL "$out/licenses/openconnect-COPYING.LGPL"
 # The DLLs it loads, and theirs, from Fedora; Windows' own ones are not in $root/bin and stay out.
 todo=("$out/openconnect.exe" "$out/libopenconnect-5.dll")
 while ((${#todo[@]})); do
@@ -35,6 +36,11 @@ while ((${#todo[@]})); do
     if [[ -n "$src" && ! -e "$out/$(basename "$src")" ]]; then
       cp "$src" "$out/"
       todo+=("$out/$(basename "$src")")
+      # The licence files of the Fedora package it comes from.
+      package=$(rpm -qf --qf '%{NAME}\n' "$src" | head -n1)
+      for file in $(rpm -qL "$package"); do
+        if [ -f "$file" ]; then cp "$file" "$out/licenses/$package-$(basename "$file")"; fi
+      done
     fi
   done
 done
@@ -42,4 +48,5 @@ done
 curl -fsSL --retry 5 --retry-all-errors --retry-delay 15 -o "$work/wintun.zip" https://www.wintun.net/builds/wintun-0.14.1.zip
 echo "07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51  $work/wintun.zip" | sha256sum -c -
 unzip -o -j -q "$work/wintun.zip" wintun/bin/amd64/wintun.dll -d "$out"
-ls -l "$out"
+unzip -p "$work/wintun.zip" wintun/LICENSE.txt >"$out/licenses/wintun-LICENSE.txt"
+ls -l "$out" "$out/licenses"

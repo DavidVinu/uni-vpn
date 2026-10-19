@@ -207,6 +207,34 @@ func TestDuoPushSendsPushAsTheSecondLine(t *testing.T) {
 	}
 }
 
+func TestDuoPushWaitsForAPrompt(t *testing.T) {
+	// "push" answers Duo's field in the password's form; after a refused password openconnect
+	// asks for the password again, and "push" must not go in as one (a second failed sign-in).
+	for _, c := range []struct {
+		mode, lines string
+		ready       bool
+	}{
+		{"second_password", "secret\npush\n", true},
+		{"auth_fail", "secret\n", false},
+	} {
+		f := newFlow(t)
+		f.cfg.MFA = "duo_push"
+		t.Setenv("FAKE_MODE", c.mode)
+		tn := f.make()
+		f.start(tn, "secret", "")
+		if tn.WaitReady(3*time.Second) != c.ready {
+			t.Fatal(c.mode, tn.StderrTail())
+		}
+		tn.Stop(2 * time.Second)
+		if data, _ := os.ReadFile(f.pwfile); string(data) != c.lines {
+			t.Fatalf("%s: %q", c.mode, data)
+		}
+		if v, _ := tn.Classification(); !c.ready && v != (Verdict{"auth_failed", DuoRejected}) {
+			t.Fatal(c.mode, v)
+		}
+	}
+}
+
 func TestOTPGeneratedAtIsZeroWithoutToken(t *testing.T) {
 	f := newFlow(t)
 	tn := f.make()

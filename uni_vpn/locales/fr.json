@@ -195,6 +195,8 @@
   "uni.heidelberg.mfa.4": "Faites une capture d’écran du code QR ({shot}) et déposez-la ou collez-la ici.{secret}",
   "uni.heidelberg.mfa.5": "Cliquez sur « Weiter », puis « Testen ». Saisissez ce code et cliquez sur « Absenden ».{code}",
   "uni.heidelberg.mfa.6": "Pour terminer, cliquez sur « Abschließen ».",
+  "uni.ugr.mfa.1": "Ouvrez la {portal} et connectez-vous. Choisissez « Doble Factor Autenticación para Servicios TIC UGR » puis cliquez sur « Generar nuevo token ».",
+  "uni.ugr.mfa.2": "Faites une capture d’écran du code QR ({shot}) et déposez-la ou collez-la ici. Scannez-le aussi avec l’application de votre téléphone.{secret}",
   "phone.off": "Désactivé",
   "phone.edit_websites": "Ajouter un site web",
   "phone.scan_qr": "Scanner le code QR",
@@ -232,5 +234,7 @@
   "phone.uni.heidelberg.mfa.3": "Saisissez un nom, par exemple Téléphone, puis touchez « Weiter ».",
   "phone.uni.heidelberg.mfa.4": "Touchez « Tokendetails einblenden », copiez la ligne qui commence par otpauth:// et collez-la ci-dessous.",
   "phone.uni.heidelberg.mfa.5": "Touchez « Weiter », puis « Testen ». Saisissez le code affiché ici et touchez « Absenden ».",
-  "phone.uni.heidelberg.mfa.6": "Pour terminer, touchez « Abschließen »."
+  "phone.uni.heidelberg.mfa.6": "Pour terminer, touchez « Abschließen ».",
+  "phone.uni.ugr.mfa.1": "Ouvrez la {portal} et connectez-vous. Choisissez « Doble Factor Autenticación para Servicios TIC UGR » puis touchez « Generar nuevo token ».",
+  "phone.uni.ugr.mfa.2": "Scannez le code QR affiché, ou copiez la ligne qui commence par otpauth://, et collez-la ci-dessous. Ajoutez-le aussi à votre générateur de codes."
 }

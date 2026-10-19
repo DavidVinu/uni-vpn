@@ -25,7 +25,7 @@ jobs:
         run: |
           # One file per call: "bash -n a b" checks only a.
           for f in install.sh get.sh packaging/macos/*.sh packaging/linux/build.sh packaging/build-core.sh; do bash -n "$f"; done
-          for f in packaging/stage-app.sh packaging/uni-vpn-open packaging/macos/scripts/postinstall; do sh -n "$f"; done
+          for f in packaging/stage-app.sh packaging/go-licenses.sh packaging/uni-vpn-open packaging/macos/scripts/postinstall; do sh -n "$f"; done
       - name: Installer dry run
         run: ./install.sh --dry-run --user citest
       - name: Check launchd plist

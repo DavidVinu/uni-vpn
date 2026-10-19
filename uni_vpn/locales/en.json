@@ -226,5 +226,7 @@
   "phone.uni.heidelberg.mfa.3": "Type a name, for example Phone, and tap \"Weiter\".",
   "phone.uni.heidelberg.mfa.4": "Tap \"Tokendetails einblenden\", copy the line starting with otpauth:// and paste it below.",
   "phone.uni.heidelberg.mfa.5": "Tap \"Weiter\", then \"Testen\". Type the code shown here and tap \"Absenden\".",
-  "phone.uni.heidelberg.mfa.6": "Tap \"Abschließen\" to finish."
+  "phone.uni.heidelberg.mfa.6": "Tap \"Abschließen\" to finish.",
+  "phone.uni.ugr.mfa.1": "Open the {portal} and sign in. Choose \"Doble Factor Autenticación para Servicios TIC UGR\" and tap \"Generar nuevo token\".",
+  "phone.uni.ugr.mfa.2": "Scan the QR code it shows, or copy the line starting with otpauth://, and paste it below. Add it to your code generator app too."
 }
