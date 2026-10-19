@@ -911,6 +911,8 @@ $("g-back").onclick = () => {
   if (autoOK()) step("step2a"); else if (changingTotp) endChange(); else { setupDone = false; step("step1"); }
 };
 
+// The second click of a double click on Next would skip a picture (or send the setup).
+$("step2").querySelector("[type=submit]").onclick = (e) => { if (e.detail > 1) e.preventDefault(); };
 $("step2").onsubmit = async (e) => {
   e.preventDefault();
   if (slide < guide.length - 1) { slide++; renderGuide(); return; }
@@ -1299,6 +1301,8 @@ function saved(id, r, okText) {
   $(id).textContent = r.ok ? okText : errText(r);
 }
 
+// The second click of a double click on Save: the first one emptied the field when it saved.
+$("pwform").querySelector("[type=submit]").onclick = (e) => { if (e.detail > 1) e.preventDefault(); };
 $("pwform").onsubmit = async (e) => {
   e.preventDefault();
   if (!$("pw").value) { saved("pwmsg", {ok: false, data: null, text: t("setup.enter_password")}); return; }
