@@ -52,6 +52,9 @@ fun AutoSecondFactor(
     var code by rememberSaveable { mutableStateOf("") }
     var seen by rememberSaveable { mutableStateOf("") }
     var invalid by remember { mutableStateOf<String?>(null) }
+    // The field and Next give way to the spinner: "Set it up by hand instead" moves up under the
+    // finger (App.kt doubleTapGuard).
+    LaunchedEffect(busy) { model.screenChanged() }
 
     if (running) {
         val now = enroll?.optString("stage")

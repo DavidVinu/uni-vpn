@@ -19,6 +19,7 @@ import (
 	"math"
 	"math/rand/v2"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -906,10 +907,8 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 		}
 	}
 	d.mu.Lock()
-	websites := d.cfg.DefaultDomains
+	before, _ := d.ruleDomainsLocked()
 	config.CopyProfile(d.cfg, &profile)
-	// Another university's websites (no list of the user's own): a new proxy rule.
-	newRule := !slices.Equal(websites, d.cfg.DefaultDomains)
 	port := d.cfg.HTTPPort
 	d.switching = false
 	d.accountGen++
@@ -919,6 +918,9 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 	d.logf(slog.LevelInfo, "Setup completed for %s (%s)", user, profile.UniversityName)
 	d.needsSetup = false
 	d.configError = ""
+	// Another university's websites (no list of the user's own), or its portal: a new rule.
+	after, _ := d.ruleDomainsLocked()
+	newRule := !slices.Equal(before, after)
 	if once {
 		d.startEnrollLocked(code, profile.MFAPortalURL)
 	}
@@ -996,11 +998,31 @@ func (d *Daemon) secretsChanged() {
 func (d *Daemon) PAC() (string, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	domains, err := pac.ReadDomains(d.opts.DomainsPath, d.cfg.DefaultDomains)
+	domains, err := d.ruleDomainsLocked()
 	if err != nil {
 		return "", err
 	}
 	return pac.BuildPAC(domains, d.cfg.SocksPort), nil
+}
+
+// vpnOnlyPortals: universities whose MFA portal opens only on the university network or over
+// the VPN (Heidelberg's URZ, W-HS). Once the device is set up, the rule sends it through Uni VPN,
+// so a new phone's code generator can be added from home. Not before: the listed websites wait
+// for the setup then, and the guide's way by hand opens the portal on campus.
+var vpnOnlyPortals = map[string]bool{"heidelberg": true, "w-hs": true}
+
+// ruleDomainsLocked: the websites the proxy rule sends through Uni VPN.
+func (d *Daemon) ruleDomainsLocked() ([]string, error) {
+	domains, err := pac.ReadDomains(d.opts.DomainsPath, d.cfg.DefaultDomains)
+	if err != nil || d.needsSetup || d.configError != "" || !vpnOnlyPortals[d.cfg.University] {
+		return domains, err
+	}
+	if u, err := url.Parse(d.cfg.MFAPortalURL); err == nil {
+		if host := pac.NormalizeHost(u.Hostname()); host != "" && !pac.Matches(host, domains) {
+			domains = append(domains, host)
+		}
+	}
+	return domains, nil
 }
 
 // SetDomains saves the website list. Invalid lines are a *httpapi.ValueError.

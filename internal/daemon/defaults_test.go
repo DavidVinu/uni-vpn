@@ -3,6 +3,7 @@
 package daemon
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -180,4 +181,48 @@ func TestListWithoutSetupWaitsForIt(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(h.tokenDir, addedDefaultsName)); err == nil {
 		t.Fatal("marked done")
 	}
+}
+
+// Heidelberg's portal for code generators opens only on the university network or over the
+// VPN: once the device is set up, the rule sends it through Uni VPN, and the browsers are told.
+// Not before the setup (the listed websites wait for it), and not in the user's website list.
+func TestVPNOnlyPortalGoesThroughOnceSetUp(t *testing.T) {
+	h := newHarness(t)
+	h.startSetup()
+	rule := func() string {
+		r := h.http("GET", "/proxy.pac", nil, "")
+		if r.status != 200 {
+			t.Fatal(r.status)
+		}
+		return string(r.body)
+	}
+	if got := rule(); strings.Contains(got, "mfa.uni-heidelberg.de") {
+		t.Fatal("listed before the setup:", got)
+	}
+	if status, data := h.postSetup(`{"user": "ab123", "password": "pw", "secret": "GEZDGNBVGY3TQOJQ", "university": "heidelberg"}`); status != 200 {
+		t.Fatal(status, data)
+	}
+	if got := rule(); strings.Count(got, `"mfa.uni-heidelberg.de"`) != 1 {
+		t.Fatal(got)
+	}
+	h.waitRefreshed([]int{h.cfg.HTTPPort})
+	if data := h.http("GET", "/status.json", nil, "").json(t); strings.Contains(fmt.Sprint(data["domains"]), "mfa.") {
+		t.Fatal(data["domains"])
+	}
+}
+
+// A saved list that already covers the portal: nothing added, and the rule did not change.
+func TestVPNOnlyPortalCoveredByTheSavedList(t *testing.T) {
+	h := newHarness(t)
+	if err := pac.WriteDomains(h.domainsPath, []string{"uni-heidelberg.de"}); err != nil {
+		t.Fatal(err)
+	}
+	h.startSetup()
+	if status, data := h.postSetup(`{"user": "ab123", "password": "pw", "secret": "GEZDGNBVGY3TQOJQ", "university": "heidelberg"}`); status != 200 {
+		t.Fatal(status, data)
+	}
+	if r := h.http("GET", "/proxy.pac", nil, ""); strings.Contains(string(r.body), "mfa.") {
+		t.Fatal(string(r.body))
+	}
+	h.waitRefreshed(nil)
 }

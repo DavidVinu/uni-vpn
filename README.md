@@ -154,6 +154,8 @@ now go through the university, along with `cip.dmed.uni-heidelberg.de`, which el
 embeds for its statistics, the heiCO login at `heico.uni-heidelberg.de`, Moodle at
 `https://moodle.uni-heidelberg.de`, the AI platform YoKI at `https://yoki.urz.uni-heidelberg.de` and
 the Microsoft 365 license portal at `https://m365.urz.uni-heidelberg.de`. Everything else does not.
+Once Uni VPN is set up, the security page `https://mfa.uni-heidelberg.de` goes through it too
+(W-HS: `https://mfa.za.w-hs.de`), so a new phone's code generator can be added from home.
 For other universities the list starts empty. Domains go under Settings, Websites.
 
 Without a desktop, `--university ID` (`-University ID` on Windows) picks the university, for

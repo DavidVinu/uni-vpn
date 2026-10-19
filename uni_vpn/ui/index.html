@@ -1522,12 +1522,10 @@ document.addEventListener("click", (e) => {
   }
 }, true);
 // On a Mac the click that brings the window forward never reaches the page, but it counts:
-// the next click there arrives as the second of a double click.
+// the next click there arrives as the second of a double click. lastClick stays: a link's
+// browser can take the focus between the two clicks of a double click.
 window.addEventListener("focus", (e) => {
-  if (e.target === window) {
-    switched = false;
-    lastClick = -Infinity;
-  }
+  if (e.target === window) switched = false;
 });
 
 const closePops = () => { for (const p of document.querySelectorAll(".pop")) p.hidden = true; };
