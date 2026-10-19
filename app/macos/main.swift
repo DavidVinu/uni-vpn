@@ -4,6 +4,7 @@
 // Built by "uni-vpn setup" with swiftc; the port comes from Info.plist (UniVPNPort).
 
 import Cocoa
+import ServiceManagement
 import UniformTypeIdentifiers
 import WebKit
 
@@ -51,6 +52,9 @@ var texts: [String: String] = [
     "menu.about": "About Uni VPN", "menu.hide": "Hide Uni VPN", "menu.edit": "Edit", "menu.undo": "Undo",
     "menu.redo": "Redo", "menu.cut": "Cut", "menu.copy": "Copy", "menu.paste": "Paste",
     "menu.select_all": "Select All", "menu.window": "Window", "menu.minimize": "Minimize", "menu.close": "Close",
+    "menu.background_off": "Uni VPN was off after you signed in",
+    "menu.background_hint": "So it starts on its own, allow Uni VPN in the background.",
+    "menu.background_open": "Open Settings", "menu.not_now": "Not Now",
 ]
 func t(_ key: String) -> String { texts[key] ?? key }
 
@@ -72,6 +76,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     var seen: String?
     var restarting = false
     var setupStarted = false
+    // Opened by the user (not the login item) while the service was down: see askBackground.
+    let openedByUser = !CommandLine.arguments.contains("--hidden")
+    var firstPoll = true
+    var downAtLaunch = false
+    var startedAfterLogin = false
 
     func applicationDidFinishLaunching(_ note: Notification) {
         // Started by the copy it replaces after an update: that one quits first.
@@ -333,8 +342,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
                 next.reachable = true
             }
             DispatchQueue.main.async {
+                if self?.firstPoll == true {
+                    self?.firstPoll = false
+                    self?.downAtLaunch = !next.reachable
+                }
                 self?.status = next
                 self?.render()
+                if next.reachable, self?.startedAfterLogin == true {
+                    self?.startedAfterLogin = false
+                    self?.askBackground()
+                }
                 self?.startServiceIfDown()
                 self?.restartIfUpdated()
             }
@@ -373,6 +390,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         let domain = "gui/\(getuid())"
         let plist = NSHomeDirectory() + "/Library/LaunchAgents/de.davidvinu.uni-vpn.plist"
         if setUpIfMissing(plist) { return }
+        if openedByUser, downAtLaunch, ProcessInfo.processInfo.systemUptime > 180 {
+            startedAfterLogin = true
+        }
         for args in [["bootstrap", domain, plist], ["kickstart", domain + "/de.davidvinu.uni-vpn"]] {
             let task = Process()
             task.executableURL = URL(fileURLWithPath: "/bin/launchctl")
@@ -381,6 +401,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
             task.standardError = FileHandle.nullDevice
             try? task.run()
             task.waitUntilExit()
+        }
+    }
+
+    // The service was set up but did not start at login, and neither did this app's login item
+    // (it would have started the service): macOS's "Allow in the Background" is off for them
+    // (System Settings > General > Login Items). Like Dropbox and Tailscale, say so and open
+    // that page; macOS 12 and earlier have no such switch.
+    func askBackground() {
+        guard #available(macOS 13, *) else { return }
+        let alert = NSAlert()
+        alert.messageText = t("menu.background_off")
+        alert.informativeText = t("menu.background_hint")
+        alert.addButton(withTitle: t("menu.background_open"))
+        alert.addButton(withTitle: t("menu.not_now"))
+        let answer: (NSApplication.ModalResponse) -> Void = { response in
+            if response == .alertFirstButtonReturn { SMAppService.openSystemSettingsLoginItems() }
+        }
+        if let win = window, win.isVisible {
+            alert.beginSheetModal(for: win, completionHandler: answer)
+        } else {
+            answer(alert.runModal())
         }
     }
 
