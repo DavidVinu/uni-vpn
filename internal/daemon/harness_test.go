@@ -209,6 +209,16 @@ func (h *harness) start(edit func(*Options), before ...func(*Daemon)) *Daemon {
 	if sum, err := d.pacSum(); err == nil && !exists(filepath.Join(h.tokenDir, pacSumName)) {
 		_ = os.WriteFile(filepath.Join(h.tokenDir, pacSumName), []byte(sum), 0o600)
 	}
+	// A real openconnect takes longer to exit than the handlers of the connections Disconnect
+	// closed take to end; the fake one exits at once, so a handler still ending on a busy runner
+	// would count as demand and sign in again right after the disconnect.
+	closeAll := d.closeAll
+	d.closeAll = func() {
+		closeAll()
+		for deadline := time.Now().Add(time.Second); d.forwarder.Active() > 0 && time.Now().Before(deadline); {
+			time.Sleep(time.Millisecond)
+		}
+	}
 	for _, f := range before {
 		f(d)
 	}

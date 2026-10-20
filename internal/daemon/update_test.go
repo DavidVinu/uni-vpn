@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -127,6 +128,29 @@ func TestUpdateWaitsWhileTheTunnelIsWanted(t *testing.T) {
 	h.waitDone()
 	if _, applied, _ := fake.counts(); applied != 1 || !d.RestartRequested {
 		t.Fatal("not installed once idle")
+	}
+}
+
+// A listed website open directly (no network to the gateway, as on Halle's campus) is in use,
+// a download or a lecture video, though nothing wants the tunnel: the update waits for it.
+func TestUpdateWaitsForAWebsiteOpenDirectly(t *testing.T) {
+	h := newHarness(t)
+	fake := &fakeUpdater{commit: commitB}
+	var open atomic.Bool
+	open.Store(true)
+	d := h.start(withUpdater(fake), timing(50*time.Millisecond, time.Hour, 0),
+		func(d *Daemon) { d.directOpen = open.Load })
+	if !waitFor(3*time.Second, func() bool { c, _, _ := fake.counts(); return c == 1 }) {
+		t.Fatal("no check")
+	}
+	time.Sleep(400 * time.Millisecond)
+	if _, applied, _ := fake.counts(); applied != 0 {
+		t.Fatal("installed under a website open directly")
+	}
+	open.Store(false)
+	h.waitDone()
+	if _, applied, _ := fake.counts(); applied != 1 || !d.RestartRequested {
+		t.Fatal("not installed once the website closed")
 	}
 }
 

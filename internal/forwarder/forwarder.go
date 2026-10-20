@@ -229,6 +229,14 @@ func (f *Forwarder) CloseDirect() {
 	}
 }
 
+// DirectOpen: a connection Direct let through is still open, in use (a download, a video)
+// though nothing wants the tunnel.
+func (f *Forwarder) DirectOpen() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.directs) > 0
+}
+
 // setDirect adds c to the connections CloseDirect ends, or removes it.
 func (f *Forwarder) setDirect(c net.Conn, on bool) {
 	f.mu.Lock()

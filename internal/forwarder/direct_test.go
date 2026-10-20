@@ -262,3 +262,26 @@ func TestCloseDirectEndsADirectDial(t *testing.T) {
 	close(release)
 	expectEOF(t, c, 2*time.Second)
 }
+
+// A website open directly is in use (a download, a lecture video): an update waits for it.
+func TestDirectOpenWhileAWebsiteIsOpenDirectly(t *testing.T) {
+	e, _ := setup(t)
+	e.setTarget(func(context.Context) (int, bool) { return 0, false })
+	e.setDirect("localhost")
+	if e.fwd.DirectOpen() {
+		t.Fatal("open before any website")
+	}
+	direct, rep := socksConnect(t, e, "localhost", website(t))
+	if rep != 0 {
+		t.Fatal(rep)
+	}
+	if !e.fwd.DirectOpen() {
+		t.Fatal("not open with a website open directly")
+	}
+	direct.Close()
+	for deadline := time.Now().Add(5 * time.Second); e.fwd.DirectOpen(); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("still open after the browser closed it")
+		}
+	}
+}

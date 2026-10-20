@@ -2,6 +2,7 @@ package de.davidvinu.univpn.ui
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -25,6 +26,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -105,10 +107,19 @@ fun SettingRow(title: String, value: String? = null, onClick: (() -> Unit)? = nu
     )
 }
 
+/** Read out when it appears or changes, or [attempt] counts up; [live] false while a key is typed letter by letter. */
 @Composable
-fun ErrorText(text: String?, modifier: Modifier = Modifier) {
+fun ErrorText(text: String?, modifier: Modifier = Modifier, live: Boolean = true, attempt: Int = 0) {
     if (!text.isNullOrEmpty()) {
-        Text(text, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium, modifier = modifier.semantics { liveRegion = LiveRegionMode.Polite })
+        // The size (a scrolling viewport) on the outer box: a read-out text that is resized, by
+        // a keyboard opening under it, would be read again. A new message, or the same one after
+        // a new attempt, is a new text: read out even when its size stays the same.
+        Box(modifier) {
+            key(text, attempt) {
+                Text(text, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium,
+                    modifier = if (live) Modifier.semantics { liveRegion = LiveRegionMode.Polite } else Modifier)
+            }
+        }
     }
 }
 

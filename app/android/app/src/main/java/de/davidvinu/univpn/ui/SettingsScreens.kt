@@ -40,6 +40,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -150,6 +151,7 @@ private fun PasswordDialog(model: AppModel) {
     val scope = rememberCoroutineScope()
     var password by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    var attempt by remember { mutableIntStateOf(0) } // each failure: its error is read out, the same one too
     // Opened by a tap (Home's "Update password"): the second tap of a double tap lands beside it.
     DialogShown(model)
     AlertDialog(
@@ -162,7 +164,7 @@ private fun PasswordDialog(model: AppModel) {
                 }
                 PasswordField(model, password) { password = it }
                 // Shares the room left with the hint: both scroll when the keyboard or large text leaves too little.
-                ErrorText(error, Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()))
+                ErrorText(error, Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), attempt = attempt)
             }
         },
         dismissButton = { TextButton(onClick = { model.passwordDialog = false }) { Text(model.t("app.back")) } },
@@ -170,7 +172,7 @@ private fun PasswordDialog(model: AppModel) {
             TextButton(enabled = password.isNotEmpty(), onClick = {
                 scope.launch {
                     val result = model.post("/api/password", JSONObject().put("password", password))
-                    if (result.ok) model.passwordDialog = false else error = result.error
+                    if (result.ok) model.passwordDialog = false else { error = result.error; attempt++ }
                 }
             }) { Text(model.t("app.save")) }
         },
@@ -186,12 +188,14 @@ fun WebsitesScreen(model: AppModel) {
     val domains = status.optJSONArray("domains")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
     var adding by rememberSaveable { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    var attempt by remember { mutableIntStateOf(0) } // each failure: its error is read out, the same one too
     // The rows move up under the finger after a remove.
     LaunchedEffect(domains) { model.screenChanged() }
     fun save(list: List<String>, then: () -> Unit = {}) {
         scope.launch {
             val result = model.post("/api/domains", JSONObject().put("text", list.joinToString("\n")))
             error = result.error
+            if (error != null) attempt++
             if (result.ok) {
                 UniVpnService.refresh(context)
                 then()
@@ -215,7 +219,7 @@ fun WebsitesScreen(model: AppModel) {
             }
         }
         Column(Modifier.padding(16.dp)) {
-            ErrorText(error, Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()))
+            ErrorText(error, Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), attempt = attempt)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val add = { if (adding.isNotBlank()) save(domains + adding.trim()) { adding = "" } }
                 OutlinedTextField(

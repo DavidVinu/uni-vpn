@@ -245,10 +245,12 @@ type Daemon struct {
 	closeAll  func() // forwarder.CloseAll; tests replace it before Run
 	// closeDirect is forwarder.CloseDirect; tests replace it before Run.
 	closeDirect func()
-	stop        chan struct{}
-	stopOnce    sync.Once
-	started     chan struct{}
-	readyOnce   sync.Once
+	// directOpen is forwarder.DirectOpen; tests replace it before Run.
+	directOpen func() bool
+	stop       chan struct{}
+	stopOnce   sync.Once
+	started    chan struct{}
+	readyOnce  sync.Once
 }
 
 // New builds the daemon; Run starts it.
@@ -378,6 +380,7 @@ func New(cfg *config.Config, log *slog.Logger, opts Options) *Daemon {
 	d.forwarder.Direct = d.directHosts
 	d.closeAll = d.forwarder.CloseAll
 	d.closeDirect = d.forwarder.CloseDirect
+	d.directOpen = d.forwarder.DirectOpen
 	if opts.NeedsSetup {
 		d.message = messages.SetupNeeded
 	} else if opts.ConfigError != "" {

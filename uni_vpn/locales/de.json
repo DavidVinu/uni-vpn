@@ -43,6 +43,8 @@
   "uni.ugr.sign_in": "Deine vollständige UGR-E-Mail-Adresse (name@ugr.es oder name@correo.ugr.es) und ihr Passwort.",
   "uni.uiuc.sign_in": "Deine NetID ohne @illinois.edu und ihr Passwort.",
   "uni.uwaterloo.sign_in": "Deine WatIAM-ID ohne @uwaterloo.ca und ihr Passwort.",
+  "uni.uottawa.sign_in": "Deine uoAccess-ID (wie jsmit000) ohne @uottawa.ca und ihr Passwort.",
+  "uni.uottawa-students.sign_in": "Deine uoAccess-ID (wie jsmit000) ohne @uottawa.ca und ihr Passwort.",
   "setup.enter_user": "Gib deinen Benutzernamen ein, zum Beispiel ab123",
   "setup.enter_password": "Gib dein Passwort ein",
   "setup.invalid_user": "Prüfe deinen Benutzernamen",

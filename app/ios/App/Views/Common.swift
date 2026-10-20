@@ -1,3 +1,4 @@
+import Accessibility
 import SwiftUI
 
 /// A hint that would otherwise be text on the screen: behind an info button (project rule).
@@ -53,14 +54,33 @@ struct PasswordField: View {
     }
 }
 
-/// An error under a group of fields.
+/// Says a text that appeared by itself: iOS has no live regions (Android's polite region, the
+/// page's aria-live), so VoiceOver would not read it.
+func announce(_ text: String) {
+    var spoken = AttributedString(text)
+    spoken.accessibilitySpeechAnnouncementPriority = .low // after what VoiceOver says (a new page)
+    AccessibilityNotification.Announcement(spoken).post()
+}
+
+/// An error under a group of fields, said when it appears or changes, or `attempt` counts up
+/// (the same error after another try); `live` false while a key is typed letter by letter.
 struct ErrorText: View {
     let text: String?
+    var live = true
+    var attempt = 0
 
     var body: some View {
         if let text, !text.isEmpty {
             Text(text).foregroundStyle(.red)
+                .onChange(of: Said(text: text, attempt: attempt), initial: true) { _, new in
+                    if live { announce(new.text) }
+                }
         }
+    }
+
+    private struct Said: Equatable {
+        let text: String
+        let attempt: Int
     }
 }
 

@@ -143,6 +143,7 @@ struct PairView: View {
         // already be used up ("unknown").
         guard !busy else { return }
         busy = true
+        error = nil // the same error again is said again
         let before = others()
         let result = await model.post("/api/sync/enter", ["code": code], timeout: 60)
         busy = false

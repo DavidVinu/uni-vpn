@@ -459,7 +459,7 @@ func TestJoinInTheNotifyGapOfASetupByHandKeepsOneAccountWithItsPassword(t *testi
 				}()
 				select {
 				case <-applying:
-				case <-time.After(5 * time.Second):
+				case <-time.After(30 * time.Second): // the code's key derivation is slow under -race
 					t.Error("the join round did not reach Apply")
 				}
 			}
@@ -480,7 +480,7 @@ func TestJoinInTheNotifyGapOfASetupByHandKeepsOneAccountWithItsPassword(t *testi
 	}
 	select {
 	case <-joined:
-	case <-time.After(10 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("no join")
 	}
 	for range 3 {

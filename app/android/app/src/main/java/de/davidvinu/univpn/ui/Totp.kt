@@ -53,15 +53,18 @@ fun TotpEntry(model: AppModel, mfa: String, secret: String, onSecret: (String) -
     var checkError by remember { mutableStateOf<String?>(null) }
     var checks by remember { mutableIntStateOf(0) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
+    // A key typed letter by letter is incomplete until its last letter: the check's answer is
+    // read out only for a key that came at once (scanned or pasted).
+    var atOnce by rememberSaveable { mutableStateOf(true) }
     FilledTonalButton(onClick = {
-        Scanner.scanQr(context, { checkError = model.t("phone.scan_failed") }) { value -> if (value != null) onSecret(value) }
+        Scanner.scanQr(context, { atOnce = true; checkError = model.t("phone.scan_failed") }) { value -> if (value != null) { atOnce = true; onSecret(value) } }
     }, modifier = Modifier.fillMaxWidth()) {
         Icon(Icons.Outlined.QrCodeScanner, contentDescription = null)
         Text("  " + model.t("phone.scan_qr"))
     }
     OutlinedTextField(
         value = secret,
-        onValueChange = onSecret,
+        onValueChange = { atOnce = kotlin.math.abs(it.length - secret.length) > 1; onSecret(it) },
         label = { Text(model.t("setup.token_secret")) },
         singleLine = true,
         visualTransformation = if (shown) VisualTransformation.None else PasswordVisualTransformation(),
@@ -104,7 +107,7 @@ fun TotpEntry(model: AppModel, mfa: String, secret: String, onSecret: (String) -
         lifecycle.currentStateFlow.first { it.isAtLeast(Lifecycle.State.STARTED) }
         checks++ // the next code
     }
-    ErrorText(checkError ?: error)
+    ErrorText(checkError ?: error, live = checkError == null || atOnce)
     code?.let {
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), itemVerticalAlignment = Alignment.CenterVertically) {
             CircularProgressIndicator(progress = { left / 30f }, modifier = Modifier.padding(4.dp))
