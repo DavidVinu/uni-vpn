@@ -41,6 +41,8 @@
   "uni.ugr.sign_in": "Your full UGR email address (name@ugr.es or name@correo.ugr.es) and its password.",
   "uni.uiuc.sign_in": "Your NetID without @illinois.edu, and its password.",
   "uni.uwaterloo.sign_in": "Your WatIAM user ID without @uwaterloo.ca, and its password.",
+  "uni.uottawa.sign_in": "Your uoAccess ID (like jsmit000) without @uottawa.ca, and its password.",
+  "uni.uottawa-students.sign_in": "Your uoAccess ID (like jsmit000) without @uottawa.ca, and its password.",
   "setup.enter_user": "Enter your username, for example ab123",
   "setup.enter_password": "Enter your password",
   "setup.invalid_user": "Check your username",

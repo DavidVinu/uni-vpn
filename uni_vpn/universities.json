@@ -328,7 +328,7 @@
       "usergroup": "uottawa",
       "mfa": "duo_push",
       "aliases": ["Universite d'Ottawa"],
-      "notes": "Profile from the university's documentation, not tested. Microsoft Authenticator push. Graduate students: uottawa-students."
+      "notes": "Profile from the university's documentation, not tested. Microsoft Authenticator push. Graduate students: uottawa-students. User name: the uoAccess ID (like jsmit000) without @uottawa.ca; full-name addresses and aliases are not uoAccess IDs."
     },
     {
       "id": "uottawa-students",
@@ -338,7 +338,7 @@
       "usergroup": "students",
       "mfa": "duo_push",
       "aliases": ["Universite d'Ottawa"],
-      "notes": "Profile from the university's documentation, not tested. Microsoft Authenticator push. Employees: uottawa."
+      "notes": "Profile from the university's documentation, not tested. Microsoft Authenticator push. Employees: uottawa. User name: the uoAccess ID (like jsmit000) without @uottawa.ca; full-name addresses and aliases are not uoAccess IDs."
     },
     {
       "id": "carleton",

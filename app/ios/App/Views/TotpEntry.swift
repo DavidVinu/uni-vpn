@@ -11,16 +11,24 @@ struct TotpEntry: View {
     @Binding var secret: String
     @Binding var valid: Bool
     let error: String?
+    /// Counts the failures `error` comes from: the same error again is said again.
+    var attempt = 0
     @State private var code: String?
     @State private var left = 0
     @State private var checkError: String?
     @State private var checks = 0
+    /// A key typed letter by letter is incomplete until its last letter: the check's answer is
+    /// said only for a key that came at once (scanned or pasted).
+    @State private var atOnce = true
 
     var body: some View {
-        ScanButton(model: model, title: model.t("phone.scan_qr")) { secret = $0 }
-        PasswordField(model: model, label: model.t("setup.token_secret"), text: $secret, showLabel: "setup.show_secret")
+        ScanButton(model: model, title: model.t("phone.scan_qr")) { atOnce = true; secret = $0 }
+        PasswordField(model: model, label: model.t("setup.token_secret"), text: Binding(get: { secret }, set: {
+            atOnce = abs($0.count - secret.count) > 1
+            secret = $0
+        }), showLabel: "setup.show_secret")
             .task(id: "\(secret)|\(mfa)|\(checks)") { await check() }
-        ErrorText(text: checkError ?? error)
+        ErrorText(text: checkError ?? error, live: checkError == nil || atOnce, attempt: attempt)
         if let code {
             HStack(spacing: 12) {
                 ZStack {

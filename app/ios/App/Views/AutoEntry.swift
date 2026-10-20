@@ -15,6 +15,9 @@ struct AutoEntry: View {
         Form {
             Section {
                 Text(auto.text(model))
+                    // Said when it changes, like the page's aria-live line: "type the next code"
+                    // asks for something.
+                    .onChange(of: auto.text(model)) { _, new in announce(new) }
                 if busy {
                     ProgressView().frame(maxWidth: .infinity)
                 } else {

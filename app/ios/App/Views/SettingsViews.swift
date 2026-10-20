@@ -137,6 +137,8 @@ struct WebsitesView: View {
     let model: AppModel
     @State private var adding = ""
     @State private var error: String?
+    /// Each failure: its error is said, the same one too.
+    @State private var attempt = 0
 
     var body: some View {
         let domains = model.status?.strings("domains") ?? []
@@ -167,7 +169,7 @@ struct WebsitesView: View {
                     .accessibilityLabel(model.t("app.save"))
                 }
             } footer: {
-                ErrorText(text: error)
+                ErrorText(text: error, attempt: attempt)
             }
         }
         .navigationTitle(model.t("settings.through"))
@@ -188,6 +190,7 @@ struct WebsitesView: View {
         Task {
             let result = await model.post("/api/domains", ["text": list.joined(separator: "\n")])
             error = result.error
+            if error != nil { attempt += 1 }
             if result.ok {
                 model.domainsChanged()
                 then()
@@ -201,6 +204,8 @@ struct SecondFactorView: View {
     @State private var secret = ""
     @State private var valid = false
     @State private var error: String?
+    /// Each failure: its error is said, the same one too.
+    @State private var attempt = 0
     /// The university takes one code instead of the key (AutoEnroll); nil until known.
     @State private var offersAuto: Bool?
     @State private var byHand = false
@@ -235,7 +240,7 @@ struct SecondFactorView: View {
                 if let portal = uni?.portal, let url = URL(string: portal), !portal.isEmpty {
                     Link(model.t("setup.mfa_portal"), destination: url)
                 }
-                TotpEntry(model: model, mfa: model.status?.string("mfa") ?? "", secret: $secret, valid: $valid, error: error)
+                TotpEntry(model: model, mfa: model.status?.string("mfa") ?? "", secret: $secret, valid: $valid, error: error, attempt: attempt)
             }
         }
         .toolbar {
@@ -247,7 +252,7 @@ struct SecondFactorView: View {
             BottomButton(title: model.t("app.save"), enabled: valid) {
                 Task {
                     let result = await model.post("/api/totp", ["secret": secret.trimmingCharacters(in: .whitespacesAndNewlines)])
-                    if result.ok { model.back() } else { error = result.error }
+                    if result.ok { model.back() } else { error = result.error; attempt += 1 }
                 }
             }
         }

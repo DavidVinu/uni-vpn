@@ -11,11 +11,15 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import de.davidvinu.univpn.AppModel
 
@@ -98,7 +102,9 @@ fun AutoSecondFactor(
         busy -> model.t(if (stage == "working") "setup.auto_working" else "setup.waiting")
         else -> model.t("setup.auto_sub")
     }
-    Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    // Read out when it changes, like the page's aria-live line: "type the next code" asks for
+    // something. A new sentence is a new text: one changed in place is not read.
+    key(text) { Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
     if (busy) {
         CircularProgressIndicator()
     } else {
