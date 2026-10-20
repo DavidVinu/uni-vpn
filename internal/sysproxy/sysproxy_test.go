@@ -379,6 +379,42 @@ func TestMacRestorePutsOldURLBack(t *testing.T) {
 	}
 }
 
+// A service that is gone since (a VPN app removed, a service renamed) has nothing to put back,
+// and does not keep the rule on the others: uninstalling would fail at it every time.
+func TestMacRestoreSkipsServicesThatAreGone(t *testing.T) {
+	r := &runner{answers: []answer{
+		{"networksetup -listallnetworkservices", 0, "An asterisk (*) denotes that a network service is disabled.\nWi-Fi\n*Ethernet\n"},
+		{"networksetup -setautoproxystate Old VPN", 4, "Old VPN is not a recognized network service.\n** Error: The parameters were not valid.\n"},
+	}}
+	err := mac(r).Restore(&Snapshot{Mac: &Mac{Services: []Service{{Name: "Old VPN"}, {Name: "Wi-Fi"}, {Name: "Ethernet"}}}})
+	if err != nil || r.called("networksetup", "-setautoproxystate", "Old VPN", "off") ||
+		!r.called("networksetup", "-setautoproxystate", "Wi-Fi", "off") ||
+		!r.called("networksetup", "-setautoproxystate", "Ethernet", "off") {
+		t.Fatal(err, r.calls)
+	}
+}
+
+// A list that names nothing (networksetup not answering) is no reason to put nothing back.
+func TestMacRestoreTriesEachWithoutAList(t *testing.T) {
+	r := &runner{answers: []answer{{"networksetup -listallnetworkservices", 1, ""}}}
+	err := mac(r).Restore(&Snapshot{Mac: &Mac{Services: []Service{{Name: "Wi-Fi"}}}})
+	if err != nil || !r.called("networksetup", "-setautoproxystate", "Wi-Fi", "off") {
+		t.Fatal(err, r.calls)
+	}
+}
+
+// One that fails for another reason does not keep the rule on the others either.
+func TestMacRestoreGoesOnAfterAFailure(t *testing.T) {
+	r := &runner{answers: []answer{
+		{"networksetup -listallnetworkservices", 0, "An asterisk (*) denotes that a network service is disabled.\nUSB LAN\nWi-Fi\n"},
+		{"networksetup -setautoproxystate USB LAN", 1, ""},
+	}}
+	err := mac(r).Restore(&Snapshot{Mac: &Mac{Services: []Service{{Name: "USB LAN"}, {Name: "Wi-Fi"}}}})
+	if err == nil || !r.called("networksetup", "-setautoproxystate", "Wi-Fi", "off") {
+		t.Fatal(err, r.calls)
+	}
+}
+
 func TestMacStateOKWhenOurURLIsEnabled(t *testing.T) {
 	answers := append([]answer{{"networksetup -getautoproxyurl Wi-Fi", 0, "URL: http://127.0.0.1:1081/proxy.pac\nEnabled: Yes\n"}}, macAnswers()...)
 	if got := mac(&runner{answers: answers}).State(1081); got != "ok" {

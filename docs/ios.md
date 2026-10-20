@@ -155,5 +155,7 @@ core, Safari and other browsers following the proxy rule, connect on demand afte
 a network change, the Control Center button, the camera scanner, a full sign-in with a real
 account and a second factor, the one-code second factor, Duo push, the memory limit of the
 extension, and Safari opening the security page when Uni VPN refuses (the extension connects
-it directly; try a wrong code on campus Wi-Fi, then open `mfa.za.w-hs.de`). The simulator tests
-cover the core, libopenconnect and the gateway, the API token and the secrets.
+it directly; try a wrong code on campus Wi-Fi, then open `mfa.za.w-hs.de`), and the listed
+websites opening directly on a campus whose network cannot reach its own gateway (Halle, HS
+Flensburg) while Home says No network. The simulator tests cover the core, libopenconnect and
+the gateway, the API token and the secrets.

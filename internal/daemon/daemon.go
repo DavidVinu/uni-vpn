@@ -219,6 +219,10 @@ type Daemon struct {
 	// offlineRecheck seconds later, so a page with many requests does not probe for each one.
 	offlineAt      float64
 	offlineRecheck float64
+	// offlineRun counts the looks in a row that found no gateway, since one that did, a
+	// resume (a new place) or another account. From awayAfter on a page load does not wait.
+	offlineRun int
+	awayFor    float64 // seconds the last of them counts
 
 	// RestartRequested is set when the program files were replaced and the caller should
 	// start the new code. Read it after Run returned.
@@ -239,10 +243,12 @@ type Daemon struct {
 
 	forwarder *forwarder.Forwarder
 	closeAll  func() // forwarder.CloseAll; tests replace it before Run
-	stop      chan struct{}
-	stopOnce  sync.Once
-	started   chan struct{}
-	readyOnce sync.Once
+	// closeDirect is forwarder.CloseDirect; tests replace it before Run.
+	closeDirect func()
+	stop        chan struct{}
+	stopOnce    sync.Once
+	started     chan struct{}
+	readyOnce   sync.Once
 }
 
 // New builds the daemon; Run starts it.
@@ -251,7 +257,7 @@ func New(cfg *config.Config, log *slog.Logger, opts Options) *Daemon {
 		log = slog.New(slog.DiscardHandler)
 	}
 	d := &Daemon{log: log, cfg: cfg, changed: make(chan struct{}), wake: make(chan struct{}),
-		stop: make(chan struct{}), started: make(chan struct{}), offlineRecheck: 5}
+		stop: make(chan struct{}), started: make(chan struct{}), offlineRecheck: 5, awayFor: 600}
 	d.wall = func() float64 { return float64(time.Now().UnixNano()) / 1e9 }
 	d.mono = monoClock(platform.IsAndroid || platform.IsIOS)
 	d.updateFirstCheck, d.updateInterval, d.updateJitter = 600*time.Second, 5*time.Hour, 30*time.Minute
@@ -371,6 +377,7 @@ func New(cfg *config.Config, log *slog.Logger, opts Options) *Daemon {
 	d.forwarder = forwarder.New("127.0.0.1", cfg.SocksPort, d.acquire, d.noteActivity, seconds(cfg.HalfcloseGrace), log)
 	d.forwarder.Direct = d.directHosts
 	d.closeAll = d.forwarder.CloseAll
+	d.closeDirect = d.forwarder.CloseDirect
 	if opts.NeedsSetup {
 		d.message = messages.SetupNeeded
 	} else if opts.ConfigError != "" {
@@ -926,6 +933,7 @@ func (d *Daemon) completeSetup(user, password, token, university string, overrid
 	port := d.cfg.HTTPPort
 	d.switching = false
 	d.accountGen++
+	d.offlineRun = 0 // maybe another gateway
 	d.forgetSignIn()
 	d.wakeUp()
 	d.configPath = path
@@ -1038,8 +1046,9 @@ func (d *Daemon) ruleLocked() (string, error) {
 
 // directHosts: what a browser still reaches when Uni VPN refuses, as the rule's "; DIRECT"
 // says. The core connects it itself, for browsers that ignore that. While the gateway cannot
-// be reached, the listed websites too: some universities' gateways cannot be reached from
-// their own network (Halle, HS Flensburg), where the websites open directly.
+// be reached (also while the loop rests after that, see away), the listed websites too: some
+// universities' gateways cannot be reached from their own network (Halle, HS Flensburg), where
+// the websites open directly.
 func (d *Daemon) directHosts() []string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -1047,7 +1056,7 @@ func (d *Daemon) directHosts() []string {
 	if host := d.portalHostLocked(); host != "" {
 		hosts = append(hosts, host)
 	}
-	if d.state == Offline && !d.needsSetup && d.configError == "" {
+	if (d.state == Offline || d.state == Idle && d.away()) && !d.needsSetup && d.configError == "" {
 		if domains, err := pac.ReadDomains(d.opts.DomainsPath, d.cfg.DefaultDomains); err == nil {
 			hosts = append(hosts, domains...)
 		}
@@ -1457,6 +1466,10 @@ func (d *Daemon) acquire(ctx context.Context) (int, bool) {
 			woke = true
 			d.ensureLoop()
 			d.wakeUp()
+			if d.away() {
+				d.mu.Unlock()
+				return 0, false
+			}
 		} else if state.retry() {
 			d.ensureLoop()
 			d.mu.Unlock()
@@ -1464,6 +1477,10 @@ func (d *Daemon) acquire(ctx context.Context) (int, bool) {
 		}
 		if state == Idle {
 			d.ensureLoop()
+			if d.away() { // also after the loop rested for want of use
+				d.mu.Unlock()
+				return 0, false
+			}
 		}
 		remaining := deadline - d.mono()
 		if remaining <= 0 {
@@ -1488,6 +1505,17 @@ func (d *Daemon) acquire(ctx context.Context) (int, bool) {
 			return 0, false
 		}
 	}
+}
+
+// awayAfter: looks in a row without the gateway, after which a page load no longer waits for
+// the next one.
+const awayAfter = 2
+
+// away: the gateway did not answer the last looks here, lately, like on a campus that cannot
+// reach its own (Halle). A page load starts the next look without waiting for it, and the listed
+// websites go directly meanwhile (directHosts); mu must be held.
+func (d *Daemon) away() bool {
+	return d.offlineRun >= awayAfter && d.mono()-d.offlineAt < d.awayFor
 }
 
 // ensureLoop starts the connect loop unless it runs; mu must be held. The loop takes mu
@@ -1697,6 +1725,7 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 		}
 		if !online {
 			d.offlineAt = d.mono()
+			d.offlineRun++
 			d.set(Offline, messages.Offline)
 			d.sleep(ctx, cfg.RetryInterval)
 			if ctx.Err() != nil {
@@ -1704,6 +1733,7 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 			}
 			continue
 		}
+		d.offlineRun = 0
 		if wait := d.otpWaitAt(d.wall()); wait > 0 && d.onceCode == "" {
 			d.set(Connecting, messages.WaitingForCode)
 			d.sleep(ctx, wait)
@@ -1959,6 +1989,8 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 		_ = os.WriteFile(filepath.Join(d.opts.TokenDir, signedInName), []byte(d.cfg.User+"\n"+d.cfg.Host), 0o600)
 		d.logf(slog.LevelInfo, "Tunnel ready after %.1f s", elapsed(tun.StartedAt(), tun.ReadyAt()))
 		d.set(Connected, messages.Connected)
+		// What went directly while the VPN was away goes through it now.
+		d.closeDirect()
 		// The "connect now" request is fulfilled. From here on only real use counts, the idle
 		// timer handles the rest.
 		d.explicit = false
@@ -2126,6 +2158,7 @@ func (d *Daemon) ticker() {
 		}
 		if jump > 30 {
 			d.logf(slog.LevelInfo, "Resume detected (clock jumped by %.0f s)", jump)
+			d.offlineRun = 0
 			if tun := d.tun; tun != nil {
 				// Stop cleanly instead of SIGUSR2: the state machine then goes through
 				// disconnecting -> idle and reconnects if there is demand.

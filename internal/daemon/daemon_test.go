@@ -1132,6 +1132,102 @@ func TestListedWebsitesGoDirectlyWhileTheGatewayCannotBeReached(t *testing.T) {
 	}
 }
 
+// A website opened directly meanwhile goes through the VPN once it is up: the browser would
+// otherwise keep its connection and the website's off-campus version.
+func TestWebsitesOpenedDirectlyCloseOnceConnected(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.RetryInterval = 30
+	h.probeResult.Store(false)
+	var closed atomic.Int64
+	d := h.start(nil, func(d *Daemon) { d.closeDirect = func() { closed.Add(1) } })
+	d.RequestConnect()
+	waitState(t, d, Offline)
+	if closed.Load() != 0 {
+		t.Fatal(closed.Load())
+	}
+	h.probeResult.Store(true)
+	h.wallOffset.Store(120)
+	waitState(t, d, Connected, 3*time.Second)
+	if !waitFor(2*time.Second, func() bool { return closed.Load() == 1 }) {
+		t.Fatal(closed.Load())
+	}
+}
+
+// A campus whose network drops what goes to its own gateway (Halle): once two looks found no
+// gateway, the listed websites go directly at once instead of waiting for each new look, also
+// after the loop rested for want of use. A resume is a new place, where page loads wait again,
+// and so is the time long after the last look.
+func TestCampusWithoutItsGatewayDoesNotWaitForEachLook(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.RetryInterval = 30
+	if err := pac.WriteDomains(h.domainsPath, []string{"uni-halle.de"}); err != nil {
+		t.Fatal(err)
+	}
+	var probes atomic.Int64
+	d := h.start(func(o *Options) {
+		o.Probe = func(ctx context.Context) bool {
+			probes.Add(1)
+			select {
+			case <-time.After(time.Second):
+			case <-ctx.Done():
+			}
+			return false
+		}
+	}, func(d *Daemon) { d.offlineRecheck = 0.2 })
+	quick := func() bool {
+		t.Helper()
+		started := time.Now()
+		if _, ok := d.acquire(context.Background()); ok {
+			t.Fatal("through the VPN")
+		}
+		return time.Since(started) < 300*time.Millisecond
+	}
+	d.RequestConnect()
+	waitState(t, d, Offline, 3*time.Second)
+	// One look found nothing (Wi-Fi a few seconds after waking the laptop): a page load waits.
+	time.Sleep(300 * time.Millisecond)
+	if quick() {
+		t.Fatal("did not wait for the second look")
+	}
+	time.Sleep(300 * time.Millisecond)
+	if !quick() {
+		t.Fatal("waited for the third look")
+	}
+	if !waitFor(time.Second, func() bool { return probes.Load() == 3 }) {
+		t.Fatal(probes.Load()) // it runs meanwhile, and finds the gateway once it answers
+	}
+	d.RequestDisconnect()
+	waitState(t, d, Idle, 3*time.Second)
+	if !quick() || !slices.Contains(d.forwarder.Direct(), "uni-halle.de") {
+		t.Fatal("waited after resting", d.forwarder.Direct())
+	}
+	// Long after the last look (a phone, whose screen going off is no resume, carried home):
+	// a page load waits for the next.
+	d.RequestDisconnect()
+	waitState(t, d, Idle, 3*time.Second)
+	d.mu.Lock()
+	d.awayFor = 0.001
+	d.mu.Unlock()
+	if hosts := d.forwarder.Direct(); slices.Contains(hosts, "uni-halle.de") || quick() {
+		t.Fatal("did not wait long after the last look", hosts)
+	}
+	d.mu.Lock()
+	d.awayFor = 600
+	d.mu.Unlock()
+	h.wallOffset.Store(120) // the laptop slept
+	if !waitFor(3*time.Second, func() bool {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		return d.offlineRun == 0
+	}) {
+		t.Fatal("no resume")
+	}
+	time.Sleep(1200 * time.Millisecond) // the look the resume started
+	if quick() {
+		t.Fatal("did not wait after a resume")
+	}
+}
+
 // A dock or an iPhone plugged in later brings a new network service on macOS: the core looks
 // for one at the start and again every few minutes.
 func TestNewNetworkServicesGetTheRule(t *testing.T) {

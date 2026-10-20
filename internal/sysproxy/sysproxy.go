@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -152,7 +153,11 @@ func splitLines(s string) []string {
 	return lines
 }
 
-func (s *System) services() ([]string, error) {
+// services: the enabled network services of macOS.
+func (s *System) services() ([]string, error) { return s.listServices(false) }
+
+// listServices: the network services, with the disabled ones too if disabled.
+func (s *System) listServices(disabled bool) ([]string, error) {
 	r, err := s.run("networksetup", "-listallnetworkservices")
 	if err != nil {
 		return nil, err
@@ -164,8 +169,9 @@ func (s *System) services() ([]string, error) {
 	}
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if line != "" && !strings.HasPrefix(line, "*") { // * = disabled service
-			names = append(names, line)
+		name, off := strings.CutPrefix(line, "*") // * = disabled service
+		if name != "" && (disabled || !off) {
+			names = append(names, name)
 		}
 	}
 	return names, nil
@@ -318,18 +324,26 @@ func (s *System) Restore(saved *Snapshot) error {
 		if saved.Mac == nil {
 			return nil
 		}
+		// A service gone since (a VPN app removed, a service renamed) has nothing to put back.
+		// None of them keeps the rule on the others: uninstalling would fail at it every time.
+		names, err := s.listServices(true)
+		known := err == nil && len(names) > 0 // else each is tried
+		var first error
 		for _, e := range saved.Mac.Services {
+			if known && !slices.Contains(names, e.Name) {
+				continue
+			}
 			var err error
 			if e.Enabled && e.URL != "" {
 				err = s.set("networksetup", "-setautoproxyurl", e.Name, e.URL)
 			} else {
 				err = s.set("networksetup", "-setautoproxystate", e.Name, "off")
 			}
-			if err != nil {
-				return err
+			if first == nil {
+				first = err
 			}
 		}
-		return nil
+		return first
 	}
 	if g := saved.GNOME; g != nil {
 		mode := g.Mode

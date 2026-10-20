@@ -215,7 +215,7 @@ fun WebsitesScreen(model: AppModel) {
             }
         }
         Column(Modifier.padding(16.dp)) {
-            ErrorText(error)
+            ErrorText(error, Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val add = { if (adding.isNotBlank()) save(domains + adding.trim()) { adding = "" } }
                 OutlinedTextField(

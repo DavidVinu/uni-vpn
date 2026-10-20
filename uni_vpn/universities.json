@@ -267,7 +267,7 @@
       "authgroup": "OpenConnect2 (All)",
       "mfa": "duo_push",
       "aliases": ["UIUC", "Illinois", "University of Illinois at Urbana-Champaign"],
-      "notes": "Profile from the university's documentation, not tested. The university's library guidance asks for Tunnel All. Other OpenConnect groups: OpenConnect1 (Split), OpenConnect3 (Public)."
+      "notes": "Profile from the university's documentation, not tested. The university's library guidance asks for Tunnel All. Other OpenConnect groups: OpenConnect1 (Split), OpenConnect3 (Public). User name: the NetID without @illinois.edu (the OpenConnect groups); the Cisco client's own sign-in asks for NetID@illinois.edu."
     },
     {
       "id": "uga",

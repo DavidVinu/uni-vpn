@@ -41,6 +41,7 @@
   "uni.uni-jena.sign_in": "Votre identifiant URZ (comme ab12cde) et son mot de passe, pas votre adresse e-mail.",
   "uni.w-hs.sign_in": "Votre nom d’utilisateur (comme ma12345) sans @w-hs.de, et son mot de passe.",
   "uni.ugr.sign_in": "Votre adresse e-mail UGR complète (nom@ugr.es ou nom@correo.ugr.es) et son mot de passe.",
+  "uni.uiuc.sign_in": "Votre NetID sans @illinois.edu, et son mot de passe.",
   "uni.uwaterloo.sign_in": "Votre identifiant WatIAM sans @uwaterloo.ca, et son mot de passe.",
   "setup.enter_user": "Saisissez votre nom d’utilisateur, par exemple ab123",
   "setup.enter_password": "Saisissez votre mot de passe",
