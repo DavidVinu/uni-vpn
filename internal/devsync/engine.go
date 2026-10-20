@@ -894,17 +894,28 @@ func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, s
 		}
 		version = next
 	}
-	saved := state{Version: version, Keyed: true, Hashes: map[string]savedHash{}}
+	// A join whose account came back busy (changed here while it ran) takes the group's account
+	// in the next round too: what was typed here meanwhile does not go out with it.
+	saved := state{Version: version, Keyed: true, Hashes: map[string]savedHash{},
+		Adopt: st.Adopt && errors.Is(failed[KeyAccount], ErrBusy)}
+	e.mu.Lock()
+	noted := maps.Clone(e.pending.Changes)
+	e.mu.Unlock()
 	for key, ent := range merged {
 		hv := h(ent.V)
 		if errors.Is(failed[key], ErrBusy) && !st.Adopt {
 			// Changed here while the round ran (a setup by hand): what it read of this device is
-			// old. sync.json keeps what it had, nothing for a value never synced here: the next
-			// round sends what was typed.
+			// old. sync.json keeps what it had, nothing for a value typed since and never synced
+			// here: the next round sends what was typed. Not typed (another change made it busy):
+			// what this device has counts as seen, as below, else a later Notify would take it
+			// for a change made here (sync.json lost).
 			if old, ok := st.Hashes[key]; ok {
 				saved.Hashes[key] = old
+				continue
 			}
-			continue
+			if _, typed := noted[key]; typed {
+				continue
+			}
 		}
 		if failed[key] != nil {
 			// Not taken over: what this device has counts as seen, so it is not sent back as a

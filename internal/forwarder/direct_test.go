@@ -206,3 +206,59 @@ func TestStopEndsADirectDial(t *testing.T) {
 		t.Fatal(time.Since(started), logs.String())
 	}
 }
+
+// The VPN is up again: the websites the core opened directly meanwhile close, so the browser
+// opens them again through the VPN (the campus version), and a connection through the tunnel
+// stays.
+func TestCloseDirectEndsOnlyTheDirectConnections(t *testing.T) {
+	e, _ := setup(t)
+	e.setTarget(func(context.Context) (int, bool) { return 0, false })
+	e.setDirect("localhost")
+	direct, rep := socksConnect(t, e, "localhost", website(t))
+	if rep != 0 {
+		t.Fatal(rep)
+	}
+	if got := readWithin(t, direct, 6, 2*time.Second); string(got) != "campus" {
+		t.Fatal(string(got))
+	}
+	e.setTarget(func(context.Context) (int, bool) { return e.echoPort, true })
+	tunnel := e.dial(t)
+	tunnel.Write([]byte("a"))
+	if got := readWithin(t, tunnel, 1, 2*time.Second); string(got) != "a" {
+		t.Fatal(string(got))
+	}
+	e.fwd.CloseDirect()
+	expectEOF(t, direct, 2*time.Second)
+	tunnel.Write([]byte("b"))
+	if got := readWithin(t, tunnel, 1, 2*time.Second); string(got) != "b" {
+		t.Fatal(string(got))
+	}
+}
+
+// One still connecting directly when the VPN comes up does not go on directly either.
+func TestCloseDirectEndsADirectDial(t *testing.T) {
+	e, _ := setup(t)
+	e.setTarget(func(context.Context) (int, bool) { return 0, false })
+	e.setDirect("localhost")
+	port := website(t)
+	dialing, release := make(chan struct{}), make(chan struct{})
+	e.mu.Lock()
+	e.dialer = func(ctx context.Context, network, address string) (net.Conn, error) {
+		close(dialing)
+		<-release
+		return (&net.Dialer{}).DialContext(context.Background(), network, address)
+	}
+	e.mu.Unlock()
+	c := e.dialRaw(t)
+	c.Write([]byte{socksVersion, 1, 0})
+	readWithin(t, c, 2, 2*time.Second)
+	c.Write(binary.BigEndian.AppendUint16(append([]byte{socksVersion, 1, 0, 3, 9}, "localhost"...), uint16(port)))
+	select {
+	case <-dialing:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no dial")
+	}
+	e.fwd.CloseDirect()
+	close(release)
+	expectEOF(t, c, 2*time.Second)
+}

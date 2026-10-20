@@ -29,6 +29,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import de.davidvinu.univpn.AppModel
 
@@ -105,7 +108,7 @@ fun SettingRow(title: String, value: String? = null, onClick: (() -> Unit)? = nu
 @Composable
 fun ErrorText(text: String?, modifier: Modifier = Modifier) {
     if (!text.isNullOrEmpty()) {
-        Text(text, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium, modifier = modifier)
+        Text(text, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium, modifier = modifier.semantics { liveRegion = LiveRegionMode.Polite })
     }
 }
 

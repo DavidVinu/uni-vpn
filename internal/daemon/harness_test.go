@@ -214,11 +214,20 @@ func (h *harness) start(edit func(*Options), before ...func(*Daemon)) *Daemon {
 	}
 	h.d = d
 	h.done = make(chan struct{})
+	covered := h.covered.Load()
 	go func() { d.Run(); close(h.done) }()
 	select {
 	case <-d.Started():
 	case <-time.After(3 * time.Second):
 		h.t.Fatal("daemon did not start")
+	}
+	// The start's look at the rule (refreshIfRuleChanged, then ProxyCover) runs on its own: a
+	// test that changes the rule at once (a setup) would race it and count a second refresh.
+	d.mu.Lock()
+	bound := d.http != nil
+	d.mu.Unlock()
+	for deadline := time.Now().Add(3 * time.Second); bound && h.covered.Load() == covered && time.Now().Before(deadline); {
+		time.Sleep(time.Millisecond)
 	}
 	return d
 }

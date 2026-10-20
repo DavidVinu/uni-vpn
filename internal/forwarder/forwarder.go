@@ -65,6 +65,7 @@ type Forwarder struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
 	conns   map[net.Conn]struct{}
+	directs map[net.Conn]struct{} // both ends of what direct passes on, also in conns
 	waiting map[*waiter]struct{}
 	wg      sync.WaitGroup
 }
@@ -131,6 +132,7 @@ func (f *Forwarder) Start(ctx context.Context) error {
 	f.ln = ln
 	f.ctx, f.cancel = context.WithCancel(context.Background())
 	f.conns = map[net.Conn]struct{}{}
+	f.directs = map[net.Conn]struct{}{}
 	f.waiting = map[*waiter]struct{}{}
 	f.mu.Unlock()
 	context.AfterFunc(ctx, f.Stop)
@@ -213,6 +215,31 @@ wait:
 	}
 }
 
+// CloseDirect ends the connections Direct let through, also those still connecting: the VPN is
+// up again, and the browser opens them anew through it (a website's campus version).
+func (f *Forwarder) CloseDirect() {
+	f.mu.Lock()
+	conns := make([]net.Conn, 0, len(f.directs))
+	for c := range f.directs {
+		conns = append(conns, c)
+	}
+	f.mu.Unlock()
+	for _, c := range conns {
+		c.Close()
+	}
+}
+
+// setDirect adds c to the connections CloseDirect ends, or removes it.
+func (f *Forwarder) setDirect(c net.Conn, on bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if on {
+		f.directs[c] = struct{}{}
+	} else {
+		delete(f.directs, c)
+	}
+}
+
 func (f *Forwarder) track(c net.Conn) {
 	f.mu.Lock()
 	f.conns[c] = struct{}{}
@@ -286,6 +313,10 @@ func (f *Forwarder) direct(client net.Conn) bool {
 	if f.Direct == nil {
 		return false
 	}
+	// Closed by CloseDirect meanwhile (the VPN is up again), the client gets no reply and nothing
+	// is passed on.
+	f.setDirect(client, true)
+	defer f.setDirect(client, false)
 	hosts := f.Direct()
 	if len(hosts) == 0 {
 		return false
@@ -313,6 +344,8 @@ func (f *Forwarder) direct(client net.Conn) bool {
 	client.SetReadDeadline(time.Time{})
 	f.track(upstream)
 	defer f.untrack(upstream)
+	f.setDirect(upstream, true)
+	defer f.setDirect(upstream, false)
 	if _, err := client.Write(socksReply(0)); err == nil {
 		f.splice(client, upstream, nil, nil, nil)
 	}
