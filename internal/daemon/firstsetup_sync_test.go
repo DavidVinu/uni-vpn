@@ -404,4 +404,99 @@ func TestJoinWithAPasswordTypedMidRoundTakesTheGroupsAccount(t *testing.T) {
 	if lu, du := statusValue(t, laptop, "user"), statusValue(t, desktop, "user"); lu != a.user || du != a.user {
 		t.Errorf("laptop %v, desktop %v: want the group's account (%s) after the join", lu, du, a.user)
 	}
+	// With its own password: the one typed for the account before goes nowhere.
+	laptopK.mu.Lock()
+	lpw := laptopK.passwords[a.user]
+	laptopK.mu.Unlock()
+	desktopK.mu.Lock()
+	dpw := desktopK.passwords[a.user]
+	desktopK.mu.Unlock()
+	if lpw != a.password || dpw != a.password {
+		t.Errorf("%s's password: laptop %q, desktop %q; want %q", a.user, lpw, dpw, a.password)
+	}
+}
+
+// A device not set up joins the laptop's group while the user sets it up by hand with another
+// account: the join round reads after that setup wrote config.toml, before its Notify. One
+// account in the end, with its own password.
+func TestJoinInTheNotifyGapOfASetupByHandKeepsOneAccountWithItsPassword(t *testing.T) {
+	ctx := context.Background()
+	_, url := relaytest.Start(t)
+	a, c := setupAccounts[0], setupAccounts[1]
+	laptopK := &userKeyring{passwords: map[string]string{a.user: a.password}, tokens: map[string]string{}}
+	desktopK := &userKeyring{passwords: map[string]string{}, tokens: map[string]string{}}
+	laptopH := newHarness(t)
+	laptopH.cfg.User, laptopH.cfg.University, laptopH.cfg.Host, laptopH.cfg.MFA = a.user, a.university, a.host, "none"
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := config.WriteInitial(path, a.user, a.university, a.overrides); err != nil {
+		t.Fatal(err)
+	}
+	laptop := laptopH.start(syncOptions(url, dir, func(o *Options) { o.ConfigPath = path; laptopK.options(o) }),
+		func(d *Daemon) { laptopK.d = d })
+	offer, err := laptop.Sync("offer", pyjson.O())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pairing, _ := offer.Get("pairing")
+	code, _ := pairing.(pyjson.Object).Get("code")
+	desktopH := newHarness(t)
+	desktopDir := t.TempDir()
+	var armed atomic.Bool
+	applying := make(chan struct{})
+	joined := make(chan struct{})
+	var desktop *Daemon
+	desktop = desktopH.start(syncOptions(url, desktopDir, func(o *Options) {
+		o.NeedsSetup, o.ConfigPath = true, filepath.Join(desktopDir, "config.toml")
+		desktopK.options(o)
+		refresh := o.ProxyRefresh
+		o.ProxyRefresh = func(port int) { // in the setup, after config.toml, before its Notify
+			refresh(port)
+			if armed.CompareAndSwap(true, false) {
+				go func() {
+					desktop.Sync("enter", pyjson.O("code", code))
+					close(joined)
+				}()
+				select {
+				case <-applying:
+				case <-time.After(5 * time.Second):
+					t.Error("the join round did not reach Apply")
+				}
+			}
+		}
+	}), func(d *Daemon) {
+		desktopK.d = d
+		d.beforeApply = func() {
+			select {
+			case <-applying:
+			default:
+				close(applying)
+			}
+		}
+	})
+	armed.Store(true)
+	if err := desktop.CompleteSetup(c.user, c.password, c.token, c.university, c.overrides); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-joined:
+	case <-time.After(10 * time.Second):
+		t.Fatal("no join")
+	}
+	for range 3 {
+		for _, d := range []*Daemon{desktop, laptop} {
+			d.sync.Sync(ctx)
+		}
+	}
+	lu, du := statusValue(t, laptop, "user").(string), statusValue(t, desktop, "user").(string)
+	laptopK.mu.Lock()
+	lpw := laptopK.passwords[lu]
+	laptopK.mu.Unlock()
+	desktopK.mu.Lock()
+	dpw := desktopK.passwords[du]
+	desktopK.mu.Unlock()
+	want := map[string]string{a.user: a.password, c.user: c.password}
+	if lu != du || lpw != want[lu] || dpw != want[du] {
+		t.Errorf("laptop %s %q, desktop %s %q: want one account with its own password", lu, lpw, du, dpw)
+	}
 }
