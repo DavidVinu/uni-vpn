@@ -894,6 +894,20 @@ jobs:
           if ($out -match "certificate.*fail|verify failed") { exit 1 }
           if (-not ($out -match "Connected to")) { Write-Host "openconnect did not reach the gateway"; exit 1 }
           exit 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: The adapter emulated Wintun leaves behind is removed
+        shell: powershell
+        run: |
+          $env:GOARCH = "amd64"
+          go test -c -o x64.test.exe ./internal/wintunnel
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Remove-Item Env:GOARCH
+          $env:UNI_VPN_WINTUN_DLL = "$PWD\openconnect\wintun.dll"
+          $env:UNI_VPN_X64_TEST = "$PWD\x64.test.exe"
+          go test -count=1 -v -run '^TestLeftoverAdapterOfEmulatedWintunIsRemoved$' ./internal/wintunnel
+          exit $LASTEXITCODE
       - name: Install it like a user would
         shell: powershell
         run: |
