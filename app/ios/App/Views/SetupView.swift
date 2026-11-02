@@ -374,6 +374,8 @@ private struct ConnectingPage: View {
             Text(Self.text(model))
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
+                // Said when it changes, like the page's aria-live line: stuck, with Finish.
+                .onChange(of: text) { _, new in announce(new) }
             if stuck && setup.sentAt != nil {
                 Button(model.t("setup.finish")) {
                     setup.sentAt = nil
