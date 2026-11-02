@@ -440,7 +440,18 @@ function step(id, focusId) {
 }
 
 
-function err(id, text) { $(id).textContent = text || ""; $(id).hidden = !text; }
+// Each error shown is a new alert: screen readers read an alert added to the page, not the same
+// text set again (Chromium) or an alert shown again (WebKitGTK). A status stays in place (a new one
+// is not always read). A poll that finds the text already shown leaves it alone.
+function err(id, text, poll) {
+  const el = $(id);
+  if (poll && el.textContent === (text || "") && el.hidden === !text) return;
+  if (!text || el.getAttribute("role") !== "alert") { el.textContent = text || ""; el.hidden = !text; return; }
+  const fresh = el.cloneNode(false);
+  fresh.textContent = text;
+  fresh.hidden = false;
+  el.replaceWith(fresh);
+}
 
 // --- status ------------------------------------------------------------------
 // Message ids (messages.py) whose state label says it all.
@@ -765,7 +776,7 @@ function autoProgress() {
   if (!autoRunning && !autoSending && !$("step2a").hidden) {
     // A Repair may end at any time: the buttons follow the service. After a Repair here, how it
     // goes is said here too (repairing, failed, download again).
-    if (autoRepair) err("a-err", QUIET.includes(S.message_id) ? "" : tr(S.message, S.message_t));
+    if (autoRepair) err("a-err", QUIET.includes(S.message_id) ? "" : tr(S.message, S.message_t), true);
     $("a-fix").hidden = fixAction() !== "repair";
     $("a-fix").disabled = !!S.repairing;
     $("a-download").hidden = S.message_id !== "reinstall_needed";
@@ -1378,7 +1389,7 @@ function renderDevices() {
   // A failed Remove until a later round goes through (the error it left is gone again).
   if (removeError && sync.error) removeSeen = true;
   else if (removeError && removeSeen) removeError = null;
-  err("sync-err", (removeError && errText(removeError)) || (sync.on && sync.error ? tr("", sync.error) : ""));
+  err("sync-err", (removeError && errText(removeError)) || (sync.on && sync.error ? tr("", sync.error) : ""), true);
   const rows = (sync.on ? sync.devices : []).map((d, i) => {
     const row = document.createElement("div"), name = document.createElement("span"), val = document.createElement("span");
     row.className = "item";
@@ -1453,13 +1464,13 @@ function renderPair() {
   else {
     // Gone from the status after it was there: the service restarted and took the code with it.
     // Expired, as on the phones.
-    if (pairListed) { err("pair-err", t("sync.expired")); $("pair-new").hidden = false; }
+    if (pairListed) { err("pair-err", t("sync.expired"), true); $("pair-new").hidden = false; }
     return;
   }
   // error: linked, but some settings could not be used here; or why it failed.
   if (p.state === "done") { pairPart("pair-done"); err("pair-err", tr("", p.error)); $("pair-done").querySelector("h2").focus(); pairShown = null; }
   else if (p.state === "expired" || p.state === "failed") {
-    err("pair-err", p.error ? tr("", p.error) : t(p.state === "expired" ? "sync.expired" : "sync.offline"));
+    err("pair-err", p.error ? tr("", p.error) : t(p.state === "expired" ? "sync.expired" : "sync.offline"), true);
     $("pair-new").hidden = false;
   }
 }

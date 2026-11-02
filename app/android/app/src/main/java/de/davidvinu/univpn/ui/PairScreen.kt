@@ -43,6 +43,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
@@ -154,7 +157,8 @@ fun PairScreen(model: AppModel, mode: String, activity: MainActivity) {
             when {
                 done -> {
                     Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = Ok, modifier = Modifier.size(72.dp))
-                    Text(model.t("sync.done"), style = MaterialTheme.typography.headlineSmall)
+                    // Read out when it appears, like the page's focus on its heading.
+                    Text(model.t("sync.done"), style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
                     Button(onClick = { model.back() }) { Text(model.t("app.done")) }
                 }
                 typing -> {

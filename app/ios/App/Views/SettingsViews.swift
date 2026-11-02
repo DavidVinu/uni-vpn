@@ -7,6 +7,8 @@ struct SettingsView: View {
     @State private var passwordError: String?
     /// Why Remove did not go through, with the device it was for.
     @State private var removeError: (device: String, text: String)?
+    /// Each failed Remove: its error is said, the same one too.
+    @State private var removeFailures = 0
 
     var body: some View {
         let status = model.status ?? JSON([:])
@@ -45,6 +47,7 @@ struct SettingsView: View {
                                         let id = device.string("id")
                                         let result = await model.post("/api/sync/remove", ["device": id], timeout: 30)
                                         removeError = result.error.map { (device: id, text: $0) }
+                                        if result.error != nil { removeFailures += 1 }
                                     }
                                 }
                                 .buttonStyle(.borderless)
@@ -65,7 +68,7 @@ struct SettingsView: View {
                     // same is no error: only while it is still listed.
                     let listed: [String] = sync.bool("on") ? sync.objects("devices").map { $0.string("id") } : []
                     let removal: String? = removeError.flatMap { listed.contains($0.device) ? $0.text : nil }
-                    ErrorText(text: removal ?? problem.map { model.strings.t($0) })
+                    ErrorText(text: removal ?? problem.map { model.strings.t($0) }, attempt: removeFailures)
                 }
             }
             Section(model.t("settings.general")) {

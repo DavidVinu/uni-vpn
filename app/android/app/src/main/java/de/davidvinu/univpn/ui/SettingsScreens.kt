@@ -73,6 +73,7 @@ fun SettingsScreen(model: AppModel) {
     // A Remove that did not go through, and the device it was for.
     var removeError by remember { mutableStateOf<String?>(null) }
     var removeFor by remember { mutableStateOf("") }
+    var removeAttempt by remember { mutableIntStateOf(0) } // each failed Remove: its error is read out, the same one too
     LaunchedEffect(Unit) {
         // Like the desktop: opening Settings brings in changes from the other devices.
         if (sync?.optBoolean("on") == true) model.post("/api/sync/refresh", timeoutMs = 30_000)
@@ -104,7 +105,7 @@ fun SettingsScreen(model: AppModel) {
                     // The core goes on after the app stopped waiting (a slow network): once the
                     // device is gone, so is the error.
                     val failed = removeError?.takeIf { rows.any { it.optString("id") == removeFor } }
-                    Column(Modifier.padding(horizontal = 16.dp)) { ErrorText(failed ?: problem) }
+                    Column(Modifier.padding(horizontal = 16.dp)) { ErrorText(failed ?: problem, attempt = removeAttempt) }
                 }
                 items(rows) { device ->
                     ListItem(
@@ -118,6 +119,7 @@ fun SettingsScreen(model: AppModel) {
                                     val error = model.post("/api/sync/remove", JSONObject().put("device", id), 30_000).error
                                     removeFor = id
                                     removeError = error
+                                    if (error != null) removeAttempt++
                                 }
                             }) { Text(model.t("sync.remove"), color = MaterialTheme.colorScheme.error) }
                         },
@@ -302,7 +304,7 @@ fun SecondFactorScreen(model: AppModel, @Suppress("UNUSED_PARAMETER") activity: 
                             }
                         }) { Text(model.t("setup.mfa_portal")) }
                     }
-                    TotpEntry(model, status.optString("mfa"), secret, { secret = it }, { valid = it }, error, attempt)
+                    TotpEntry(model, status.optString("mfa"), secret, { secret = it; error = null }, { valid = it }, error, attempt)
                     Actions {
                         Button(enabled = valid, onClick = {
                             scope.launch {

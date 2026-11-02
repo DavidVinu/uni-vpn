@@ -32,7 +32,7 @@ struct AutoEntry: View {
                     InfoButton(model: model, text: model.t("setup.auto_help"))
                 }
             } footer: {
-                ErrorText(text: auto.error)
+                ErrorText(text: auto.error, attempt: auto.tries)
             }
             Section {
                 Button(model.t("setup.by_hand")) {

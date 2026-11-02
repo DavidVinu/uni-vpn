@@ -45,6 +45,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -55,6 +56,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -146,6 +150,8 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
     // Whose answer model.pairResult is (it survives turning the phone, like the page).
     val pairOwner = rememberSaveable { UUID.randomUUID().toString() }
     var error by remember { mutableStateOf<String?>(null) }
+    var attempt by remember { mutableIntStateOf(0) } // Next again with the same mistake: read out again
+    fun fail(text: String) { error = text; attempt++ }
 
     LaunchedEffect(Unit) {
         // Again until it arrives: without it every university would look "Not listed" (the core
@@ -432,14 +438,14 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
                         ) { otherMfa = it }
                     }
                 }
-                ErrorText(error)
+                ErrorText(error, attempt = attempt)
                 Actions {
                     if (detecting) CircularProgressIndicator()
                     Button(enabled = !detecting, onClick = {
                         when {
-                            uniId.isEmpty() -> error = model.t("setup.choose")
-                            uni?.mfa == "saml" -> error = model.t("setup.saml")
-                            isOther && host.isBlank() -> error = model.t("setup.enter_address")
+                            uniId.isEmpty() -> fail(model.t("setup.choose"))
+                            uni?.mfa == "saml" -> fail(model.t("setup.saml"))
+                            isOther && host.isBlank() -> fail(model.t("setup.enter_address"))
                             isOther && otherMfa.isEmpty() -> detectGateway(if (groups.size > 1 || ownGroup) group else "")
                             else -> go(SIGN_IN)
                         }
@@ -460,12 +466,12 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
                     modifier = Modifier.fillMaxWidth(),
                 )
                 PasswordField(model, password) { password = it }
-                ErrorText(error)
+                ErrorText(error, attempt = attempt)
                 Actions {
                     Button(onClick = {
                         when {
-                            !USER_RE.matches(user.trim()) -> error = model.t("setup.enter_user")
-                            password.isEmpty() -> error = model.t("setup.enter_password")
+                            !USER_RE.matches(user.trim()) -> fail(model.t("setup.enter_user"))
+                            password.isEmpty() -> fail(model.t("setup.enter_password"))
                             needsTotp -> {
                                 byHand = false
                                 go(SECOND_FACTOR)
@@ -517,7 +523,7 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
                         Text(model.t("setup.mfa_portal"))
                     }
                 }
-                TotpEntry(model, mfa, secret, { secret = it }, { secretValid = it }, error)
+                TotpEntry(model, mfa, secret, { secret = it; error = null }, { secretValid = it }, error)
                 Actions {
                     Button(enabled = secretValid, onClick = { submit() }) { Text(model.t("app.next")) }
                 }
@@ -537,7 +543,12 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
                 } else {
                     model.t("setup.waiting")
                 }
-                Text(text, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                // Read out when it changes, like the page's aria-live line: stuck, with Finish. A
+                // new sentence is a new text: one changed in place is not read.
+                key(text) {
+                    Text(text, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                }
                 if (stuck && model.setupSentAt > 0) {
                     TextButton(onClick = { model.setupSentAt = 0; if (model.changingAccount) finishChange() else go(DONE) }) {
                         Text(model.t("setup.finish"))
