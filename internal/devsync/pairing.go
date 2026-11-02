@@ -202,13 +202,17 @@ func (e *Engine) await(ctx context.Context, cancel context.CancelFunc, shown *Pa
 		case shown.Mode == "offer" && m.Kind == "joined":
 			e.logf(slog.LevelInfo, "Another device now syncs with this one")
 			finish("done", nil)
-			e.bg.Add(1)
-			go func() {
-				defer e.bg.Done()
-				if err := e.Sync(context.Background()); err != nil {
-					e.logf(slog.LevelWarn, "Sync failed: %s", err)
-				}
-			}()
+			e.mu.Lock()
+			if e.bgCtx.Err() == nil {
+				e.bg.Add(1)
+				go func() {
+					defer e.bg.Done()
+					if err := e.Sync(e.bgCtx); err != nil && e.bgCtx.Err() == nil {
+						e.logf(slog.LevelWarn, "Sync failed: %s", err)
+					}
+				}()
+			}
+			e.mu.Unlock()
 		case shown.Mode == "request" && m.Kind == "root":
 			err := e.join(context.WithoutCancel(ctx), m.Root)
 			var ae *ApplyError
