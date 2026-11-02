@@ -530,7 +530,12 @@ async function refresh() {
     S = await res.json();
     $("offline").hidden = true;
   } catch (e) {
-    $("offline").hidden = false;
+    // Shown again as a new alert, as in err(): WebKitGTK says nothing for an alert shown again.
+    if ($("offline").hidden) {
+      const fresh = $("offline").cloneNode(true);
+      fresh.hidden = false;
+      $("offline").replaceWith(fresh);
+    }
     return;
   } finally {
     refreshing = false;

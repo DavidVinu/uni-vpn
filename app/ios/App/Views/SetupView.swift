@@ -99,8 +99,17 @@ struct SetupView: View {
             }
         case .signIn: SignInPage(model: model, setup: setup)
         case .secondFactor: SecondFactorPage(model: model, setup: setup)
-        case .connecting: FitPage { ConnectingPage(model: model, setup: setup) }
-        case .done: FitPage { DonePage(model: model) }
+        case .connecting:
+            // Said when it changes, like the page's aria-live line: stuck, with Finish. Here, not
+            // in the page: FitPage holds two copies of it, and a change that stops it fitting
+            // would land in the other copy, which has no old value to compare.
+            FitPage { ConnectingPage(model: model, setup: setup) }
+                .onChange(of: ConnectingPage.text(model)) { _, new in announce(new) }
+        case .done:
+            // Said when it comes up by itself (connected, a pairing code, the one code), like the
+            // page's focus on its heading.
+            FitPage { DonePage(model: model) }
+                .onAppear { announce(model.t("setup.all_set")) }
         }
     }
 }
@@ -344,22 +353,27 @@ private struct ConnectingPage: View {
     let model: AppModel
     let setup: SetupState
 
-    var body: some View {
+    static func stuck(_ model: AppModel) -> Bool {
+        ["offline", "blocked", "error"].contains((model.status ?? JSON([:])).string("state"))
+    }
+
+    /// Why it waits, or that it tests the connection.
+    static func text(_ model: AppModel) -> String {
         let status = model.status ?? JSON([:])
-        let state = status.string("state")
-        let stuck = ["offline", "blocked", "error"].contains(state)
-        let text = stuck || status.string("message_id") == "waiting_for_code"
+        return stuck(model) || status.string("message_id") == "waiting_for_code"
             ? model.strings.message(status.string("message"), status.object("message_t"))
             : model.t("setup.waiting")
+    }
+
+    var body: some View {
+        let stuck = Self.stuck(model)
         VStack(spacing: 16) {
             Spacer()
             ProgressView().controlSize(.large)
             Text(model.t("look.connecting")).font(.title2.weight(.semibold))
-            Text(text)
+            Text(Self.text(model))
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
-                // Said when it changes, like the page's aria-live line: stuck, with Finish.
-                .onChange(of: text) { _, new in announce(new) }
             if stuck && setup.sentAt != nil {
                 Button(model.t("setup.finish")) {
                     setup.sentAt = nil

@@ -138,7 +138,9 @@ type Engine struct {
 	pairSlots     pairing // the slots of the code on screen
 	cancelPair    context.CancelFunc
 	wake          chan struct{}
-	bg            sync.WaitGroup // the sync after a device joined (tests wait for it)
+	bg            sync.WaitGroup // the sync after a device joined (Run waits for it)
+	bgCtx         context.Context
+	bgStop        context.CancelFunc
 	// wall is the wall clock without Go's monotonic reading, which stops while the device sleeps
 	// (except on Windows): the relay's lifetimes and the user's minutes go on meanwhile.
 	wall func() time.Time
@@ -162,6 +164,7 @@ func New(opts Options) *Engine {
 		opts.CodeLifetime = 10 * time.Minute
 	}
 	e := &Engine{opts: opts, wake: make(chan struct{}, 1), wall: func() time.Time { return time.Now().Round(0) }}
+	e.bgCtx, e.bgStop = context.WithCancel(context.Background())
 	if opts.Relay != "" {
 		e.relay = newRelay(opts.Relay)
 	}
@@ -586,6 +589,11 @@ func (e *Engine) Run(stop <-chan struct{}) {
 		select {
 		case <-stop:
 			e.cancelPairing()
+			// The round after a join ends with the core: no write after Run returned.
+			e.mu.Lock()
+			e.bgStop()
+			e.mu.Unlock()
+			e.bg.Wait()
 			return
 		case <-first:
 		case <-e.wake:
