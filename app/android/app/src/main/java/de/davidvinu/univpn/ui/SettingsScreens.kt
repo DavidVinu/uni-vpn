@@ -246,6 +246,7 @@ fun SecondFactorScreen(model: AppModel, @Suppress("UNUSED_PARAMETER") activity: 
     var secret by rememberSaveable { mutableStateOf("") }
     var valid by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var attempt by remember { mutableIntStateOf(0) } // each failure: its error is read out, the same one too
     // One code from the user's app where the core can add itself in the MFA portal, as on the
     // desktop; null while the list loads.
     var auto by remember { mutableStateOf<Boolean?>(if (model.enrollSentAt > 0) true else null) }
@@ -301,12 +302,12 @@ fun SecondFactorScreen(model: AppModel, @Suppress("UNUSED_PARAMETER") activity: 
                             }
                         }) { Text(model.t("setup.mfa_portal")) }
                     }
-                    TotpEntry(model, status.optString("mfa"), secret, { secret = it }, { valid = it }, error)
+                    TotpEntry(model, status.optString("mfa"), secret, { secret = it }, { valid = it }, error, attempt)
                     Actions {
                         Button(enabled = valid, onClick = {
                             scope.launch {
                                 val result = model.post("/api/totp", JSONObject().put("secret", secret.trim()))
-                                if (result.ok) model.back() else error = result.error
+                                if (result.ok) model.back() else { error = result.error; attempt++ }
                             }
                         }) { Text(model.t("app.save")) }
                     }

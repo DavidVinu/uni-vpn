@@ -45,7 +45,7 @@ import org.json.JSONObject
  * a key whose codes it can't use is refused before the user registers it.
  */
 @Composable
-fun TotpEntry(model: AppModel, mfa: String, secret: String, onSecret: (String) -> Unit, onValid: (Boolean) -> Unit, error: String?) {
+fun TotpEntry(model: AppModel, mfa: String, secret: String, onSecret: (String) -> Unit, onValid: (Boolean) -> Unit, error: String?, attempt: Int = 0) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var shown by rememberSaveable { mutableStateOf(false) }
     var code by remember { mutableStateOf<String?>(null) }
@@ -107,7 +107,7 @@ fun TotpEntry(model: AppModel, mfa: String, secret: String, onSecret: (String) -
         lifecycle.currentStateFlow.first { it.isAtLeast(Lifecycle.State.STARTED) }
         checks++ // the next code
     }
-    ErrorText(checkError ?: error, live = checkError == null || atOnce)
+    ErrorText(checkError ?: error, live = checkError == null || atOnce, attempt = attempt)
     code?.let {
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), itemVerticalAlignment = Alignment.CenterVertically) {
             CircularProgressIndicator(progress = { left / 30f }, modifier = Modifier.padding(4.dp))

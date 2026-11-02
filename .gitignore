@@ -9,3 +9,4 @@ __pycache__/
 !internal/certs/testdata/*.pem
 web-ext-artifacts/
 .DS_Store
+graphify-out/
