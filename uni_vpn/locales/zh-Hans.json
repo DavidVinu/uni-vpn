@@ -43,6 +43,8 @@
   "uni.ugr.sign_in": "你的完整 UGR 邮箱地址（name@ugr.es 或 name@correo.ugr.es）及其密码。",
   "uni.uiuc.sign_in": "你的 NetID（不带 @illinois.edu）及其密码。",
   "uni.uwaterloo.sign_in": "你的 WatIAM ID（不带 @uwaterloo.ca）及其密码。",
+  "uni.uottawa.sign_in": "你的 uoAccess ID（例如 jsmit000，不带 @uottawa.ca）及其密码。",
+  "uni.uottawa-students.sign_in": "你的 uoAccess ID（例如 jsmit000，不带 @uottawa.ca）及其密码。",
   "setup.enter_user": "请输入用户名，例如 ab123",
   "setup.enter_password": "请输入密码",
   "setup.invalid_user": "请检查用户名",

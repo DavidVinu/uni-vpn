@@ -22,10 +22,10 @@ type Updater interface {
 	Discard()
 }
 
-// idleForUpdateLocked: nothing uses or wants the tunnel, so replacing the program and
-// restarting goes unnoticed. mu must be held.
+// idleForUpdateLocked: nothing uses or wants the tunnel and no website is open directly, so
+// replacing the program and restarting goes unnoticed. mu must be held.
 func (d *Daemon) idleForUpdateLocked() bool {
-	return d.tun == nil && !d.hasDemand() && !d.loopRunning &&
+	return d.tun == nil && !d.hasDemand() && !d.loopRunning && !d.directOpen() &&
 		d.state != Connecting && d.state != Connected && d.state != Disconnecting
 }
 
