@@ -231,7 +231,7 @@ private struct UniversityPage: View {
             }
             if setup.error != nil {
                 Section {
-                    ErrorText(text: setup.error)
+                    ErrorText(text: setup.error, attempt: setup.attempt)
                 }
             }
         }
@@ -244,11 +244,11 @@ private struct UniversityPage: View {
 
     private func next() {
         if setup.uniId.isEmpty {
-            setup.error = model.t("setup.choose")
+            setup.fail(model.t("setup.choose"))
         } else if setup.uni?.mfa == "saml" {
-            setup.error = model.t("setup.saml")
+            setup.fail(model.t("setup.saml"))
         } else if setup.isOther && setup.host.trimmingCharacters(in: .whitespaces).isEmpty {
-            setup.error = model.t("setup.enter_address")
+            setup.fail(model.t("setup.enter_address"))
         } else if setup.isOther && setup.otherMfa.isEmpty {
             Task { await setup.detect(model, group: setup.showsGroups ? setup.group : "") }
         } else {
@@ -276,7 +276,7 @@ private struct SignInPage: View {
             } footer: {
                 VStack(alignment: .leading, spacing: 8) {
                     if let hint = SetupState.signInHint(model, uniId: setup.uniId) { Text(hint) }
-                    ErrorText(text: setup.error)
+                    ErrorText(text: setup.error, attempt: setup.attempt)
                 }
             }
         }
@@ -290,9 +290,9 @@ private struct SignInPage: View {
     private func next() {
         let user = setup.user.trimmingCharacters(in: .whitespacesAndNewlines)
         if user.wholeMatch(of: userPattern) == nil {
-            setup.error = model.t("setup.enter_user")
+            setup.fail(model.t("setup.enter_user"))
         } else if setup.password.isEmpty {
-            setup.error = model.t("setup.enter_password")
+            setup.fail(model.t("setup.enter_password"))
         } else if setup.needsTotp {
             setup.byHand = false
             setup.go(.secondFactor)
@@ -358,6 +358,8 @@ private struct ConnectingPage: View {
             Text(text)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
+                // Said when it changes, like the page's aria-live line: stuck, with Finish.
+                .onChange(of: text) { _, new in announce(new) }
             if stuck && setup.sentAt != nil {
                 Button(model.t("setup.finish")) {
                     setup.sentAt = nil

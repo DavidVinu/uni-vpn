@@ -47,6 +47,8 @@ final class SetupState {
     var byHand = false
     var pairCode = ""
     var error: String?
+    /// Counts the mistakes Next finds on a page: the same one again is said again.
+    var attempt = 0
     var busy = false
     /// The setup request is out.
     private(set) var sending = false
@@ -62,6 +64,12 @@ final class SetupState {
     @ObservationIgnored private var changedAt = -TimeInterval.infinity
 
     func pageChanged() { changedAt = ProcessInfo.processInfo.systemUptime }
+
+    /// A mistake Next found on the page.
+    func fail(_ text: String) {
+        error = text
+        attempt += 1
+    }
 
     /// A tap right after the page changed is the second of a double tap meant for the page
     /// before: it would go back once more, or show the next page's error (Android: justChanged).
@@ -386,6 +394,8 @@ final class AutoEnroll {
 
     var code = ""
     var error: String?
+    /// Counts the codes Next refused: the same mistake again is said again.
+    var tries = 0
     /// A run was started here and is followed until it is done or failed.
     private(set) var running = false
     /// The request is out.
@@ -430,6 +440,7 @@ final class AutoEnroll {
         let typed = code.filter { !$0.isWhitespace }
         guard (6...8).contains(typed.count), typed.allSatisfy({ $0.isASCII && $0.isNumber }) else {
             error = model.t("enroll.enter_code")
+            tries += 1
             return
         }
         let answer = stage(model.status) == "code"

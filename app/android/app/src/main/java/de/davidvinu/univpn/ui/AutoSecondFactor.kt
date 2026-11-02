@@ -12,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -56,6 +57,7 @@ fun AutoSecondFactor(
     var code by rememberSaveable { mutableStateOf("") }
     var seen by rememberSaveable { mutableStateOf("") }
     var invalid by remember { mutableStateOf<String?>(null) }
+    var tries by remember { mutableIntStateOf(0) } // the same mistake again: read out again
     // The field and Next give way to the spinner: "Set it up by hand instead" moves up under the
     // finger (App.kt doubleTapGuard).
     LaunchedEffect(busy) { model.screenChanged() }
@@ -89,6 +91,7 @@ fun AutoSecondFactor(
         val typed = code.replace(Regex("\\s"), "")
         if (!CODE_RE.matches(typed)) {
             invalid = model.t("enroll.enter_code")
+            tries++
             return
         }
         invalid = null
@@ -118,7 +121,7 @@ fun AutoSecondFactor(
             modifier = Modifier.fillMaxWidth(),
         )
     }
-    ErrorText(invalid ?: error)
+    ErrorText(invalid ?: error, attempt = tries)
     if (!busy) {
         Actions {
             Button(onClick = { next() }) { Text(model.t("app.next")) }

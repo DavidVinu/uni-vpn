@@ -30,6 +30,8 @@ struct PairView: View {
                             .font(.system(size: 64))
                             .foregroundStyle(.green)
                         Text(model.t("sync.done")).font(.title3.weight(.semibold))
+                            // Said when it appears, like the page's focus on its heading.
+                            .onAppear { announce(model.t("sync.done")) }
                         // Linked, but some settings could not be used here.
                         ErrorText(text: error)
                     }

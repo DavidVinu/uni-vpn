@@ -20,15 +20,28 @@ struct TotpEntry: View {
     /// A key typed letter by letter is incomplete until its last letter: the check's answer is
     /// said only for a key that came at once (scanned or pasted).
     @State private var atOnce = true
+    /// The error (with its attempt) the key was changed under: it asks to enter the key again,
+    /// so once the key is entered again it is gone (shown and said after each check, it would
+    /// be read after almost every letter).
+    @State private var changedUnder: String?
+
+    private var errorID: String { "\(attempt)|\(error ?? "")" }
 
     var body: some View {
-        ScanButton(model: model, title: model.t("phone.scan_qr")) { atOnce = true; secret = $0 }
+        ScanButton(model: model, title: model.t("phone.scan_qr")) {
+            atOnce = true
+            changedUnder = errorID
+            secret = $0
+        }
         PasswordField(model: model, label: model.t("setup.token_secret"), text: Binding(get: { secret }, set: {
-            atOnce = abs($0.count - secret.count) > 1
+            // A hidden field empties itself at the first letter typed after coming back to it:
+            // that one letter is typed, not a key that came at once.
+            atOnce = $0.count > 1 && abs($0.count - secret.count) > 1
+            changedUnder = errorID
             secret = $0
         }), showLabel: "setup.show_secret")
             .task(id: "\(secret)|\(mfa)|\(checks)") { await check() }
-        ErrorText(text: checkError ?? error, live: checkError == nil || atOnce, attempt: attempt)
+        ErrorText(text: checkError ?? (changedUnder == errorID ? nil : error), live: checkError == nil || atOnce, attempt: attempt)
         if let code {
             HStack(spacing: 12) {
                 ZStack {
