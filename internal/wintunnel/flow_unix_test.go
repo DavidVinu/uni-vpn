@@ -3,6 +3,7 @@
 package wintunnel
 
 import (
+	"errors"
 	"io"
 	"net"
 	"os"
@@ -134,6 +135,29 @@ func TestScriptErrorEndsTheAttemptWithItsMessage(t *testing.T) {
 	if v, _ := tn.Classification(); v != (tunnel.Verdict{State: "error", Message: messages.StartFailed.Text}) {
 		t.Fatal(v)
 	}
+}
+
+func TestLeftoverAdapterIsRemovedBeforeOpenconnectStarts(t *testing.T) {
+	tn, _ := newFlow(t)
+	var names []string
+	tn.RemoveAdapter = func(name string) (int, error) {
+		names = append(names, name)
+		if tn.Pid() != 0 {
+			t.Error("openconnect already runs")
+		}
+		return 0, errors.New("access denied")
+	}
+	if err := tn.Start([]byte("pw"), ""); err != nil {
+		t.Fatal(err)
+	}
+	// A failed removal does not stop the attempt: there may be nothing left to remove.
+	if !tn.WaitReady(5 * time.Second) {
+		t.Fatal("not ready")
+	}
+	if !slices.Equal(names, []string{Interface}) {
+		t.Fatal(names)
+	}
+	tn.Stop(3 * time.Second)
 }
 
 func TestStopBeforeTheProcessExistsEndsTheAttempt(t *testing.T) {

@@ -27,3 +27,6 @@ func defaultCtrlC(int) bool { return false }
 
 // CtrlCHelperMain only works on Windows.
 func CtrlCHelperMain(int) int { return 1 }
+
+// Wintun adapters exist only on Windows.
+func removeAdapter(string) (int, error) { return 0, nil }

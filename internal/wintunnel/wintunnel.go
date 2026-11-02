@@ -166,6 +166,9 @@ type Tunnel struct {
 	CtrlC func(pid int) bool
 	// NewSocks starts the SOCKS server; required.
 	NewSocks SocksFactory
+	// RemoveAdapter removes what an earlier openconnect left of the adapter named Interface and
+	// returns how many it removed. New sets the default (see removeAdapter).
+	RemoveAdapter func(name string) (int, error)
 
 	mu        sync.Mutex
 	stateFile string
@@ -177,7 +180,8 @@ type Tunnel struct {
 
 // New creates a Windows tunnel. tokenDir "" means platform.StateDir().
 func New(cfg tunnel.Config, openconnect, script string, log *slog.Logger, tokenDir string) *Tunnel {
-	w := &Tunnel{Tunnel: tunnel.New(cfg, openconnect, script, log, "", tokenDir), Script: script, CtrlC: defaultCtrlC}
+	w := &Tunnel{Tunnel: tunnel.New(cfg, openconnect, script, log, "", tokenDir), Script: script, CtrlC: defaultCtrlC,
+		RemoveAdapter: removeAdapter}
 	w.Hooks = tunnel.Hooks{
 		Command:       w.command,
 		Env:           w.env,
@@ -260,6 +264,11 @@ func (w *Tunnel) StateFile() string {
 func (w *Tunnel) Start(password []byte, totp string) error {
 	if err := os.MkdirAll(w.TokenDir, 0o777); err != nil {
 		return err
+	}
+	if n, err := w.RemoveAdapter(Interface); err != nil {
+		w.logf(slog.LevelWarn, "Could not remove the leftover adapter %q: %v", Interface, err)
+	} else if n > 0 {
+		w.logf(slog.LevelInfo, "Removed the leftover adapter %q", Interface)
 	}
 	if err := w.Tunnel.Start(password, totp); err != nil {
 		return err
