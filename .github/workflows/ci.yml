@@ -952,7 +952,7 @@ jobs:
           git push -f origin refs/tags/latest
           if ! gh release view latest >/dev/null 2>&1; then
             gh release create latest --title "Uni VPN" --latest \
-              --notes "Download the file for your computer and open it: uni-vpn.pkg (Mac), uni-vpn-setup.exe (Windows), uni-vpn.deb (Ubuntu, Debian, Mint) or uni-vpn.rpm (Fedora)."
+              --notes "Download the file for your computer and open it: uni-vpn.pkg (Mac), uni-vpn-setup.exe (Windows), uni-vpn.deb (Ubuntu, Debian, Mint), uni-vpn.rpm (Fedora) or uni-vpn.apk (Android)."
           fi
           # The manifest after its zips: it must never name a file that is not there yet. Both before
           # the installers: a new installer that finds the old manifest would update itself back.
@@ -961,11 +961,10 @@ jobs:
           # uni-vpn-openconnect-win64.zip: what install.ps1 downloads when run without the installer.
           gh release upload latest out/uni-vpn.pkg out/uni-vpn-setup.exe out/uni-vpn.deb out/uni-vpn.rpm \
             out/uni-vpn-arm64.deb out/uni-vpn-arm64.rpm out/uni-vpn-openconnect-win64.zip --clobber
-          gh release edit latest --notes "Version $UNI_VPN_VERSION, $(date -u +%Y-%m-%d). Download the file for your computer and open it: uni-vpn.pkg (Mac), uni-vpn-setup.exe (Windows), uni-vpn.deb (Ubuntu, Debian, Mint) or uni-vpn.rpm (Fedora)."
+          gh release edit latest --notes "Version $UNI_VPN_VERSION, $(date -u +%Y-%m-%d). Download the file for your computer and open it: uni-vpn.pkg (Mac), uni-vpn-setup.exe (Windows), uni-vpn.deb (Ubuntu, Debian, Mint), uni-vpn.rpm (Fedora) or uni-vpn.apk (Android)."
 
-  # Only a signed app goes to the release page; sideloading is not the way for users
-  # (docs/android.md), but it lets testers install the newest build. After "publish", so the
-  # release exists and its tag is this commit.
+  # Only a signed app goes to the release page, where the download page links it. After
+  # "publish", so the release exists and its tag is this commit.
   publish-android:
     needs: [publish, android]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
