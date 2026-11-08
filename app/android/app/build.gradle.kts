@@ -26,13 +26,14 @@ android {
 
     signingConfigs {
         // The upload key, from repository secrets (docs/android.md). Without it the release
-        // build stays unsigned and Play App Signing or a later step signs it.
+        // build stays unsigned and Play App Signing or a later step signs it. Trimmed: a secret
+        // pasted from a file keeps its trailing newline.
         if (keystore != null) {
             create("release") {
                 storeFile = file(keystore)
-                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
-                keyAlias = System.getenv("ANDROID_KEY_ALIAS")
-                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")?.trim()
+                keyAlias = System.getenv("ANDROID_KEY_ALIAS")?.trim()
+                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")?.trim()
             }
         }
     }
