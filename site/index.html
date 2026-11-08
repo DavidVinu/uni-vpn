@@ -73,7 +73,7 @@ footer a{color:inherit}
     <div class="size" id="note"></div>
   </section>
   <section class="others">
-    <h2 data-t="others">Other computers</h2>
+    <h2 data-t="others">Other devices</h2>
     <nav class="list" id="list"></nav>
   </section>
 </main>
@@ -86,27 +86,27 @@ footer a{color:inherit}
 const BASE = "https://github.com/DavidVinu/uni-vpn/releases/latest/download/";
 const T = {
   en: {tagline: "Your university's websites from home, as if you were on campus.", download: "Download for {os}",
-    others: "Other computers", source: "Source code", imprint: "Imprint", privacy: "Privacy", phone: "For computers. Open this page on your Mac, Windows or Linux computer.",
+    others: "Other devices", source: "Source code", imprint: "Imprint", privacy: "Privacy", phone: "Not on iPhone yet. Open this page on your computer or Android phone.", android: "If Android asks: allow your browser to install apps.",
     mac: "If your Mac says the file cannot be opened: open System Settings, Privacy & Security, and click \"Open Anyway\".",
     win: "If a blue box appears: click \"More info\", then \"Run anyway\".", arm: "ARM processor", help: "More help"},
   de: {tagline: "Die Webseiten deiner Uni von zu Hause, als wärst du auf dem Campus.", download: "Für {os} herunterladen",
-    others: "Andere Computer", source: "Quellcode", imprint: "Impressum", privacy: "Datenschutz", phone: "Für Computer. Öffne diese Seite auf deinem Mac, Windows- oder Linux-Computer.",
+    others: "Andere Geräte", source: "Quellcode", imprint: "Impressum", privacy: "Datenschutz", phone: "Noch nicht für iPhone. Öffne diese Seite auf deinem Computer oder Android-Handy.", android: "Wenn Android fragt: Erlaube deinem Browser, Apps zu installieren.",
     mac: "Wenn dein Mac sagt, dass die Datei nicht geöffnet werden kann: Öffne die Systemeinstellungen, Datenschutz & Sicherheit, und klicke auf \"Dennoch öffnen\".",
     win: "Wenn ein blaues Fenster erscheint: Klicke auf \"Weitere Informationen\", dann auf \"Trotzdem ausführen\".", arm: "ARM-Prozessor", help: "Weitere Hilfe"},
   fr: {tagline: "Les sites de votre université depuis chez vous, comme sur le campus.", download: "Télécharger pour {os}",
-    others: "Autres ordinateurs", source: "Code source", imprint: "Mentions légales", privacy: "Confidentialité", phone: "Pour ordinateurs. Ouvrez cette page sur votre Mac, PC Windows ou Linux.",
+    others: "Autres appareils", source: "Code source", imprint: "Mentions légales", privacy: "Confidentialité", phone: "Pas encore sur iPhone. Ouvrez cette page sur votre ordinateur ou votre téléphone Android.", android: "Si Android le demande : autorisez votre navigateur à installer des applications.",
     mac: "Si votre Mac indique que le fichier ne peut pas être ouvert : ouvrez Réglages Système, Confidentialité et sécurité, puis cliquez sur « Ouvrir quand même ».",
     win: "Si une fenêtre bleue apparaît : cliquez sur « Informations complémentaires », puis sur « Exécuter quand même ».", arm: "Processeur ARM", help: "Plus d’aide"},
   es: {tagline: "Las webs de tu universidad desde casa, como si estuvieras en el campus.", download: "Descargar para {os}",
-    others: "Otros ordenadores", source: "Código fuente", imprint: "Aviso legal", privacy: "Privacidad", phone: "Para ordenadores. Abre esta página en tu Mac, PC con Windows o Linux.",
+    others: "Otros dispositivos", source: "Código fuente", imprint: "Aviso legal", privacy: "Privacidad", phone: "Aún no disponible para iPhone. Abre esta página en tu ordenador o móvil Android.", android: "Si Android lo pide: permite que tu navegador instale aplicaciones.",
     mac: "Si tu Mac dice que el archivo no se puede abrir: abre Ajustes del Sistema, Privacidad y seguridad, y haz clic en \"Abrir igualmente\".",
     win: "Si aparece un recuadro azul: haz clic en \"Más información\" y luego en \"Ejecutar de todas formas\".", arm: "Procesador ARM", help: "Más ayuda"},
   "zh-Hans": {tagline: "在家访问学校网站，就像在校园里一样。", download: "下载 {os} 版",
-    others: "其他电脑", source: "源代码", imprint: "网站信息", privacy: "隐私", phone: "适用于电脑。请在 Mac、Windows 或 Linux 电脑上打开此页面。",
+    others: "其他设备", source: "源代码", imprint: "网站信息", privacy: "隐私", phone: "暂不支持 iPhone。请在电脑或 Android 手机上打开此页面。", android: "如果 Android 询问：允许浏览器安装应用。",
     mac: "如果 Mac 提示无法打开该文件：打开“系统设置”>“隐私与安全性”，然后点击“仍要打开”。",
     win: "如果出现蓝色窗口：点击“更多信息”，然后点击“仍要运行”。", arm: "ARM 处理器", help: "更多帮助"},
   "zh-Hant": {tagline: "在家存取學校網站，就像在校園裡一樣。", download: "下載 {os} 版",
-    others: "其他電腦", source: "原始碼", imprint: "網站資訊", privacy: "隱私權", phone: "適用於電腦。請在 Mac、Windows 或 Linux 電腦上開啟此頁面。",
+    others: "其他裝置", source: "原始碼", imprint: "網站資訊", privacy: "隱私權", phone: "尚不支援 iPhone。請在電腦或 Android 手機上開啟此頁面。", android: "如果 Android 詢問：允許瀏覽器安裝應用程式。",
     mac: "如果 Mac 提示無法打開該檔案：打開「系統設定」>「隱私權與安全性」，然後按一下「強制打開」。",
     win: "如果出現藍色視窗：按一下「其他資訊」，然後按一下「仍要執行」。", arm: "ARM 處理器", help: "更多說明"},
 };
@@ -128,8 +128,9 @@ const FILES = {
   windows: [{os: "Windows", file: "uni-vpn-setup.exe"}],
   deb: [{os: "Ubuntu, Debian, Mint", file: "uni-vpn.deb"}, {os: "Ubuntu, Debian, Mint", file: "uni-vpn-arm64.deb", arm: true}],
   rpm: [{os: "Fedora", file: "uni-vpn.rpm"}, {os: "Fedora", file: "uni-vpn-arm64.rpm", arm: true}],
+  android: [{os: "Android", file: "uni-vpn.apk"}],
 };
-const ALL = [...FILES.mac, ...FILES.windows, ...FILES.deb, ...FILES.rpm];
+const ALL = [...FILES.mac, ...FILES.windows, ...FILES.deb, ...FILES.rpm, ...FILES.android];
 const ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/></svg>';
 const INFO = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5m0-8h.01" stroke-linecap="round"/></svg>';
 
@@ -152,7 +153,8 @@ function tip(key) {
 
 async function detect() {
   const ua = navigator.userAgent, plat = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "";
-  if (/Android|iPhone|iPad|iPod/i.test(ua) || (/Mac/.test(plat) && navigator.maxTouchPoints > 1)) return {kind: "phone"};
+  if (/Android/i.test(ua)) return {kind: "android"};
+  if (/iPhone|iPad|iPod/i.test(ua) || (/Mac/.test(plat) && navigator.maxTouchPoints > 1)) return {kind: "phone"};
   // One setup for Intel, AMD and ARM processors.
   if (/Win/i.test(plat) || /Windows/.test(ua)) return {kind: "windows"};
   if (/Mac/i.test(plat) || /Mac OS X/.test(ua)) return {kind: "mac"};
@@ -170,7 +172,7 @@ async function detect() {
 detect().then(d => {
   const main = document.getElementById("main"), note = document.getElementById("note");
   let shown = [];
-  if (d.kind === "mac" || d.kind === "windows") shown = FILES[d.kind];
+  if (d.kind === "mac" || d.kind === "windows" || d.kind === "android") shown = FILES[d.kind];
   if (d.kind === "linux") {
     const pick = list => list.filter(f => !!f.arm === d.arm);
     shown = d.fedora ? [...pick(FILES.rpm), ...pick(FILES.deb)] : [...pick(FILES.deb), ...pick(FILES.rpm)];
@@ -178,6 +180,7 @@ detect().then(d => {
   shown.forEach(f => main.appendChild(button(f)));
   if (d.kind === "mac") note.appendChild(tip("mac"));
   if (d.kind === "windows") note.appendChild(tip("win"));
+  if (d.kind === "android") note.appendChild(tip("android"));
   if (d.kind === "phone") { note.textContent = t(d.kind); }
   if (!shown.length && d.kind !== "phone") document.querySelector(".others h2").hidden = true;
   const list = document.getElementById("list");
