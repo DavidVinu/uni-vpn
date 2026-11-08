@@ -417,9 +417,13 @@ jobs:
         run: |
           before=$(pgrep -x "Uni VPN")
           open -n "/Applications/Uni VPN.app"
-          open "uni-vpn://settings"
-          sleep 8
+          for i in $(seq 15); do sleep 1; test "$(pgrep -x "Uni VPN")" = "$before" && break; done
           test "$(pgrep -x "Uni VPN")" = "$before" || { echo "::error::a second copy stayed open"; pgrep -lx "Uni VPN"; exit 1; }
+          # Only after the second copy is gone: Launch Services would hand the link to the copy
+          # that is quitting and fail with -600.
+          open "uni-vpn://settings"
+          sleep 3
+          test "$(pgrep -x "Uni VPN")" = "$before" || { echo "::error::the settings link started a second copy"; pgrep -lx "Uni VPN"; exit 1; }
       - name: Drag it to the Trash
         run: |
           app="$HOME/Library/Application Support/uni-vpn/app"
