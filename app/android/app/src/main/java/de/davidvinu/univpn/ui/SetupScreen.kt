@@ -562,7 +562,10 @@ fun SetupFlow(model: AppModel, activity: MainActivity) {
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = Ok, modifier = Modifier.size(72.dp))
-                Text(model.t("setup.all_set"), style = MaterialTheme.typography.headlineMedium)
+                // Read out when it comes up by itself (connected, a pairing code, the one code), like
+                // the page's focus on its heading.
+                Text(model.t("setup.all_set"), style = MaterialTheme.typography.headlineMedium,
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
                 val hasDomains = (status.optJSONArray("domains")?.length() ?: 0) > 0
                 Text(
                     model.t(if (hasDomains) "setup.all_set_sub" else "setup.all_set_no_domains"),
