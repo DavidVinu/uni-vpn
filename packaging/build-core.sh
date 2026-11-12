@@ -15,7 +15,8 @@ out=$(mkdir -p "$2" && cd "$2" && pwd)
 apps=""
 if [ -n "${3:-}" ]; then
   apps=$(cd "$3" && pwd)
-  for f in "darwin/desktop/Uni VPN.app/Contents/MacOS/Uni VPN" "windows/desktop/Uni VPN.exe" \
+  for f in "darwin/desktop/Uni VPN.app/Contents/MacOS/Uni VPN" "darwin/desktop/Uni VPN.app/Contents/Resources/Assets.car" \
+    "windows/desktop/Uni VPN.exe" \
     darwin/runtime/arm64/bin/openconnect darwin/runtime/arm64/bin/ocproxy \
     darwin/runtime/x86_64/bin/openconnect darwin/runtime/x86_64/bin/ocproxy \
     windows/openconnect/openconnect.exe; do
