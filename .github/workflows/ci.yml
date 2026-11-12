@@ -260,8 +260,27 @@ jobs:
           path: runtime-*.tar.gz
           retention-days: 3
 
+  # The app icon's looks for macOS 26 (app/AppIcon.icon): Xcode 26's actool only runs on macOS 26,
+  # the .pkg is built on macos-15. The previews show each look to anyone without a Mac.
+  macos-icon:
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - run: packaging/macos/build-icon.sh icon icon-preview
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-icon
+          path: icon
+          retention-days: 3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-icon-preview
+          path: icon-preview
+          retention-days: 7
+
   macos-pkg:
-    needs: macos-runtime
+    needs: [macos-runtime, macos-icon]
     runs-on: macos-15
     timeout-minutes: 30
     env:
@@ -324,8 +343,12 @@ jobs:
             echo "MACOS_INSTALLER_IDENTITY=Developer ID Installer"
             echo "MACOS_NOTARY_PROFILE=uni-vpn"
           } >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-icon
+          path: icon
       - name: Build uni-vpn.pkg
-        run: packaging/macos/build-pkg.sh runtime "$UNI_VPN_VERSION" uni-vpn.pkg app-update
+        run: MACOS_ICON_DIR=icon packaging/macos/build-pkg.sh runtime "$UNI_VPN_VERSION" uni-vpn.pkg app-update
       # The app window alone, for the updates (core-files). As a tar: artifacts lose the executable flag.
       - run: tar -czf app-darwin.tar.gz -C app-update .
       - uses: actions/upload-artifact@v4
@@ -361,6 +384,9 @@ jobs:
           command -v openconnect || echo "openconnect is the package's"
           grep -q "/Applications/Uni VPN.app/Contents/MacOS/Uni VPN" "$HOME/Library/LaunchAgents/de.davidvinu.uni-vpn.app.plist"
           lipo -archs "/Applications/Uni VPN.app/Contents/MacOS/Uni VPN"
+          # The icon's looks for macOS 26 (dark, tinted) next to the older icon.
+          test -s "/Applications/Uni VPN.app/Contents/Resources/Assets.car"
+          test -s "/Applications/Uni VPN.app/Contents/Resources/AppIcon.icns"
           # Setup started the menu bar app; one that ends at start would reach every user with the
           # next update.
           sleep 5

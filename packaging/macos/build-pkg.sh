@@ -6,6 +6,8 @@
 # next to the core: APP-DIR/desktop/Uni VPN.app and APP-DIR/runtime/<arch> (packaging/build-core.sh).
 # Signs and notarizes when MACOS_APP_IDENTITY, MACOS_INSTALLER_IDENTITY and
 # MACOS_NOTARY_PROFILE are set (see .github/workflows/ci.yml); unsigned otherwise.
+# MACOS_ICON_DIR: Assets.car from build-icon.sh, made on macOS 26 (CI: macos-icon); without it
+# this script runs build-icon.sh itself.
 set -euo pipefail
 runtime=$(cd "$1" && pwd)
 version="$2"
@@ -47,6 +49,12 @@ for size in 16 32 128 256 512; do
   sips -z $((size * 2)) $((size * 2)) "$repo/app/icon.png" --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
 done
 iconutil -c icns "$iconset" -o "$resources/AppIcon.icns"
+# macOS 26 and later show the icon from Assets.car (CFBundleIconName), with its dark and tinted looks.
+if [ -n "${MACOS_ICON_DIR:-}" ]; then
+  cp "$MACOS_ICON_DIR/Assets.car" "$resources/"
+else
+  "$repo/packaging/macos/build-icon.sh" "$resources"
+fi
 plutil -lint "$app/Contents/Info.plist"
 alone=""
 if [ -n "${4:-}" ]; then
@@ -55,7 +63,7 @@ if [ -n "${4:-}" ]; then
   mkdir -p "$alone/Contents/MacOS" "$alone/Contents/Resources"
   cp "$app/Contents/MacOS/Uni VPN" "$alone/Contents/MacOS/"
   cp "$app/Contents/Info.plist" "$alone/Contents/"
-  cp "$resources/AppIcon.icns" "$alone/Contents/Resources/"
+  cp "$resources/AppIcon.icns" "$resources/Assets.car" "$alone/Contents/Resources/"
 fi
 
 if [ -n "${MACOS_APP_IDENTITY:-}" ]; then

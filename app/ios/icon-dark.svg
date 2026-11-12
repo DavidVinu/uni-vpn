@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- The dark look (iOS 18+): no background, iOS puts its own dark one behind the shield. -->
+  <defs>
+    <linearGradient id="shield" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4f8cf5"/>
+      <stop offset="1" stop-color="#1f66e0"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(512 512) scale(1.2) translate(-512 -512)">
+    <path d="M512 232 L732 314 V500 C732 640 640 738 512 792 C384 738 292 640 292 500 V314 Z" fill="url(#shield)"/>
+    <path d="M512 410 L646 470 L512 530 L378 470 Z" fill="#fff"/>
+    <path d="M430 500 V572 C460 600 564 600 594 572 V500 L512 537 Z" fill="#fff"/>
+    <path d="M630 478 V560" stroke="#fff" stroke-width="12" stroke-linecap="round"/>
+  </g>
+</svg>

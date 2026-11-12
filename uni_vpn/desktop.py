@@ -183,7 +183,9 @@ def _browser_entry(port: int, dry: bool, created, run) -> bool:
 def info_plist(port: int) -> dict:
     return {
         "CFBundleName": APP_NAME, "CFBundleDisplayName": APP_NAME, "CFBundleIdentifier": BUNDLE_ID,
-        "CFBundleExecutable": APP_NAME, "CFBundleIconFile": "AppIcon", "CFBundlePackageType": "APPL",
+        "CFBundleExecutable": APP_NAME, "CFBundleIconFile": "AppIcon",
+        # macOS 26 and later: the light, dark and tinted looks from Assets.car (app/AppIcon.icon).
+        "CFBundleIconName": "AppIcon", "CFBundlePackageType": "APPL",
         "CFBundleShortVersionString": _version(), "CFBundleVersion": _version(),
         "LSMinimumSystemVersion": "11.0", "NSHighResolutionCapable": True, "LSApplicationCategoryType":
         "public.app-category.utilities", "UniVPNPort": str(port),

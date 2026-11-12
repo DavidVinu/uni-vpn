@@ -76,6 +76,7 @@ class MacTests(Harness):
         self.assertEqual(info["UniVPNPort"], "1099")
         self.assertEqual(info["CFBundleURLTypes"][0]["CFBundleURLSchemes"], ["uni-vpn", "otpauth"])
         self.assertEqual(info["CFBundleExecutable"], "Uni VPN")
+        self.assertEqual((info["CFBundleIconFile"], info["CFBundleIconName"]), ("AppIcon", "AppIcon"))
         self.assertNotIn("LSUIElement", info)  # a Dock icon while the window is open
         # Else the page's navigator.languages says English on every Mac.
         self.assertEqual(info["CFBundleLocalizations"], ["en", "de", "fr", "es", "zh-Hans", "zh-Hant"])
