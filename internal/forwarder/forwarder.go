@@ -385,6 +385,16 @@ func connectRequest(c net.Conn) (host string, port int, ok bool) {
 		return "", 0, false
 	}
 	if head[1] != 1 || head[3] != 3 { // CONNECT to a name: the rule names hosts
+		// The rest of the request first: Windows resets a connection closed with unread data,
+		// and the reset can overtake the refusal.
+		switch head[3] {
+		case 1: // IPv4 address and port, its first byte already in head
+			io.CopyN(io.Discard, c, 4+2-1)
+		case 3:
+			io.CopyN(io.Discard, c, int64(head[4])+2)
+		case 4: // IPv6
+			io.CopyN(io.Discard, c, 16+2-1)
+		}
 		c.Write(socksReply(2))
 		return "", 0, false
 	}
