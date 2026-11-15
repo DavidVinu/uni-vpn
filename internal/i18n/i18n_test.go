@@ -2,10 +2,14 @@ package i18n
 
 import (
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/DavidVinu/uni-vpn/internal/pyjson"
@@ -109,5 +113,50 @@ print(json.dumps({"catalogs": i18n.catalogs(), "negotiate": {t: i18n.negotiate("
 	json.Unmarshal(pyjson.Marshal(Menu("zh-Hant")), &menu)
 	if fmt.Sprint(menu) != fmt.Sprint(want.Menu) {
 		t.Error("menus differ")
+	}
+}
+
+// The phone apps show phone.msg.port_in_use when the core cannot start, so they carry their own
+// copy of it (Android's port_in_use, iOS's Strings.portTaken). A change to the catalog must reach
+// both; the iOS test checks its copy only on a Mac.
+func TestPhoneAppsCarryTheCoresPortText(t *testing.T) {
+	root := filepath.Join("..", "..")
+	swift, err := os.ReadFile(filepath.Join(root, "app", "ios", "Shared", "Strings.swift"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	android := map[string]string{"en": "values", "de": "values-de", "fr": "values-fr", "es": "values-es",
+		"zh-Hans": "values-zh-rCN", "zh-Hant": "values-zh-rTW"}
+	for code, dir := range android {
+		want := Catalog(code)["phone.msg.port_in_use"]
+		data, err := os.ReadFile(filepath.Join(root, "app", "android", "app", "src", "main", "res", dir, "strings.xml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var res struct {
+			Strings []struct {
+				Name string `xml:"name,attr"`
+				Text string `xml:",chardata"`
+			} `xml:"string"`
+		}
+		if err := xml.Unmarshal(data, &res); err != nil {
+			t.Fatal(dir, err)
+		}
+		got := ""
+		for _, s := range res.Strings {
+			if s.Name == "port_in_use" {
+				got = strings.NewReplacer(`\'`, `'`, `\"`, `"`).Replace(s.Text)
+			}
+		}
+		if got != want {
+			t.Errorf("Android %s port_in_use = %q, catalog %s %q", dir, got, code, want)
+		}
+		got = ""
+		if m := regexp.MustCompile(`(?m)^\s*"` + regexp.QuoteMeta(code) + `": "([^"]*)",`).FindSubmatch(swift); m != nil {
+			got = string(m[1])
+		}
+		if got != want {
+			t.Errorf("iOS Strings.portTaken %s = %q, catalog %q", code, got, want)
+		}
 	}
 }

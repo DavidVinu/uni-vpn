@@ -94,5 +94,10 @@ and the "stable" branch, the build scripts (packaging/, get.sh, install.sh), the
   phone.msg.hostscan_required said the university connects ("antes de conectarse", now "antes de
   que se conecte"), totp.qr_not_key now says "códigos de acceso", the
   app's own name for them ("Código de acceso").
+- The phone apps carry their own copy of phone.msg.port_in_use (shown when the core cannot
+  start): Android's port_in_use and iOS's Strings.portTaken now have the ’ too. The iOS CI test
+  caught the mismatch, but only on a Mac and not for Android, so internal/i18n's
+  TestPhoneAppsCarryTheCoresPortText now compares both copies with the catalog in every language
+  (failed before the copies were updated, passes after).
 - Verification: every file still loads, keeps its keys, has the placeholders of en.json, and keeps
   its formatting (json.dumps round trip byte for byte); the Python test suite (592 tests) passes.
