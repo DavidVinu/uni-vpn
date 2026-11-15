@@ -570,3 +570,53 @@ func TestAReleaseWithoutOpenConnectLeavesIt(t *testing.T) {
 		}
 	}
 }
+
+// failFS fails the rename of one staged file, like a disk error or a file Windows keeps open
+// (a virus scanner) halfway through an install.
+type failFS struct {
+	osFS
+	fail string // base name of the staged file
+}
+
+func (f *failFS) Rename(oldpath, newpath string) error {
+	if f.fail != "" && filepath.Base(oldpath) == f.fail && strings.Contains(oldpath, StagePrefix) {
+		return &os.LinkError{Op: "rename", Old: oldpath, New: newpath, Err: errors.New("input/output error")}
+	}
+	return os.Rename(oldpath, newpath)
+}
+
+// An install that stops halfway (an error, the computer switched off) must not leave the new
+// program with old files: the program that starts next would know its commit is current and
+// never install the rest.
+func TestAnInstallThatStopsHalfwayIsCompletedLater(t *testing.T) {
+	f := newFixture(t, makeZip(t, file{name: "bin/uni-vpn-core", body: "new core", mode: 0o755},
+		file{name: "openconnect/openconnect", body: "new openconnect", mode: 0o755}))
+	oc := filepath.Join(f.root, "openconnect", "openconnect")
+	write(t, oc, "old openconnect")
+	fsys := &failFS{fail: "openconnect"}
+	f.u.Files = fsys
+	if _, err := f.u.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.u.Apply(); err == nil {
+		t.Fatal("the install did not fail")
+	}
+	// The next start runs whatever program is in place now.
+	fsys.fail = ""
+	running := commitA
+	if read(t, filepath.Join(f.root, "bin", "uni-vpn-core")) == "new core" {
+		running = commitB
+	}
+	f.u.Commit = running
+	if _, err := f.u.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if f.u.Pending() != "" {
+		if _, err := f.u.Apply(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if core, got := read(t, filepath.Join(f.root, "bin", "uni-vpn-core")), read(t, oc); core != "new core" || got != "new openconnect" {
+		t.Fatalf("core %q with openconnect %q", core, got)
+	}
+}

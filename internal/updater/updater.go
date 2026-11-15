@@ -449,7 +449,12 @@ func (u *Updater) install(s *staged) error {
 	if err := u.writeList(union(previous, s.files)); err != nil {
 		return err
 	}
-	for _, rel := range s.files {
+	// The program last: an install that stops halfway leaves the old one, which installs the
+	// rest at its next check. The new one would find its commit current and never do it.
+	isExe := func(rel string) bool { return fold(rel) == fold(u.Exe) }
+	order := slices.DeleteFunc(slices.Clone(s.files), isExe)
+	order = append(order, slices.DeleteFunc(slices.Clone(s.files), func(rel string) bool { return !isExe(rel) })...)
+	for _, rel := range order {
 		src := filepath.Join(s.folder, filepath.FromSlash(rel))
 		// Unchanged files stay: on Windows the open app window is not moved aside for nothing.
 		if same(src, u.path(rel)) {
