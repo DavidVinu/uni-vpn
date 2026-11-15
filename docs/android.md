@@ -46,8 +46,9 @@ the Go core does the work and the app only talks to its local API.
   page, `play` the bundle for Google Play, which updates its apps itself and forbids installing
   them any other way (no self-update, no `REQUEST_INSTALL_PACKAGES`). The website build asks for
   `releases/latest/download/uni-vpn-apk.json` (`version_code`, `size`, `sha256` of
-  `uni-vpn.apk`, written by CI) at most once a day, while the VPN is on or the app is open, and
-  not at all while Settings, Automatic updates is off (the computers' switch, synced). A newer
+  `uni-vpn.apk`, written by CI) once a day, every 10 minutes after a check that did not get
+  through, while the VPN is on or the app is open, and not at all while Settings, Automatic
+  updates is off (the computers' switch, synced). A newer
   version comes down at once on Wi-Fi, on mobile data when the user taps; it must match the
   size, the SHA-256, the package and this copy's signing key. A file that does not match yet is
   tried again after 10 minutes, then 20, 40 and so on up to a day, and a tap on it waits for

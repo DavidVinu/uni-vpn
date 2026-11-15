@@ -169,7 +169,9 @@ and the "stable" branch, the build scripts (packaging/, get.sh, install.sh), the
   check 10 minutes ahead before each request and keeps it there when the request fails (no
   network, 404, unreadable JSON), and a download that does not match its JSON is tried again
   after 10, 20, 40 minutes up to a day. The page now says once a day, and after a failed check
-  again after 10 minutes. Checked against ApkUpdate.kt (RETRY = 10 minutes, DAY).
+  every 10 minutes until it works (the re-audit of #80: "again after 10 minutes" read as one
+  more try); docs/android.md said "at most once a day" too and now says the same. Checked
+  against ApkUpdate.kt (RETRY = 10 minutes, DAY).
 - WC-24: "(unten, Nummer 4)" / "(below, number 4)" now say 5; headless Chromium numbers the list
   the same way.
 - WC-25: on an HTTP error `gh api` prints GitHub's error body to stdout, and retry() kept the
