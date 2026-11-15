@@ -20,6 +20,11 @@ windows, installers, phone apps, website and CI.
 | GC-5 | Linux Repair and restart take another account's panel icon for this account's | Low | fixed |
 | GC-6 | Linux does not stop the panel icon when its path has `+`, `(` or `[` | Low | fixed |
 | GC-7 | Any web page can restart the app window once per service start | Low | left: only once per start, only after an update installed the window; needs a marker only the shells send |
+| GC-8 | An update that stops halfway leaves the new core next to old files for good | Medium | fixed |
+| GC-9 | Updated files are not on disk before they are renamed into place (empty core after a power cut) | Low | fixed |
+| GC-10 | Windows: the running core is missing if the update dies between its two renames | Low | left: a window of microseconds; Windows has no atomic swap for a running program |
+| GC-11 | `.core-files` and `.commit` are written without fsync | Low | left: a crash only skips the clean-up of old files once; the core keeps working |
+| GC-12 | `uni-vpn update` in a terminal and the service can install at the same time | Low | left: the install fails and is retried 5 hours later |
 
 ### GC-1 Another account's request gets through the account check if it resets the connection first
 
@@ -83,3 +88,26 @@ windows, installers, phone apps, website and CI.
 - Fix: the path is passed through `regexp.QuoteMeta`.
 - Verification: with real `pkill`, a process at `/tmp/a+b (c)/linux/uni-vpn-app.py` was not
   stopped with the raw path (exit 1) and was with the quoted one (exit 0); desktop tests updated.
+
+### GC-8 An update that stops halfway leaves the new core next to old files for good
+
+- Severity: Medium (Windows ends the update at shutdown, a power cut, a full disk: the user keeps
+  old openconnect files, or on macOS a half-replaced app window whose signature no longer fits).
+- Root cause: `install` renamed the files in zip order, so the core could be replaced first. After
+  a stop halfway the next start ran the new core, whose update check compares only its own
+  commit with the manifest: it found itself current and never installed the rest.
+- Fix: the core program is renamed into place last. A stop before that leaves the old core, whose
+  next check installs the rest (files already in place are skipped).
+- Verification: `TestAnInstallThatStopsHalfwayIsCompletedLater` (second rename fails, then a
+  restart) failed with `core "new core" with openconnect "old openconnect"` before, passes after;
+  `go test -race ./internal/updater/` ok; `go vet` for linux, darwin, windows ok.
+
+### GC-9 Updated files are not on disk before they are renamed into place
+
+- Root cause: APFS, NTFS and XFS do not order a rename after the file's data; `unpack` wrote the
+  new core without fsync, so a power cut right after an automatic update could leave an empty
+  `bin/uni-vpn-core`, which the start script does not replace.
+- Fix: `unpack` syncs each file before closing it (during staging, not during the install).
+- Verification: `strace` showed write then `renameat` with no `fsync` before, `fsync` first after;
+  `TestUnpackedFilesAreOnDiskBeforeTheInstall` failed before, passes after.
+
