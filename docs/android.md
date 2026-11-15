@@ -41,7 +41,26 @@ the Go core does the work and the app only talks to its local API.
   XChaCha20-Poly1305 (`internal/credentials/filecred.go`). The key comes from the app
   (`UNI_VPN_SECRETS_KEY`), stored wrapped by an AES key in the Android Keystore. Not tied to
   unlocking, so reconnects work in a pocket. Backups and device transfer exclude the app's data.
-- **Updates** come from the store; the core's self-updater is off on Android.
+- **Updates.** The core's self-updater is off on Android; the app updates itself (`ApkUpdate`,
+  role model Signal's website build). Two flavors: `website` is `uni-vpn.apk` on the release
+  page, `play` the bundle for Google Play, which updates its apps itself and forbids installing
+  them any other way (no self-update, no `REQUEST_INSTALL_PACKAGES`). The website build asks for
+  `releases/latest/download/uni-vpn-apk.json` (`version_code`, `size`, `sha256` of
+  `uni-vpn.apk`, written by CI) at most once a day, while the VPN is on or the app is open, and
+  not at all while Settings, Automatic updates is off (the computers' switch, synced). A newer
+  version comes down at once on Wi-Fi, on mobile data when the user taps; it must match the
+  size, the SHA-256, the package and this copy's signing key. A file that does not match yet is
+  tried again after 10 minutes, then 20, 40 and so on up to a day, and a tap on it waits for
+  that next check; one signed with another key (a build of one's own) is not offered or
+  downloaded again until the next release. Home shows "Update Uni VPN" and so
+  does the VPN's notification; a tap hands the file to Android's installer
+  (`PackageInstaller`), which asks once to allow installs from Uni VPN and then for the update.
+  On Android 12 and newer, after the first one, it may install without asking again
+  (`UPDATE_PACKAGES_WITHOUT_USER_ACTION`). When the core does not start (a release whose core
+  fails on this phone), the "not running" page offers the update too, and the notification
+  still does.
+  BootReceiver turns the VPN back on after the update. Copies from before this (November 2026)
+  have no update check: they need the new APK once by hand.
 - **Later: openconnect in the core's own process.** The iPhone app runs libopenconnect inside
   the core, with a userspace network stack instead of ocproxy (`docs/ios.md`, build tag
   `libopenconnect`). Android could use the same engine, which would drop the two extra programs

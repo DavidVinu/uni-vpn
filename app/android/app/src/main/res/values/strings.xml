@@ -4,4 +4,8 @@
     <string name="channel">Connection</string>
     <!-- Shown when the core cannot run, so without its texts (App.kt). -->
     <string name="port_in_use">Another app is in the way. Uni VPN keeps trying. If this stays, restart the phone.</string>
+    <!-- The VPN's notification when a newer version is out (ApkUpdate). -->
+    <string name="update">Update Uni VPN</string>
+    <!-- Shown when the core has not answered for 20 s, so without its texts (App.kt). -->
+    <string name="not_running">Uni VPN is not running. Close the app and open it again.</string>
 </resources>

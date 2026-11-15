@@ -2,4 +2,7 @@
 <resources>
     <string name="channel">连接</string>
     <string name="port_in_use">另一个应用造成了干扰。Uni VPN 会继续尝试。如果问题持续，请重启手机。</string>
+    <!-- The VPN's notification when a newer version is out (ApkUpdate). -->
+    <string name="update">更新 Uni VPN</string>
+    <string name="not_running">Uni VPN 未在运行。请关闭应用后重新打开。</string>
 </resources>

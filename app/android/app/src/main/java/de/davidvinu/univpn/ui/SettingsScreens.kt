@@ -6,6 +6,7 @@ import androidx.activity.compose.BackHandler
 import androidx.core.net.toUri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -35,6 +36,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -49,12 +51,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import de.davidvinu.univpn.AppModel
+import de.davidvinu.univpn.BuildConfig
 import de.davidvinu.univpn.MainActivity
 import de.davidvinu.univpn.Scanner
 import de.davidvinu.univpn.Screen
@@ -138,6 +142,18 @@ fun SettingsScreen(model: AppModel) {
                 val setting = status.optString("language")
                 val name = model.strings.languages.firstOrNull { it.first == setting }?.second ?: model.t("settings.language_system")
                 SettingRow(model.t("settings.language"), name, { model.open(Screen.Language) })
+                if (BuildConfig.SELF_UPDATE) {
+                    // The computers' switch, synced with them; Google Play updates its own build.
+                    // One element for screen readers: the row is the switch.
+                    val automatic = status.optBoolean("auto_update", true)
+                    ListItem(
+                        headlineContent = { Text(model.t("settings.auto_update")) },
+                        trailingContent = { Switch(checked = automatic, onCheckedChange = null) },
+                        modifier = Modifier.toggleable(value = automatic, role = Role.Switch) { on ->
+                            scope.launch { model.post("/api/auto-update", JSONObject().put("enabled", on)) }
+                        },
+                    )
+                }
                 Section(model.t("settings.about"))
                 SettingRow(model.t("settings.log"), null, { model.open(Screen.Log) })
                 SettingRow(model.t("phone.licenses"), null, { model.open(Screen.Licenses) })
@@ -214,7 +230,8 @@ fun WebsitesScreen(model: AppModel) {
                     leadingContent = { Icon(Icons.Outlined.Language, contentDescription = null) },
                     trailingContent = {
                         IconButton(onClick = { save(domains - host) }) {
-                            Icon(Icons.Outlined.Close, contentDescription = model.t("sync.remove"))
+                            // Screen readers name the website: touched on its own, "Remove" alone says not which.
+                            Icon(Icons.Outlined.Close, contentDescription = model.t("sync.remove") + " " + host)
                         }
                     },
                 )

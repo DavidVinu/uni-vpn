@@ -102,6 +102,22 @@ class CatalogTests(unittest.TestCase):
                 self.assertEqual(used - set(source), set())
                 self.assertGreater(len(used), 50)
 
+    def test_android_texts_without_the_core_are_the_cores(self):
+        # Shown when the core cannot answer (App.kt), so from the app's own resources: the same
+        # words as the core's catalogs.
+        res = Path(i18n.__file__).parent.parent / "app" / "android" / "app" / "src" / "main" / "res"
+        folders = {"en": "values", "de": "values-de", "fr": "values-fr", "es": "values-es",
+                   "zh-Hans": "values-zh-rCN", "zh-Hant": "values-zh-rTW"}
+        self.assertEqual(set(folders), set(i18n.CODES))
+        for lang, folder in folders.items():
+            xml = (res / folder / "strings.xml").read_text(encoding="utf-8")
+            texts = {m.group(1): m.group(2).replace("\\'", "'")
+                     for m in re.finditer(r'<string name="(\w+)"[^>]*>([^<]*)</string>', xml)}
+            for name, key in (("port_in_use", "phone.msg.port_in_use"), ("not_running", "phone.msg.not_running"),
+                              ("update", "phone.update")):
+                with self.subTest(lang=lang, text=name):
+                    self.assertEqual(texts.get(name), i18n.catalog(lang)[key])
+
     def test_phones_never_speak_of_the_computer(self):
         # The phones show phone.<key> where there is one (Strings.kt, Strings.swift). Their
         # secrets file failing to save shows the keyring's message too (keyringFailed).

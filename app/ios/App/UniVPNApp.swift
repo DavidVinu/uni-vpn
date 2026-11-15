@@ -28,7 +28,12 @@ struct RootView: View {
         if model.portTaken {
             FitPage { PortTakenView(model: model) }
         } else if model.status == nil {
-            ProgressView()
+            // The core never answered. Its texts need the core: this one comes with the app.
+            if model.stuck {
+                FitPage { NotRunningView(model: model) }
+            } else {
+                ProgressView()
+            }
         } else if model.setupNeeded || model.changingAccount || model.setupFinishing {
             SetupView(model: model)
         } else {
@@ -56,21 +61,43 @@ private struct PortTakenView: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        let defaults = UserDefaults(suiteName: CoreHost.appGroup)
-        let setupDone = defaults?.bool(forKey: "setup_done") ?? false
-        let language = defaults?.string(forKey: "language") ?? ""
+        let language = UserDefaults(suiteName: CoreHost.appGroup)?.string(forKey: "language") ?? ""
         VStack(spacing: 24) {
             Text(Strings.portTaken(language, Locale.preferredLanguages))
                 .multilineTextAlignment(.center)
-            if model.vpn.isOn || setupDone {
-                HStack(spacing: 16) {
-                    Text(verbatim: "Uni VPN").font(.headline)
-                    Toggle("Uni VPN", isOn: $model.vpnSwitch)
-                        .labelsHidden()
-                        .disabled(model.switching)
-                }
-            }
+            VPNSwitch(model: model)
         }
         .padding(24)
+    }
+}
+
+private struct NotRunningView: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        let language = UserDefaults(suiteName: CoreHost.appGroup)?.string(forKey: "language") ?? ""
+        VStack(spacing: 24) {
+            Text(Strings.notRunning(language, Locale.preferredLanguages))
+                .multilineTextAlignment(.center)
+            VPNSwitch(model: model)
+        }
+        .padding(24)
+    }
+}
+
+/// The switch on the pages shown without the core, so Uni VPN can still be turned off there.
+private struct VPNSwitch: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        let setupDone = UserDefaults(suiteName: CoreHost.appGroup)?.bool(forKey: "setup_done") ?? false
+        if model.vpn.isOn || setupDone {
+            HStack(spacing: 16) {
+                Text(verbatim: "Uni VPN").font(.headline)
+                Toggle("Uni VPN", isOn: $model.vpnSwitch)
+                    .labelsHidden()
+                    .disabled(model.switching)
+            }
+        }
     }
 }

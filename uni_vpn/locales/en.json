@@ -233,6 +233,7 @@
   "phone.camera_denied": "Uni VPN may not use the camera. Allow it in Settings.",
   "phone.vpn_refused": "Android didn't let Uni VPN turn on. If another VPN app is set to always on, turn that off in the VPN settings.",
   "phone.vpn_settings": "VPN settings",
+  "phone.update": "Update Uni VPN",
   "phone.lockdown": "Android blocks connections without a VPN, so apps can't reach the internet. Turn that off in the VPN settings.",
   "phone.scan_failed": "The scanner didn't open. Try again in a moment, or type it in.",
   "phone.vpn_not_allowed": "iPhone didn't let Uni VPN turn on. Tap the switch to be asked again.",

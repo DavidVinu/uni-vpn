@@ -38,6 +38,21 @@ android {
         }
     }
 
+    // Where the app comes from (role model: Signal's two Android builds). "website" is
+    // uni-vpn.apk on the release page, which updates itself (ApkUpdate); "play" is the bundle
+    // for Google Play, which updates it instead and does not allow an app to install itself.
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("website") {
+            dimension = "distribution"
+            buildConfigField("boolean", "SELF_UPDATE", "true")
+        }
+        create("play") {
+            dimension = "distribution"
+            buildConfigField("boolean", "SELF_UPDATE", "false")
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true

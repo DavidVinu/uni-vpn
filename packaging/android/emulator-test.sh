@@ -5,8 +5,8 @@
 # Usage: packaging/android/emulator-test.sh
 set -euo pipefail
 apks=app/android/app/build/outputs/apk
-adb install -r "$apks/debug/app-debug.apk"
-adb install -r "$apks/androidTest/debug/app-debug-androidTest.apk"
+adb install -r "$apks/website/debug/app-website-debug.apk"
+adb install -r "$apks/androidTest/website/debug/app-website-debug-androidTest.apk"
 adb shell appops set de.davidvinu.univpn ACTIVATE_VPN allow
 result=$(adb shell am instrument -w de.davidvinu.univpn.test/androidx.test.runner.AndroidJUnitRunner)
 echo "$result"

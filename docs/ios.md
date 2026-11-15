@@ -45,8 +45,9 @@ thin SwiftUI shell around the core.
   core ends (`UniVPNStart` returns 3) when it cannot have both ports, and creates `api-ready` in
   its state folder once it has them. It removes the file before it lets go of the lock, so a
   core still ending after the handover never removes the next one's. The app and the extension
-  send requests, and the extension hands iOS the proxy rule, only while the file exists; when
-  another app is in the way, the app says so.
+  send requests, and the extension hands iOS the proxy rule, only while the file exists and a
+  core holds the lock (`CoreHost.ready`): a core that iOS ended leaves the file behind until the
+  next one starts. When another app is in the way, the app says so.
 - **Known gap: the proxy port**, as on Android: the SOCKS port is open to every app on the phone
   while the VPN is on, since browsers cannot send a token.
 - **Secrets.** The core keeps the password and the setup key in `secrets.json`, sealed with

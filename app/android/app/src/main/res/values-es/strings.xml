@@ -2,4 +2,7 @@
 <resources>
     <string name="channel">Conexión</string>
     <string name="port_in_use">Otra aplicación interfiere. Uni VPN sigue intentándolo. Si continúa, reinicia el teléfono.</string>
+    <!-- The VPN's notification when a newer version is out (ApkUpdate). -->
+    <string name="update">Actualizar Uni VPN</string>
+    <string name="not_running">Uni VPN no se está ejecutando. Cierra la aplicación y vuelve a abrirla.</string>
 </resources>

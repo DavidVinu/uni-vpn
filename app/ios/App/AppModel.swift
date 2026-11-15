@@ -27,6 +27,9 @@ final class AppModel {
     private(set) var status: JSON?
     /// The core did not answer the last poll.
     private(set) var unreachable = false
+    /// Nor the polls of the last 20 s: the app says so instead of a spinner without end.
+    private(set) var stuck = false
+    @ObservationIgnored private var unreachableSince: TimeInterval = 0
     private(set) var strings = Strings(locales: nil, setting: "", preferred: [])
     @ObservationIgnored private var locales: JSON?
     @ObservationIgnored private var stringsFor = ""
@@ -91,6 +94,9 @@ final class AppModel {
         keepAlive?.cancel()
         keepAlive = nil
         guard poll == nil else { return }
+        // The 20 s until "not running" count while on screen, not from before the app left it.
+        unreachable = false
+        stuck = false
         poll = Task { [weak self] in
             await self?.vpn.load()
             await self?.ensureCore()
@@ -227,11 +233,14 @@ final class AppModel {
     func refresh() async {
         let reply = await API.get("/status.json")
         guard reply.ok, let json = reply.json else {
+            if !unreachable { unreachableSince = Self.uptime }
             unreachable = true
+            stuck = Self.uptime - unreachableSince > 20
             await ensureCore()
             return
         }
         unreachable = false
+        stuck = false
         portTaken = false
         status = json
         // The Control Center button reads it without asking the core.

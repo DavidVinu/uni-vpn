@@ -251,6 +251,7 @@
   "phone.camera_denied": "Uni VPN 無法使用相機。請在「設定」中允許。",
   "phone.vpn_refused": "Android 沒有讓 Uni VPN 開啟。如果另一個 VPN App 設為一律開啟，請在 VPN 設定中關閉。",
   "phone.vpn_settings": "VPN 設定",
+  "phone.update": "更新 Uni VPN",
   "phone.lockdown": "Android 封鎖了不經過 VPN 的連線，所以 App 無法連上網際網路。請在 VPN 設定中關閉此項。",
   "phone.scan_failed": "掃描器沒有開啟。請稍後再試，或手動輸入。",
   "phone.vpn_not_allowed": "iPhone 沒有讓 Uni VPN 開啟。輕觸開關後會再問你一次。",

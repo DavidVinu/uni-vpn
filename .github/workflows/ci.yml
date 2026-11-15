@@ -638,15 +638,24 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          packaging/android/build-apk.sh "$GITHUB_SHA" assembleRelease bundleRelease assembleDebug assembleDebugAndroidTest lintDebug testDebugUnitTest
+          # The download page's APK updates itself; the Play bundle leaves that to the store
+          # (app/build.gradle.kts, flavors "website" and "play").
+          packaging/android/build-apk.sh "$GITHUB_SHA" assembleWebsiteRelease bundlePlayRelease assembleWebsiteDebug \
+            assembleWebsiteDebugAndroidTest lintWebsiteDebug testWebsiteDebugUnitTest
           mkdir out
           outputs=app/android/app/build/outputs
-          cp $outputs/apk/debug/app-debug.apk out/uni-vpn-debug.apk
+          cp $outputs/apk/website/debug/app-website-debug.apk out/uni-vpn-debug.apk
           if [ "$HAS_UPLOAD_KEY" = true ]; then
-            cp $outputs/apk/release/app-release.apk out/uni-vpn.apk
-            cp $outputs/bundle/release/app-release.aab out/uni-vpn.aab
+            cp $outputs/apk/website/release/app-website-release.apk out/uni-vpn.apk
+            cp $outputs/bundle/playRelease/app-play-release.aab out/uni-vpn.aab
+            # What the app's update check reads (ApkUpdate): the version code from the APK itself.
+            code=$("$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging out/uni-vpn.apk | sed -n "s/^package: .* versionCode='\([0-9]*\)'.*/\1/p")
+            [ -n "$code" ] || { echo "no versionCode in uni-vpn.apk" >&2; exit 1; }
+            printf '{"version_code": %s, "version": "%s", "size": %s, "sha256": "%s"}\n' "$code" "$UNI_VPN_VERSION" \
+              "$(stat -c %s out/uni-vpn.apk)" "$(sha256sum out/uni-vpn.apk | cut -d' ' -f1)" > out/uni-vpn-apk.json
+            cat out/uni-vpn-apk.json
           else
-            cp $outputs/apk/release/app-release-unsigned.apk out/uni-vpn-unsigned.apk
+            cp $outputs/apk/website/release/app-website-release-unsigned.apk out/uni-vpn-unsigned.apk
           fi
           ls -l out
       - name: Enable KVM for the emulator
@@ -1072,3 +1081,6 @@ jobs:
           git fetch --quiet origin main
           if [ "$(git rev-parse FETCH_HEAD)" != "$GITHUB_SHA" ]; then echo "main has moved on, the newer run publishes"; exit 0; fi
           gh release upload latest out/uni-vpn.apk --clobber
+          # After the APK: a phone that reads the new version code finds its file in place
+          # (ApkUpdate checks size and SHA-256 and tries again later when they differ).
+          gh release upload latest out/uni-vpn-apk.json --clobber
