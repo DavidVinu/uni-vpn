@@ -153,13 +153,14 @@ func (m *Manager) legacyOurs() bool {
 
 // taskOwnerScript prints "ours" when the task in Task Scheduler's top folder runs as the
 // account with this SID, "other" for another account, nothing without the task. Both
-// names are plain (letters, digits, "-").
+// names are plain (letters, digits, "-"). "exit 0": without the task the silenced error of
+// Get-ScheduledTask would make powershell -Command end with exit code 1.
 func taskOwnerScript(task, sid string) string {
 	return fmt.Sprintf(`$ErrorActionPreference = 'Stop'; `+
 		`$t = Get-ScheduledTask -TaskPath '\' -TaskName '%s' -ErrorAction SilentlyContinue; `+
 		`if ($t) { $u = $t.Principal.UserId; `+
 		`try { $u = (New-Object Security.Principal.NTAccount $u).Translate([Security.Principal.SecurityIdentifier]).Value } catch {}; `+
-		`if ($u -eq '%s') { 'ours' } else { 'other' } }`, task, sid)
+		`if ($u -eq '%s') { 'ours' } else { 'other' } }; exit 0`, task, sid)
 }
 
 // tasks are the scheduled tasks that start this account's service: its own, and until it is
