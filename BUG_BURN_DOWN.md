@@ -50,6 +50,30 @@ windows, installers, phone apps, website and CI.
 | GC-35 | Small tunnel edges: an empty `openconnect --help` (fork failure) adds `--no-external-auth` once; pipes leak if a second pipe cannot be made; a server banner with a marker word could be misread | Low | left: rare, and the next start corrects it |
 | GC-36 | Proxy backup files are written without an atomic rename | Low | left: only a crash during the write; Restore falls back to the defaults |
 | GC-37 | A UTF-8 BOM in domains.txt makes its first line invalid | Low | left: hand-edited files only |
+| GC-38 | The ports are not read from a config.toml that is not UTF-8, so the window cannot reach the core with custom ports (found by the re-audit, rest of GC-14) | Low | fixed |
+| GC-39 | Phones: the ready file outlives the status port at a stop, so the app could send its token to another app on that port | Low | fixed |
+| GC-40 | Windows: `taskkill /IM "Uni VPN.exe"` after an update, setup or uninstall also closes other signed-in accounts' tray apps | Low | left: multi-account Windows (see the per-user task name item); a session filter cannot be tested here |
+| GC-41 | iPhone in-process restart: an enrollment started before a stop can write its result after it; a late log line reopens the log file | Low | left: only the iPhone's in-process restart, a tiny leak |
+| GC-42 | Uninstall keeps the password and TOTP secret when config.toml is broken (the user name comes from it) | Low | left: terminal-only uninstall of a broken install |
+| GC-43 | macOS proxy edges: a dead rule address comes back if the proxy backup was deleted; a covered service keeps our address in its switched-off field | Low | left: browsers go direct when the rule cannot be loaded |
+| GC-44 | A gateway that breaks the connection after every password would now be retried with back-off, each try a new Duo push (rest of GC-30) | Low | left: no such gateway known (ASA and ocserv answer "Login failed" or 401) |
+| GC-45 | Sync edges seen by the re-audit: a code shown in the moment before a stop polls the relay after it (writes nothing); busy rounds logged as failures; a device linked again right after removal is listed only once its clock passes the removal; a retried Remove leaves an unused group on the relay | Low | left: no wrong value anywhere; each recovers by itself |
+
+### Final re-audit (2026-11-15)
+
+After the fixes above, four fresh reviewers re-audited the whole Go core on this branch (core and
+local API; tunnel and proxy; sync and relay; update, setup and data). Each first reviewed every
+fix in its area for regressions (several by removing the fix and watching its test fail again),
+then read its area anew. Result: no Critical, High or Medium bug found; two Lows fixed (GC-38,
+GC-39), the rest recorded above as left. Evidence beyond the unit tests: Ubuntu 24.04's
+openconnect 9.12 for GC-13, a 3-device property test with clocks +2 h, 0 and -30 min and a lossy
+relay for GC-15 (200 seeds pass, 14 failures with the old rule), and the devsync suite against the
+real relay worker. Windows and macOS code was checked by reading, cross-compiling and CI only.
+
+Full suite on the final branch: `go test -race ./...` (35 packages), `go vet` for linux, darwin,
+windows and android, the contract tests against the Go core, `node --test relay/worker.test.mjs`
+and the devsync tests against `relay/serve.mjs`, `go test -tags iosapi ./cmd/uni-vpn-ios/`; plus
+every CI job on the pull request.
 
 ### GC-1 Another account's request gets through the account check if it resets the connection first
 
@@ -257,4 +281,22 @@ windows, installers, phone apps, website and CI.
   uni-vpn's address in the field.
 - Fix: Restore writes the service's own address back, then switches it off.
 - Verification: `TestMacUninstallKeepsAnAddressThatWasOff` failed before, passes after.
+
+### GC-38 The ports are not read from a config.toml that is not UTF-8
+
+- Root cause: `PortsFromBroken` read the file with `readText`, which refuses invalid UTF-8, so the
+  core that GC-14 now starts with such a file fell back to 1080/1081 while the window and the
+  openers used the configured port.
+- Fix: it reads the raw bytes and replaces invalid sequences (the port lines are ASCII).
+- Verification: a Latin-1 case in `TestPortsFromBroken` returned no ports before; a built core with
+  `http_port = 21081` answered on 1081 before and on 21081 (`settings_broken`) after.
+
+### GC-39 Phones: the ready file outlives the status port at a stop
+
+- Root cause: Run's stop closed both ports, waited up to 5 s for requests and 5 s for the loop, and
+  removed the ready file only at the end (Unbind too, after unbinding); the iPhone app sends its
+  token wherever the file says the core is ready.
+- Fix: `dropReady()` runs before the ports are let go, in Run's stop and first in Unbind.
+- Verification: `TestReadyFileGoesBeforeTheStatusPort` (another app takes the port the moment it
+  is free) failed before, passes after (`-race -count=20`).
 
