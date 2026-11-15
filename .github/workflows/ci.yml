@@ -391,6 +391,15 @@ jobs:
           # next update.
           sleep 5
           pgrep -x "Uni VPN" >/dev/null || { echo "::error::the menu bar app is not running"; exit 1; }
+      # Every university website goes through the service: launchd must not run it throttled like
+      # a background job (lowest CPU priority, sockets marked background).
+      - name: The service runs at normal priority
+        run: |
+          pid=$(launchctl print "gui/$(id -u)/de.davidvinu.uni-vpn" | awk '$1 == "pid" { print $3; exit }')
+          ps -o pid,pri,nice,command -p "$pid"
+          sudo taskinfo "$pid" 2>&1 | head -n 40 || true
+          pri=$(ps -o pri= -p "$pid" | tr -d ' ')
+          if [ "$pri" -le 4 ]; then echo "::error::the service runs throttled (priority $pri)"; exit 1; fi
       - name: Uninstall it with the core
         run: |
           app="$HOME/Library/Application Support/uni-vpn/app"
