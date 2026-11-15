@@ -158,7 +158,47 @@ class Core(private val context: Context) {
      * in the Android Keystore that never leaves the phone's hardware. Not tied to unlocking, so
      * the VPN can reconnect in a pocket.
      */
-    private fun secretsKey(): String {
+    private fun secretsKey(): String = try {
+        readSecretsKey().also { keyOk() }
+    } catch (e: Exception) {
+        val lasting = keyFailures.failed(SystemClock.elapsedRealtime())
+        prefs.edit { putLong("key_failing", keyFailures.failing); putLong("key_failed_at", keyFailures.last); putInt("key_boot", boot) }
+        if (!lasting) throw e
+        // A minute of the same failure is no Keystore still starting up: its key is broken (seen
+        // on some phones after a system update). A new key, after which the core asks for the
+        // password again, beats an app that never starts.
+        Log.e(TAG, "secrets key unusable for a minute, making a new one", e)
+        KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.deleteEntry(KEY_ALIAS)
+        prefs.edit(commit = true) { remove("wrapped") }
+        keyOk()
+        readSecretsKey()
+    }
+
+    /**
+     * The Keystore failing at every start (about every second) for a minute, also over a few
+     * closings of the app in between (elapsedRealtime counts on). Under [lock].
+     */
+    private val keyFailures = run {
+        // elapsedRealtime starts again with the phone, maybe past the count's last failure.
+        val sameBoot = prefs.getInt("key_boot", boot) == boot
+        LastingFailure(
+            patienceMs = 60_000,
+            gapMs = 10_000,
+            pauseMs = 10 * 60_000,
+            failing = if (sameBoot) prefs.getLong("key_failing", 0) else 0,
+            last = if (sameBoot) prefs.getLong("key_failed_at", -1) else -1,
+        )
+    }
+
+    private val boot: Int get() = Settings.Global.getInt(context.contentResolver, Settings.Global.BOOT_COUNT, -1)
+
+    private fun keyOk() {
+        if (keyFailures.last < 0) return
+        keyFailures.ok()
+        prefs.edit { remove("key_failing"); remove("key_failed_at"); remove("key_boot") }
+    }
+
+    private fun readSecretsKey(): String {
         val (keystoreKey, fresh) = keystoreKey()
         val stored = prefs.getString("wrapped", null)
         if (stored != null && !fresh) {
@@ -173,7 +213,7 @@ class Core(private val context: Context) {
                 Log.e(TAG, "secrets key unreadable, making a new one", e)
             }
             // Anything else (the Keystore not ready yet, for example) throws: the core is not
-            // started and the next try reads the same key.
+            // started and the next try reads the same key, for a minute (secretsKey).
         }
         // A new key cannot read the old secrets: drop them, so the core asks for them again
         // instead of reporting a broken store.
@@ -263,5 +303,32 @@ class Core(private val context: Context) {
 
         private fun randomHex(bytes: Int) = ByteArray(bytes).also { SecureRandom().nextBytes(it) }.toHex()
         private fun ByteArray.toHex() = joinToString("") { "%02x".format(it) }
+    }
+}
+
+/**
+ * A failure that keeps coming: [failed] is true once [patienceMs] were spent failing, counted in
+ * runs of failures never more than [gapMs] apart. A pause up to [pauseMs] between runs (the app
+ * closed and opened again, as the "not running" text says) keeps the count; a longer one, a
+ * restart of the phone ([now] going back) or a success starts afresh. The caller keeps
+ * [failing] and [last] across restarts of the app.
+ */
+internal class LastingFailure(
+    private val patienceMs: Long,
+    private val gapMs: Long,
+    private val pauseMs: Long,
+    var failing: Long = 0,
+    var last: Long = -1,
+) {
+    fun failed(now: Long): Boolean {
+        val since = now - last
+        if (last < 0 || since < 0 || since > pauseMs) failing = 0 else if (since <= gapMs) failing += since
+        last = now
+        return failing >= patienceMs
+    }
+
+    fun ok() {
+        failing = 0
+        last = -1
     }
 }

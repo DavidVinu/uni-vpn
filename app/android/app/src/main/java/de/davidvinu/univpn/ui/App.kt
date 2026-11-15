@@ -20,6 +20,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -32,14 +33,26 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import de.davidvinu.univpn.ApkUpdate
 import de.davidvinu.univpn.AppModel
 import de.davidvinu.univpn.MainActivity
 import de.davidvinu.univpn.R
 import de.davidvinu.univpn.Screen
 import java.util.UUID
 
+/** The switch on the pages shown without the core, so Uni VPN can still be turned off there. */
+@Composable
+private fun VpnSwitch(model: AppModel, vpnOn: Boolean, activity: MainActivity) {
+    if (!vpnOn && !model.core.setupDone) return
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        Text(stringResource(R.string.app_name), style = MaterialTheme.typography.titleMedium)
+        Switch(checked = vpnOn, onCheckedChange = { on -> model.screenChanged(); if (on) activity.turnOn() else activity.turnOff() })
+    }
+}
+
 @Composable
 fun App(model: AppModel, vpnOn: Boolean, activity: MainActivity) {
+    val update by ApkUpdate.offered.collectAsState()
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
         // Turned sideways, the camera cutout sits at one side: nothing goes under it. The top
         // bars keep clear of it themselves and do not add it twice.
@@ -55,16 +68,21 @@ fun App(model: AppModel, vpnOn: Boolean, activity: MainActivity) {
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(stringResource(R.string.port_in_use), textAlign = TextAlign.Center)
-                    if (vpnOn || model.core.setupDone) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            Text(stringResource(R.string.app_name), style = MaterialTheme.typography.titleMedium)
-                            Switch(checked = vpnOn, onCheckedChange = { on -> model.screenChanged(); if (on) activity.turnOn() else activity.turnOff() })
-                        }
-                    }
+                    VpnSwitch(model, vpnOn, activity)
                 }
-                model.status == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
+                // The core never answered: a phone whose Keystore fails, for example (Core.kt
+                // gives it a minute). Its texts need the core: these come with the app. A
+                // release whose core does not start here still offers the next one.
+                model.status == null && model.stuck -> Column(
+                    Modifier.fillMaxSize().padding(24.dp),
+                    verticalArrangement = Arrangement.spacedBy(24.dp, Alignment.CenterVertically),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(stringResource(R.string.not_running), textAlign = TextAlign.Center)
+                    if (update != null) UpdateRow(stringResource(R.string.update), model)
+                    VpnSwitch(model, vpnOn, activity)
                 }
+                model.status == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
                 else -> Pages(
                     setup = model.setupNeeded || model.changingAccount || model.setupFinishing,
                     visit = model.visit,

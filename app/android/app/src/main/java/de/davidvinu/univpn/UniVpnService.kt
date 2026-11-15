@@ -1,6 +1,7 @@
 package de.davidvinu.univpn
 
 import android.app.Notification
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
@@ -64,19 +65,45 @@ class UniVpnService : VpnService() {
         Toggles.update(this)
         if (poll?.isActive == true) return
         poll = scope.launch {
-            // The rule names the core's port: Android gets it once our own core holds it, not
-            // while another app listens there (Core.ready).
-            while (!core.ready()) {
-                core.ensureRunning()
-                delay(250)
-            }
-            applyRule(force = true)
-            // Websites can change on another device (syncing): the rule follows.
             while (isActive) {
-                delay(30_000)
-                applyRule(force = false)
+                // The rule names the core's port: Android gets it once our own core holds it,
+                // not while another app listens there (Core.ready).
+                var waited = 0
+                while (!core.ready()) {
+                    // A release whose core does not start on this phone: the next one still
+                    // reaches it (ApkUpdate).
+                    if (waited++ % 120 == 0) update()
+                    core.ensureRunning()
+                    delay(250)
+                }
+                applyRule(force = true)
+                // Websites can change on another device (syncing): the rule follows, every
+                // 30 s. Our core ending (a crash, Android ending it, Repair) takes the rule down
+                // within a second, not at the next round: another app could take the free ports
+                // before the next core does and answer the browsers. The next core brings it back.
+                var seconds = 0
+                while (isActive && core.ready()) {
+                    if (seconds % 30 == 0) update()
+                    delay(1_000)
+                    if (++seconds % 30 == 0) applyRule(force = false)
+                }
+                withdraw()
             }
         }
+    }
+
+    /**
+     * No rule until our own core holds its ports again. With [applyRule]'s lock: a refresh that
+     * is still establishing the old rule cannot bring it back afterwards.
+     */
+    @Synchronized
+    private fun withdraw() {
+        synchronized(tunLock) {
+            tun?.close()
+            tun = null
+            pacVersion = null
+        }
+        blocking.value = false
     }
 
     /** (Re)establishes the VPN when the rule changed, so browsers reload it. */
@@ -87,15 +114,11 @@ class UniVpnService : VpnService() {
         // VPN" on or off: Home's warning follows it here, not only when the VPN starts.
         if (tun != null) blocking.value = isLockdownEnabled
         val status = core.get("/status.json").json
+        status?.let { ApkUpdate.setAutomatic(this, it.optBoolean("auto_update", true)) }
         if (status == null && core.portTaken) {
             // Our core ended and another app took its port (Core.ready): the rule would hand that
             // app the browsers. It comes back with the next answer from our own core.
-            synchronized(tunLock) {
-                tun?.close()
-                tun = null
-                pacVersion = null
-            }
-            blocking.value = false
+            withdraw()
             return
         }
         // Without an answer the rule is unknown: keep it as it is (the first start still hands
@@ -143,17 +166,45 @@ class UniVpnService : VpnService() {
         blocking.value = isLockdownEnabled
     }
 
+    /** A newer version of the app is out (ApkUpdate): the notification offers it. */
+    @Volatile private var updateShown = false
+    private var updateCheck: Job? = null
+
+    /**
+     * Most users never open the app again once it is set up: the notification says when there
+     * is a new version. Beside the rule, so a download does not hold up the next website list.
+     */
+    private fun update() {
+        if (updateCheck?.isActive == true) return
+        updateCheck = scope.launch {
+            ApkUpdate.check(this@UniVpnService)
+            val offered = ApkUpdate.offered.value != null
+            // Under the lock Stop takes before it removes the notification: never brought back
+            // after that.
+            synchronized(tunLock) {
+                if (offered == updateShown || stopped) return@launch
+                updateShown = offered
+                getSystemService(NotificationManager::class.java).notify(NOTIFICATION, notification())
+            }
+        }
+    }
+
     private fun notification(): Notification =
         Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_tile)
             .setContentTitle(getString(R.string.app_name))
-            .setContentIntent(openApp())
+            .apply { if (updateShown) setContentText(getString(R.string.update)) }
+            .setContentIntent(if (updateShown) openApp(MainActivity.ACTION_UPDATE) else openApp())
             .setOngoing(true)
             .setCategory(Notification.CATEGORY_SERVICE)
             .build()
 
-    private fun openApp(): PendingIntent = PendingIntent.getActivity(
-        this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE,
+    private fun openApp(action: String? = null): PendingIntent = PendingIntent.getActivity(
+        this,
+        if (action == null) 0 else 1,
+        Intent(this, MainActivity::class.java).setAction(action).apply { if (action != null) putExtra(MainActivity.EXTRA_KEY, ApkUpdate.tapKey) },
+        // Updated: the key is new after the app was restarted.
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
     private fun shutDown() {

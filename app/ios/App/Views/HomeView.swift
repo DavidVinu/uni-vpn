@@ -1,3 +1,4 @@
+import NetworkExtension
 import SwiftUI
 
 /// Message ids whose state name says it all (as on the status page).
@@ -13,8 +14,11 @@ struct HomeView: View {
     var body: some View {
         let status = model.status ?? JSON([:])
         let vpnOn = model.vpn.isOn
-        let state = status.string("state")
-        let action = status.string("action")
+        // While the tunnel extension starts its core, the status is still the one the app's own
+        // core gave before it stopped for the handover: the VPN is connecting, whatever that said.
+        let starting = model.vpn.status == .connecting
+        let state = starting ? "connecting" : status.string("state")
+        let action = starting ? "" : status.string("action")
         let fix = fixes[action]
         let stopped = vpnOn && ["auth_failed", "keyring", "error"].contains(state) && !status.bool("busy")
         List {
@@ -26,7 +30,7 @@ struct HomeView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(vpnOn ? model.t("look.\(state)") : model.t("phone.off"))
                             .font(.title3.weight(.semibold))
-                        let line = hint(status, vpnOn: vpnOn, state: state)
+                        let line = starting ? "" : hint(status, vpnOn: vpnOn, state: state)
                         if !line.isEmpty {
                             Text(line)
                                 .font(.subheadline)
