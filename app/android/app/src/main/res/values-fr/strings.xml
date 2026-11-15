@@ -2,4 +2,6 @@
 <resources>
     <string name="channel">Connexion</string>
     <string name="port_in_use">Une autre application gêne. Uni VPN continue d\'essayer. Si cela persiste, redémarrez le téléphone.</string>
+    <!-- The VPN's notification when a newer version is out (ApkUpdate). -->
+    <string name="update">Mettre à jour Uni VPN</string>
 </resources>

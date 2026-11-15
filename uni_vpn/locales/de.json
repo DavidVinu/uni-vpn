@@ -251,6 +251,7 @@
   "phone.camera_denied": "Uni VPN darf die Kamera nicht nutzen. Erlaube es in den Einstellungen.",
   "phone.vpn_refused": "Android hat Uni VPN nicht eingeschaltet. Wenn eine andere VPN-App immer an sein soll, schalte das in den VPN-Einstellungen aus.",
   "phone.vpn_settings": "VPN-Einstellungen",
+  "phone.update": "Uni VPN aktualisieren",
   "phone.lockdown": "Android blockiert Verbindungen ohne VPN, deshalb kommen Apps nicht ins Internet. Schalte das in den VPN-Einstellungen aus.",
   "phone.scan_failed": "Der Scanner ging nicht auf. Versuche es gleich noch einmal oder tippe es ein.",
   "phone.vpn_not_allowed": "Das iPhone hat Uni VPN nicht eingeschaltet. Tippe auf den Schalter, dann fragt es noch einmal.",

@@ -71,8 +71,22 @@ class MainActivity : ComponentActivity() {
 
     fun turnOff() = UniVpnService.stop(this)
 
+    /** The notification's "Update Uni VPN": straight to Android's installer. */
+    private fun handle(intent: Intent?) {
+        if (intent?.action != ACTION_UPDATE) return
+        // Once only, not again when the phone is turned.
+        setIntent(Intent(this, MainActivity::class.java))
+        model.installUpdate()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handle(intent)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null) handle(intent)
         enableEdgeToEdge()
         setContent {
             UniVpnTheme {
@@ -85,6 +99,10 @@ class MainActivity : ComponentActivity() {
                 App(model, vpnOn, this)
             }
         }
+    }
+
+    companion object {
+        const val ACTION_UPDATE = "de.davidvinu.univpn.UPDATE"
     }
 
     override fun onResume() {

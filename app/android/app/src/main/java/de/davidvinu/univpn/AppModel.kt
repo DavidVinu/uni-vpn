@@ -221,9 +221,23 @@ class AppModel(app: Application) : AndroidViewModel(app) {
 
     val setupNeeded get() = status?.optBoolean("setup_needed", false) == true
 
+    /** Home's and the notification's "Update Uni VPN": the new version to Android's installer. */
+    fun installUpdate() {
+        if (ApkUpdate.installing.value) return
+        ApkUpdate.installing.value = true
+        val context = getApplication<Application>()
+        viewModelScope.launch {
+            val handed = withContext(Dispatchers.IO) { ApkUpdate.prepare(context)?.let { ApkUpdate.install(context, it) } == true }
+            // Else the installer answers (UpdateReceiver).
+            if (!handed) ApkUpdate.installing.value = false
+        }
+    }
+
     /** Polls status.json while the app is on screen, like the desktop apps. */
     suspend fun pollWhileVisible() {
         withContext(Dispatchers.IO) { core.ensureRunning() }
+        // Once a day, also with the VPN off (ApkUpdate).
+        viewModelScope.launch(Dispatchers.IO) { ApkUpdate.check(getApplication()) }
         while (true) {
             refresh()
             delay(if (unreachable) 500 else 1500)
@@ -241,6 +255,9 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         unreachable = false
         status = json
         core.setupDone = !json.optBoolean("setup_needed", true)
+        if (ApkUpdate.setAutomatic(getApplication(), json.optBoolean("auto_update", true))) {
+            viewModelScope.launch(Dispatchers.IO) { ApkUpdate.check(getApplication()) }
+        }
         if (!enrollChecked) {
             enrollChecked = true
             resumeEnroll(json)

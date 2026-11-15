@@ -1,6 +1,7 @@
 package de.davidvinu.univpn
 
 import android.app.Notification
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
@@ -73,6 +74,7 @@ class UniVpnService : VpnService() {
             applyRule(force = true)
             // Websites can change on another device (syncing): the rule follows.
             while (isActive) {
+                update()
                 delay(30_000)
                 applyRule(force = false)
             }
@@ -87,6 +89,7 @@ class UniVpnService : VpnService() {
         // VPN" on or off: Home's warning follows it here, not only when the VPN starts.
         if (tun != null) blocking.value = isLockdownEnabled
         val status = core.get("/status.json").json
+        status?.let { ApkUpdate.setAutomatic(this, it.optBoolean("auto_update", true)) }
         if (status == null && core.portTaken) {
             // Our core ended and another app took its port (Core.ready): the rule would hand that
             // app the browsers. It comes back with the next answer from our own core.
@@ -143,17 +146,41 @@ class UniVpnService : VpnService() {
         blocking.value = isLockdownEnabled
     }
 
+    /** A newer version of the app is out (ApkUpdate): the notification offers it. */
+    @Volatile private var updateShown = false
+    private var updateCheck: Job? = null
+
+    /**
+     * Most users never open the app again once it is set up: the notification says when there
+     * is a new version. Beside the rule, so a download does not hold up the next website list.
+     */
+    private fun update() {
+        if (updateCheck?.isActive == true) return
+        updateCheck = scope.launch {
+            ApkUpdate.check(this@UniVpnService)
+            val offered = ApkUpdate.offered.value != null
+            // Under the lock Stop takes before it removes the notification: never brought back
+            // after that.
+            synchronized(tunLock) {
+                if (offered == updateShown || stopped) return@launch
+                updateShown = offered
+                getSystemService(NotificationManager::class.java).notify(NOTIFICATION, notification())
+            }
+        }
+    }
+
     private fun notification(): Notification =
         Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_tile)
             .setContentTitle(getString(R.string.app_name))
-            .setContentIntent(openApp())
+            .apply { if (updateShown) setContentText(getString(R.string.update)) }
+            .setContentIntent(if (updateShown) openApp(MainActivity.ACTION_UPDATE) else openApp())
             .setOngoing(true)
             .setCategory(Notification.CATEGORY_SERVICE)
             .build()
 
-    private fun openApp(): PendingIntent = PendingIntent.getActivity(
-        this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE,
+    private fun openApp(action: String? = null): PendingIntent = PendingIntent.getActivity(
+        this, if (action == null) 0 else 1, Intent(this, MainActivity::class.java).setAction(action), PendingIntent.FLAG_IMMUTABLE,
     )
 
     private fun shutDown() {

@@ -23,9 +23,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -45,6 +47,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import de.davidvinu.univpn.ApkUpdate
 import de.davidvinu.univpn.AppModel
 import de.davidvinu.univpn.MainActivity
 import de.davidvinu.univpn.Screen
@@ -66,6 +69,8 @@ fun HomeScreen(model: AppModel, vpnOn: Boolean, activity: MainActivity) {
     val status = model.status ?: return
     val scope = rememberCoroutineScope()
     val lockdown by UniVpnService.lockdown.collectAsState()
+    val update by ApkUpdate.offered.collectAsState()
+    val installing by ApkUpdate.installing.collectAsState()
     val state = status.optString("state")
     val domains = status.optJSONArray("domains")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
     Column(Modifier.fillMaxSize()) {
@@ -147,6 +152,17 @@ fun HomeScreen(model: AppModel, vpnOn: Boolean, activity: MainActivity) {
                             }
                         }
                     }
+                }
+            }
+            if (update != null) {
+                item {
+                    // Role model Signal's download build: a newer version, one tap to install.
+                    ListItem(
+                        headlineContent = { Text(model.t("phone.update"), color = MaterialTheme.colorScheme.primary) },
+                        leadingContent = { Icon(Icons.Outlined.SystemUpdate, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                        trailingContent = if (installing) { { CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp) } } else null,
+                        modifier = Modifier.clickable(enabled = !installing) { model.installUpdate() },
+                    )
                 }
             }
             item { Section(model.t("settings.through")) }

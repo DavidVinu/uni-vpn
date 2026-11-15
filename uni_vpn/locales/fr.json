@@ -251,6 +251,7 @@
   "phone.camera_denied": "Uni VPN n'a pas accès à l'appareil photo. Autorisez l'accès dans Réglages.",
   "phone.vpn_refused": "Android n'a pas laissé Uni VPN s'activer. Si une autre application VPN est réglée pour rester toujours active, désactivez cela dans les réglages VPN.",
   "phone.vpn_settings": "Réglages VPN",
+  "phone.update": "Mettre à jour Uni VPN",
   "phone.lockdown": "Android bloque les connexions sans VPN, les applications n'ont donc pas accès à Internet. Désactivez cela dans les réglages VPN.",
   "phone.scan_failed": "Le scanner ne s'est pas ouvert. Réessayez dans un instant ou saisissez-le.",
   "phone.vpn_not_allowed": "L'iPhone n'a pas laissé Uni VPN s'activer. Touchez l'interrupteur pour qu'il vous le redemande.",
