@@ -2,4 +2,9 @@
 <resources>
     <color name="background">#FFFFFF</color>
     <color name="icon_background">#1F66E0</color>
+    <!-- The widget (VpnWidget): Quick Settings colours, the phone's own from Android 12. -->
+    <color name="widget_on">#0B57D0</color>
+    <color name="widget_on_icon">#FFFFFF</color>
+    <color name="widget_off">#E9EEF6</color>
+    <color name="widget_off_icon">#1F1F1F</color>
 </resources>

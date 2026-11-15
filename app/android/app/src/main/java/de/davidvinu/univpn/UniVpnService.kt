@@ -61,6 +61,7 @@ class UniVpnService : VpnService() {
         running.value = true
         stopped = false
         want(this, true)
+        Toggles.update(this)
         if (poll?.isActive == true) return
         poll = scope.launch {
             // The rule names the core's port: Android gets it once our own core holds it, not
@@ -169,7 +170,7 @@ class UniVpnService : VpnService() {
         }
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
-        VpnTileService.update(this)
+        Toggles.update(this)
     }
 
     override fun onRevoke() = shutDown()
@@ -183,7 +184,7 @@ class UniVpnService : VpnService() {
             tun = null
         }
         scope.cancel()
-        VpnTileService.update(this)
+        Toggles.update(this)
         super.onDestroy()
     }
 
@@ -212,7 +213,6 @@ class UniVpnService : VpnService() {
         /** Call only after VpnService.prepare returned null. */
         fun start(context: Context) {
             context.startForegroundService(Intent(context, UniVpnService::class.java))
-            VpnTileService.update(context)
         }
 
         fun stop(context: Context) {

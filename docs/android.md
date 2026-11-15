@@ -53,6 +53,7 @@ the Go core does the work and the app only talks to its local API.
 |---|---|---|
 | Home | Tailscale | Name and settings gear in the top bar, one switch with the state above everything, the list below (websites instead of devices) |
 | Quick Settings tile | Tailscale | One tap on or off; the app opens when the system prompt or setup is needed |
+| Home screen widget | Android's Quick Settings tiles (Pixel) | One cell, the icon alone, the phone's accent colour while on; one tap on or off, the app opens as with the tile |
 | System prompt | Tailscale | Android's "connection request" right after setup |
 | Welcome, Add a device | WhatsApp, Signal linked devices | Scan the code the computer shows; the code under the QR code to type instead |
 | University | eduroam CAT | Search by name or city, "Not listed" for a VPN address |
