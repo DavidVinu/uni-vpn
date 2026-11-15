@@ -51,6 +51,10 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     /** The core did not answer the last poll. */
     var unreachable by mutableStateOf(false)
         private set
+    /** Nor the polls of the last 20 s (App.kt says so instead of a spinner without end). */
+    var stuck by mutableStateOf(false)
+        private set
+    private var unreachableSince = 0L
     /** Another app holds the core's port (Core.portTaken). */
     var portTaken by mutableStateOf(false)
         private set
@@ -248,11 +252,15 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         val reply = withContext(Dispatchers.IO) { core.get("/status.json") }
         portTaken = core.portTaken
         val json = reply.json
+        val now = SystemClock.elapsedRealtime()
         if (!reply.ok || json == null) {
+            if (!unreachable) unreachableSince = now
             unreachable = true
+            stuck = now - unreachableSince > 20_000
             return
         }
         unreachable = false
+        stuck = false
         status = json
         core.setupDone = !json.optBoolean("setup_needed", true)
         if (ApkUpdate.setAutomatic(getApplication(), json.optBoolean("auto_update", true))) {

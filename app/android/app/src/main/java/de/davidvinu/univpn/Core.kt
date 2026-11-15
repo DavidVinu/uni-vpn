@@ -158,7 +158,24 @@ class Core(private val context: Context) {
      * in the Android Keystore that never leaves the phone's hardware. Not tied to unlocking, so
      * the VPN can reconnect in a pocket.
      */
-    private fun secretsKey(): String {
+    private fun secretsKey(): String = try {
+        readSecretsKey().also { keyFailures.ok() }
+    } catch (e: Exception) {
+        if (!keyFailures.failed(SystemClock.elapsedRealtime())) throw e
+        // A minute of the same failure is no Keystore still starting up: its key is broken (seen
+        // on some phones after a system update). A new key, after which the core asks for the
+        // password again, beats an app that never starts.
+        Log.e(TAG, "secrets key unusable for a minute, making a new one", e)
+        KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.deleteEntry(KEY_ALIAS)
+        prefs.edit(commit = true) { remove("wrapped") }
+        keyFailures.ok()
+        readSecretsKey()
+    }
+
+    /** The Keystore failing at every start (about every second) for a minute. Under [lock]. */
+    private val keyFailures = LastingFailure(patienceMs = 60_000, gapMs = 10_000)
+
+    private fun readSecretsKey(): String {
         val (keystoreKey, fresh) = keystoreKey()
         val stored = prefs.getString("wrapped", null)
         if (stored != null && !fresh) {
@@ -173,7 +190,7 @@ class Core(private val context: Context) {
                 Log.e(TAG, "secrets key unreadable, making a new one", e)
             }
             // Anything else (the Keystore not ready yet, for example) throws: the core is not
-            // started and the next try reads the same key.
+            // started and the next try reads the same key, for a minute (secretsKey).
         }
         // A new key cannot read the old secrets: drop them, so the core asks for them again
         // instead of reporting a broken store.
@@ -263,5 +280,24 @@ class Core(private val context: Context) {
 
         private fun randomHex(bytes: Int) = ByteArray(bytes).also { SecureRandom().nextBytes(it) }.toHex()
         private fun ByteArray.toHex() = joinToString("") { "%02x".format(it) }
+    }
+}
+
+/**
+ * A failure that keeps coming: [failed] is true once failures followed one another, never more
+ * than [gapMs] apart, for [patienceMs]. Two failures far apart start counting afresh.
+ */
+internal class LastingFailure(private val patienceMs: Long, private val gapMs: Long) {
+    private var since = -1L
+    private var last = -1L
+
+    fun failed(now: Long): Boolean {
+        if (since < 0 || now - last > gapMs) since = now
+        last = now
+        return now - since >= patienceMs
+    }
+
+    fun ok() {
+        since = -1
     }
 }

@@ -4,4 +4,5 @@
     <string name="port_in_use">Eine andere App ist im Weg. Uni VPN versucht es weiter. Bleibt es so, starte das Handy neu.</string>
     <!-- The VPN's notification when a newer version is out (ApkUpdate). -->
     <string name="update">Uni VPN aktualisieren</string>
+    <string name="not_running">Uni VPN läuft nicht. Schließe die App und öffne sie erneut.</string>
 </resources>

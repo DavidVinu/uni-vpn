@@ -62,8 +62,10 @@ fun App(model: AppModel, vpnOn: Boolean, activity: MainActivity) {
                         }
                     }
                 }
-                model.status == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
+                // The core never answered: a phone whose Keystore fails, for example (Core.kt
+                // gives it a minute). Its texts need the core: this one comes with the app.
+                model.status == null -> Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                    if (model.stuck) Text(stringResource(R.string.not_running), textAlign = TextAlign.Center) else CircularProgressIndicator()
                 }
                 else -> Pages(
                     setup = model.setupNeeded || model.changingAccount || model.setupFinishing,

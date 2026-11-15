@@ -43,6 +43,9 @@ final class CoreTests: XCTestCase {
             XCTAssertEqual(Strings.portTaken("", [code]), core, code)
             // The language chosen in Settings comes first.
             XCTAssertEqual(Strings.portTaken(code, ["pt-BR"]), core, code)
+            // And the one for a core that never answers.
+            let notRunning = locales.json?.object("catalogs")?.object(code)?.string("phone.msg.not_running")
+            XCTAssertEqual(Strings.notRunning(code, ["pt-BR"]), notRunning, code)
         }
     }
 

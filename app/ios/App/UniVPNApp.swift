@@ -28,7 +28,12 @@ struct RootView: View {
         if model.portTaken {
             FitPage { PortTakenView(model: model) }
         } else if model.status == nil {
-            ProgressView()
+            // The core never answered. Its texts need the core: this one comes with the app.
+            if model.stuck {
+                FitPage { NotRunningView() }
+            } else {
+                ProgressView()
+            }
         } else if model.setupNeeded || model.changingAccount || model.setupFinishing {
             SetupView(model: model)
         } else {
@@ -72,5 +77,14 @@ private struct PortTakenView: View {
             }
         }
         .padding(24)
+    }
+}
+
+private struct NotRunningView: View {
+    var body: some View {
+        let language = UserDefaults(suiteName: CoreHost.appGroup)?.string(forKey: "language") ?? ""
+        Text(Strings.notRunning(language, Locale.preferredLanguages))
+            .multilineTextAlignment(.center)
+            .padding(24)
     }
 }
