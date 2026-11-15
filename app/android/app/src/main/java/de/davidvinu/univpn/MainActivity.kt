@@ -73,7 +73,9 @@ class MainActivity : ComponentActivity() {
 
     /** The notification's "Update Uni VPN": straight to Android's installer. */
     private fun handle(intent: Intent?) {
-        if (intent?.action != ACTION_UPDATE) return
+        if (intent?.action != ACTION_UPDATE || intent.getStringExtra(EXTRA_KEY) != ApkUpdate.tapKey) return
+        // Opened again from Recents, Android hands over the first intent again: not a new tap.
+        if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return
         // Once only, not again when the phone is turned.
         setIntent(Intent(this, MainActivity::class.java))
         model.installUpdate()
@@ -103,6 +105,7 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val ACTION_UPDATE = "de.davidvinu.univpn.UPDATE"
+        const val EXTRA_KEY = "key"
     }
 
     override fun onResume() {

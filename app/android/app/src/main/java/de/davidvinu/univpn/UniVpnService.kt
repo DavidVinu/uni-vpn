@@ -68,7 +68,11 @@ class UniVpnService : VpnService() {
             while (isActive) {
                 // The rule names the core's port: Android gets it once our own core holds it,
                 // not while another app listens there (Core.ready).
+                var waited = 0
                 while (!core.ready()) {
+                    // A release whose core does not start on this phone: the next one still
+                    // reaches it (ApkUpdate).
+                    if (waited++ % 120 == 0) update()
                     core.ensureRunning()
                     delay(250)
                 }
@@ -88,7 +92,11 @@ class UniVpnService : VpnService() {
         }
     }
 
-    /** No rule until our own core holds its ports again. */
+    /**
+     * No rule until our own core holds its ports again. With [applyRule]'s lock: a refresh that
+     * is still establishing the old rule cannot bring it back afterwards.
+     */
+    @Synchronized
     private fun withdraw() {
         synchronized(tunLock) {
             tun?.close()
@@ -192,7 +200,11 @@ class UniVpnService : VpnService() {
             .build()
 
     private fun openApp(action: String? = null): PendingIntent = PendingIntent.getActivity(
-        this, if (action == null) 0 else 1, Intent(this, MainActivity::class.java).setAction(action), PendingIntent.FLAG_IMMUTABLE,
+        this,
+        if (action == null) 0 else 1,
+        Intent(this, MainActivity::class.java).setAction(action).apply { if (action != null) putExtra(MainActivity.EXTRA_KEY, ApkUpdate.tapKey) },
+        // Updated: the key is new after the app was restarted.
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
     private fun shutDown() {

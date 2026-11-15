@@ -226,19 +226,13 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     val setupNeeded get() = status?.optBoolean("setup_needed", false) == true
 
     /** Home's and the notification's "Update Uni VPN": the new version to Android's installer. */
-    fun installUpdate() {
-        if (ApkUpdate.installing.value) return
-        ApkUpdate.installing.value = true
-        val context = getApplication<Application>()
-        viewModelScope.launch {
-            val handed = withContext(Dispatchers.IO) { ApkUpdate.prepare(context)?.let { ApkUpdate.install(context, it) } == true }
-            // Else the installer answers (UpdateReceiver).
-            if (!handed) ApkUpdate.installing.value = false
-        }
-    }
+    fun installUpdate() = ApkUpdate.start(getApplication())
 
     /** Polls status.json while the app is on screen, like the desktop apps. */
     suspend fun pollWhileVisible() {
+        // The 20 s until "not running" count while on screen, not from before the app left it.
+        unreachable = false
+        stuck = false
         withContext(Dispatchers.IO) { core.ensureRunning() }
         // Once a day, also with the VPN off (ApkUpdate).
         viewModelScope.launch(Dispatchers.IO) { ApkUpdate.check(getApplication()) }

@@ -11,8 +11,12 @@ import android.net.NetworkCapabilities
 import android.os.Build
 import android.util.Log
 import androidx.core.content.edit
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
@@ -20,6 +24,7 @@ import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
+import java.util.UUID
 
 /** The release's uni-vpn-apk.json: the version code, size and SHA-256 of its uni-vpn.apk. */
 class ApkRelease(val versionCode: Long, val size: Long, val sha256: String) {
@@ -59,6 +64,13 @@ object ApkUpdate {
     val offered: StateFlow<ApkRelease?> = newer
     /** The tap is being handled: downloading on mobile data, or handing the file to Android. */
     val installing = MutableStateFlow(false)
+    /**
+     * Goes with the notification's "Update Uni VPN" (MainActivity.ACTION_UPDATE): the activity is
+     * exported, and another app's intent must not start a download.
+     */
+    val tapKey: String = UUID.randomUUID().toString()
+    /** The tap's work outlives the screen: leaving the app mid-download does not leave it busy. */
+    private val taps = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val lock = Any()
     @Volatile private var loaded = false
@@ -119,19 +131,37 @@ object ApkUpdate {
             if (release.versionCode <= BuildConfig.VERSION_CODE || release.sha256 == prefs.getString("refused", null)) {
                 newer.value = null
                 apk(context).delete()
-                prefs.edit { remove("release"); putLong("checked", now) }
+                prefs.edit { remove("release"); remove("misses"); putLong("checked", now) }
                 return
             }
             prefs.edit { putString("release", JSONObject().put("version_code", release.versionCode).put("size", release.size).put("sha256", release.sha256).toString()) }
             newer.value = release
-            // A file that does not match yet (uni-vpn.apk of the next release, uploaded just
-            // before its uni-vpn-apk.json) tries again in 10 minutes; a refused one tomorrow.
-            if (!unmetered(context) || download(context, release) != null || newer.value == null) prefs.edit { putLong("checked", now) }
+            if (!unmetered(context) || download(context, release) != null || newer.value == null) {
+                prefs.edit { remove("misses"); putLong("checked", now) }
+            } else {
+                // A file that does not match yet (uni-vpn.apk of the next release, uploaded just
+                // before its uni-vpn-apk.json): again in 10 minutes, then 20, 40 and so on, at
+                // most a day, so a release whose uni-vpn-apk.json never came is not downloaded
+                // all day.
+                val misses = prefs.getInt("misses", 0)
+                prefs.edit { putInt("misses", misses + 1); putLong("checked", now - DAY + minOf(RETRY shl minOf(misses, 8), DAY)) }
+            }
+        }
+    }
+
+    /** The tap on "Update Uni VPN": the file (downloaded now on mobile data) to Android's installer. */
+    fun start(context: Context) {
+        if (!installing.compareAndSet(expect = false, update = true)) return
+        val app = context.applicationContext
+        taps.launch {
+            val handed = runCatching { prepare(app)?.let { install(app, it) } == true }.getOrDefault(false)
+            // Else the installer answers (UpdateReceiver).
+            if (!handed) installing.value = false
         }
     }
 
     /** The checked file of the version on offer, downloading it now when needed; null when it does not come. */
-    fun prepare(context: Context): File? {
+    private fun prepare(context: Context): File? {
         synchronized(lock) {
             load(context)
             val release = newer.value ?: return null

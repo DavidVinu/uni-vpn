@@ -49,10 +49,15 @@ the Go core does the work and the app only talks to its local API.
   `uni-vpn.apk`, written by CI) at most once a day, while the VPN is on or the app is open, and
   not at all while Settings, Automatic updates is off (the computers' switch, synced). A newer
   version comes down at once on Wi-Fi, on mobile data when the user taps; it must match the
-  size, the SHA-256, the package and this copy's signing key. Home shows "Update Uni VPN" and so
+  size, the SHA-256, the package and this copy's signing key. A file that does not match yet is
+  tried again after 10 minutes, then 20, 40 and so on up to a day; one signed with another key
+  (a build of one's own) is not offered or downloaded again until the next release. Home shows "Update Uni VPN" and so
   does the VPN's notification; a tap hands the file to Android's installer
   (`PackageInstaller`), which asks once to allow installs from Uni VPN and then for the update.
-  On Android 12 and newer, after the first one, it may install without asking again.
+  On Android 12 and newer, after the first one, it may install without asking again
+  (`UPDATE_PACKAGES_WITHOUT_USER_ACTION`). When the core does not start (a release whose core
+  fails on this phone), the "not running" page offers the update too, and the notification
+  still does.
   BootReceiver turns the VPN back on after the update. Copies from before this (November 2026)
   have no update check: they need the new APK once by hand.
 - **Later: openconnect in the core's own process.** The iPhone app runs libopenconnect inside

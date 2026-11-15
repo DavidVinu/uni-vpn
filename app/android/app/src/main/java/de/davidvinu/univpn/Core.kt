@@ -159,21 +159,38 @@ class Core(private val context: Context) {
      * the VPN can reconnect in a pocket.
      */
     private fun secretsKey(): String = try {
-        readSecretsKey().also { keyFailures.ok() }
+        readSecretsKey().also { keyOk() }
     } catch (e: Exception) {
-        if (!keyFailures.failed(SystemClock.elapsedRealtime())) throw e
+        val lasting = keyFailures.failed(SystemClock.elapsedRealtime())
+        prefs.edit { putLong("key_failing", keyFailures.failing); putLong("key_failed_at", keyFailures.last) }
+        if (!lasting) throw e
         // A minute of the same failure is no Keystore still starting up: its key is broken (seen
         // on some phones after a system update). A new key, after which the core asks for the
         // password again, beats an app that never starts.
         Log.e(TAG, "secrets key unusable for a minute, making a new one", e)
         KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.deleteEntry(KEY_ALIAS)
         prefs.edit(commit = true) { remove("wrapped") }
-        keyFailures.ok()
+        keyOk()
         readSecretsKey()
     }
 
-    /** The Keystore failing at every start (about every second) for a minute. Under [lock]. */
-    private val keyFailures = LastingFailure(patienceMs = 60_000, gapMs = 10_000)
+    /**
+     * The Keystore failing at every start (about every second) for a minute, also over a few
+     * closings of the app in between (elapsedRealtime counts on). Under [lock].
+     */
+    private val keyFailures = LastingFailure(
+        patienceMs = 60_000,
+        gapMs = 10_000,
+        pauseMs = 10 * 60_000,
+        failing = prefs.getLong("key_failing", 0),
+        last = prefs.getLong("key_failed_at", -1),
+    )
+
+    private fun keyOk() {
+        if (keyFailures.last < 0) return
+        keyFailures.ok()
+        prefs.edit { remove("key_failing"); remove("key_failed_at") }
+    }
 
     private fun readSecretsKey(): String {
         val (keystoreKey, fresh) = keystoreKey()
@@ -284,20 +301,28 @@ class Core(private val context: Context) {
 }
 
 /**
- * A failure that keeps coming: [failed] is true once failures followed one another, never more
- * than [gapMs] apart, for [patienceMs]. Two failures far apart start counting afresh.
+ * A failure that keeps coming: [failed] is true once [patienceMs] were spent failing, counted in
+ * runs of failures never more than [gapMs] apart. A pause up to [pauseMs] between runs (the app
+ * closed and opened again, as the "not running" text says) keeps the count; a longer one, a
+ * restart of the phone ([now] going back) or a success starts afresh. The caller keeps
+ * [failing] and [last] across restarts of the app.
  */
-internal class LastingFailure(private val patienceMs: Long, private val gapMs: Long) {
-    private var since = -1L
-    private var last = -1L
-
+internal class LastingFailure(
+    private val patienceMs: Long,
+    private val gapMs: Long,
+    private val pauseMs: Long,
+    var failing: Long = 0,
+    var last: Long = -1,
+) {
     fun failed(now: Long): Boolean {
-        if (since < 0 || now - last > gapMs) since = now
+        val since = now - last
+        if (last < 0 || since < 0 || since > pauseMs) failing = 0 else if (since <= gapMs) failing += since
         last = now
-        return now - since >= patienceMs
+        return failing >= patienceMs
     }
 
     fun ok() {
-        since = -1
+        failing = 0
+        last = -1
     }
 }
