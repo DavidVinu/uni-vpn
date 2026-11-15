@@ -124,12 +124,36 @@ foreach ($i in 1..30) {
   try { $status = Invoke-RestMethod http://127.0.0.1:1081/status.json; $ok = $true; break } catch { Start-Sleep 1 }
 }
 if (-not $ok -or $status.commit -ne $env:GITHUB_SHA) { Explain; throw "the service does not run after installing again" }
+# An otpauth:// link's key must not stay on disk in the window's browsing history, as it does
+# not in the browser's (the fallback without WebView2 leaves it out): uninstall deletes the key
+# everywhere else. Looked for again below, once the window's browser process has ended.
+$key = "UNIVPNCIKEYABCDEFG"
+function KeyOnDisk {
+  foreach ($file in Get-ChildItem "$env:LOCALAPPDATA\uni-vpn\WebView2" -Recurse -File -ErrorAction SilentlyContinue) {
+    try {
+      $stream = New-Object IO.FileStream($file.FullName, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
+      $bytes = New-Object byte[] $stream.Length
+      [void]$stream.Read($bytes, 0, $bytes.Length)
+      $stream.Close()
+      if ([Text.Encoding]::ASCII.GetString($bytes).Contains($key)) { return $file.FullName }
+    } catch { }
+  }
+  return $null
+}
+$problems = @()
+# The link starts the app (here without a window yet, so the page loads with the key in it).
+Get-Process -Name "Uni VPN" -ErrorAction SilentlyContinue | Stop-Process -Force
+foreach ($i in 1..30) { if ((AppWebViews).Count -eq 0) { break }; Start-Sleep 1 }
+Start-Process $exe -ArgumentList "otpauth://totp/uni-vpn-ci?secret=$key"
+Start-Sleep 20  # Chromium writes its history every 10 s
+$found = KeyOnDisk
+if ($found) { $problems += "the otpauth link's key is on disk in $found" }
 # A page process that ends (crash, out of memory, Task Manager) loads the page again; without
 # its browser process the window gets a new one. Both left the window blank until Exit.
 function AppBrowser { @(AppWebViews | Where-Object { $_.CommandLine -notmatch "--type=" }) }
 function Renderers($browser) { @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $browser" | Where-Object { $_.CommandLine -match "--type=renderer" }) }
 foreach ($i in 1..30) { if ((AppBrowser).Count -gt 0 -and (Renderers (AppBrowser)[0].ProcessId).Count -gt 0) { break }; Start-Sleep 1 }
-if ((AppBrowser).Count -eq 0) { Explain; throw "the installer did not open the app window" }
+if ((AppBrowser).Count -eq 0) { Explain; throw "the otpauth link did not open the app window" }
 $browser = (AppBrowser)[0].ProcessId
 $renderers = @(Renderers $browser | ForEach-Object ProcessId)
 Write-Host "app window: browser process $browser, page processes $($renderers -join ', ')"
@@ -138,11 +162,16 @@ Start-Sleep 5
 Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\app.log" -ErrorAction SilentlyContinue
 $new = @(Renderers $browser | Where-Object { $renderers -notcontains $_.ProcessId })
 if ((Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\app.log" -Raw -ErrorAction SilentlyContinue) -notlike "*RenderProcessExited*" -or $new.Count -eq 0) {
-  Explain; throw "the page did not load again after its process ended"
+  Explain; $problems += "the page did not load again after its process ended"
 }
 Stop-Process -Id $browser -Force
 function NewBrowser { @(AppBrowser | Where-Object { $_.ProcessId -ne $browser }) }
 foreach ($i in 1..20) { if ((NewBrowser).Count -gt 0) { break }; Start-Sleep 1 }
 Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\app.log" -ErrorAction SilentlyContinue
-if ((NewBrowser).Count -eq 0) { Explain; throw "the window did not come back after its browser process ended" }
-if ((Trays).Count -eq 0) { Explain; throw "the tray app ended with the window's browser process" }
+if ((NewBrowser).Count -eq 0) { Explain; $problems += "the window did not come back after its browser process ended" }
+if ((Trays).Count -eq 0) { Explain; $problems += "the tray app ended with the window's browser process" }
+if (-not $found) {
+  $found = KeyOnDisk
+  if ($found) { $problems += "the otpauth link's key is on disk in $found once the browser process ended" }
+}
+if ($problems.Count -gt 0) { throw ($problems -join "; ") }
