@@ -144,6 +144,15 @@ func TestMissingFile(t *testing.T) {
 	}
 }
 
+// A file that is not UTF-8 (edited in a Latin-1 editor, damaged on disk) is a problem in the
+// file like any other: the daemon must start and show it, and the assistant start over.
+func TestFileThatIsNotUTF8IsAConfigError(t *testing.T) {
+	path := write(t, "user = \"ab123\"\n# Universit\xe4t\n")
+	if err := loadErr(t, path); !strings.Contains(err.Error(), "utf-8") {
+		t.Errorf("err = %v", err)
+	}
+}
+
 func TestWriteInitialRoundtrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	if err := WriteInitial(path, "ab123", unis.DefaultID, nil); err != nil {

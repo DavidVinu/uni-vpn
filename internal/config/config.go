@@ -354,7 +354,8 @@ func readText(path string) (string, error) {
 		return "", err
 	}
 	if !utf8.Valid(data) {
-		return "", fmt.Errorf("%s: 'utf-8' codec can't decode the file", path)
+		// A problem in the file like a TOML error: the daemon starts and shows it.
+		return "", &ConfigError{Message: fmt.Sprintf("%s: 'utf-8' codec can't decode the file", path)}
 	}
 	text := strings.ReplaceAll(string(data), "\r\n", "\n")
 	return strings.ReplaceAll(text, "\r", "\n"), nil
