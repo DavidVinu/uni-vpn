@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -267,6 +268,11 @@ func (m *Manager) endTask() (bool, error) {
 		if !m.IsActive() {
 			return true, nil
 		}
+		// The tray app starts a stopped service again after two missed polls (3 to 6 s), once a
+		// minute at most: ended again, it stays ended.
+		if _, err := m.Run(Cmd{Args: schtasks("/End", "/TN", winsys.TaskName), Capture: true, NoWindow: true}); err != nil {
+			return false, err
+		}
 		m.Sleep(500 * time.Millisecond)
 	}
 	return false, nil
@@ -372,6 +378,7 @@ func (m *Manager) Install(dryRun bool) ([]string, error) {
 	}
 	files := []string{target}
 	if m.macOS() {
+		old := m.runningPid()
 		if _, err := m.Run(Cmd{Args: []string{"launchctl", "bootout", m.guiDomain(), target}, Capture: true}); err != nil {
 			return files, err
 		}
@@ -379,6 +386,11 @@ func (m *Manager) Install(dryRun bool) ([]string, error) {
 		for attempt := 0; ; attempt++ {
 			err := m.runChecked([]string{"launchctl", "bootstrap", m.guiDomain(), target}, files)
 			if err == nil {
+				break
+			}
+			// The menu bar app loads a stopped service again after two missed polls: another job
+			// than the old one runs, loaded from the file written above.
+			if pid := m.runningPid(); pid != 0 && pid != old {
 				break
 			}
 			if attempt == 4 {
@@ -399,6 +411,23 @@ func (m *Manager) Install(dryRun bool) ([]string, error) {
 		}
 	}
 	return files, nil
+}
+
+// runningPid is the pid of the running launchd job, 0 if none runs.
+func (m *Manager) runningPid() int {
+	r, err := m.Run(Cmd{Args: []string{"launchctl", "print", m.guiDomain() + "/" + Label},
+		Capture: true, Timeout: 5 * time.Second})
+	if err != nil || r.Code != 0 || !strings.Contains(r.Stdout, "state = running") {
+		return 0
+	}
+	for _, line := range strings.Split(r.Stdout, "\n") {
+		if value, ok := strings.CutPrefix(strings.TrimSpace(line), "pid = "); ok {
+			if pid, err := strconv.Atoi(value); err == nil {
+				return pid
+			}
+		}
+	}
+	return 0
 }
 
 // UpgradeProcessType gives the service file of an earlier version, a background job, the

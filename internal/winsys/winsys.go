@@ -103,7 +103,9 @@ func RenderTaskBinary(conhost, binary, user, workdir string) string {
 	return taskXML(conhost, "--headless "+XMLEscape(QuoteArg(binary))+" daemon", user, workdir)
 }
 
-// taskXML takes arguments already escaped.
+// taskXML takes arguments already escaped. Priority 4 is normal CPU, I/O and memory priority;
+// Task Scheduler's own 7 is below normal, for maintenance tasks, while all of the browser's
+// traffic to the university goes through the service.
 func taskXML(command, arguments, user, workdir string) string {
 	return `<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
@@ -140,7 +142,7 @@ func taskXML(command, arguments, user, workdir string) string {
     <RunOnlyIfIdle>false</RunOnlyIfIdle>
     <WakeToRun>false</WakeToRun>
     <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
-    <Priority>7</Priority>
+    <Priority>4</Priority>
     <RestartOnFailure>
       <Interval>PT1M</Interval>
       <Count>999</Count>

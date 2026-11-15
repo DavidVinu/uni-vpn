@@ -29,7 +29,7 @@ desktop.
   installer's process search, and installs again over the running app, then checks that the
   core of this commit answers.
 
-### D2. Repair can fail because the tray or menu bar app starts the service in the middle of it (all desktops)
+### D2. Repair can fail because the tray or menu bar app starts the service in the middle of it (Windows, macOS)
 
 - Severity: Medium
 - Status: fixed
@@ -39,14 +39,27 @@ desktop.
   between makes setup fail ("The running service did not stop") before the proxy rule and the
   app are set up again. On macOS a menu bar app that loads the service between Repair's bootout
   and bootstrap makes all five bootstrap attempts fail.
-- Fix: the status already says `repairing`. All three shells remember when they last saw it and
-  do not start the service within 60 s of that; a service that Repair did not bring back is
-  started after that.
-- Verification: reproduced with the real Linux shell under Xvfb against a fake core that says
-  `repairing` and then goes away: before the fix the shell ran `systemctl --user start` 3.1 s
-  later. After it: nothing within 20 s, a start 62.6 s after the core went away, and a service
-  that stops outside Repair is still started again within 6 s. The Windows shell compiles with
-  mcs as C# 5 (as csc in CI), the macOS shell in CI.
+- Fix, in two places:
+  - Setup itself (internal/service), for Repair, a reinstall and setup alike. On Windows, while
+    it waits for the old service to end, it ends a task that runs again once more (a shell
+    starts it at most once a minute). On macOS, a bootstrap that fails while another job than
+    the old one runs counts as done: that job was loaded from the file setup had just written.
+  - The shells: the status already says `repairing`. All three remember when they last saw it
+    and do not start the service within 60 s of that. The re-audit showed that a poll every 3 s
+    often misses it (an idle service ends within a second of the Repair), so this alone was not
+    enough.
+- Verification:
+  - Reproduced with the real Linux shell under Xvfb against a fake core that says `repairing`
+    and then goes away: before the fix the shell ran `systemctl --user start` 3.1 s later.
+    After it: nothing within 20 s, a start 62.6 s after the core went away, and a service that
+    stops outside Repair is still started again within 6 s.
+  - Go tests: setup ends a task that was started again and then starts it; a job loaded by the
+    menu bar app counts, the old one going away does not.
+  - CI runs Repair's setup while the service is started again at the worst moment: on Windows
+    as soon as Task Scheduler no longer counts it as running (windows-installer,
+    windows-arm-install), on macOS by a loop that loads it as soon as it can (macos-pkg).
+    Setup must succeed.
+  - The Windows shell compiles with mcs as C# 5 (as csc in CI), the macOS shell in CI.
 
 ### D3. The Mac service runs throttled as a background job (macOS)
 
@@ -91,8 +104,9 @@ desktop.
 - Verification: Linux under Xvfb: after killing WebKitWebProcess the page was gone (JavaScript
   errors) before the fix, loaded again after it; a second kill within 10 s stays blank until the
   window is opened again, which loads it. Windows: test-install.ps1 kills the window's page
-  processes and its browser process and checks that the page loads again and a new window
-  comes up.
+  processes and its browser process and checks that a new window comes up and that the page
+  itself loaded again (the window notes it in app.log; a new page process alone proves
+  nothing, WebView2 starts one for its error page).
 
 ### D6. Linux app menu entry missing when the home folder's path has $, ", ` or \ (Linux)
 
@@ -113,7 +127,86 @@ desktop.
   uninstall leaves in place. The browser fallback already leaves the key out for this reason.
 - Fix: the window's WebView2 runs InPrivate, and the profile earlier versions kept is deleted.
 - Verification: test-install.ps1 opens an otpauth link and looks for its key in every file of
-  the WebView2 folder, 20 s later and again after the browser process ended.
+  the WebView2 folder, 20 s later and again after the browser process ended. The first version
+  of that check could never fail: in PowerShell the comma binds tighter than `-bor`, so opening
+  each file threw and the error was swallowed. Fixed; it now also says how many files it read.
+
+### D8. The Windows service runs below normal priority (Windows)
+
+- Severity: Medium (the Windows twin of D3)
+- Status: fixed
+- Root cause: the scheduled task had `<Priority>7</Priority>`, Task Scheduler's default for
+  maintenance tasks: below normal CPU priority, low I/O and memory priority. Programs it starts
+  get the same class, openconnect included. Under load (a video call, a virus scan) the proxy
+  that carries every university website and the tunnel wait behind every normal program.
+- Fix: priority 4 (normal) in internal/winsys. An update replaces only the program, so the
+  service also sets its own priority class to normal when it starts (cmd/uni-vpn), before it
+  starts openconnect.
+- Verification: Go test for the task priority. CI (windows-installer, windows-arm-install)
+  checks the installed task's priority and that the running service has base priority 8
+  (normal; below normal is 6).
+
+### D9. The Linux and Mac app windows keep an otpauth link's key on disk (Linux, macOS)
+
+- Severity: Low (a secret on disk, readable by the user's account only; the Linux twin of D7)
+- Status: fixed
+- Root cause: the window's web view kept its data on disk. When an otpauth link opens the
+  window, WebKit's network cache records the full address, key included
+  (`~/.cache/de.davidvinu.UniVPN/WebKitCache/.../SubResources/...`, mode 0644), and uninstall
+  leaves it there. WKWebView's default data store is the same WebKit cache.
+- Fix: the Linux window's web view is ephemeral, the Mac window's data store is not persistent,
+  and both delete what earlier versions kept (Linux `~/.cache` and `~/.local/share`
+  `de.davidvinu.UniVPN`; macOS `~/Library/Caches/<bundle id>/WebKit` and
+  `~/Library/WebKit/<bundle id>`). The page stores nothing.
+- Verification: real Linux shell under Xvfb with WebKitGTK 2.52: before the fix `grep -r` found
+  the key in that SubResources file 20 s after the link opened the window; after it, nothing,
+  the earlier files were gone, and the page still put the key into the sign-in code step. CI
+  macos-pkg opens an otpauth link in the installed app and looks for the key in the app's
+  WebKit, cache and saved state folders, before and after the app quits.
+
+### D10. After the page's process ends, an old otpauth link is offered again (Linux, Windows)
+
+- Severity: Low
+- Status: fixed
+- Root cause: the shells keep the page asked for last (D4) to load it again (D5, a failed load),
+  and that included `#otpauth=<key>`. A page process that ended much later put the user back
+  into "Change second factor" with the old key, during a first setup possibly over a newer one.
+- Fix: once the page has loaded (Linux: load committed; Windows: navigation succeeded), the
+  shells drop the otpauth part from the page they load again.
+- Verification: Linux under Xvfb: open with an otpauth link, then Main, then kill
+  WebKitWebProcess: the page came back in the change with the old key before the fix, on the
+  main screen after it. Windows: same code path, compiled with mcs.
+
+### D11. The Windows window loses the page asked for while WebView2 starts (Windows)
+
+- Severity: Low (the Windows twin of D4)
+- Status: fixed
+- Root cause: until WebView2 is ready (1 to 3 s), a click on the icon ("as it is") replaced the
+  page asked for, an otpauth link or Settings, with the main page.
+- Fix: before WebView2 is ready, "as it is" keeps the page asked for.
+- Verification: traced in the code; compiled with mcs as C# 5.
+
+### D12. The Windows window reopens over and over when its browser process keeps ending (Windows)
+
+- Severity: Low
+- Status: fixed
+- Root cause: D5's new window after a browser process exit had no limit; a browser process
+  that ended at once each time (security software) made a window take the focus each time.
+- Fix: a new window at most once in 10 s, as for the page process.
+- Verification: traced in the code; compiled with mcs as C# 5.
+
+### D13. Other programs could run JavaScript in the Mac app window (macOS)
+
+- Severity: Low (only gains something for a program that cannot reach the local API itself,
+  such as a sandboxed app without network access)
+- Status: fixed
+- Root cause: the page name of the `de.davidvinu.uni-vpn.app.show` notification, which any
+  program of the user can post, went into `evaluateJavaScript("location.hash = '<page>'")`
+  unescaped, so `#'; fetch(...); '` ran in the page with the whole local API.
+- Fix: the page name goes into the script as a JSON string; a name that is no valid address is
+  ignored instead of being force-unwrapped.
+- Verification: the re-audit ran the old script text with such a name in node and the injected
+  code ran; the JSON string cannot end early. The macOS shell compiles in CI.
 
 ### Left as they are (Low)
 
@@ -129,3 +222,23 @@ desktop.
   registration is repaired by the next setup or Repair.
 - macOS: when the updated menu bar app cannot be started, the running one goes on as it is
   and tries again only after its next start.
+- Windows: the elevated setup (installer, Repair, which a program of the user can start through
+  the local API) reads things the user can write: PowerShell finds Get-ScheduledTask through
+  the user's module path, and the task's XML is written to and read from %LOCALAPPDATA%. A
+  program of the user could so get its code run with administrator rights. The re-audit rated
+  it High; left as Low because uni-vpn on Windows is set up only from an administrator account,
+  where programs of the user already reach administrator rights in other ways (the user's own
+  environment variables reach every elevated program the user starts), and Microsoft does not
+  treat UAC as a security boundary. No other account's data is reachable this way.
+- Linux: when an otpauth link starts the shell (it was not running), the key is in that
+  process's command line, which other accounts can read with ps for as long as it runs. The
+  fix would be D-Bus activation instead of the command line.
+- macOS: a second end of the page's process within about 30 s leaves the window blank until
+  the app restarts (WebKit reloads only once).
+- macOS: when two copies start at the same moment, the hand-over posts an otpauth link's key
+  to the user's other programs that listen for that notification.
+- Windows: after its browser process ended, the new window shows the main page, not the page
+  shown before.
+- Linux: after a self-restart the old WebKit processes stay as zombies (two per restart);
+  `pkill -f` takes the script path as a pattern (a home path with `+`, `(` or `[` misses);
+  a restart after an update can drop a half-done change while the window is hidden.

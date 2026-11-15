@@ -12,6 +12,7 @@ Arguments: --port N, --hidden (sign-in: panel icon only), --page P ("#settings",
 import json
 import locale
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -288,7 +289,11 @@ class App(Gtk.Application):
             self.window.set_resizable(False)
             self.window.set_position(Gtk.WindowPosition.CENTER)
             self.window.set_icon_name(APP_ID)
-            self.view = WebKit2.WebView()
+            # Nothing of the page on disk: WebKit's cache kept an otpauth link's key (#otpauth=),
+            # also after uninstall. The page stores nothing. What earlier versions kept goes.
+            for base in (GLib.get_user_cache_dir(), GLib.get_user_data_dir()):
+                shutil.rmtree(os.path.join(base, APP_ID), ignore_errors=True)
+            self.view = WebKit2.WebView(is_ephemeral=True)
             settings = self.view.get_settings()
             settings.set_enable_developer_extras(False)
             settings.set_user_agent_with_application_details("UniVPN", "")
@@ -297,6 +302,7 @@ class App(Gtk.Application):
             self.view.connect("context-menu", lambda _view, _menu, *rest: not rest[-1].context_is_editable())
             self.view.connect("load-failed", self.on_failed)
             self.view.connect("web-process-terminated", self.on_terminated)
+            self.view.connect("load-changed", self.on_load_changed)
             self.window.add(self.view)
             self.window.connect("delete-event", self.on_close)
         self.load(page)
@@ -346,6 +352,12 @@ class App(Gtk.Application):
 
         GLib.timeout_add_seconds(2, retry)
         return True
+
+    def on_load_changed(self, _view, event):
+        # The page has an otpauth link's key now: a page loaded again (ended process, retry) does
+        # not offer it once more.
+        if event == WebKit2.LoadEvent.COMMITTED and self.target and "#otpauth=" in self.target:
+            self.target = self.target.split("#", 1)[0]
 
     def on_terminated(self, view, reason):
         # The page's process ended (crash, out of memory): the window stays blank until the page

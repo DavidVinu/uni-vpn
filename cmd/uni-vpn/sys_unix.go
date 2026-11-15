@@ -15,3 +15,5 @@ func harden() {
 }
 
 func umask() { syscall.Umask(0o077) }
+
+func normalPriority() {}

@@ -101,6 +101,7 @@ func cmdDaemon(configArg string) int {
 	exe := executable()
 	harden()
 	umask() // lock file, log and everything else readable only by the user
+	normalPriority()
 	// The Android app hands over its keys this way; openconnect and ocproxy need neither.
 	apiToken := os.Getenv(apiTokenEnv)
 	os.Unsetenv(apiTokenEnv)

@@ -216,6 +216,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         if window == nil {
             let config = WKWebViewConfiguration()
             config.applicationNameForUserAgent = "UniVPN"
+            // Nothing of the page on disk: WebKit's cache keeps an otpauth link's key (#otpauth=),
+            // also after uninstall. The page stores nothing. What earlier versions kept goes.
+            config.websiteDataStore = .nonPersistent()
+            let library = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library")
+            let id = Bundle.main.bundleIdentifier ?? "de.davidvinu.uni-vpn.app"
+            for old in ["Caches/\(id)/WebKit", "WebKit/\(id)"] {
+                try? FileManager.default.removeItem(at: library.appendingPathComponent(old))
+            }
             let view = WKWebView(frame: NSRect(origin: .zero, size: windowSize), configuration: config)
             view.navigationDelegate = self
             view.uiDelegate = self
@@ -255,12 +263,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     func load(_ page: String) {
         guard let view = webView else { return }
         if let current = view.url, current.host == base.host, current.port == base.port, page.isEmpty || page.hasPrefix("#") {
-            if !page.isEmpty { view.evaluateJavaScript("location.hash = '\(page)'") }
+            // As a string, never as code: other apps can ask for a page too (showNote).
+            if !page.isEmpty, let json = try? JSONSerialization.data(withJSONObject: [page]),
+               let list = String(data: json, encoding: .utf8) {
+                view.evaluateJavaScript("location.hash = \(list)[0]")
+            }
             return
         }
         // Nothing shown (a load that failed): "as it is" is the page asked for last (Settings,
         // setup's prefill), not the main page.
-        if !page.isEmpty { target = URL(string: "?app=1" + page, relativeTo: base)!.absoluteURL }
+        if !page.isEmpty, let url = URL(string: "?app=1" + page, relativeTo: base) { target = url.absoluteURL }
         view.load(URLRequest(url: target))
     }
 

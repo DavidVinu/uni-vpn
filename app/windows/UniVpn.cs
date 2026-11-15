@@ -459,6 +459,8 @@ class MainWindow : Form
     string target;
     readonly Action reopen;
     DateTime reloaded = DateTime.MinValue;
+    string failed;  // the page process that ended, until the page loaded again
+    static DateTime browserEnded = DateTime.MinValue;
 
     // reopen: a new window in this one's place (TrayApp.Show), when this one cannot show anything any more.
     public MainWindow(string baseUrl, string page, Action reopen)
@@ -544,6 +546,12 @@ class MainWindow : Form
             int status = 0;
             try { status = e.HttpStatusCode; } catch (Exception) { }  // older runtimes cannot say
             loaded = e.IsSuccess || status != 0;
+            if (e.IsSuccess && status >= 200 && status < 300)
+            {
+                if (failed != null) { Note(failed + ", the page loaded again"); failed = null; }
+                // The page has an otpauth link's key now: a page loaded again does not offer it once more.
+                if (target != null && target.Contains("#otpauth=")) target = target.Substring(0, target.IndexOf('#'));
+            }
             if (loaded || quitting) return;
             System.Windows.Forms.Timer retry = new System.Windows.Forms.Timer();
             retry.Interval = 2000;
@@ -559,8 +567,10 @@ class MainWindow : Form
             Note("A WebView2 process ended: " + e.ProcessFailedKind);
             if (e.ProcessFailedKind == CoreWebView2ProcessFailedKind.BrowserProcessExited)
             {
-                // This WebView2 is closed for good: a new window takes this one's place.
-                bool open = Visible;
+                // This WebView2 is closed for good: a new window takes this one's place, not
+                // over and over when it ends at once again.
+                bool open = Visible && (DateTime.Now - browserEnded).TotalSeconds >= 10;
+                browserEnded = DateTime.Now;
                 quitting = true;
                 BeginInvoke((MethodInvoker)delegate { Close(); if (open) reopen(); });
             }
@@ -570,6 +580,7 @@ class MainWindow : Form
                 // Not over and over for a page that ends it at once.
                 if ((DateTime.Now - reloaded).TotalSeconds < 10) return;
                 reloaded = DateTime.Now;
+                failed = "A WebView2 process ended: " + e.ProcessFailedKind;
                 view.CoreWebView2.Reload();
             }
         };
@@ -597,7 +608,8 @@ class MainWindow : Form
     // page: "" (as it is), "#main", "#settings", or "&user=ab123&university=ethz" from setup.
     void ShowPage(string page)
     {
-        if (!ready) { pending = page; return; }
+        // Before WebView2 is ready: "as it is" keeps the page asked for (an otpauth link, Settings).
+        if (!ready) { if (page != "") pending = page; return; }
         string current = view.Source == null ? "" : view.Source.ToString();
         if (loaded && current.StartsWith(baseUrl) && (page == "" || page.StartsWith("#")))
         {

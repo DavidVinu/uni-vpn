@@ -124,23 +124,59 @@ foreach ($i in 1..30) {
   try { $status = Invoke-RestMethod http://127.0.0.1:1081/status.json; $ok = $true; break } catch { Start-Sleep 1 }
 }
 if (-not $ok -or $status.commit -ne $env:GITHUB_SHA) { Explain; throw "the service does not run after installing again" }
+$problems = @()
+# Repair stops and starts the service while the tray app starts a stopped one again. Here at the
+# worst moment, as soon as Task Scheduler no longer counts it as running: setup ends it again,
+# else it fails ("The running service did not stop") and skips the proxy rule and the app.
+$core = "$env:ProgramFiles\uni-vpn\bin\uni-vpn-core.exe"
+[IO.File]::WriteAllText("$PWD\empty-input.txt", "")
+$repair = Start-Process -FilePath $core -ArgumentList "setup --no-browser --repair" -RedirectStandardInput empty-input.txt `
+  -RedirectStandardOutput repair.log -RedirectStandardError repair-err.log -NoNewWindow -PassThru
+$null = $repair.Handle  # else ExitCode stays empty
+$sw = [Diagnostics.Stopwatch]::StartNew()
+$restarted = $null
+while (-not $repair.HasExited -and $sw.Elapsed.TotalSeconds -lt 60) {
+  if ((Get-ScheduledTask -TaskName uni-vpn).State -ne "Running") { schtasks /Run /TN uni-vpn | Out-Null; $restarted = $sw.Elapsed.TotalSeconds; break }
+  Start-Sleep -Milliseconds 50
+}
+if (-not $repair.WaitForExit(300000)) { Explain; throw "Repair's setup did not finish within 5 minutes" }
+Get-Content repair.log, repair-err.log -ErrorAction SilentlyContinue
+Write-Host "the test started the task again at $restarted s; setup ended with $($repair.ExitCode) at $($sw.Elapsed.TotalSeconds) s"
+if ($repair.ExitCode -ne 0) { Explain; $problems += "Repair failed when the service was started again meanwhile" }
+$ok = $false
+foreach ($i in 1..30) {
+  try { $status = Invoke-RestMethod http://127.0.0.1:1081/status.json; $ok = $true; break } catch { Start-Sleep 1 }
+}
+if (-not $ok -or $status.commit -ne $env:GITHUB_SHA) { Explain; throw "the service does not run after Repair" }
+# Normal priority: Task Scheduler's default runs a task below normal, with low I/O and memory
+# priority, while all of the browser's traffic to the university goes through the service.
+$taskPriority = (Get-ScheduledTask -TaskName uni-vpn).Settings.Priority
+$daemon = @(Get-CimInstance Win32_Process -Filter "Name = 'uni-vpn-core.exe'" | Where-Object { $_.CommandLine -like "* daemon*" })
+Write-Host "task priority $taskPriority; service base priority $(($daemon | ForEach-Object Priority) -join ', ') (8 is normal, 6 below normal)"
+if ($taskPriority -ne 4) { $problems += "the task has priority $taskPriority, not 4" }
+if ($daemon.Count -eq 0 -or ($daemon | Where-Object { $_.Priority -lt 8 })) { $problems += "the service does not run at normal priority" }
 # An otpauth:// link's key must not stay on disk in the window's browsing history, as it does
 # not in the browser's (the fallback without WebView2 leaves it out): uninstall deletes the key
 # everywhere else. Looked for again below, once the window's browser process has ended.
 $key = "UNIVPNCIKEYABCDEFG"
 function KeyOnDisk {
+  $read = 0; $unread = @()
   foreach ($file in Get-ChildItem "$env:LOCALAPPDATA\uni-vpn\WebView2" -Recurse -File -ErrorAction SilentlyContinue) {
     try {
-      $stream = New-Object IO.FileStream($file.FullName, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
+      # Also files the running WebView2 has open.
+      $stream = [IO.File]::Open($file.FullName, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
       $bytes = New-Object byte[] $stream.Length
-      [void]$stream.Read($bytes, 0, $bytes.Length)
+      $n = 0
+      while ($n -lt $bytes.Length) { $got = $stream.Read($bytes, $n, $bytes.Length - $n); if ($got -le 0) { break }; $n += $got }
       $stream.Close()
-      if ([Text.Encoding]::ASCII.GetString($bytes).Contains($key)) { return $file.FullName }
-    } catch { }
+      $read++
+      if ([Text.Encoding]::ASCII.GetString($bytes).Contains($key) -or [Text.Encoding]::Unicode.GetString($bytes).Contains($key)) { return $file.FullName }
+    } catch { $unread += "$($file.Name): $($_.Exception.Message)" }
   }
+  Write-Host "looked for the key in $read files of the WebView2 folder; could not read $($unread.Count) $($unread -join '; ')"
+  if ($read -eq 0 -and $unread.Count -gt 0) { return "none of its files (none could be read)" }
   return $null
 }
-$problems = @()
 # The link starts the app (here without a window yet, so the page loads with the key in it).
 Get-Process -Name "Uni VPN" -ErrorAction SilentlyContinue | Stop-Process -Force
 foreach ($i in 1..30) { if ((AppWebViews).Count -eq 0) { break }; Start-Sleep 1 }
@@ -161,8 +197,9 @@ Write-Host "app window: browser process $browser, page processes $($renderers -j
 $renderers | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
 Start-Sleep 5
 Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\app.log" -ErrorAction SilentlyContinue
-$new = @(Renderers $browser | Where-Object { $renderers -notcontains $_.ProcessId })
-if ((Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\app.log" -Raw -ErrorAction SilentlyContinue) -notlike "*RenderProcessExited*" -or $new.Count -eq 0) {
+# WebView2 shows an error page in a new page process by itself: only the window's note says the
+# page itself loaded again.
+if ((Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\app.log" -Raw -ErrorAction SilentlyContinue) -notlike "*RenderProcessExited, the page loaded again*") {
   Explain; $problems += "the page did not load again after its process ended"
 }
 Stop-Process -Id $browser -Force

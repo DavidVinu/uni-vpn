@@ -494,6 +494,43 @@ func TestMacOSBootstrapIsRetried(t *testing.T) {
 	}
 }
 
+// The menu bar app loads a stopped service again after two missed polls, also between setup's
+// bootout and bootstrap (Repair, a reinstall): setup's bootstrap then fails, but the job runs,
+// loaded from the file setup wrote.
+func TestMacOSInstallAcceptsTheJobTheMenuBarAppLoaded(t *testing.T) {
+	setupHome(t)
+	pid := "100"
+	r := &recorder{}
+	r.reply = func(c Cmd) (Result, error) {
+		switch c.Args[1] {
+		case "bootout":
+			pid = "200"
+		case "bootstrap":
+			return Result{Code: 5, Stderr: "Bootstrap failed: 5: Input/output error"}, nil
+		case "print":
+			return Result{Stdout: "gui/501/de.davidvinu.uni-vpn = {\n\tstate = running\n\tpid = " + pid + "\n}\n"}, nil
+		}
+		return Result{}, nil
+	}
+	m, _ := manager("darwin", r)
+	if _, err := m.Install(false); err != nil {
+		t.Fatal(err, r.calls)
+	}
+	// The old job, still going away: not taken for the new one.
+	r.reply = func(c Cmd) (Result, error) {
+		switch c.Args[1] {
+		case "bootstrap":
+			return Result{Code: 5, Stderr: "Bootstrap failed: 5: Input/output error"}, nil
+		case "print":
+			return Result{Stdout: "\tstate = running\n\tpid = 100\n"}, nil
+		}
+		return Result{}, nil
+	}
+	if _, err := m.Install(false); err == nil || !strings.Contains(err.Error(), "Bootstrap failed: 5") {
+		t.Fatal(err)
+	}
+}
+
 func TestUninstallRemovesUnit(t *testing.T) {
 	setupHome(t)
 	r := &recorder{}
@@ -640,7 +677,9 @@ func TestWindowsControlEndsTaskAfterLoggingOut(t *testing.T) {
 		names = append(names, strings.Join(c, " "))
 	}
 	ps := "powershell -NoProfile -NonInteractive -Command (Get-ScheduledTask -TaskName 'uni-vpn').State"
-	if !reflect.DeepEqual(names, []string{"schtasks /End /TN uni-vpn", ps, ps, ps, "schtasks /Run /TN uni-vpn"}) {
+	// Still running: ended again (the tray app may have started it again).
+	end := "schtasks /End /TN uni-vpn"
+	if !reflect.DeepEqual(names, []string{end, ps, end, ps, end, ps, "schtasks /Run /TN uni-vpn"}) {
 		t.Fatal(names)
 	}
 }
@@ -744,6 +783,42 @@ func TestWindowsInstallWritesUTF16TaskAndRuns(t *testing.T) {
 	}
 	if !r.called("schtasks", "/Create", "/TN", "uni-vpn", "/XML", files[0], "/F") ||
 		!reflect.DeepEqual(r.calls[len(r.calls)-1], []string{"schtasks", "/Run", "/TN", "uni-vpn"}) {
+		t.Fatal(r.calls)
+	}
+}
+
+// The tray app starts a stopped service again after two missed polls (3 to 6 s), also while
+// Repair's setup waits for the old one to end: the task runs again, and with IgnoreNew setup's
+// own "/Run" would be dropped. Setup ends it again until it stays ended.
+func TestWindowsInstallEndsATaskThatWasStartedAgain(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	var mu sync.Mutex
+	queries := 0
+	r := &recorder{reply: func(c Cmd) (Result, error) {
+		if c.Args[0] != "powershell" {
+			return Result{}, nil
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		queries++
+		if queries <= 2 {
+			return Result{Stdout: "Running"}, nil
+		}
+		return Result{Stdout: "Ready"}, nil
+	}}
+	m, _ := manager("windows", r)
+	m.HTTPPort = func() (int, error) { return 9, nil }
+	if _, err := m.Install(false); err != nil {
+		t.Fatal(err)
+	}
+	ends, last := 0, -1
+	for i, c := range r.calls {
+		if reflect.DeepEqual(c, []string{"schtasks", "/End", "/TN", "uni-vpn"}) {
+			ends, last = ends+1, i
+		}
+	}
+	if ends != 3 || !reflect.DeepEqual(r.calls[len(r.calls)-1], []string{"schtasks", "/Run", "/TN", "uni-vpn"}) || last > len(r.calls)-2 {
 		t.Fatal(r.calls)
 	}
 }
