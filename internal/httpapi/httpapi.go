@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
@@ -28,6 +29,7 @@ import (
 	"github.com/DavidVinu/uni-vpn/internal/config"
 	"github.com/DavidVinu/uni-vpn/internal/detect"
 	"github.com/DavidVinu/uni-vpn/internal/i18n"
+	"github.com/DavidVinu/uni-vpn/internal/pac"
 	"github.com/DavidVinu/uni-vpn/internal/pyjson"
 	"github.com/DavidVinu/uni-vpn/internal/qrscan"
 	"github.com/DavidVinu/uni-vpn/internal/sockowner"
@@ -126,8 +128,11 @@ type Server struct {
 	AppPolled func(restartsItself bool)
 	// OtherAccount tells whether a connection comes from another account of this computer
 	// (fast user switching: its app and browser reach the uni-vpn that started first). Only
-	// the PAC file is served to them. Tests replace it.
+	// a PAC file is served to them, one that sends everything directly: this account's VPN is
+	// not theirs to use (the SOCKS port refuses them too). Tests replace it.
 	OtherAccount func(c net.Conn) (bool, error)
+	// OtherAccountSeen is told of each request from another account; nil ignores them.
+	OtherAccountSeen func()
 
 	daemon Daemon
 	log    *slog.Logger
@@ -358,7 +363,14 @@ func (s *Server) handle(c net.Conn) {
 			return
 		}
 	}
-	if other && !(method == "GET" && path == "/proxy.pac") {
+	if other {
+		if s.OtherAccountSeen != nil {
+			s.OtherAccountSeen()
+		}
+		if method == "GET" && path == "/proxy.pac" {
+			s.respond(c, 200, "application/x-ns-proxy-autoconfig", []byte(pac.Direct), hdrs)
+			return
+		}
 		s.refuse(c, path, hdrs)
 		return
 	}
@@ -399,6 +411,35 @@ const otherAccountPage = `<!doctype html><html lang="%s"><meta charset="utf-8">`
 	`<title>Uni VPN</title><p style="font:16px/1.5 system-ui,sans-serif;margin:2em">%s</p>` +
 	`<script>setInterval(() => fetch("/status.json", {cache: "no-store"})` +
 	`.then((r) => { if (r.status !== 403) location.reload(); }, () => {}), 5000);</script></html>`
+
+// OtherAccountWindow is otherAccountPage for this account's app window while another account
+// holds the port (daemon: the instance file): in the language setting, else in the system's,
+// as the page picks it (systemLanguage in index.html).
+func OtherAccountWindow(setting string) string {
+	key := i18n.T("app.other_account").Key
+	texts := map[string]string{}
+	for _, l := range i18n.Languages {
+		if text, ok := i18n.Catalog(l.Code)[key]; ok {
+			texts[l.Code] = text
+		}
+	}
+	if !i18n.Valid(setting) {
+		setting = ""
+	}
+	list, _ := json.Marshal(texts) // < > & as \u003c...: nothing in it ends the script
+	return `<!doctype html><html lang="en"><meta charset="utf-8">` +
+		`<meta name="color-scheme" content="light dark">` +
+		`<title>Uni VPN</title><p id="t" style="font:16px/1.5 system-ui,sans-serif;margin:2em">` +
+		html.EscapeString(texts[i18n.Source]) + `</p><script>const texts = ` + string(list) +
+		`, setting = "` + setting + `";` +
+		`function pick() { if (texts[setting]) return setting;` +
+		` for (const tag of navigator.languages || [navigator.language || ""]) {` +
+		` const [base, ...rest] = tag.toLowerCase().split("-");` +
+		` if (base === "zh") return !rest.includes("hans") && rest.some((p) => ["hant", "tw", "hk", "mo"].includes(p)) ? "zh-Hant" : "zh-Hans";` +
+		` if (texts[base]) return base; } return "en"; }` +
+		`const code = pick(); document.documentElement.lang = code; document.getElementById("t").textContent = texts[code];` +
+		`</script></html>`
+}
 
 // refuse answers another account's window (in its language) and its programs (JSON).
 func (s *Server) refuse(c net.Conn, path string, hdrs headers) {

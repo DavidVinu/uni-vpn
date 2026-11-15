@@ -70,6 +70,28 @@ def system_languages():
     return locale.getlocale()[0] or "en"
 
 
+def instance_path():
+    """The service's instance file (internal/daemon writeInstance), next to its log."""
+    state = os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state")
+    return os.path.join(state, "uni-vpn", "instance")
+
+
+def read_instance(last):
+    """The instance file, which only this account can read: None without it (a version before
+    it), else its id and the page that says another account holds the port. A file that cannot
+    be read just now keeps the last one."""
+    try:
+        with open(instance_path(), encoding="utf-8") as file:
+            data = json.load(file)
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError):
+        return last
+    if not isinstance(data, dict):
+        return last
+    return {"id": str(data.get("id") or ""), "page": str(data.get("page") or "")}
+
+
 def option(args, name):
     return args[args.index(name) + 1] if name in args[:-1] else None
 
@@ -146,6 +168,13 @@ class App(Gtk.Application):
         self.program = stamp()
         self.seen = None
         self.restarting = False
+        # The window loads the status port's page only once status.json says the id in the
+        # instance file (or without the file, as before): another account may run anything on
+        # the port. shown is what the window has instead: None (that page), "" (nothing), or
+        # the page that says another account holds the port.
+        self.instance = read_instance(None)
+        self.allowed = self.instance is None
+        self.shown = None
 
     # A second start (app grid, "uni-vpn app") reaches the running instance here.
     def do_command_line(self, command_line):
@@ -203,6 +232,8 @@ class App(Gtk.Application):
                 url = self.base + "status.json?menu=" + urllib.parse.quote(system_languages()) + "&shell=1"
                 with OPENER.open(url, timeout=3) as response:
                     data = json.loads(response.read().decode("utf-8"))
+                if not isinstance(data, dict):
+                    data = None
             except (OSError, ValueError):
                 data = None
             GLib.idle_add(self.render, data)
@@ -242,6 +273,9 @@ class App(Gtk.Application):
             self.program, self.restarting = now, False  # stays as it is; tried again after the next update
 
     def render(self, data):
+        self.check(data)
+        if not self.allowed:
+            data = None  # the menu says "Not running"
         self.reachable = data is not None
         if data and data.get("repairing") is True:
             self.repairing = time.monotonic()
@@ -280,6 +314,40 @@ class App(Gtk.Application):
         self.poll()
         return False  # poll returns True for its 3 s timer: an idle callback would run forever
 
+    def check(self, data):
+        """Whether what answers on the port is this account's uni-vpn (data: its status.json, or
+        None when nothing answered)."""
+        self.instance = read_instance(self.instance)
+        if self.instance is None:
+            self.guard(True, None)
+            return
+        ours = data is not None and self.instance["id"] != "" and data.get("instance") == self.instance["id"]
+        if self.instance["page"]:
+            self.guard(False, self.instance["page"])
+        elif ours:
+            self.guard(True, None)
+        elif data is not None:
+            self.guard(False, "")  # not this account's uni-vpn: nothing of it
+        else:
+            self.guard(False, None)  # nothing answers (a restart): the page stays, nothing loads
+
+    def guard(self, allowed, instead):
+        was, self.allowed = self.allowed, allowed
+        if self.view is None:
+            return
+        if instead is not None and instead != self.shown:
+            self.show_instead(instead)
+        elif allowed and not was and self.shown is not None and self.window.get_visible():
+            self.shown = None
+            self.view.load_uri(self.target)  # this account's again: the page asked for last
+
+    def show_instead(self, instead):
+        self.shown = instead
+        if instead:
+            self.view.load_html(instead, "about:blank")
+        else:
+            self.view.load_uri("about:blank")
+
     # --- window --------------------------------------------------------------
 
     def show(self, page):
@@ -305,6 +373,10 @@ class App(Gtk.Application):
             self.view.connect("load-changed", self.on_load_changed)
             self.window.add(self.view)
             self.window.connect("delete-event", self.on_close)
+        self.instance = read_instance(self.instance)
+        if self.instance is not None and self.instance["page"]:
+            self.allowed = False
+            self.show_instead(self.instance["page"])
         self.load(page)
         self.window.show_all()
         # The panel menu's click reaches no GTK event: without a time of its own the window
@@ -318,7 +390,7 @@ class App(Gtk.Application):
     def load(self, page):
         """page: "" (as it is), "#main", "#settings", or "&user=ab123&university=ethz" from setup."""
         current = self.view.get_uri() or ""
-        if current.startswith(self.base) and (page == "" or page.startswith("#")):
+        if self.shown is None and current.startswith(self.base) and (page == "" or page.startswith("#")):
             if page:
                 self.view.run_javascript(f"location.hash = {json.dumps(page)}", None, None, None)
             return
@@ -326,11 +398,18 @@ class App(Gtk.Application):
         # asked for last (Settings, setup's prefill), not the main page.
         if page or self.target is None:
             self.target = self.base + "?app=1" + page
-        self.view.load_uri(self.target)
+        if self.allowed:
+            self.shown = None
+            self.view.load_uri(self.target)
+        elif self.shown is None:
+            self.show_instead("")  # until this account's uni-vpn answers (check)
 
     def on_policy(self, _view, decision, kind):
         if kind in (WebKit2.PolicyDecisionType.NAVIGATION_ACTION, WebKit2.PolicyDecisionType.NEW_WINDOW_ACTION):
             uri = decision.get_navigation_action().get_request().get_uri()
+            if uri.startswith(self.base) and not self.allowed:
+                decision.ignore()  # not this account's uni-vpn, or not yet (the page reloads itself)
+                return True
             if not uri.startswith(self.base) and not uri.startswith("about:"):
                 # Links to anything but the page itself (MFA portal) go to the default browser;
                 # only web links: another scheme would run without the browser's question.
@@ -346,7 +425,7 @@ class App(Gtk.Application):
         # The service is still starting (sign-in) or restarting (update): try again shortly.
 
         def retry():
-            if self.view is view and self.window.get_visible():
+            if self.view is view and self.window.get_visible() and self.shown is None:
                 view.load_uri(self.target)  # the page asked for (Settings), not the main one
             return False
 
@@ -356,7 +435,8 @@ class App(Gtk.Application):
     def on_load_changed(self, _view, event):
         # The page has an otpauth link's key now: a page loaded again (ended process, retry) does
         # not offer it once more.
-        if event == WebKit2.LoadEvent.COMMITTED and self.target and "#otpauth=" in self.target:
+        if (event == WebKit2.LoadEvent.COMMITTED and self.target and "#otpauth=" in self.target
+                and (self.view.get_uri() or "").startswith(self.base)):
             self.target = self.target.split("#", 1)[0]
 
     def on_terminated(self, view, reason):
@@ -366,7 +446,10 @@ class App(Gtk.Application):
         if reason == WebKit2.WebProcessTerminationReason.TERMINATED_BY_API or time.monotonic() - self.reloaded < 10:
             return
         self.reloaded = time.monotonic()
-        view.load_uri(self.target)
+        if self.allowed and self.shown is None:
+            view.load_uri(self.target)
+        else:
+            self.show_instead(self.shown or "")  # the page once this account's uni-vpn answers
 
     def on_close(self, window, _event):
         if self.indicator:

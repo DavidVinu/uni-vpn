@@ -2,16 +2,20 @@ package httpapi
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
+	"html"
 	"io"
 	"log/slog"
 	"net"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/DavidVinu/uni-vpn/internal/i18n"
+	"github.com/DavidVinu/uni-vpn/internal/pac"
 )
 
 func TestAllowedOrigin(t *testing.T) {
@@ -78,6 +82,8 @@ func TestAnotherAccountGetsOnlyThePAC(t *testing.T) {
 	// account's uni-vpn.
 	s := New(pacOnly{}, "127.0.0.1", 0, nil)
 	s.OtherAccount = func(net.Conn) (bool, error) { return true, nil }
+	var seen atomic.Int64
+	s.OtherAccountSeen = func() { seen.Add(1) }
 	if err := s.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -101,8 +107,48 @@ func TestAnotherAccountGetsOnlyThePAC(t *testing.T) {
 			t.Fatal(req, head, string(body))
 		}
 	}
-	if head, _ := get(t, s, "GET", "/proxy.pac", ""); !strings.HasPrefix(head, "HTTP/1.1 200 ") {
-		t.Fatal(head)
+	// Its browser goes directly: this account's VPN is not its to use.
+	if head, body := get(t, s, "GET", "/proxy.pac", ""); !strings.HasPrefix(head, "HTTP/1.1 200 ") || string(body) != pac.Direct {
+		t.Fatal(head, string(body))
+	}
+	// Each request (its uni-vpn asks for the PAC file after switching the rule off on macOS).
+	if seen.Load() != 5 {
+		t.Fatal(seen.Load())
+	}
+}
+
+func TestOwnRequestsAreNotAnotherAccounts(t *testing.T) {
+	s := New(pacOnly{}, "127.0.0.1", 0, nil)
+	s.OtherAccount = func(net.Conn) (bool, error) { return false, nil }
+	var seen atomic.Int64
+	s.OtherAccountSeen = func() { seen.Add(1) }
+	if err := s.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer s.Stop()
+	if head, _ := get(t, s, "GET", "/proxy.pac", ""); !strings.HasPrefix(head, "HTTP/1.1 200 ") || seen.Load() != 0 {
+		t.Fatal(head, seen.Load())
+	}
+}
+
+// The page this account's app window shows while another account holds the port: in the
+// language setting, else as the page picks the system's; nothing in a text ends the script.
+func TestOtherAccountWindow(t *testing.T) {
+	page := OtherAccountWindow("")
+	for _, l := range i18n.Languages {
+		text, _ := json.Marshal(i18n.Catalog(l.Code)["app.other_account"])
+		if !strings.Contains(page, strings.Trim(string(text), `"`)) {
+			t.Fatal(l.Code, page)
+		}
+	}
+	english := html.EscapeString(i18n.Catalog("en")["app.other_account"])
+	if !strings.Contains(page, `<p id="t" style="font:16px/1.5 system-ui,sans-serif;margin:2em">`+english+`</p>`) ||
+		!strings.Contains(page, `setting = "";`) || !strings.Contains(page, `navigator.languages`) ||
+		strings.Count(page, "</script") != 1 || strings.Count(page, "<script") != 1 {
+		t.Fatal(page)
+	}
+	if !strings.Contains(OtherAccountWindow("de"), `setting = "de";`) || !strings.Contains(OtherAccountWindow(`x"; alert(1); "`), `setting = "";`) {
+		t.Fatal("setting")
 	}
 }
 

@@ -343,3 +343,46 @@ func TestOnlySocksClientsAskForTheTunnel(t *testing.T) {
 		t.Fatal(got, asked.Load())
 	}
 }
+
+// Another account of this computer reaches the port too (its browser, any of its programs):
+// it must not use this account's VPN or start this account's sign-in. When the system cannot
+// tell, the connection goes through, as on the status page.
+func TestRefusesOtherAccounts(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		other bool
+		err   error
+		asked int64
+	}{{"other account", true, nil, 0}, {"this account", false, nil, 1}, {"unknown", false, io.ErrUnexpectedEOF, 1}} {
+		t.Run(tc.name, func(t *testing.T) {
+			e, _ := setup(t)
+			var asked atomic.Int64
+			fwd := New("127.0.0.1", freePort(t), func(context.Context) (int, bool) { asked.Add(1); return e.echoPort, true },
+				func() {}, 500*time.Millisecond, nil)
+			fwd.OtherAccount = func(net.Conn) (bool, error) { return tc.other, tc.err }
+			if err := fwd.Start(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(fwd.Stop)
+			c, err := net.Dial("tcp", "127.0.0.1:"+strconv.Itoa(fwd.Port))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer c.Close()
+			c.Write([]byte{socksVersion, 1, 0})
+			c.SetReadDeadline(time.Now().Add(2 * time.Second))
+			got := make([]byte, 2)
+			n, err := io.ReadFull(c, got)
+			if tc.other {
+				// Closed (or reset: the greeting's rest was never read), never passed on.
+				if n != 0 || err == nil || isTimeout(err) || asked.Load() != 0 {
+					t.Fatal(n, err, asked.Load())
+				}
+				return
+			}
+			if err != nil || string(got) != "\x01\x00" || asked.Load() != tc.asked {
+				t.Fatal(got, err, asked.Load())
+			}
+		})
+	}
+}

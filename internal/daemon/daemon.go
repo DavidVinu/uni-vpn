@@ -9,16 +9,21 @@ package daemon
 
 import (
 	"context"
+	cryptorand "crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"math"
 	"math/rand/v2"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -28,6 +33,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/DavidVinu/uni-vpn/internal/atomicfile"
 	"github.com/DavidVinu/uni-vpn/internal/certs"
 	"github.com/DavidVinu/uni-vpn/internal/config"
 	"github.com/DavidVinu/uni-vpn/internal/credentials"
@@ -39,6 +45,7 @@ import (
 	"github.com/DavidVinu/uni-vpn/internal/pac"
 	"github.com/DavidVinu/uni-vpn/internal/platform"
 	"github.com/DavidVinu/uni-vpn/internal/pyjson"
+	"github.com/DavidVinu/uni-vpn/internal/sockowner"
 	"github.com/DavidVinu/uni-vpn/internal/socks"
 	"github.com/DavidVinu/uni-vpn/internal/sysproxy"
 	"github.com/DavidVinu/uni-vpn/internal/totp"
@@ -131,8 +138,20 @@ type Options struct {
 	// ProxyUnversioned: the system has the rule's plain address (sysproxy.Unversioned).
 	ProxyUnversioned func(httpPort int) bool
 	// ProxyCover gives the rule to network services added since the install (sysproxy.Cover).
-	ProxyCover  func(httpPort int)
-	RepairStart func() (Process, error)
+	ProxyCover func(httpPort int)
+	// ProxyWithdraw switches the rule off while another account holds the status port
+	// (sysproxy.Withdraw); ProxyInstall puts it back (sysproxy.Install).
+	ProxyWithdraw func(httpPort int) bool
+	ProxyInstall  func(httpPort int)
+	// OtherAccountListens: a program of another account of this computer accepts on
+	// 127.0.0.1:port (sockowner.OtherAccountListens).
+	OtherAccountListens func(port int) bool
+	// Knock asks the status port for the PAC file: the uni-vpn of another account that holds
+	// it then switches on again what Withdraw switched off on macOS (otherAccountSeen).
+	Knock func(port int)
+	// OtherAccount: a browser connection comes from another account (sockowner.OtherAccount).
+	OtherAccount func(c net.Conn) (bool, error)
+	RepairStart  func() (Process, error)
 	// Elevated is is_admin() on Windows, nil elsewhere (status "elevated": null).
 	Elevated func() *bool
 	// Updater is the self-updater; nil means updater.New(Commit).
@@ -211,6 +230,14 @@ type Daemon struct {
 	removing      bool // the app was removed and this program removes itself: no update now
 	http          *httpapi.Server
 	httpWaiting   *httpapi.Server // its port was taken at the start; the ticker tries again
+	// socksTaken: another program holds the SOCKS port, so the rule sends everything directly
+	// (whatever listens there would get the browser's connections).
+	socksTaken bool
+	// instance: status.json says it, and the instance file holds it (writeInstance), so the
+	// app windows tell this account's uni-vpn from what another account runs on the port.
+	instance string
+	// coverSoon: when the ticker gives the rule its next look (otherAccountSeen), 0 for none.
+	coverSoon float64
 	// The automatic second factor (enroll.go): its run, and the code from the user's app the
 	// next connect signs in with instead of the stored secret.
 	enrollJob *enrollJob
@@ -259,7 +286,8 @@ func New(cfg *config.Config, log *slog.Logger, opts Options) *Daemon {
 		log = slog.New(slog.DiscardHandler)
 	}
 	d := &Daemon{log: log, cfg: cfg, changed: make(chan struct{}), wake: make(chan struct{}),
-		stop: make(chan struct{}), started: make(chan struct{}), offlineRecheck: 5, awayFor: 600}
+		stop: make(chan struct{}), started: make(chan struct{}), offlineRecheck: 5, awayFor: 600,
+		instance: randomID()}
 	d.wall = func() float64 { return float64(time.Now().UnixNano()) / 1e9 }
 	d.mono = monoClock(platform.IsAndroid || platform.IsIOS)
 	d.updateFirstCheck, d.updateInterval, d.updateJitter = 600*time.Second, 5*time.Hour, 30*time.Minute
@@ -328,6 +356,27 @@ func New(cfg *config.Config, log *slog.Logger, opts Options) *Daemon {
 			opts.ProxyCover = func(int) {}
 		}
 	}
+	if opts.ProxyWithdraw == nil {
+		opts.ProxyWithdraw = sysproxy.Withdraw
+		if platform.IsAndroid || platform.IsIOS {
+			opts.ProxyWithdraw = func(int) bool { return false }
+		}
+	}
+	if opts.ProxyInstall == nil {
+		opts.ProxyInstall = func(port int) { sysproxy.Install(port, "") }
+		if platform.IsAndroid || platform.IsIOS {
+			opts.ProxyInstall = func(int) {}
+		}
+	}
+	if opts.OtherAccountListens == nil {
+		opts.OtherAccountListens = sockowner.OtherAccountListens
+	}
+	if opts.Knock == nil {
+		opts.Knock = knock
+	}
+	if opts.OtherAccount == nil {
+		opts.OtherAccount = sockowner.OtherAccount
+	}
 	if opts.Probe == nil {
 		// The gateway of the current account: the assistant can set up another university
 		// while the service runs (on the first run it starts with Heidelberg's defaults).
@@ -378,6 +427,7 @@ func New(cfg *config.Config, log *slog.Logger, opts Options) *Daemon {
 	d.lastActivity = d.mono()
 	d.forwarder = forwarder.New("127.0.0.1", cfg.SocksPort, d.acquire, d.noteActivity, seconds(cfg.HalfcloseGrace), log)
 	d.forwarder.Direct = d.directHosts
+	d.forwarder.OtherAccount = opts.OtherAccount
 	d.closeAll = d.forwarder.CloseAll
 	d.closeDirect = d.forwarder.CloseDirect
 	d.directOpen = d.forwarder.DirectOpen
@@ -687,6 +737,8 @@ func (d *Daemon) Status() (pyjson.Object, error) {
 		// Not listed: the assistant shows the gateway settings again when the account changes.
 		"usergroup", cfg.Usergroup,
 		"authgroup", cfg.Authgroup,
+		// The app windows show the page only when this is the id in the instance file.
+		"instance", d.instance,
 	), nil
 }
 
@@ -1044,6 +1096,9 @@ func (d *Daemon) ruleLocked() (string, error) {
 	if host := d.portalHostLocked(); host != "" {
 		portal = []string{host}
 	}
+	if d.socksTaken {
+		return pac.Direct, nil
+	}
 	return pac.BuildPACOrDirect(domains, portal, d.cfg.SocksPort), nil
 }
 
@@ -1290,8 +1345,10 @@ func (d *Daemon) Run() {
 	d.mu.Lock()
 	httpPort := d.cfg.HTTPPort
 	d.mu.Unlock()
+	d.writeInstance(d.instance, "")
 	server := httpapi.New(d, "127.0.0.1", httpPort, d.log)
 	server.Token = d.opts.APIToken
+	server.OtherAccountSeen = d.otherAccountSeen
 	if d.opts.AppPolled != nil {
 		server.AppPolled = func(restartsItself bool) { d.opts.AppPolled(httpPort, restartsItself) }
 	}
@@ -1301,6 +1358,7 @@ func (d *Daemon) Run() {
 		d.httpWaiting = server
 		d.mu.Unlock()
 		server = nil
+		d.portHeld(httpPort)
 	}
 	d.mu.Lock()
 	d.http = server
@@ -1327,6 +1385,7 @@ func (d *Daemon) Run() {
 	refreshDone := make(chan struct{})
 	go func() {
 		if server != nil {
+			d.reinstateRule(httpPort)
 			d.refreshIfRuleChanged(httpPort)
 			d.opts.ProxyCover(httpPort)
 		}
@@ -1367,6 +1426,8 @@ func (d *Daemon) Run() {
 	d.forwarder.Stop()
 	if server := d.HTTP(); server != nil {
 		server.Stop()
+		// Not before: the app windows would take this uni-vpn for another's until it ends.
+		d.writeInstance(randomID(), "")
 	}
 	if loopDone != nil {
 		select {
@@ -1410,6 +1471,16 @@ func (d *Daemon) bindForwarder() {
 	d.mu.Unlock()
 	err := d.forwarder.Start(context.Background())
 	d.mu.Lock()
+	taken := d.socksTaken
+	d.socksTaken = err != nil
+	server := d.http
+	d.mu.Unlock()
+	if taken != (err != nil) && server != nil {
+		// The browsers load the rule again: directly while the port is not ours, through it
+		// once it is.
+		d.refreshIfRuleChanged(server.Port)
+	}
+	d.mu.Lock()
 	defer d.mu.Unlock()
 	if err != nil {
 		if !retry {
@@ -1441,6 +1512,93 @@ func (d *Daemon) bindHTTP() {
 	d.mu.Lock()
 	d.http, d.httpWaiting = server, nil
 	d.mu.Unlock()
+	d.writeInstance(d.instance, "")
+	d.reinstateRule(server.Port)
+}
+
+// withdrawnName: portHeld switched the rule off, reinstateRule puts it back, also after a
+// restart.
+const withdrawnName = "rule-withdrawn"
+
+// portHeld: another account of this computer holds the status port (its uni-vpn started
+// first, or any program of it listens there). The app windows show the page that says so
+// instead of whatever answers there. The browsers take their rule from that port, so the rule
+// is off until this account's uni-vpn has the port.
+func (d *Daemon) portHeld(port int) {
+	if !d.opts.OtherAccountListens(port) {
+		return
+	}
+	d.mu.Lock()
+	language := d.cfg.Language
+	d.mu.Unlock()
+	d.writeInstance(d.instance, httpapi.OtherAccountWindow(language))
+	if !d.opts.ProxyWithdraw(port) {
+		return
+	}
+	if err := os.WriteFile(filepath.Join(d.opts.TokenDir, withdrawnName), nil, 0o600); err != nil {
+		d.logf(slog.LevelError, "Could not write %s: %s", withdrawnName, err)
+	}
+	d.logf(slog.LevelWarn, "Another account of this computer holds the status port %d: the rule for the websites is off until it is free", port)
+	// On macOS the setting is the computer's: the uni-vpn that holds the port switches it on
+	// again at once.
+	d.opts.Knock(port)
+}
+
+// instanceName: the instance file, see writeInstance.
+const instanceName = "instance"
+
+// writeInstance replaces the instance file, which only this account can read. The app windows
+// show the status port's page only when status.json has its id, and page (another account
+// holds the port) in its place. An id no uni-vpn answers with marks one that ended.
+func (d *Daemon) writeInstance(id, page string) {
+	data, _ := json.Marshal(struct {
+		ID   string `json:"id"`
+		Page string `json:"page,omitempty"`
+	}{id, page})
+	path := filepath.Join(d.opts.TokenDir, instanceName)
+	err := os.MkdirAll(d.opts.TokenDir, 0o700)
+	if err == nil {
+		err = atomicfile.Write(path, append(data, '\n'))
+	}
+	if err != nil {
+		d.logf(slog.LevelError, "Could not write %s: %s", path, err)
+	}
+}
+
+// randomID is 128 random bits in hex.
+func randomID() string {
+	b := make([]byte, 16)
+	_, _ = cryptorand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// otherAccountSeen: a program of another account reached the status port. Its uni-vpn may have
+// switched the rule off (Knock): the ticker looks at it 2 s later, at most once per retry
+// interval.
+func (d *Daemon) otherAccountSeen() {
+	d.mu.Lock()
+	d.coverSoon = d.mono() + 2
+	d.mu.Unlock()
+}
+
+// knock is Options.Knock.
+func knock(port int) {
+	client := &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{Proxy: nil}}
+	if r, err := client.Get("http://127.0.0.1:" + strconv.Itoa(port) + "/proxy.pac"); err == nil {
+		_, _ = io.Copy(io.Discard, r.Body)
+		r.Body.Close()
+	}
+}
+
+// reinstateRule puts back the rule that portHeld switched off, once the status port is ours.
+func (d *Daemon) reinstateRule(port int) {
+	marker := filepath.Join(d.opts.TokenDir, withdrawnName)
+	if _, err := os.Stat(marker); err != nil {
+		return
+	}
+	d.opts.ProxyInstall(port)
+	os.Remove(marker)
+	d.logf(slog.LevelInfo, "The status port is this account's again: the rule for the websites is on again")
 }
 
 // --- Demand ------------------------------------------------------------------
@@ -2171,8 +2329,9 @@ func (d *Daemon) ticker() {
 			}
 		}
 		// A dock or an iPhone plugged in brings a new network service on macOS, without our rule.
-		if mono-lastCover >= coverEvery*cfg.RetryInterval && d.httpWaiting == nil {
-			lastCover = mono
+		hinted := d.coverSoon != 0 && mono >= d.coverSoon && mono-lastCover >= cfg.RetryInterval
+		if (mono-lastCover >= coverEvery*cfg.RetryInterval || hinted) && d.httpWaiting == nil {
+			lastCover, d.coverSoon = mono, 0
 			d.unlocked(func() { d.opts.ProxyCover(cfg.HTTPPort) })
 		}
 		if jump > 30 {

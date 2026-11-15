@@ -50,6 +50,10 @@ type Forwarder struct {
 	// Direct names the hosts a refused connection still reaches directly (nil: none). Set
 	// it before Start.
 	Direct func() []string
+	// OtherAccount tells whether a connection comes from another account of this computer
+	// (sockowner.OtherAccount): its browser must not use this account's VPN, nor start this
+	// account's sign-in. nil lets every connection through. Set it before Start.
+	OtherAccount func(net.Conn) (bool, error)
 
 	getTarget      TargetFunc
 	dialDirect     func(ctx context.Context, network, address string) (net.Conn, error)
@@ -59,6 +63,7 @@ type Forwarder struct {
 	log            *slog.Logger
 
 	active, bytesIn, bytesOut, rejected atomic.Int64
+	lookupWarning                       sync.Once // a failing OtherAccount is logged once
 
 	mu      sync.Mutex
 	ln      net.Listener
@@ -287,6 +292,9 @@ func (f *Forwarder) handle(client net.Conn) {
 	if !greets(client) {
 		return
 	}
+	if f.otherAccount(client) {
+		return
+	}
 	f.active.Add(1)
 	w := &waiter{done: make(chan struct{})}
 	port, ok, cancelled := f.target(w)
@@ -310,6 +318,22 @@ func (f *Forwarder) handle(client net.Conn) {
 	f.track(upstream)
 	defer f.untrack(upstream)
 	f.splice(client, upstream, &f.bytesOut, &f.bytesIn, []byte{socksVersion})
+}
+
+// otherAccount fails open, as the status page does: when the system cannot tell, the
+// connection goes through.
+func (f *Forwarder) otherAccount(c net.Conn) bool {
+	if f.OtherAccount == nil {
+		return false
+	}
+	other, err := f.OtherAccount(c)
+	if err != nil {
+		f.lookupWarning.Do(func() {
+			f.log.Warn(fmt.Sprintf("Could not tell which account a browser connection comes from: %s", err))
+		})
+		return false
+	}
+	return other
 }
 
 // direct serves a refused connection to a host that Direct names: the security page that

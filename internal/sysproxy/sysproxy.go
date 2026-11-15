@@ -413,7 +413,9 @@ func (s *System) Refresh(httpPort int) {
 // an iPhone over USB): each service has its own setting, and the browsers follow the one in
 // use. Only while another service uses our rule, and only services without an automatic proxy
 // that the backup does not know, each backed up first, so that uninstalling turns it off again.
-// Errors are ignored. backup "" means BackupPath().
+// Our rule switched off (the uni-vpn of another account waits for the port, Withdraw) is
+// switched on again, while this account's install has its backup. Errors are ignored. backup
+// "" means BackupPath().
 func (s *System) Cover(httpPort int, backup string) {
 	if !s.macOS() {
 		return
@@ -430,6 +432,16 @@ func (s *System) Cover(httpPort int, backup string) {
 		}
 	}
 	if ours == "" {
+		// Switched off by the uni-vpn of another account of this Mac, which waits for the status
+		// port this one holds (Withdraw): the setting is the computer's, so it is on again here.
+		for _, svc := range now.Mac.Services {
+			if !svc.Enabled && IsOurs(svc.URL, httpPort) {
+				if _, err := os.Stat(backupOr(backup)); err == nil {
+					_, _ = s.Install(httpPort, backup)
+				}
+				return
+			}
+		}
 		return
 	}
 	unset := func(svc Service) bool { return !svc.Enabled && svc.URL == "" }
@@ -600,6 +612,46 @@ func (s *System) Install(httpPort int, backup string) (string, error) {
 	return "ok", nil
 }
 
+// backupOr is backup, or BackupPath() for "".
+func backupOr(backup string) string {
+	if backup == "" {
+		return BackupPath()
+	}
+	return backup
+}
+
+// Withdraw switches the automatic proxy setting off where it uses our rule: another account of
+// this computer holds the status port, so what answers there is not this account's uni-vpn,
+// and the browsers would take their rule from it. Install puts the rule back. Reports whether
+// it switched anything off. On Linux and Windows the setting is this account's. On macOS it is
+// the computer's: the address stays there, switched off, and the uni-vpn that holds the port
+// switches it on again (Cover). Errors are ignored.
+func (s *System) Withdraw(httpPort int) bool {
+	now := s.Current()
+	if now == nil {
+		return false
+	}
+	if s.windows() {
+		return now.Windows != nil && IsOurs(now.Windows.URL, httpPort) && s.WinSet("") == nil
+	}
+	off := false
+	if s.macOS() {
+		for _, svc := range now.Mac.Services {
+			if svc.Enabled && IsOurs(svc.URL, httpPort) && s.set("networksetup", "-setautoproxystate", svc.Name, "off") == nil {
+				off = true
+			}
+		}
+		return off
+	}
+	if g := now.GNOME; g != nil && g.Mode == "auto" && IsOurs(g.URL, httpPort) {
+		off = s.set("gsettings", "set", Schema, "mode", "none") == nil
+	}
+	if k := now.KDE; k != nil && k.Type == KDEPAC && IsOurs(k.URL, httpPort) && s.kdeSet("0", k.URL, true) == nil {
+		off = true
+	}
+	return off
+}
+
 // mkdirLast creates dir and its parents like Path.mkdir(parents=True, mode=...): only the
 // last component gets mode.
 func mkdirLast(dir string, mode os.FileMode) error {
@@ -693,6 +745,7 @@ func Restore(saved *Snapshot) error                       { return Default().Res
 func Refresh(httpPort int)                                { Default().Refresh(httpPort) }
 func Unversioned(httpPort int) bool                       { return Default().Unversioned(httpPort) }
 func Cover(httpPort int)                                  { Default().Cover(httpPort, "") }
+func Withdraw(httpPort int) bool                          { return Default().Withdraw(httpPort) }
 func Install(httpPort int, backup string) (string, error) { return Default().Install(httpPort, backup) }
 func Uninstall(backup string) (string, error)             { return Default().Uninstall(backup) }
 func State(httpPort int) string                           { return Default().State(httpPort) }

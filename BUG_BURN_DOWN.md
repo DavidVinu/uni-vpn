@@ -1007,8 +1007,8 @@ translations and docs. The full test suite on that commit passed first: `go test
 | FA-5 | The privacy page says only the terminal scripts fetch from the Linux package sources; the normal .deb and .rpm do too | Low | fixed |
 | FA-6 | Linux with no password store at all (no gnome-keyring, KDE before 5.97): "Your saved passwords are locked. Sign out..." and no way through | Medium | fixed |
 | FA-7 | Windows PC with two accounts: the second account's install takes over the scheduled task, and the first account's Uni VPN never starts again | Medium | fixed |
-| FA-8 | Another local account that holds 127.0.0.1:1081 first answers this account's proxy rule and app window | High | open |
-| FA-9 | Another local account can use this account's VPN session through 127.0.0.1:1080 and start its sign-in | Medium | open |
+| FA-8 | Another local account that holds 127.0.0.1:1081 first answers this account's proxy rule and app window | High | fixed |
+| FA-9 | Another local account can use this account's VPN session through 127.0.0.1:1080 and start its sign-in | Medium | fixed |
 | FA-10 | Chrome, Edge and Brave on Xfce, MATE and LXQt never read the proxy rule, while setup reports success | Medium | open |
 | FA-11 | The sync relay can be filled for 400 days with a few thousand anonymous requests (not deployed yet) | Medium | open |
 
@@ -1106,8 +1106,79 @@ translations and docs. The full test suite on that commit passed first: `go test
   "uni-vpn"), turns the install into an earlier version's (only "uni-vpn", priority 7),
   checks that its service registers its own task, and that the Repair button deletes
   "uni-vpn" again; test-uninstall.ps1 checks that no "uni-vpn*" task is left. Failing first:
-  the new Go tests fail with the old fixed name.
+  the new Go tests fail with the old fixed name. The first Windows CI run of the task owner
+  test failed: without the task, `powershell -Command` ends with exit code 1 (the error that
+  `-ErrorAction SilentlyContinue` silences still counts). Setup took that as "not ours", which
+  is right there, but the script now ends with `exit 0`, and the test shows what PowerShell
+  wrote.
 - Left (Low): a computer where a second install already took the task before this version:
   the account without a task needs the installer once more (its "Restart the computer" does
   not bring a task back); after that neither takes the other's again. Uninstalling from one
   account leaves the other accounts' tasks, which then start nothing.
+
+### FA-8 Another account on the status port
+
+- Found by: the system reviewer, by reading. A port on 127.0.0.1 is the computer's, not an
+  account's: whatever another account runs on 1081 first (its uni-vpn, which starts first
+  after a restart, or any program of it) answers this account too. On Linux and Windows this
+  account's proxy rule (GNOME, KDE, the Windows setting) points at
+  http://127.0.0.1:1081/proxy.pac, so the browsers took their rule from the other account's
+  program, which could send them through any proxy; and the app windows loaded whatever page
+  answered there, for example a sign-in form that asks for the university password.
+- Root cause: the rule and the app windows trusted the fixed port; nothing checked whose
+  program listens there.
+- Fix:
+  - Core: when the status port is taken by a program of another account
+    (sockowner.OtherAccountListens), the rule is switched off (sysproxy.Withdraw) and a marker
+    puts it back once the port is this account's, also after a restart. On macOS the rule is
+    the computer's: the uni-vpn that holds the port switches it on again (Cover), at once when
+    the other one asks for the PAC file after switching it off (Knock, OtherAccountSeen).
+  - App windows (Linux, macOS, Windows): the core writes an instance file that only this
+    account can read: a random id, and while another account holds the port the page that
+    says so (OtherAccountWindow, in the language setting or the system's). status.json says
+    the id. The windows load the status port's page only once status.json says that id; they
+    show the core's note while another account holds the port, nothing while something else
+    answers, and keep the page from reloading itself meanwhile. The menu then says
+    "Not running" and takes no texts from that program. Without the file (an earlier core)
+    they work as before.
+  - The uni-vpn of another account answers this account only with a PAC file that sends
+    everything directly, and refuses everything else (as before).
+- Verification: Go tests, failing first without the change:
+  TestRuleIsOffWhileAnotherAccountHoldsTheStatusPort, TestRuleIsOnAgainOnceTheStatusPortIsFree,
+  TestWithdrawSwitchesOffOnlyOurRule, TestMacCoverSwitchesOnWhatAnotherAccountSwitchedOff,
+  TestAnotherAccountGetsOnlyThePAC, TestInstanceFileTellsTheAppWindowsWhatIsOurs,
+  TestInstanceFileHasNoPageForThisAccountsProgram,
+  TestAnotherAccountsRequestBringsTheRulesLookForward, TestOtherAccountWindow. End to end on
+  Linux with the real core and a second account (nobody): while it held 1081 the GNOME rule
+  went to "none" and the log said why; once the port was free, "auto" again with a new `?v=`.
+  The real Linux app window (WebKitGTK under Xvfb) against a fake uni-vpn of the other account
+  (its own sign-in page, a status.json without the id): the note while this account's uni-vpn
+  ran, this account's page once the port was free, nothing while only the fake answered, the
+  note again after a restart, and never the fake page. The note's language in Chromium: de,
+  zh-TW, zh-CN and es as the system's, ja falls back to English, the setting fr wins. The macOS
+  and Windows windows have the same logic; CI builds them (not run with a second account).
+- Left (Low): on macOS the uni-vpn that holds the port also switches the rule back on after a
+  user switched it off by hand. If this account's uni-vpn stops while its page is open and a
+  program of another account takes the port and answers the app's own checks with a reset,
+  the open page talks to it for the few seconds until the app starts this account's uni-vpn
+  again, which then puts the note in place. A failing owner lookup counts as this account.
+  Windows without a WebView2 runtime opens the page in the browser, without the check.
+
+### FA-9 Another account on the SOCKS port
+
+- Found by: the system reviewer, by reading. The SOCKS port 1080 took every local connection:
+  a browser of another account (the rule is the computer's on macOS) used this account's VPN
+  session, and its connection started this account's sign-in. Whatever held 1080 instead got
+  this account's browser connections.
+- Root cause: the forwarder checked no owner, and the rule pointed at the SOCKS port whoever
+  held it.
+- Fix: the forwarder refuses connections of other accounts after the SOCKS greeting, before a
+  target is asked (sockowner.OtherAccount; a failing lookup lets it through). Other accounts get
+  a PAC file that sends everything directly (pac.Direct). While another program holds the SOCKS
+  port, the rule sends everything directly too, and the browsers are told to load it again
+  when that changes.
+- Verification: TestRefusesOtherAccounts (forwarder), TestSocksPortRefusesOtherAccounts and
+  TestRuleIsDirectWhileTheSocksPortIsTaken (daemon). End to end on Linux: the other account's
+  SOCKS connection was reset and its PAC file was DIRECT, this account's got `05 00` and a PAC
+  file with SOCKS; while nobody held 1080 this account's PAC file was DIRECT, and the rule's
+  address changed when 1080 was taken and again when it was free.

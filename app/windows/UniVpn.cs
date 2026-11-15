@@ -167,11 +167,20 @@ class TrayApp : ApplicationContext
     string program = Stamp();
     string seen;
     bool restarting;
+    // The window loads the status port's page only once status.json says the id in the
+    // instance file (or without the file, as before): another account may run anything on the
+    // port. The file is the service's (internal/daemon writeInstance), next to its log, and only
+    // this account can read it.
+    static readonly string instancePath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "uni-vpn", "logs", "instance");
+    Dictionary<string, object> instance = ReadInstance(null);
+    bool allowed;
 
     public TrayApp(string[] args, string pipe)
     {
         if (!int.TryParse(Options.Value(args, "--port") ?? "", out port)) port = 1081;
         baseUrl = "http://127.0.0.1:" + port + "/";
+        allowed = instance == null;
         // Not SynchronizationContext.Current: the menu items above made it a plain context
         // (ToolStrip subscribes to SystemEvents), which runs Post on a thread pool thread, where
         // the window's WebView2 cannot start (RPC_E_CHANGED_MODE). This one posts to this thread.
@@ -241,10 +250,53 @@ class TrayApp : ApplicationContext
 
     public void Show(string page)
     {
-        if (window == null || window.IsDisposed) window = new MainWindow(baseUrl, page, delegate { Show(""); });
-        // No WebView2 runtime: the window closed itself at once and the page is open in the browser.
+        if (window == null || window.IsDisposed)
+        {
+            window = new MainWindow(baseUrl, page, delegate { Show(""); });
+            // No WebView2 runtime: the window closed itself at once and the page is open in the browser.
+            if (window.IsDisposed) return;
+            window.Guard(allowed, allowed ? null : "");
+        }
         if (window.IsDisposed) return;
+        // The page that says another account holds the port, at once.
+        instance = ReadInstance(instance);
+        string held = Field(instance, "page");
+        if (held != "") Guard(false, held);
         window.Open(page);
+    }
+
+    // null without the file (a version before it); a file that cannot be read just now keeps the last one.
+    static Dictionary<string, object> ReadInstance(Dictionary<string, object> last)
+    {
+        if (!File.Exists(instancePath)) return null;
+        try { return new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(instancePath, Encoding.UTF8)); }
+        catch (Exception) { return last; }
+    }
+
+    static string Field(Dictionary<string, object> json, string key)
+    {
+        object value;
+        return json != null && json.TryGetValue(key, out value) && value is string ? (string)value : "";
+    }
+
+    // Whether what answers on the port is this account's service (json: its status.json, or
+    // null when nothing answered).
+    void Check(Dictionary<string, object> json)
+    {
+        instance = ReadInstance(instance);
+        if (instance == null) { Guard(true, null); return; }
+        string id = Field(instance, "id"), held = Field(instance, "page");
+        bool ours = json != null && id != "" && Field(json, "instance") == id;
+        if (held != "") Guard(false, held);
+        else if (ours) Guard(true, null);
+        else if (json != null) Guard(false, "");  // not this account's service: nothing of it
+        else Guard(false, null);  // nothing answers (a restart): the page stays, nothing loads
+    }
+
+    void Guard(bool allowed, string instead)
+    {
+        this.allowed = allowed;
+        if (window != null && !window.IsDisposed) window.Guard(allowed, instead);
     }
 
     void Exit()
@@ -270,24 +322,24 @@ class TrayApp : ApplicationContext
         client.DownloadStringCompleted += delegate(object sender, DownloadStringCompletedEventArgs e)
         {
             polling = false;
-            reachable = e.Error == null && !e.Cancelled;
+            Dictionary<string, object> json = null;
+            if (e.Error == null && !e.Cancelled)
+            {
+                try { json = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(e.Result); }
+                catch (Exception) { }
+            }
+            Check(json);
+            // Else the menu says "Not running".
+            reachable = json != null && allowed;
             if (reachable)
             {
-                try
-                {
-                    Dictionary<string, object> json = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(e.Result);
-                    object value;
-                    state = json.TryGetValue("state", out value) ? Convert.ToString(value) : "unknown";
-                    busy = json.TryGetValue("busy", out value) && value is bool && (bool)value;
-                    if (json.TryGetValue("repairing", out value) && value is bool && (bool)value) repairing = DateTime.Now;
-                    if (json.TryGetValue("menu", out value) && value is Dictionary<string, object>)
-                        foreach (KeyValuePair<string, object> entry in (Dictionary<string, object>)value)
-                            texts[entry.Key] = Convert.ToString(entry.Value);
-                }
-                catch (Exception)
-                {
-                    reachable = false;
-                }
+                object value;
+                state = json.TryGetValue("state", out value) ? Convert.ToString(value) : "unknown";
+                busy = json.TryGetValue("busy", out value) && value is bool && (bool)value;
+                if (json.TryGetValue("repairing", out value) && value is bool && (bool)value) repairing = DateTime.Now;
+                if (json.TryGetValue("menu", out value) && value is Dictionary<string, object>)
+                    foreach (KeyValuePair<string, object> entry in (Dictionary<string, object>)value)
+                        texts[entry.Key] = Convert.ToString(entry.Value);
             }
             client.Dispose();
             Render();
@@ -465,6 +517,10 @@ class MainWindow : Form
     DateTime reloaded = DateTime.MinValue;
     string failed;  // the page process that ended, until the page loaded again
     static DateTime browserEnded = DateTime.MinValue;
+    // TrayApp.Check: whether the status port's page may load, and what the window has instead:
+    // null (that page), "" (nothing), or the page that says another account holds the port.
+    bool allowed = true;
+    string shown;
 
     // reopen: a new window in this one's place (TrayApp.Show), when this one cannot show anything any more.
     public MainWindow(string baseUrl, string page, Action reopen)
@@ -532,6 +588,8 @@ class MainWindow : Form
         settings.UserAgent = settings.UserAgent + " UniVPN";
         view.CoreWebView2.NavigationStarting += delegate(object sender, CoreWebView2NavigationStartingEventArgs e)
         {
+            // Not this account's service, or not yet (the page reloads itself).
+            if (!allowed && e.Uri.StartsWith(baseUrl)) { e.Cancel = true; return; }
             // Only web links: another scheme (a file, an app's own) would run without the browser's question.
             if (!Local(e.Uri)) { e.Cancel = true; if (e.Uri.StartsWith("http://") || e.Uri.StartsWith("https://")) Process.Start(e.Uri); }
         };
@@ -560,7 +618,7 @@ class MainWindow : Form
             System.Windows.Forms.Timer retry = new System.Windows.Forms.Timer();
             retry.Interval = 2000;
             // Hidden, it stops; opening the window again loads the page (ShowPage, !loaded).
-            retry.Tick += delegate { retry.Dispose(); if (Visible && !loaded && !quitting) view.CoreWebView2.Navigate(target); };
+            retry.Tick += delegate { retry.Dispose(); if (Visible && !loaded && !quitting && shown == null) view.CoreWebView2.Navigate(target); };
             retry.Start();
         };
         // A process of the page ended (crash, out of memory, ended in Task Manager): WebView2
@@ -617,15 +675,35 @@ class MainWindow : Form
         // Before WebView2 is ready: "as it is" keeps the page asked for (an otpauth link, Settings).
         if (!ready) { if (page != "") pending = page; return; }
         string current = view.Source == null ? "" : view.Source.ToString();
-        if (loaded && current.StartsWith(baseUrl) && (page == "" || page.StartsWith("#")))
+        if (shown == null && loaded && current.StartsWith(baseUrl) && (page == "" || page.StartsWith("#")))
         {
             if (page != "") view.CoreWebView2.ExecuteScriptAsync("location.hash = " + new JavaScriptSerializer().Serialize(page));
             return;
         }
         // A failed page loads again as the page it was (not "?app=1" alone).
-        if (!loaded && target != null && page == "") { view.CoreWebView2.Navigate(target); return; }
-        target = baseUrl + "?app=1" + page;
-        view.CoreWebView2.Navigate(target);
+        if ((loaded && shown == null) || target == null || page != "") target = baseUrl + "?app=1" + page;
+        if (allowed) { shown = null; view.CoreWebView2.Navigate(target); }
+        else ShowInstead(shown ?? "");  // the page once this account's service answers (Guard)
+    }
+
+    public void Guard(bool allowed, string instead)
+    {
+        bool was = this.allowed;
+        this.allowed = allowed;
+        if (!ready) { if (instead != null) shown = instead; return; }
+        if (instead != null && instead != shown) ShowInstead(instead);
+        else if (allowed && !was && shown != null && Visible)
+        {
+            shown = null;
+            view.CoreWebView2.Navigate(target ?? baseUrl + "?app=1");  // this account's again: the page asked for last
+        }
+    }
+
+    void ShowInstead(string instead)
+    {
+        shown = instead;
+        if (instead == "") view.CoreWebView2.Navigate("about:blank");
+        else view.CoreWebView2.NavigateToString(instead);
     }
 
     public void Open(string page)
