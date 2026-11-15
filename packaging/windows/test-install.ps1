@@ -110,7 +110,24 @@ function ShowService {
   Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq "uni-vpn-core.exe" -or $_.Name -eq "conhost.exe") -and $_.CommandLine -like "*uni-vpn*" } |
     Format-Table ProcessId, ParentProcessId, CreationDate, CommandLine -AutoSize -Wrap | Out-String -Width 400 | Write-Host
 }
-function Answers { try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 1 http://127.0.0.1:1081/status.json | Out-Null; return $true } catch { return $false } }
+# curl, not Invoke-WebRequest: setup registers the system's proxy rule, which PowerShell's web
+# requests read (served by the service itself) before they ask the service.
+function Answers {
+  $code = & curl.exe -s -o NUL --noproxy "*" -m 2 -w "%{http_code}" http://127.0.0.1:1081/status.json
+  $script:answer = "HTTP $code, curl exit $LASTEXITCODE"
+  return ($LASTEXITCODE -eq 0 -and "$code" -eq "200")
+}
+# Who has the port, and how long each way of asking takes, for a check that fails.
+function HowItAnswers {
+  $listen = @(Get-NetTCPConnection -LocalPort 1081 -State Listen -ErrorAction SilentlyContinue | ForEach-Object OwningProcess)
+  $sw = [Diagnostics.Stopwatch]::StartNew()
+  $code = & curl.exe -s -o NUL --noproxy "*" -m 5 -w "%{http_code}" http://127.0.0.1:1081/status.json
+  $curl = "HTTP $code (exit $LASTEXITCODE) in $($sw.Elapsed.TotalSeconds) s"
+  $sw = [Diagnostics.Stopwatch]::StartNew()
+  $iwr = "answered"
+  try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 http://127.0.0.1:1081/status.json | Out-Null } catch { $iwr = $_.Exception.Message }
+  Write-Host "port 1081: listening process $($listen -join ', '); curl: $curl; Invoke-WebRequest: $iwr in $($sw.Elapsed.TotalSeconds) s; last poll: $script:answer"
+}
 # The tray app starts a stopped service again: nobody should need a terminal. Here it ends as
 # in a crash. "/End" alone ends only conhost, not the service it started: Repair, setup and
 # uninstall end that one too (checked below and in test-uninstall.ps1).
@@ -182,15 +199,19 @@ $xml = "$PWD\task-priority-7.xml"
 (Export-ScheduledTask -TaskName uni-vpn) -replace "<Priority>4</Priority>", "<Priority>7</Priority>" | Set-Content -Encoding Unicode $xml
 $out = cmd /c "schtasks /Create /TN uni-vpn /XML `"$xml`" /F 2>&1"
 if ($LASTEXITCODE -ne 0) { throw "could not give the task an earlier version's priority: $out" }
+ShowService
 $old = @(Daemons | ForEach-Object ProcessId)
 cmd /c "schtasks /End /TN uni-vpn 2>&1" | Out-Null
 $old | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
 cmd /c "schtasks /Run /TN uni-vpn 2>&1" | Out-Null
 function NewDaemons { @(Daemons | Where-Object { $old -notcontains $_.ProcessId }) }
-foreach ($i in 1..30) { if ((Answers) -and (NewDaemons).Count -gt 0) { break }; Start-Sleep 1 }
+$up = $false
+foreach ($i in 1..30) { if ((NewDaemons).Count -gt 0 -and (Answers)) { $up = $true; break }; Start-Sleep 1 }
+ShowService
 $taskPriority = (Get-ScheduledTask -TaskName uni-vpn).Settings.Priority
 $daemon = NewDaemons
 Write-Host "an earlier version's task: priority $taskPriority; service base priority $(($daemon | ForEach-Object Priority) -join ', ')"
+if (-not $up) { Explain; HowItAnswers; $problems += "the service started with an earlier version's task did not answer" }
 if ($taskPriority -ne 7) { throw "the task has priority $taskPriority, not an earlier version's 7" }
 if ($daemon.Count -eq 0 -or ($daemon | Where-Object { $_.Priority -lt 8 })) { Explain; $problems += "with an earlier version's task the service does not run at normal priority" }
 # The Repair button: the service starts setup, which ends that service and starts a new one, so
@@ -208,7 +229,7 @@ ShowService
 $taskPriority = (Get-ScheduledTask -TaskName uni-vpn).Settings.Priority
 Write-Host "the Repair button: the new service answered at $back s; task priority $taskPriority"
 Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\daemon.log" -Tail 12 -ErrorAction SilentlyContinue
-if (-not $back) { Explain; throw "no new service runs after the Repair button" }
+if (-not $back) { Explain; HowItAnswers; throw "no new service answers after the Repair button" }
 if ($back -gt 40) { Explain; $problems += "after the Repair button only the tray app started the service again ($back s)" }
 if ($taskPriority -ne 4) { $problems += "the Repair button did not write the task again (priority $taskPriority)" }
 $status = Invoke-RestMethod http://127.0.0.1:1081/status.json
