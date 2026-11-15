@@ -90,10 +90,14 @@ func (p *cmdProcess) Wait() int {
 	return p.code
 }
 
-func watch(cmd *exec.Cmd) Process {
+// watch: after, when not nil, runs once the process has ended.
+func watch(cmd *exec.Cmd, after func()) Process {
 	p := &cmdProcess{done: make(chan struct{})}
 	go func() {
 		cmd.Wait()
+		if after != nil {
+			after()
+		}
 		p.mu.Lock()
 		p.code = cmd.ProcessState.ExitCode()
 		p.mu.Unlock()
@@ -111,9 +115,9 @@ func StartRepairProcess() (Process, error) {
 		return cmd
 	}
 	// Only Windows tells the two apart; its install.ps1 takes -Repair.
-	cmd, err := startRepair(newCmd, slices.Contains(argv, repairFlag))
+	cmd, done, err := startRepair(newCmd, slices.Contains(argv, repairFlag))
 	if err != nil {
 		return nil, err
 	}
-	return watch(cmd), nil
+	return watch(cmd, done), nil
 }

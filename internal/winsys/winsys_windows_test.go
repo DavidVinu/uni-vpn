@@ -6,6 +6,7 @@ package winsys
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -14,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/windows"
 )
 
 // The test binary doubles as the processes the Ctrl+C tests need.
@@ -31,6 +34,23 @@ func TestMain(m *testing.M) {
 		case <-time.After(30 * time.Second):
 			os.Exit(0)
 		}
+	}
+	if len(os.Args) >= 3 && os.Args[1] == "__job" {
+		// A service with its job: it starts a child that stays in the job, says its pid, and
+		// ends when stdin closes.
+		if !KillChildrenWithUs() {
+			os.Exit(2)
+		}
+		if os.Args[2] == "keep" && !ChildrenEndWithUs(false) {
+			os.Exit(3)
+		}
+		child := exec.Command(os.Args[0], "__sleeper")
+		if err := child.Start(); err != nil {
+			os.Exit(4)
+		}
+		fmt.Println(child.Process.Pid)
+		io.Copy(io.Discard, os.Stdin)
+		os.Exit(0)
 	}
 	os.Exit(m.Run())
 }
@@ -151,6 +171,43 @@ func TestTaskXMLIsAcceptedByTaskScheduler(t *testing.T) {
 	query, _ := exec.Command("schtasks", "/Query", "/TN", name, "/XML").Output()
 	if !strings.Contains(string(query), "HighestAvailable") {
 		t.Fatal(string(query))
+	}
+}
+
+// Repair's setup stays in the service's job when an outer job does not let it leave; the
+// service it ends must not take it along then (ChildrenEndWithUs), and otherwise does.
+func TestChildrenEndWithUsUnlessKept(t *testing.T) {
+	for _, mode := range []string{"kill", "keep"} {
+		helper := exec.Command(os.Args[0], "__job", mode)
+		stdin, err := helper.StdinPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, err := helper.StdoutPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := helper.Start(); err != nil {
+			t.Fatal(err)
+		}
+		var pid uint32
+		if _, err := fmt.Fscan(out, &pid); err != nil {
+			helper.Wait()
+			t.Fatalf("%s: no child (exit %d): %v", mode, helper.ProcessState.ExitCode(), err)
+		}
+		child, err := windows.OpenProcess(windows.SYNCHRONIZE|windows.PROCESS_TERMINATE, false, pid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stdin.Close()
+		helper.Wait()
+		event, _ := windows.WaitForSingleObject(child, 3000)
+		ended := event == windows.WAIT_OBJECT_0
+		windows.TerminateProcess(child, 1)
+		windows.CloseHandle(child)
+		if ended != (mode == "kill") {
+			t.Errorf("%s: the child ended with the service: %v", mode, ended)
+		}
 	}
 }
 

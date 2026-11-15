@@ -235,7 +235,26 @@ desktop.
   the task was "Ready", the conhost was gone but `uni-vpn-core.exe daemon`, its child, still
   ran and answered. Go test: ending the task also ends the service, before it is started
   again. CI: after Repair no old service is left running, and after the uninstall no
-  uni-vpn-core.exe or openconnect.exe runs.
+  uni-vpn-core.exe runs. openconnect does not run in CI (no connection); that it ends with the
+  service rests on the job object, unchanged here.
+
+### D15. The Repair button could end its own setup halfway (Windows)
+
+- Severity: Low as far as CI shows, High where it happens (Repair would do nothing but a
+  restart a minute later)
+- Status: fixed
+- Root cause: the service starts Repair's setup outside its kill-on-close job. Where Windows
+  does not allow that (an outer job without breakaway), it starts setup inside the job
+  instead. Since D14 setup ends the service, and with the service's job Windows ended setup
+  too, before it started the new service.
+- Fix: in that case the job ends nothing with the service until setup is done
+  (winsys.ChildrenEndWithUs); if the service still runs then, its job kills its children
+  again. Repair disconnects first, so openconnect is not running meanwhile.
+- Verification: Windows Go test with a real job: a child stays in the job and ends with its
+  parent, and outlives it with the limit lifted. CI (windows-installer, windows-arm-install)
+  now presses Repair through the local API as the app does: the new service of this commit
+  must answer within 40 s (the tray app would only start it after a minute), and Repair must
+  write an earlier version's task (priority 7) again.
 
 ### Left as they are (Low)
 
@@ -275,6 +294,13 @@ desktop.
 - CI: the checks that no otpauth key stays on disk find nothing, but do not show that the page
   got the key (the Linux check was shown to fail before the fix under Xvfb). The macOS Repair
   race is tested only when the test's bootstrap comes before setup's; CI says when not.
+- Windows: setup counts the old service as ended once Task Scheduler no longer runs the task
+  and taskkill has run; it does not check that the old process is gone. taskkill matches the
+  account the same way the task's own principal does (winsys.CurrentUser), shown in CI.
+- macOS: the one rewrite of an earlier version's LaunchAgent (D3) may make macOS show its
+  "Background Items Added" note once after the update.
+- Windows: the window's InPrivate mode needs a WebView2 runtime from 2022 or later (101);
+  with an older one the page opens in the browser. The runtime updates itself.
 - Linux: after a self-restart the old WebKit processes stay as zombies (two per restart);
   `pkill -f` takes the script path as a pattern (a home path with `+`, `(` or `[` misses);
   a restart after an update can drop a half-done change while the window is hidden.

@@ -193,6 +193,26 @@ $daemon = NewDaemons
 Write-Host "an earlier version's task: priority $taskPriority; service base priority $(($daemon | ForEach-Object Priority) -join ', ')"
 if ($taskPriority -ne 7) { throw "the task has priority $taskPriority, not an earlier version's 7" }
 if ($daemon.Count -eq 0 -or ($daemon | Where-Object { $_.Priority -lt 8 })) { Explain; $problems += "with an earlier version's task the service does not run at normal priority" }
+# The Repair button: the service starts setup, which ends that service and starts a new one, so
+# setup must outlive it. Ended with it, only the tray app starts the service again, a minute
+# later, and the rest of Repair is not done. Repair also writes the earlier version's task again.
+$old = @(Daemons | ForEach-Object ProcessId)
+Invoke-WebRequest -UseBasicParsing -Method Post -Headers @{ "X-Uni-VPN" = "1" } http://127.0.0.1:1081/api/repair | Out-Null
+$sw = [Diagnostics.Stopwatch]::StartNew()
+$back = $null
+while (-not $back -and $sw.Elapsed.TotalSeconds -lt 90) {
+  if ((NewDaemons).Count -gt 0 -and @(Daemons | Where-Object { $old -contains $_.ProcessId }).Count -eq 0 -and (Answers)) { $back = $sw.Elapsed.TotalSeconds }
+  else { Start-Sleep -Milliseconds 250 }
+}
+ShowService
+$taskPriority = (Get-ScheduledTask -TaskName uni-vpn).Settings.Priority
+Write-Host "the Repair button: the new service answered at $back s; task priority $taskPriority"
+Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\daemon.log" -Tail 12 -ErrorAction SilentlyContinue
+if (-not $back) { Explain; throw "no new service runs after the Repair button" }
+if ($back -gt 40) { Explain; $problems += "after the Repair button only the tray app started the service again ($back s)" }
+if ($taskPriority -ne 4) { $problems += "the Repair button did not write the task again (priority $taskPriority)" }
+$status = Invoke-RestMethod http://127.0.0.1:1081/status.json
+if ($status.commit -ne $env:GITHUB_SHA) { throw "the service after the Repair button is not this commit's ($($status.commit))" }
 # An otpauth:// link's key must not stay on disk in the window's browsing history, as it does
 # not in the browser's (the fallback without WebView2 leaves it out): uninstall deletes the key
 # everywhere else. Looked for again below, once the window's browser process has ended.
