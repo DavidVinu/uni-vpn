@@ -13,8 +13,8 @@ ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "packaging" / "release-put.sh"
 
 # The few gh calls release-put.sh makes, on a release kept in $STUB_STATE. Every call is logged
-# with the asset names after it. STUB_FAIL_UPLOADS fails that many uploads (after gh's
-# --clobber delete, like gh); STUB_LOSE_DELETES deletes but answers with an error.
+# with the asset names after it. fail_uploads fails that many uploads (after gh's --clobber
+# delete, like gh), fail_api that many reads; lose_deletes deletes but answers with an error.
 FAKE_GH = r'''
 import json, os, sys
 path = os.environ["STUB_STATE"]
@@ -25,6 +25,12 @@ def save(event):
     json.dump(state, open(path, "w"))
 def find(asset_id):
     return [a for a in state["assets"] if str(a["id"]) == asset_id]
+if args[0] == "api" and args[1] != "-X" and state["fail_api"] > 0:
+    # Like gh: GitHub's error body on stdout, then a failure.
+    state["fail_api"] -= 1
+    save(["api failed", args[1]])
+    print('{"message": "Server Error", "documentation_url": "https://docs.github.com/rest"}')
+    sys.exit(1)
 if args[:2] == ["release", "upload"]:
     name = os.path.basename(args[3])
     state["assets"] = [a for a in state["assets"] if a["name"] != name]
@@ -84,10 +90,10 @@ class ReleasePutTest(unittest.TestCase):
             path.write_text("new " + name)
             self.files.append(str(path))
 
-    def put(self, fail_uploads=0, lose_deletes=0, old=("a.zip", "core-manifest.json", "uni-vpn.pkg", "other")):
+    def put(self, fail_uploads=0, lose_deletes=0, fail_api=0, old=("a.zip", "core-manifest.json", "uni-vpn.pkg", "other")):
         assets = [{"id": i, "name": name, "data": "old " + name} for i, name in enumerate(old, 1)]
-        self.state.write_text(json.dumps({"assets": assets, "next_id": 100, "log": [],
-                                          "fail_uploads": fail_uploads, "lose_deletes": lose_deletes}))
+        self.state.write_text(json.dumps({"assets": assets, "next_id": 100, "log": [], "fail_uploads": fail_uploads,
+                                          "lose_deletes": lose_deletes, "fail_api": fail_api}))
         run = subprocess.run(["bash", str(SCRIPT), "latest", *self.files], env=self.env,
                              capture_output=True, text=True)
         return run, json.loads(self.state.read_text())
@@ -122,6 +128,15 @@ class ReleasePutTest(unittest.TestCase):
         self.assertEqual({a["name"]: a["data"] for a in state["assets"]},
                          {"a.zip": "old a.zip", "core-manifest.json": "old core-manifest.json",
                           "uni-vpn.pkg": "old uni-vpn.pkg", "other": "old other"})
+
+    def test_an_error_answer_is_tried_again_and_not_taken_for_the_answer(self):
+        # The first read is the release's id: GitHub's error text must not become part of it.
+        run, state = self.put(fail_api=1)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual({a["name"]: a["data"] for a in state["assets"]},
+                         {"a.zip": "new a.zip", "core-manifest.json": "new core-manifest.json",
+                          "uni-vpn.pkg": "new uni-vpn.pkg", "other": "old other"})
+        self.assertEqual(sum(1 for (event, _), _ in state["log"] if event == "api failed"), 1)
 
     def test_a_lost_answer_to_a_delete_does_not_stop_it(self):
         run, state = self.put(lose_deletes=1)

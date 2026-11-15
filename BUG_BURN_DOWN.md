@@ -30,10 +30,16 @@ and the "stable" branch, the build scripts (packaging/, get.sh, install.sh), the
 | WC-16 | README's helper commands and two button names are from the Python version | Low | fixed |
 | WC-17 | Download page gives Linux users no hint to open the app after installing | Low | fixed |
 | WC-18 | Download page does not say the Mac package needs macOS 14 | Low | fixed |
-| WC-19 | 32-bit ARM Linux is offered the 64-bit ARM packages | Low | fixed |
+| WC-19 | 32-bit ARM Linux is offered the 64-bit ARM packages | Low | partly: no button for armv7l any more; the list's ARM files are 64-bit only, and a browser that reports aarch64 on a 32-bit system still gets them (rare) |
 | WC-20 | An older run's queued publish can replace a newer one's, so the newest green commit waits for the next push | Low | left: GitHub's concurrency queue keeps one waiting job; nothing is lost, the next green push publishes |
 | WC-21 | CI removes the Linux package only after uninstalling, so the "removed in the app store" path runs only in unit tests | Low | left: covered by removal_test.go; an end-to-end run waits two 5-minute checks |
 | WC-22 | Windows in Chinese (Hong Kong, Macau) probably gets the installer's few texts in Simplified Chinese | Low | left: unverified, the installer shows almost no text and the app itself picks Traditional |
+| WC-23 | Privacy page says the Android app asks GitHub "at most once a day"; after a failed check it asks again 10 minutes later | Medium | fixed |
+| WC-24 | Privacy page points to "number 4" for syncing, which is number 5 since the Android item | Low | fixed |
+| WC-25 | One GitHub error answer makes release-put.sh fail instead of trying again | Low | fixed |
+| WC-26 | README says the core is not on the PATH, but setup creates a `uni-vpn` command | Low | fixed |
+| WC-27 | Download page does not say the Android app needs Android 10 | Low | fixed |
+| WC-28 | CI test TestOnlyTOTPFieldWritesATokenFile failed once ("duo_push not ready") on go (macos-latest) | Low | left: not reproduced (80 runs with -race, half under full CPU load); the test now reports how the fake ended |
 
 ### WC-1 Updates never replace the helper files the installers put next to the core
 
@@ -50,7 +56,9 @@ and the "stable" branch, the build scripts (packaging/, get.sh, install.sh), the
   checks every zip against that list and the manifest; the core-files job runs it.
 - Verification: check-core-zips.sh failed on zips built by the old script (13 missing files per
   zip) and passes on the new ones; the real updater applied the new Linux zip in a throwaway test
-  (helpers replaced, executable); installer staging differs only by the phone sources.
+  (helpers replaced, executable); installer staging differs only by the phone sources. The
+  released uni-vpn-core-linux-amd64.zip of 3c8cb5e has both helpers, app/icon.svg, LICENSE and
+  README.md.
 
 ### WC-2 Contact email hidden on the legal pages
 
@@ -129,7 +137,10 @@ and the "stable" branch, the build scripts (packaging/, get.sh, install.sh), the
   release without uni-vpn.pkg after one failed upload. tests/test_release_put.py runs the script
   against the same stand-in: all uploads before any delete, each file missing only between its
   delete and rename, swaps in the given order, a failed upload retried, uploads that keep failing
-  leave every old file, a lost answer to a delete, a file left over from a failed run.
+  leave every old file, a lost answer to a delete, a file left over from a failed run. Live:
+  the first publish with it (#79, 3c8cb5e) left all 16 files on release "latest" and no
+  "next-" file; core-manifest.json names 3c8cb5e and matches uni-vpn-core-linux-amd64.zip, and
+  uni-vpn-apk.json gives the size of the uploaded uni-vpn.apk.
 
 ### WC-16 to WC-19
 
@@ -151,6 +162,39 @@ and the "stable" branch, the build scripts (packaging/, get.sh, install.sh), the
 - Verification for WC-17 to WC-19: headless Chromium with the user agents of WC-8 plus Linux
   armv7l, in English, German and Traditional Chinese; screenshots at 375 px with the tip closed
   and open (French Mac, German Linux); no horizontal scroll.
+
+### WC-23 to WC-27
+
+- Found by: the final re-audit after #79.
+- WC-23: privacy.html (both languages) said "at most once a day". ApkUpdate.check sets the next
+  check 10 minutes ahead before each request and keeps it there when the request fails (no
+  network, 404, unreadable JSON), and a download that does not match its JSON is tried again
+  after 10, 20, 40 minutes up to a day. The page now says once a day, and after a failed check
+  every 10 minutes until it works (the re-audit of #80: "again after 10 minutes" read as one
+  more try); docs/android.md said "at most once a day" too and now says the same. Checked
+  against ApkUpdate.kt (RETRY = 10 minutes, DAY).
+- WC-24: "(unten, Nummer 4)" / "(below, number 4)" now say 5; headless Chromium numbers the list
+  the same way.
+- WC-25: on an HTTP error `gh api` prints GitHub's error body to stdout, and retry() kept the
+  output of every try, so the release id became "{...error...}7" and every later call failed.
+  retry() now prints only the successful try's output. tests/test_release_put.py's stand-in
+  for gh prints such a body now; the new test failed with the old script and passes.
+- WC-26: setup always writes a `uni-vpn` wrapper (internal/setup CommandPath, Wrapper). README
+  names it, where it goes, and the core's full path for when it is not on the PATH.
+- WC-27: minSdk is 29; older phones only hear "App not installed". The Android button now has
+  "Android 10 or newer" under it, in all six languages (checked in headless Chromium).
+
+### WC-28 A tunnel test failed once on macOS
+
+- Found by: CI of #80's first commit (go (macos-latest), `go test -race ./...`), a change with
+  no Go code; the same test passed on Linux and Windows in that run.
+- What is known: the test took 0.52 s, so WaitReady returned because the fake openconnect had
+  exited (its 3 s limit was not reached), about the time the fake listens on its port. The
+  failure printed nothing about why.
+- Reproduction: 40 runs with -race on Linux, and 40 more with every CPU busy, all passed.
+- Change: the test now prints the exit code and the fake's last output lines when it is not
+  ready, so a next failure shows the cause (checked by forcing the fake to fail once).
+- Left as Low: no user-facing path is known to fail; a release only waits for a rerun.
 
 ## Go core
 
