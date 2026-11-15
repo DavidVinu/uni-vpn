@@ -1628,6 +1628,11 @@ func (d *Daemon) RequestDisconnect() {
 // keyringFailed: a keyring that did not save shows the keyring message in the user's
 // language; the keyring's own words go to the log.
 func (d *Daemon) keyringFailed(err error) error {
+	var none *credentials.NoStoreError
+	if errors.As(err, &none) {
+		d.logf(slog.LevelWarn, "%s", none.Msg)
+		return i18n.T(messages.KeyPrefix + messages.KeyringMissing.ID)
+	}
 	var ke *credentials.KeyringError
 	if !errors.As(err, &ke) {
 		return err
@@ -1775,7 +1780,11 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 		if err != nil {
 			var missing *credentials.MissingError
 			var locked *credentials.LockedError
+			var none *credentials.NoStoreError
 			switch {
+			case errors.As(err, &none):
+				d.logf(slog.LevelWarn, "%s", none.Msg)
+				d.final(Keyring, messages.KeyringMissing)
 			case errors.As(err, &missing):
 				d.final(Keyring, messages.PasswordMissing)
 			case errors.As(err, &locked):
@@ -1805,7 +1814,11 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 			if err != nil {
 				var missing *credentials.MissingError
 				var locked *credentials.LockedError
+				var none *credentials.NoStoreError
 				switch {
+				case errors.As(err, &none):
+					d.logf(slog.LevelWarn, "%s", none.Msg)
+					d.final(Keyring, messages.KeyringMissing)
 				case errors.As(err, &missing):
 					d.final(Keyring, messages.TOTPMissing)
 				case errors.As(err, &locked):

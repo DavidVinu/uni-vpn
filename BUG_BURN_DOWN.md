@@ -989,3 +989,93 @@ desktop.
 - Linux: after a self-restart the old WebKit processes stay as zombies (two per restart);
   `pkill -f` takes the script path as a pattern (a home path with `+`, `(` or `[` misses);
   a restart after an update can drop a half-done change while the window is hidden.
+
+## Final re-audit
+
+Scope: the whole repository at 78c79e6 (after #74 to #80), read by five fresh reviewers, one per
+area: the core's sign-in path and API, the core's system parts (proxy, service, setup, updates,
+sync, relay), the desktop apps and installers, the phone apps, and the website, CI, release,
+translations and docs. The full test suite on that commit passed first: `go test -race ./...`,
+599 Python tests, the relay's tests, shellcheck, and all 23 CI jobs.
+
+| # | Bug | Severity | Status |
+|---|---|---|---|
+| FA-1 | Android tablets (Chrome's "Desktop site", on by default there) are offered the Linux packages | Medium | fixed |
+| FA-2 | A phone with 32-bit Android hears only "App not installed"; the page does not say the app needs 64-bit Android | Medium | fixed (the page says so; a 32-bit build is not made) |
+| FA-3 | Windows 11 with Smart App Control on blocks the unsigned installer outright, and the page's tip does not cover it | Medium | partly fixed: the page says so; only code signing (needs David's certificate) lets it run |
+| FA-4 | The privacy page does not say that the Android app's QR scanner (Google Play services) sends data to Google | Medium | fixed |
+| FA-5 | The privacy page says only the terminal scripts fetch from the Linux package sources; the normal .deb and .rpm do too | Low | fixed |
+| FA-6 | Linux with no password store at all (no gnome-keyring, KDE before 5.97): "Your saved passwords are locked. Sign out..." and no way through | Medium | fixed |
+| FA-7 | Windows PC with two accounts: the second account's install takes over the scheduled task, and the first account's Uni VPN never starts again | Medium | open |
+| FA-8 | Another local account that holds 127.0.0.1:1081 first answers this account's proxy rule and app window | High | open |
+| FA-9 | Another local account can use this account's VPN session through 127.0.0.1:1080 and start its sign-in | Medium | open |
+| FA-10 | Chrome, Edge and Brave on Xfce, MATE and LXQt never read the proxy rule, while setup reports success | Medium | open |
+| FA-11 | The sync relay can be filled for 400 days with a few thousand anonymous requests (not deployed yet) | Medium | open |
+
+### FA-1 Android tablets offered the Linux packages
+
+- Found by: the website reviewer. Chrome on Android with "Desktop site" sends "X11; Linux
+  x86_64" and platform "Linux" (Chromium's SetDesktopUserAgentOverride); Google turns it on by
+  default on large tablets. The page then offered uni-vpn.deb and .rpm as the main buttons.
+- Root cause: Android was recognized only by "Android" in the user agent.
+- Fix: on Linux (not ChromeOS), a touch screen that is the only pointer (`pointer: coarse`, no
+  `any-pointer: fine`, maxTouchPoints > 0) counts as Android.
+- Verification: headless Chromium with the desktop-site user agent and client hints, touch
+  emulated: the APK button and the Android note; a Linux desktop, a Linux touch laptop with a
+  touchpad (maxTouchPoints 10, fine pointer) and a Chromebook in tablet mode still get the
+  Linux files; Windows, Android phones unchanged; no script errors, no horizontal scroll.
+
+### FA-2 32-bit Android not explained
+
+- Found by: the phone and website reviewers. The APK holds arm64-v8a and x86_64 code only
+  (build.gradle.kts abiFilters, build-apk.sh); Android Go phones and some older models run
+  32-bit Android 10 or newer and refuse it with "App not installed".
+- Fix: the Android note says "Android 10 or newer (64-bit)" in all six languages; where the
+  browser still tells it (navigator.platform armv7l, armv8l or i686), the page says instead
+  that Uni VPN needs 64-bit Android and this phone has 32-bit Android, and keeps the APK in the
+  list. Chrome's frozen value "Linux armv81" does not match, so such phones keep the button.
+- Verification: headless Chromium with "Linux armv8l": no button, the message in en, de, fr,
+  the APK in the list; "Linux aarch64" and "Linux armv81": the button and the 64-bit note.
+- Left: building a 32-bit APK (openconnect, ocproxy and the core for armeabi-v7a).
+
+### FA-3 Smart App Control
+
+- Found by: the website reviewer. The release's uni-vpn-setup.exe is unsigned (empty security
+  directory). With Smart App Control on, Windows blocks it with no "Run anyway", and the core
+  and openconnect too (ci.yml's own comment).
+- Fix: the Windows tip says that if Windows reports Smart App Control blocked the file, Uni VPN
+  cannot run on this computer yet (six languages, Windows' own name for the feature).
+- Left: code signing of every program in the setup; needs a certificate (David).
+
+### FA-4 and FA-5 Privacy page
+
+- FA-4: app/android uses play-services-code-scanner (Scanner.kt, with auto zoom, manifest
+  `com.google.mlkit.vision.DEPENDENCIES` barcode_ui). Google's ML Kit data disclosure
+  (developers.google.com/ml-kit/android-data-disclosure, read 2026-11-15): device information,
+  package name and version, a device identifier for these features, performance metrics, API
+  configuration, event types and error codes, and with auto zoom a session id, zoom levels and
+  the code's bounding box. A new item 6 in "Who the app connects to" says this, in German and
+  English; scanning is only started by "Scan QR code" and "Scan code", typing the code does not
+  use it.
+- FA-5: the last item now says the Linux package's dependencies come from the distribution's
+  package sources, and only the terminal scripts fetch from GitHub, python.org, Homebrew or
+  nuget.org.
+
+### FA-6 Linux without a password store
+
+- Found by: the core reviewer, reproduced with the real secret-tool 0.21.4 under
+  dbus-run-session with no keyring: "secret-tool: The name org.freedesktop.secrets was not
+  provided by any .service files", exit 1, for lookup, store and clear. Setup and Settings
+  then said "Your saved passwords are locked. Sign out of the computer and back in", which
+  changes nothing.
+- Root cause: every failed `secret-tool store` became a KeyringError (keyring_locked), and a
+  failed lookup "No password saved".
+- Fix: credentials.NoStoreError for that answer (dbus-daemon's and dbus-broker's "The name is
+  not activatable" wording); new message keyring_missing in all six languages: install
+  "Passwords and Keys" from Discover or the Software app, then Try again. Ubuntu's seahorse
+  depends on gnome-keyring, which brings D-Bus activation of org.freedesktop.secrets, so no
+  sign-out is needed. NoStoreError counts as no secret saved for sync.
+- Verification: TestNoSecretServiceIsNoStore (both wordings; a locked collection stays a
+  KeyringError; never on macOS), TestNoPasswordStore (status and Settings); the real core with
+  the real secret-tool and no keyring now answers /api/setup and /api/password with
+  msg.keyring_missing.

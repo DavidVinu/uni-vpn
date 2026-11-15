@@ -81,6 +81,7 @@ var (
 	PasswordMissing     = m("password_missing", "password")
 	TOTPMissing         = m("totp_missing", "totp")
 	KeyringLocked       = m("keyring_locked")
+	KeyringMissing      = m("keyring_missing")
 	PasswordUnreadable  = m("password_unreadable", "password")
 	TOTPUnreadable      = m("totp_unreadable", "totp")
 	PasswordUnsupported = m("password_unsupported", "password")

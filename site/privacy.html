@@ -188,11 +188,25 @@ anderen Geräte bringen. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO,
 weil Sie die Funktion selbst nutzen. Wenn Sie in den Einstellungen alle
 Geräte entfernen, werden die Daten nicht mehr gelesen und dann
 gelöscht.</li>
-<li><strong>Nur bei Installation über die Terminal-Skripte</strong>
-(nicht beim normalen Download): Die Skripte laden zusätzlich Software
-von GitHub, python.org, Homebrew, nuget.org (Microsoft) oder aus den
-Paketquellen Ihrer Linux-Distribution. Diese Anbieter sehen dabei Ihre
-IP-Adresse.</li>
+<li><strong>Google, beim Scannen eines QR-Codes</strong> (Android-App).
+Für "QR-Code scannen" und "Code scannen" nutzt die App den Code-Scanner
+der Google-Play-Dienste; das Handy lädt ihn bei Bedarf aus Google
+Play. Das Kamerabild wertet das Handy selbst aus. Google erhält
+dabei nach eigener Aussage Informationen zum Gerät (Hersteller, Modell,
+Android-Version), den Namen und die Version der App, eine Gerätekennung
+und technische Angaben zum Scannen (etwa Dauer, Bildformat, Ereignisse,
+Fehlercodes, Zoomstufen und wo im Bild der Code lag), für Fehleranalyse
+und Nutzungsstatistik. Dafür ist Google selbst verantwortlich; es gilt
+dessen Datenschutzerklärung
+(<a href="https://policies.google.com/privacy?hl=de">https://policies.google.com/privacy</a>).
+Tippen Sie den Code ein, statt zu scannen, nutzt die App den Scanner
+nicht.</li>
+<li><strong>Paketquellen und Terminal-Skripte.</strong> Wenn Sie das
+Linux-Paket installieren, lädt Ihr System dafür nötige Programme (zum
+Beispiel openconnect) aus den Paketquellen Ihrer Linux-Distribution.
+Nur bei Installation über die Terminal-Skripte laden diese zusätzlich
+Software von GitHub, python.org, Homebrew oder nuget.org (Microsoft).
+Diese Anbieter sehen dabei Ihre IP-Adresse.</li>
 </ol>
 <p>Das App-Fenster auf Computern zeigt nur eine Seite auf Ihrem eigenen Computer an.
 Es nutzt dafür die Web-Komponente Ihres Betriebssystems (WebView2 unter
@@ -351,11 +365,25 @@ Purpose: bringing your settings to your other devices. The legal basis
 is Art. 6(1)(b) GDPR, because you use the feature yourself. If you
 remove all devices in Settings, the data is no longer read and is then
 deleted.</li>
-<li><strong>Only when installing with the terminal scripts</strong> (not
-with the normal download): the scripts also download software from
-GitHub, python.org, Homebrew, nuget.org (Microsoft) or your Linux
-distribution's package sources. These providers see your IP
-address.</li>
+<li><strong>Google, when you scan a QR code</strong> (Android app). For
+"Scan QR code" and "Scan code" the app uses the code scanner of Google
+Play services; the phone downloads it from Google Play when needed.
+The phone itself reads the camera image. According to Google, Google
+receives information about the device (manufacturer, model, Android
+version), the app's name and version, a device identifier and technical
+details of the scan (such as duration, image format, events, error
+codes, zoom levels and where in the image the code was), for diagnostics
+and usage statistics. Google is responsible for this itself; its privacy
+policy applies
+(<a href="https://policies.google.com/privacy?hl=en">https://policies.google.com/privacy</a>).
+If you type the code instead of scanning it, the app does not use the
+scanner.</li>
+<li><strong>Package sources and terminal scripts.</strong> When you
+install the Linux package, your system downloads programs it needs (for
+example openconnect) from your Linux distribution's package sources.
+Only when installing with the terminal scripts, they also download
+software from GitHub, python.org, Homebrew or nuget.org (Microsoft).
+These providers see your IP address.</li>
 </ol>
 <p>The app window on computers only shows a page on your own computer. It uses your
 operating system's web component for this (WebView2 on Windows, WebKit

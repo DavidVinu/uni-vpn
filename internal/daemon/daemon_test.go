@@ -986,6 +986,25 @@ func TestKeyringLocked(t *testing.T) {
 	}
 }
 
+// No password store at all (Linux without the Secret Service): its own message, which says
+// what to install; signing out, as for a locked keyring, would not help.
+func TestNoPasswordStore(t *testing.T) {
+	h := newHarness(t)
+	h.passwordErr = &credentials.NoStoreError{Msg: "secret-tool: The name org.freedesktop.secrets was not provided by any .service files"}
+	broken := func(string) error {
+		return &credentials.NoStoreError{Msg: "Uni VPN could not be saved: secret-tool: x"}
+	}
+	d := h.start(func(o *Options) { o.PasswordSetter = broken })
+	d.RequestConnect()
+	waitState(t, d, Keyring)
+	if _, m := d.snapshot(); m != messages.KeyringMissing {
+		t.Fatal(m)
+	}
+	if key, _ := i18n.Of(d.SetPassword("pw")).(pyjson.Object); key == nil || fmt.Sprint(key) != fmt.Sprint(i18n.T("msg.keyring_missing").JSON()) {
+		t.Fatal(key)
+	}
+}
+
 func TestSetPasswordStoresAndConnects(t *testing.T) {
 	h := newHarness(t)
 	h.passwordErr = credentials.ErrPasswordMissing
