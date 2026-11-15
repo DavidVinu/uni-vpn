@@ -56,9 +56,9 @@ $runtime = Get-ItemProperty "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Cli
 Write-Host "WebView2 runtime: $(if ($runtime) { $runtime.pv } else { 'none' }); session: $((Get-Process -Id $PID).SessionId); interactive: $([Environment]::UserInteractive)"
 Start-Sleep 5
 ShowTrays
-if ((Trays).Count -eq 0) { Explain; throw "no tray app runs after the install" }
+if (@(Trays).Count -eq 0) { Explain; throw "no tray app runs after the install" }
 Start-Sleep 10
-if ((Trays).Count -eq 0) { Explain; throw "the tray app ends at start" }
+if (@(Trays).Count -eq 0) { Explain; throw "the tray app ends at start" }
 # The installer's copy handed its window over: the app window opened (its WebView2 runs
 # with the app's data folder), not the browser. A window that cannot start on a handover
 # would open the browser on every Start menu click while the icon runs.
@@ -88,22 +88,24 @@ if ($web.Count -eq 0) { Explain; throw "the app window did not open on the hando
 # have opened the window itself, without a handover.
 function AppWebViews { @(Get-CimInstance Win32_Process -Filter "Name = 'msedgewebview2.exe'" | Where-Object { $_.CommandLine -like "*uni-vpn\WebView2*" }) }
 Get-Process -Name "Uni VPN" -ErrorAction SilentlyContinue | Stop-Process -Force
-foreach ($i in 1..30) { if ((AppWebViews).Count -eq 0) { break }; Start-Sleep 1 }
+foreach ($i in 1..30) { if (@(AppWebViews).Count -eq 0) { break }; Start-Sleep 1 }
 $old = @(AppWebViews | ForEach-Object ProcessId)
 function NewWebViews { @(AppWebViews | Where-Object { $old -notcontains $_.ProcessId }) }
 $exe = "$env:ProgramFiles\uni-vpn\desktop\Uni VPN.exe"
 $icon = Start-Process $exe -ArgumentList "--port 1081 --hidden" -PassThru
 Start-Sleep 5
-if ($icon.HasExited -or (NewWebViews).Count -ne 0) { Explain; throw "the icon alone did not run as it should" }
+if ($icon.HasExited -or @(NewWebViews).Count -ne 0) { Explain; throw "the icon alone did not run as it should" }
 $second = Start-Process $exe -ArgumentList "--port 1081" -PassThru
 if (-not $second.WaitForExit(10000)) { Explain; throw "the second start did not hand over" }
-foreach ($i in 1..15) { if ((NewWebViews).Count -gt 0) { break }; Start-Sleep 1 }
+foreach ($i in 1..15) { if (@(NewWebViews).Count -gt 0) { break }; Start-Sleep 1 }
 Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\app.log" -ErrorAction SilentlyContinue
-if ($icon.HasExited -or (NewWebViews).Count -eq 0) { Explain; throw "the app window did not open on a second start" }
+if ($icon.HasExited -or @(NewWebViews).Count -eq 0) { Explain; throw "the app window did not open on a second start" }
 $lnk = Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter "Uni VPN.lnk"
 if (-not $lnk) { throw "no Start menu entry" }
 $problems = @()
-# The service's processes: the task runs conhost.exe, which starts uni-vpn-core.exe.
+# The service's processes: the task runs conhost.exe, which starts uni-vpn-core.exe. Counted as
+# @(Daemons).Count: a function's single result comes back as itself, and in PowerShell 5.1 a
+# single process object has no Count, so (Daemons).Count -gt 0 is never true for one.
 function Daemons { @(Get-CimInstance Win32_Process -Filter "Name = 'uni-vpn-core.exe'" | Where-Object { $_.CommandLine -like "* daemon*" }) }
 function ShowService {
   Write-Host "task: $((Get-ScheduledTask -TaskName uni-vpn).State)"
@@ -206,10 +208,10 @@ $old | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue
 cmd /c "schtasks /Run /TN uni-vpn 2>&1" | Out-Null
 function NewDaemons { @(Daemons | Where-Object { $old -notcontains $_.ProcessId }) }
 $up = $false
-foreach ($i in 1..30) { if ((NewDaemons).Count -gt 0 -and (Answers)) { $up = $true; break }; Start-Sleep 1 }
+foreach ($i in 1..30) { if (@(NewDaemons).Count -gt 0 -and (Answers)) { $up = $true; break }; Start-Sleep 1 }
 ShowService
 $taskPriority = (Get-ScheduledTask -TaskName uni-vpn).Settings.Priority
-$daemon = NewDaemons
+$daemon = @(NewDaemons)
 Write-Host "an earlier version's task: priority $taskPriority; service base priority $(($daemon | ForEach-Object Priority) -join ', ')"
 if (-not $up) { Explain; HowItAnswers; $problems += "the service started with an earlier version's task did not answer" }
 if ($taskPriority -ne 7) { throw "the task has priority $taskPriority, not an earlier version's 7" }
@@ -222,7 +224,7 @@ Invoke-WebRequest -UseBasicParsing -Method Post -Headers @{ "X-Uni-VPN" = "1" } 
 $sw = [Diagnostics.Stopwatch]::StartNew()
 $back = $null
 while (-not $back -and $sw.Elapsed.TotalSeconds -lt 90) {
-  if ((NewDaemons).Count -gt 0 -and @(Daemons | Where-Object { $old -contains $_.ProcessId }).Count -eq 0 -and (Answers)) { $back = $sw.Elapsed.TotalSeconds }
+  if (@(NewDaemons).Count -gt 0 -and @(Daemons | Where-Object { $old -contains $_.ProcessId }).Count -eq 0 -and (Answers)) { $back = $sw.Elapsed.TotalSeconds }
   else { Start-Sleep -Milliseconds 250 }
 }
 ShowService
@@ -258,7 +260,7 @@ function KeyOnDisk {
 }
 # The link starts the app (here without a window yet, so the page loads with the key in it).
 Get-Process -Name "Uni VPN" -ErrorAction SilentlyContinue | Stop-Process -Force
-foreach ($i in 1..30) { if ((AppWebViews).Count -eq 0) { break }; Start-Sleep 1 }
+foreach ($i in 1..30) { if (@(AppWebViews).Count -eq 0) { break }; Start-Sleep 1 }
 Start-Process $exe -ArgumentList "otpauth://totp/uni-vpn-ci?secret=$key"
 Start-Sleep 20  # Chromium writes its history every 10 s
 $found = KeyOnDisk
@@ -268,9 +270,9 @@ Get-ChildItem "$env:LOCALAPPDATA\uni-vpn\WebView2" -Depth 2 -ErrorAction Silentl
 # its browser process the window gets a new one. Both left the window blank until Exit.
 function AppBrowser { @(AppWebViews | Where-Object { $_.CommandLine -notmatch "--type=" }) }
 function Renderers($browser) { @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $browser" | Where-Object { $_.CommandLine -match "--type=renderer" }) }
-foreach ($i in 1..30) { if ((AppBrowser).Count -gt 0 -and (Renderers (AppBrowser)[0].ProcessId).Count -gt 0) { break }; Start-Sleep 1 }
-if ((AppBrowser).Count -eq 0) { Explain; throw "the otpauth link did not open the app window" }
-$browser = (AppBrowser)[0].ProcessId
+foreach ($i in 1..30) { if (@(AppBrowser).Count -gt 0 -and @(Renderers (@(AppBrowser)[0].ProcessId)).Count -gt 0) { break }; Start-Sleep 1 }
+if (@(AppBrowser).Count -eq 0) { Explain; throw "the otpauth link did not open the app window" }
+$browser = @(AppBrowser)[0].ProcessId
 $renderers = @(Renderers $browser | ForEach-Object ProcessId)
 Write-Host "app window: browser process $browser, page processes $($renderers -join ', ')"
 $renderers | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
@@ -285,10 +287,10 @@ Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\app.log" -ErrorAction SilentlyContin
 if (-not $reloaded) { Explain; $problems += "the page did not load again after its process ended" }
 Stop-Process -Id $browser -Force
 function NewBrowser { @(AppBrowser | Where-Object { $_.ProcessId -ne $browser }) }
-foreach ($i in 1..20) { if ((NewBrowser).Count -gt 0) { break }; Start-Sleep 1 }
+foreach ($i in 1..20) { if (@(NewBrowser).Count -gt 0) { break }; Start-Sleep 1 }
 Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\app.log" -ErrorAction SilentlyContinue
-if ((NewBrowser).Count -eq 0) { Explain; $problems += "the window did not come back after its browser process ended" }
-if ((Trays).Count -eq 0) { Explain; $problems += "the tray app ended with the window's browser process" }
+if (@(NewBrowser).Count -eq 0) { Explain; $problems += "the window did not come back after its browser process ended" }
+if (@(Trays).Count -eq 0) { Explain; $problems += "the tray app ended with the window's browser process" }
 if (-not $found) {
   $found = KeyOnDisk
   if ($found) { $problems += "the otpauth link's key is on disk in $found once the browser process ended" }

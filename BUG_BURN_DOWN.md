@@ -108,7 +108,11 @@ desktop.
   window is opened again, which loads it. Windows: test-install.ps1 kills the window's page
   processes and its browser process and checks that a new window comes up and that the page
   itself loaded again (the window notes it in app.log; a new page process alone proves
-  nothing, WebView2 starts one for its error page).
+  nothing, WebView2 starts one for its error page). Its waits for the window's processes
+  always ran out their time: in PowerShell 5.1 a function's single result comes back as the
+  process object itself, which has no Count, so `(NewBrowser).Count -gt 0` was never true for
+  one process (the checks after the waits, `-eq 0`, held). The test now counts as
+  `@(...).Count` everywhere.
 
 ### D6. Linux app menu entry missing when the home folder's path has $, ", ` or \ (Linux)
 
