@@ -94,6 +94,9 @@ final class AppModel {
         keepAlive?.cancel()
         keepAlive = nil
         guard poll == nil else { return }
+        // The 20 s until "not running" count while on screen, not from before the app left it.
+        unreachable = false
+        stuck = false
         poll = Task { [weak self] in
             await self?.vpn.load()
             await self?.ensureCore()

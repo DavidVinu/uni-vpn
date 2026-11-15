@@ -39,9 +39,27 @@ final class CoreHost: @unchecked Sendable {
     /// Exists while a core of the app or the extension holds both ports (daemon.Options.ReadyFile).
     static var readyFile: URL { stateHome.appendingPathComponent("uni-vpn/api-ready") }
 
+    /// The core's lock (internal/coremain): held while a core runs, freed when its process ends.
+    static var lockFile: URL { configHome.appendingPathComponent("uni-vpn/daemon.lock") }
+
     /// Any app can listen on 127.0.0.1 first, and requests carry the token and the password:
-    /// they go only to a core that holds its ports, like Android's Core.ready.
-    static var ready: Bool { FileManager.default.fileExists(atPath: readyFile.path) }
+    /// they go only to a core that holds its ports, like Android's Core.ready. A core that iOS
+    /// ended (the extension over its memory limit) leaves its file until the next core starts:
+    /// the file counts only while a core also holds the lock.
+    static var ready: Bool { FileManager.default.fileExists(atPath: readyFile.path) && lockHeld }
+
+    /// The core holds its lock with flock: a shared lock on a new descriptor fails while it does,
+    /// also when that core runs in this process.
+    private static var lockHeld: Bool {
+        let fd = open(lockFile.path, O_RDONLY | O_CLOEXEC)
+        if fd < 0 { return false }
+        defer { close(fd) }
+        if flock(fd, LOCK_SH | LOCK_NB) == 0 {
+            flock(fd, LOCK_UN)
+            return false
+        }
+        return errno == EWOULDBLOCK
+    }
 
     var running: Bool { UniVPNRunning() == 1 }
 
