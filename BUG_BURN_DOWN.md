@@ -115,6 +115,57 @@ Scope: `app/android`, `app/ios`, `packaging/android`, `packaging/ios`, `cmd/uni-
 - **Status:** Fixed
 - **Fix:** the button's label names the website for screen readers.
 
+### M8. Android: a release whose core does not start strands the phone
+
+- **Severity:** Medium
+- **Status:** Fixed
+- **Bug:** found by the re-audit. When a release's core does not start on a phone, the next
+  release is the way out, and `ApkUpdate` finds it, but nothing offered it: Home's "Update Uni
+  VPN" needs the core's status, the app showed only "not running", and the service checked for
+  updates only while its core was ready.
+- **Root cause:** the update offer hung off the core's screens and loop, while it is what
+  repairs a broken core.
+- **Fix:** the "not running" page offers the update (text shipped in the app's resources) and
+  the switch; the service checks every 30 s also while it waits for a core.
+- **Verification:** traced the screen's branches and both service loops; lint clean, unit tests
+  pass.
+
+### M9. Android: leaving the app during a download left Update busy
+
+- **Severity:** Medium
+- **Status:** Fixed
+- **Bug:** found by the re-audit. A tap on Update on mobile data downloads first. Swiping the
+  app away (or Back on Android 10 and 11) cancelled the screen's scope; the download went on,
+  but `withContext` then threw and the busy flag was never reset. While the VPN kept the process
+  alive, Home's row stayed disabled and the notification's Update did nothing.
+- **Root cause:** work that must outlive the screen ran in the screen's `viewModelScope`.
+- **Fix:** `ApkUpdate.start` runs the tap in its own scope and resets the flag unless Android's
+  installer took the file.
+- **Verification:** traced; lint clean, both flavors compile.
+
+### M10. Fixed Lows from the re-audit
+
+- **Android: "close the app and open it again" kept M3's key reset from coming.** The minute of
+  failures counted only within one run of the app, so with the VPN off, following the text
+  started it afresh. The count is now kept across runs; a pause up to 10 minutes keeps it, a
+  restart of the phone or a success clears it (`LastingFailureTest`).
+- **Android 12 and later asked before every update.** `USER_ACTION_NOT_REQUIRED` needs
+  `UPDATE_PACKAGES_WITHOUT_USER_ACTION`, now declared (website build only).
+- **Android: any app could start the update download** through the exported activity's
+  `ACTION_UPDATE`. The notification's intent now carries a key known only to this run of the
+  app; reopening from Recents is not a new tap.
+- **Android: a release whose `uni-vpn-apk.json` upload failed** had phones download the APK
+  every 10 minutes on Wi-Fi. Mismatches now wait 10, 20, 40 minutes and so on, up to a day.
+- **Android: a rule refresh still establishing when the core ended** could bring the rule back
+  after it was withdrawn (M2). The withdrawal now takes the refresh's lock.
+- **Both apps: back on screen, "not running" could show at once,** counted from before the app
+  left. The 20 s now count on screen.
+- **iPhone: `api-ready` left by a core that iOS ended** let requests with the token go, for
+  about a second, to another app that took port 1081. `CoreHost.ready` now also needs a core to
+  hold the lock (flock), as Android checks its own process.
+- **Both apps: the "not running" page had no switch;** it now has the one the port-taken page
+  has, so the VPN can be turned off there.
+
 ### Left as they are (Low)
 
 - **Fixed ports 1080 and 1081.** A local proxy app on the same port (Shadowsocks' default local
