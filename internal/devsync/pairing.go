@@ -148,10 +148,12 @@ func (e *Engine) show(mode, code string, p pairing) Pairing {
 	// The relay counts the code's ten minutes by its clock, which goes on while this device sleeps
 	// (a phone's screen off, a laptop's lid closed); Go's timers stop meanwhile (not on Windows).
 	until := e.wall().Add(e.opts.CodeLifetime)
-	e.cancelPairing() // a new code replaces the one on screen
+	// A new code replaces the one on screen, in one step: one shown at the same time (a double
+	// click) must not stay open behind it.
 	e.mu.Lock()
-	e.pairing, e.cancelPair, e.pairSlots = &shown, cancel, p
+	closeOld := e.replacePairingLocked(&shown, cancel, p)
 	e.mu.Unlock()
+	closeOld()
 	go e.await(ctx, cancel, &shown, p, until)
 	return shown
 }
@@ -296,6 +298,14 @@ func (e *Engine) CancelPairing() { e.cancelPairing() }
 
 func (e *Engine) cancelPairing() {
 	e.mu.Lock()
+	closeOld := e.replacePairingLocked(nil, nil, pairing{})
+	e.mu.Unlock()
+	closeOld()
+}
+
+// replacePairingLocked puts shown on screen in place of the code there (e.mu is held) and
+// returns what closes the old code's slots, to call without e.mu.
+func (e *Engine) replacePairingLocked(shown *Pairing, cancel context.CancelFunc, p pairing) func() {
 	waiting := e.pairing != nil && e.pairing.State == "waiting"
 	mode := ""
 	if waiting {
@@ -305,10 +315,11 @@ func (e *Engine) cancelPairing() {
 		e.cancelPair()
 	}
 	slots := e.pairSlots
-	e.pairing, e.cancelPair, e.pairSlots = nil, nil, pairing{}
-	e.mu.Unlock()
-	if waiting && slots.a != "" {
-		e.closeSlots(mode, slots)
+	e.pairing, e.cancelPair, e.pairSlots = shown, cancel, p
+	return func() {
+		if waiting && slots.a != "" {
+			e.closeSlots(mode, slots)
+		}
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"sync"
 	"testing"
 	"time"
 )
@@ -53,5 +54,40 @@ func TestJoinFromARequestCodeEndsWithTheCore(t *testing.T) {
 	time.Sleep(time.Second)
 	if after, _ := os.ReadFile(opts.StatePath); !bytes.Equal(before, after) {
 		t.Errorf("sync.json was written after Run returned:\nbefore %s\nafter  %s", before, after)
+	}
+}
+
+// Codes asked for at once (a double click) replace each other: once the code on screen is
+// taken off, none of them works any more.
+func TestCodesShownAtOnceAreAllWithdrawn(t *testing.T) {
+	ctx := context.Background()
+	_, url := startRelay(t)
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	laptop := newDevice(t, url, "Laptop", setUpLaptop(), c)
+	phone := newDevice(t, url, "Phone", newLocal(false, nil), c)
+	phone.opts.PollEvery = time.Minute
+	for round := 0; round < 10; round++ {
+		var wg sync.WaitGroup
+		codes := make([]string, 8)
+		for i := range codes {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				p, err := phone.Request(ctx)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				codes[i] = p.Code
+			}()
+		}
+		wg.Wait()
+		phone.CancelPairing()
+		for _, code := range codes {
+			n, _ := NormalizeCode(code)
+			if _, err := laptop.takeSlot(ctx, pairingFor(n), "a"); err == nil {
+				t.Fatalf("round %d: code %s still works after the code on screen was taken off", round, code)
+			}
+		}
 	}
 }
