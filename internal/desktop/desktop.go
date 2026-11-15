@@ -595,9 +595,10 @@ func (d *Desktop) HasIndicator(python string) bool {
 	return err == nil && r.Code == 0
 }
 
-// DesktopQuote quotes an argument for Exec= in a desktop entry.
+// DesktopQuote quotes an argument for Exec= in a desktop entry. Exec= is a string value, whose
+// escapes are read before the quoting rule: every backslash the quoting needs is written as \\.
 func DesktopQuote(text string) string {
-	escaped := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "`", "\\`", "$", `\$`).Replace(text)
+	escaped := strings.NewReplacer(`\`, `\\\\`, `"`, `\\"`, "`", "\\\\`", "$", `\\$`).Replace(text)
 	return `"` + strings.ReplaceAll(escaped, "%", "%%") + `"`
 }
 

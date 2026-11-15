@@ -468,7 +468,10 @@ func TestDesktopEntryQuotesAndNamesTheWindowClass(t *testing.T) {
 	if !strings.Contains(hidden, "--hidden") || !strings.Contains(hidden, "NoDisplay=true") || strings.Contains(hidden, "otpauth") {
 		t.Fatal(hidden)
 	}
-	if got := DesktopQuote(`a "b" $c 100%`); got != `"a \"b\" \$c 100%%"` {
+	// Exec= is a string value: its escapes (\\ for a backslash) come off before the quoting
+	// rule reads the argument, so each backslash of the quoting is written twice. GLib refuses
+	// an entry with \" or \$ ("Desktop file didn't specify Exec field").
+	if got := DesktopQuote("a \"b\" $c `d` 100% e\\f"); got != `"a \\"b\\" \\$c \\`+"`"+`d\\`+"`"+` 100%% e\\\\f"` {
 		t.Fatal(got)
 	}
 }
