@@ -120,7 +120,7 @@ final class Strings {
         let texts = [
             "en": "Another app is in the way. Uni VPN keeps trying. If this stays, restart the phone.",
             "de": "Eine andere App ist im Weg. Uni VPN versucht es weiter. Bleibt es so, starte das Handy neu.",
-            "fr": "Une autre application gêne. Uni VPN continue d'essayer. Si cela persiste, redémarrez le téléphone.",
+            "fr": "Une autre application gêne. Uni VPN continue d’essayer. Si cela persiste, redémarrez le téléphone.",
             "es": "Otra aplicación interfiere. Uni VPN sigue intentándolo. Si continúa, reinicia el teléfono.",
             "zh-Hans": "另一个应用造成了干扰。Uni VPN 会继续尝试。如果问题持续，请重启手机。",
             "zh-Hant": "另一個 App 造成了干擾。Uni VPN 會繼續嘗試。如果問題持續，請重新啟動手機。",
@@ -134,7 +134,7 @@ final class Strings {
         let texts = [
             "en": "Uni VPN is not running. Close the app and open it again.",
             "de": "Uni VPN läuft nicht. Schließe die App und öffne sie erneut.",
-            "fr": "Uni VPN ne fonctionne pas. Fermez l'application et rouvrez-la.",
+            "fr": "Uni VPN n’est pas lancé. Fermez l’application et rouvrez-la.",
             "es": "Uni VPN no se está ejecutando. Cierra la aplicación y vuelve a abrirla.",
             "zh-Hans": "Uni VPN 未在运行。请关闭应用后重新打开。",
             "zh-Hant": "Uni VPN 未在執行。請關閉 App 後重新開啟。",

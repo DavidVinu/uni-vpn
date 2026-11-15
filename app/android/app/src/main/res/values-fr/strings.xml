@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="channel">Connexion</string>
-    <string name="port_in_use">Une autre application gêne. Uni VPN continue d\'essayer. Si cela persiste, redémarrez le téléphone.</string>
+    <string name="port_in_use">Une autre application gêne. Uni VPN continue d’essayer. Si cela persiste, redémarrez le téléphone.</string>
     <!-- The VPN's notification when a newer version is out (ApkUpdate). -->
     <string name="update">Mettre à jour Uni VPN</string>
-    <string name="not_running">Uni VPN ne fonctionne pas. Fermez l\'application et rouvrez-la.</string>
+    <string name="not_running">Uni VPN n’est pas lancé. Fermez l’application et rouvrez-la.</string>
 </resources>

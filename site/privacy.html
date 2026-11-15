@@ -7,7 +7,8 @@
 <title>Datenschutz / Privacy · Uni VPN</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%22100 100 824 824%22%3E%3Cstyle%3E.b{fill:%231f66e0}.s{fill:%23fff}.c{fill:%230b57d0}%40media (prefers-color-scheme:dark){.b{fill:%231c1d20}.s{fill:%233b7bf0}.c{fill:%23fff}}%3C/style%3E%3Crect class=%22b%22 x=%22100%22 y=%22100%22 width=%22824%22 height=%22824%22 rx=%22185%22/%3E%3Cpath class=%22s%22 d=%22M512 232 L732 314 V500 C732 640 640 738 512 792 C384 738 292 640 292 500 V314 Z%22/%3E%3Cpath class=%22c%22 d=%22M512 410 L646 470 L512 530 L378 470 Z M430 500 V572 C460 600 564 600 594 572 V500 L512 537 Z%22/%3E%3C/svg%3E">
 <meta name="description" content="Datenschutzerklärung und Privacy Policy für Uni VPN.">
-<!-- Legal text, rendered from release/legal drafts. Same colors as index.html. -->
+<!-- Legal text, rendered from release/legal drafts. Same colors as index.html. email_off keeps
+     Cloudflare from hiding the email address behind a script (the legal notice must show it). -->
 <style>
 :root{
   --bg:#f4f5f7;--card:#fff;--text:#1d1d1f;--muted:#6e6e73;--line:#e3e3e8;
@@ -36,9 +37,10 @@ nav a{color:var(--muted)}
 <body>
 <nav><a href="./">← Uni VPN</a></nav>
 <main>
+<!--email_off-->
 <p><a href="#en">English version below</a></p>
 <h1 id="datenschutzerklärung">Datenschutzerklärung</h1>
-<p>Stand: 19. Oktober 2026</p>
+<p>Stand: 15. November 2026</p>
 <h2 id="verantwortlicher">1. Verantwortlicher</h2>
 <p>David Vinu<br />
 Mühltalstraße 139a<br />
@@ -99,16 +101,18 @@ zertifiziert.</p>
 <p>Datenschutzerklärung von GitHub:
 <a href="https://docs.github.com/de/site-policy/privacy-policies/github-general-privacy-statement">https://docs.github.com/de/site-policy/privacy-policies/github-general-privacy-statement</a></p>
 <h2 id="die-app-uni-vpn">5. Die App Uni VPN</h2>
-<p>Uni VPN verbindet Ihren Computer mit dem VPN Ihrer Universität. Nur
-die Websites, die Sie in der App eintragen (zum Beispiel Uni-Mail oder
-Moodle), laufen über die Universität. Alles andere geht wie bisher
-direkt ins Internet.</p>
+<p>Uni VPN verbindet Ihren Computer oder Ihr Android-Handy mit dem VPN
+Ihrer Universität. Nur die Websites, die Sie in der App eintragen (zum
+Beispiel Uni-Mail oder Moodle), laufen über die Universität. Alles andere
+geht wie bisher direkt ins Internet. Auf Android richtet die App dafür
+eine VPN-Verbindung des Systems ein, die nur diese Websites an die App
+weiterleitet; den übrigen Datenverkehr sieht die App nicht.</p>
 <p>Die App sendet mir keine Daten, außer Sie gleichen Ihre Geräte
 ab (unten, Nummer 4). Es gibt keine Nutzungsstatistik, keine
 Fehlerberichte und kein Benutzerkonto bei mir. Für die übrigen Daten in
 der App bin ich daher nicht verantwortlich im Sinne der DSGVO. Trotzdem
 erkläre ich hier, was die App tut.</p>
-<h3 id="was-auf-ihrem-computer-gespeichert-wird">Was auf Ihrem Computer
+<h3 id="was-auf-ihrem-computer-gespeichert-wird">Was auf Ihrem Gerät
 gespeichert wird</h3>
 <ul>
 <li><strong>Passwort und TOTP-Geheimnis</strong> (für den zweiten
@@ -116,7 +120,10 @@ Faktor): nur im Passwortspeicher Ihres Betriebssystems, also im
 GNOME-Schlüsselbund (Linux), im macOS-Schlüsselbund oder in der
 Windows-Anmeldeinformationsverwaltung. Beim Verbinden legt die App das
 Geheimnis kurz in eine Datei, die nur Ihr Benutzerkonto lesen kann, und
-löscht sie gleich danach.</li>
+löscht sie gleich danach. Auf Android: verschlüsselt in einer Datei der
+App, deren Schlüssel der Android-Schlüsselspeicher (Keystore) verwahrt.
+Sicherungen und der Umzug auf ein neues Handy nehmen die Daten der App
+nicht mit.</li>
 <li><strong>Benutzername, Universität und Einstellungen</strong> (zum
 Beispiel die eingetragenen Websites): in Einstellungsdateien
 (config.toml, domains.txt) in Ihrem Benutzerordner.</li>
@@ -129,7 +136,8 @@ Fehlermeldung auf GitHub.</li>
 <p>Beim Deinstallieren unter Windows löscht die App die Einträge im
 Passwortspeicher, auf dem Mac und unter Linux bleiben sie erhalten. Sie
 können sie dort jederzeit selbst löschen ("uni-vpn", "uni-vpn-totp" und
-"uni-vpn-sync"), ebenso die Einstellungsdateien und die Logdatei.</p>
+"uni-vpn-sync"), ebenso die Einstellungsdateien und die Logdatei. Auf
+Android löscht das System beim Deinstallieren alle Daten der App.</p>
 <h3 id="mit-wem-die-app-verbindung-aufnimmt">Mit wem die App Verbindung
 aufnimmt</h3>
 <ol type="1">
@@ -148,12 +156,20 @@ Daten gesendet, das Portal sieht nur Ihre IP-Adresse.</li>
 Wenn Sie eine VPN-Adresse selbst eingeben, fragt die App diesen Server
 einmal nach seinem Anmeldeformular. Dabei werden keine Zugangsdaten
 gesendet, der Server sieht nur Ihre IP-Adresse.</li>
-<li><strong>GitHub, für Updates.</strong> Etwa alle 5 Stunden (erstmals
+<li><strong>GitHub, für Updates</strong> (auf Computern). Etwa alle 5 Stunden (erstmals
 rund 10 Minuten nach dem Start) fragt die App bei GitHub nach, ob es
 eine neue Version gibt, und lädt sie gegebenenfalls von dort herunter.
 GitHub sieht dabei Ihre IP-Adresse, die Uhrzeit und die Kennung
 "uni-vpn". Sonst wird nichts gesendet. Sie können das in der App
 ausschalten: Zahnrad, "Automatische Updates".</li>
+<li><strong>GitHub, für Updates</strong> (Android-App von dieser Website).
+Höchstens einmal am Tag, solange das VPN an oder die App offen ist, fragt
+die App bei GitHub nach, ob es eine neue Version gibt. Eine neue Version
+lädt sie im WLAN gleich herunter, über mobile Daten erst, wenn Sie auf
+"Uni VPN aktualisieren" tippen. Installiert wird sie erst nach diesem
+Tippen. GitHub sieht dabei Ihre IP-Adresse, die Uhrzeit und die Kennung
+"uni-vpn". Sonst wird nichts gesendet. Ausschalten: Zahnrad,
+"Automatische Updates".</li>
 <li><strong>Abgleich zwischen Ihren Geräten</strong> (nur wenn Sie in
 der App "Gerät hinzufügen" oder "Einstellungen von einem anderen Gerät
 übernehmen" nutzen). Ihre Geräte tauschen ihre Einstellungen über einen
@@ -177,7 +193,7 @@ von GitHub, python.org, Homebrew, nuget.org (Microsoft) oder aus den
 Paketquellen Ihrer Linux-Distribution. Diese Anbieter sehen dabei Ihre
 IP-Adresse.</li>
 </ol>
-<p>Das App-Fenster zeigt nur eine Seite auf Ihrem eigenen Computer an.
+<p>Das App-Fenster auf Computern zeigt nur eine Seite auf Ihrem eigenen Computer an.
 Es nutzt dafür die Web-Komponente Ihres Betriebssystems (WebView2 unter
 Windows, WebKit unter macOS und Linux).</p>
 <h2 id="ihre-rechte">6. Ihre Rechte</h2>
@@ -199,7 +215,7 @@ für den Datenschutz und die Informationsfreiheit Baden-Württemberg,
 Lautenschlagerstraße 20, 70173 Stuttgart.</p>
 <hr id="en">
 <h1 id="privacy-policy">Privacy Policy</h1>
-<p>Last updated: 19 October 2026</p>
+<p>Last updated: 15 November 2026</p>
 <p>This is a translation for convenience. The German version
 (Datenschutzerklärung) is the authoritative one.</p>
 <h2 id="controller">1. Controller</h2>
@@ -257,22 +273,26 @@ certified under the EU-US Data Privacy Framework.</p>
 <p>GitHub's privacy statement:
 <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement</a></p>
 <h2 id="the-uni-vpn-app">5. The Uni VPN app</h2>
-<p>Uni VPN connects your computer to your university's VPN. Only the
-websites you list in the app (for example university mail or Moodle) go
-through the university. Everything else goes directly to the internet as
-before.</p>
+<p>Uni VPN connects your computer or Android phone to your university's
+VPN. Only the websites you list in the app (for example university mail
+or Moodle) go through the university. Everything else goes directly to
+the internet as before. On Android the app sets up a system VPN
+connection for this that only hands these websites to the app; the app
+does not see the rest of your traffic.</p>
 <p>The app sends no data to me, unless you sync your devices (below,
 number 4). There are no usage statistics, no crash reports and no
 account with me. I am therefore not the controller under the GDPR for
 the other data in the app. Still, here is what the app does.</p>
 <h3 id="what-is-stored-on-your-computer">What is stored on your
-computer</h3>
+device</h3>
 <ul>
 <li><strong>Password and TOTP secret</strong> (for the second factor):
 only in your operating system's password store, that is the GNOME
 keyring (Linux), the macOS keychain or the Windows Credential Manager.
 When connecting, the app briefly puts the secret into a file only your
-user account can read and deletes it right afterwards.</li>
+user account can read and deletes it right afterwards. On Android:
+encrypted in a file of the app, whose key the Android Keystore holds.
+Backups and moving to a new phone leave the app's data out.</li>
 <li><strong>User name, university and settings</strong> (for example the
 listed websites): in settings files (config.toml, domains.txt) in your
 user folder.</li>
@@ -284,7 +304,7 @@ example in a bug report on GitHub.</li>
 <p>Uninstalling on Windows deletes the password store entries; on a Mac
 and on Linux they stay. You can delete them there yourself at any time
 ("uni-vpn", "uni-vpn-totp" and "uni-vpn-sync"), as well as the settings
-and log files.</p>
+and log files. On Android, uninstalling deletes all of the app's data.</p>
 <h3 id="who-the-app-connects-to">Who the app connects to</h3>
 <ol type="1">
 <li><strong>Your university's VPN server.</strong> When signing in, the
@@ -301,11 +321,18 @@ is sent; the portal only sees your IP address.</li>
 enter a VPN address yourself, the app asks that server once for its
 login form. No credentials are sent; the server only sees your IP
 address.</li>
-<li><strong>GitHub, for updates.</strong> About every 5 hours (first
+<li><strong>GitHub, for updates</strong> (on computers). About every 5 hours (first
 about 10 minutes after start) the app asks GitHub whether there is a new
 version and, if so, downloads it from there. GitHub sees your IP
 address, the time and the identifier "uni-vpn". Nothing else is sent.
 You can turn this off in the app: gear icon, "Automatic updates".</li>
+<li><strong>GitHub, for updates</strong> (Android app from this website).
+At most once a day, while the VPN is on or the app is open, the app asks
+GitHub whether there is a new version. On Wi-Fi it downloads a new
+version right away, on mobile data only when you tap "Update Uni VPN".
+It is installed only after that tap. GitHub sees your IP address, the
+time and the identifier "uni-vpn". Nothing else is sent. To turn it off:
+gear icon, "Automatic updates".</li>
 <li><strong>Syncing between your devices</strong> (only if you use "Add
 a device" or "Use settings from another device" in the app). Your
 devices exchange their settings through a small service I run at
@@ -327,7 +354,7 @@ GitHub, python.org, Homebrew, nuget.org (Microsoft) or your Linux
 distribution's package sources. These providers see your IP
 address.</li>
 </ol>
-<p>The app window only shows a page on your own computer. It uses your
+<p>The app window on computers only shows a page on your own computer. It uses your
 operating system's web component for this (WebView2 on Windows, WebKit
 on macOS and Linux).</p>
 <h2 id="your-rights">6. Your rights</h2>
@@ -347,6 +374,7 @@ where you live, or with the authority responsible for me: the State
 Commissioner for Data Protection and Freedom of Information
 Baden-Württemberg (LfDI), Lautenschlagerstraße 20, 70173 Stuttgart,
 Germany.</p>
+<!--/email_off-->
 </main>
 </body>
 </html>
