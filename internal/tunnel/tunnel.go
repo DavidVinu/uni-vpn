@@ -27,6 +27,7 @@ import (
 
 	"github.com/DavidVinu/uni-vpn/internal/certs"
 	"github.com/DavidVinu/uni-vpn/internal/platform"
+	totppkg "github.com/DavidVinu/uni-vpn/internal/totp"
 )
 
 // Config holds what the tunnel reads from the daemon's configuration. The daemon fills it from
@@ -500,7 +501,7 @@ func (t *Tunnel) Start(password []byte, totp string) error {
 	t.once = once
 	t.mu.Unlock()
 	if totp != "" && t.Cfg.MFA == "totp_field" && !once {
-		if err := t.writeTokenFile(totp); err != nil {
+		if err := t.writeTokenFile(totppkg.ForOpenconnect(totp)); err != nil {
 			t.RemoveTokenFile() // a disk that is full: no part of the secret stays behind
 			return err
 		}

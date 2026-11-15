@@ -114,6 +114,28 @@ func TestTOTPSecretReachesOpenconnectByFileAndIsRemovedWhenReady(t *testing.T) {
 	tn.Stop(2 * time.Second)
 }
 
+// openconnect before 9.21 (the Linux distributions' packages) refuses a base32 secret that is
+// not padded to whole groups of eight ("Invalid base32 token string"): a 128-bit secret is 26
+// characters, a 256-bit SHA256 one 52. Tokens stored by every version so far have no padding.
+func TestTokenFileIsPaddedForOlderOpenconnect(t *testing.T) {
+	for stored, want := range map[string]string{
+		"base32:GAYTEMZUGU3DOOBZMFRGGZDFMY":        "base32:GAYTEMZUGU3DOOBZMFRGGZDFMY======",
+		"sha256:base32:" + strings.Repeat("A", 52): "sha256:base32:" + strings.Repeat("A", 52) + "====",
+		token: token, // 16 characters: already whole groups
+	} {
+		f := newFlow(t)
+		tn := f.make()
+		f.start(tn, "secret", stored)
+		if !tn.WaitReady(3 * time.Second) {
+			t.Fatal("not ready")
+		}
+		if data, _ := os.ReadFile(f.tokenfile); string(data) != want+"\n" {
+			t.Fatalf("%s: %q", stored, data)
+		}
+		tn.Stop(2 * time.Second)
+	}
+}
+
 func TestTokenFileRemovedWhenOpenconnectExitsEarly(t *testing.T) {
 	f := newFlow(t)
 	t.Setenv("FAKE_MODE", "auth_fail")

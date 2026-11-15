@@ -137,6 +137,18 @@ func decode(cleaned string) ([]byte, error) {
 	return out, nil
 }
 
+// ForOpenconnect is a normalized token as openconnect reads it: the base32 part padded to whole
+// groups of eight, which openconnect before 9.21 (the Linux distributions') requires. Normalize
+// stores it unpadded.
+func ForOpenconnect(token string) string {
+	prefix, secret, ok := strings.Cut(token, "base32:")
+	if !ok {
+		return token
+	}
+	secret = strings.TrimRight(secret, "=")
+	return prefix + "base32:" + secret + strings.Repeat("=", (8-len(secret)%8)%8)
+}
+
 // Code is the code for a normalized token at the current time.
 func Code(token string) (string, error) {
 	return CodeAt(token, time.Now())
