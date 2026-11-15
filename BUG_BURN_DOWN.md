@@ -55,7 +55,9 @@ and the "stable" branch, the build scripts (packaging/, get.sh, install.sh), the
   checks every zip against that list and the manifest; the core-files job runs it.
 - Verification: check-core-zips.sh failed on zips built by the old script (13 missing files per
   zip) and passes on the new ones; the real updater applied the new Linux zip in a throwaway test
-  (helpers replaced, executable); installer staging differs only by the phone sources.
+  (helpers replaced, executable); installer staging differs only by the phone sources. The
+  released uni-vpn-core-linux-amd64.zip of 3c8cb5e has both helpers, app/icon.svg, LICENSE and
+  README.md.
 
 ### WC-2 Contact email hidden on the legal pages
 
@@ -134,7 +136,10 @@ and the "stable" branch, the build scripts (packaging/, get.sh, install.sh), the
   release without uni-vpn.pkg after one failed upload. tests/test_release_put.py runs the script
   against the same stand-in: all uploads before any delete, each file missing only between its
   delete and rename, swaps in the given order, a failed upload retried, uploads that keep failing
-  leave every old file, a lost answer to a delete, a file left over from a failed run.
+  leave every old file, a lost answer to a delete, a file left over from a failed run. Live:
+  the first publish with it (#79, 3c8cb5e) left all 16 files on release "latest" and no
+  "next-" file; core-manifest.json names 3c8cb5e and matches uni-vpn-core-linux-amd64.zip, and
+  uni-vpn-apk.json gives the size of the uploaded uni-vpn.apk.
 
 ### WC-16 to WC-19
 
