@@ -58,8 +58,10 @@ desktop.
     menu bar app counts, the old one going away does not.
   - CI runs Repair's setup while the service is started again at the worst moment: on Windows
     as soon as Task Scheduler no longer counts it as running (windows-installer,
-    windows-arm-install), on macOS by a loop that loads it as soon as it can (macos-pkg).
-    Setup must succeed.
+    windows-arm-install: started again 1.3 s in, setup succeeded and no old service was left),
+    on macOS by a loop that loads it as soon as it can (macos-pkg). On the final commit
+    setup's own load came first on macOS, so the Mac race rests on the Go tests; CI warns
+    when it was not tested.
   - The Windows shell compiles with mcs as C# 5 (as csc in CI), the macOS shell in CI.
 
 ### D3. The Mac service runs throttled as a background job (macOS)
@@ -76,6 +78,7 @@ desktop.
   login.
 - Verification: CI macos-pkg checks the priority of the installed service with `ps -o pri`.
   On the commit with only that check it failed: priority 4, `TASK_APPTYPE_DAEMON_BACKGROUND`.
+  With the fix: priority 31, `TASK_APPTYPE_DAEMON_INTERACTIVE`, I/O tier 0.
   Go tests: the rendered plist is interactive; an older plist is rewritten once, keeps its
   mode, and only on macOS.
 
@@ -258,7 +261,9 @@ desktop.
   parent, and outlives it with the limit lifted. CI (windows-installer, windows-arm-install)
   now presses Repair through the local API as the app does: the new service of this commit
   must answer within 40 s (the tray app would only start it after a minute), and Repair must
-  write an earlier version's task (priority 7) again.
+  write an earlier version's task (priority 7) again. It answered after 1.5 s (x64) and
+  1.8 s (ARM), with the task at priority 4. Both ways of starting setup now succeed, so CI
+  does not show which one Windows took.
 
 ### Left as they are (Low)
 
