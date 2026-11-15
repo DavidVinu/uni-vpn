@@ -106,6 +106,9 @@ type Classifier struct {
 	formShown  bool
 	formsSent  int
 	codeInForm bool
+	// The connection broke while openconnect waited for the answer to its last request (http.c
+	// "Error reading HTTP response"). A request line after it means openconnect retried.
+	requestFailed bool
 }
 
 func NewClassifier(mfa string) *Classifier {
@@ -128,6 +131,11 @@ func (c *Classifier) Feed(line string) (Verdict, bool) {
 	} else if strings.HasPrefix(line, "POST ") && c.formShown {
 		c.formsSent++
 	}
+	if strings.HasPrefix(line, "POST ") || strings.HasPrefix(line, "GET ") {
+		c.requestFailed = false
+	} else if strings.Contains(lowered, "error reading http response") {
+		c.requestFailed = true
+	}
 	// The OTP form: the password was accepted. With a typed code (OncePrefix) openconnect
 	// generates nothing, so the form's own text counts too.
 	if strings.Contains(lowered, strings.ToLower(OTPGenerated)) || strings.Contains(lowered, OTPForm) {
@@ -147,6 +155,9 @@ func (c *Classifier) Feed(line string) (Verdict, bool) {
 			message = m
 		}
 		c.verdict, c.has = Verdict{StateAuthFailed, message}, true
+	} else if c.requestFailed && strings.Contains(lowered, "failed to complete authentication") {
+		// The gateway never answered: network trouble, the password was never checked.
+		c.verdict, c.has = Verdict{StateError, messages.ConnectFailed.Text}, true
 	} else {
 		c.verdict, c.has = ClassifyLine(line)
 	}

@@ -223,6 +223,11 @@ func TestGatewayTroubleIsNotASignInFailure(t *testing.T) {
 		{"Connected to HTTPS on vpn.example.edu with ciphersuite (TLS1.3)", "Got HTTP response: HTTP/1.1 503 Service Unavailable",
 			"Unexpected 503 result from server", "Failed to complete authentication"},
 		{"Got inappropriate HTTP CONNECT response: HTTP/1.1 503 Service Unavailable", "Creating SSL connection failed"},
+		// The connection broke while openconnect waited for the gateway's answer to the
+		// first request on it (http.c process_http_response, gnutls.c): no retry, no form.
+		{"POST https://vpn.example.edu/", "Connected to HTTPS on vpn.example.edu with ciphersuite (TLS1.3)",
+			"Failed to read from TLS/DTLS socket: Error in the pull function.",
+			"Error reading HTTP response: Input/output error", "Failed to complete authentication"},
 	} {
 		c := NewClassifier("totp_field")
 		for _, line := range lines {
@@ -230,6 +235,31 @@ func TestGatewayTroubleIsNotASignInFailure(t *testing.T) {
 		}
 		if v, _ := c.Verdict(); v != (Verdict{StateError, messages.ConnectFailed.Text}) {
 			t.Fatal(lines, v)
+		}
+	}
+}
+
+func TestARetriedRequestStillReportsTheSignIn(t *testing.T) {
+	// A kept-alive connection the gateway had closed: openconnect reads nothing, sends the
+	// request again on a new connection (http.c) and the login goes on.
+	for _, tc := range []struct {
+		lines []string
+		want  Verdict
+	}{
+		{[]string{"POST https://vpn.example.edu/", "Error reading HTTP response: Invalid argument",
+			"Retrying failed POST request on new connection", "POST https://vpn.example.edu/", "Login failed.",
+			"User input required in non-interactive mode", "Failed to complete authentication"},
+			Verdict{StateAuthFailed, PasswordRejected}},
+		{[]string{"POST https://vpn.example.edu/", "Error reading HTTP response: Invalid argument",
+			"GET https://vpn.example.edu/", "Failed to complete authentication"},
+			Verdict{StateAuthFailed, AuthRejected}},
+	} {
+		c := NewClassifier("totp_field")
+		for _, line := range tc.lines {
+			c.Feed(line)
+		}
+		if v, _ := c.Verdict(); v != tc.want {
+			t.Fatal(tc.lines, v)
 		}
 	}
 }
