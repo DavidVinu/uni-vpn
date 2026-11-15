@@ -43,6 +43,7 @@ h1{font-size:28px;font-weight:600;margin:4px 0 0;text-wrap:balance}
 .btn:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .btn svg{width:20px;height:20px;flex:none}
 .btns{width:100%;display:flex;flex-direction:column;gap:10px}
+.req{font-size:13px;color:var(--muted);margin:6px 0 0}
 .size{font-size:13px;color:var(--muted);margin:2px 0 0;display:flex;align-items:center;justify-content:center;gap:6px;min-height:28px}
 details.info{display:inline}
 details.info summary{list-style:none;cursor:pointer;color:var(--muted);display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%}
@@ -106,26 +107,32 @@ const T = {
   en: {tagline: "Your university's websites from home, as if you were on campus.", download: "Download for {os}",
     others: "Other devices", source: "Source code", imprint: "Imprint", privacy: "Privacy", phone: "Not on iPhone and iPad yet. Open this page on your computer or Android phone.", android: "If Android asks: allow your browser to install apps.",
     mac: "If your Mac says the file cannot be opened: open System Settings, Privacy & Security, and click \"Open Anyway\".",
+    linux: "When the installation is done, open Uni VPN from your apps.", macos: "macOS 14 or newer",
     win: "If a blue box appears: click \"More info\", then \"Run anyway\".", arm: "ARM processor", help: "More help"},
   de: {tagline: "Die Webseiten deiner Uni von zu Hause, als wärst du auf dem Campus.", download: "Für {os} herunterladen",
     others: "Andere Geräte", source: "Quellcode", imprint: "Impressum", privacy: "Datenschutz", phone: "Noch nicht für iPhone und iPad. Öffne diese Seite auf deinem Computer oder Android-Handy.", android: "Wenn Android fragt: Erlaube deinem Browser, Apps zu installieren.",
     mac: "Wenn dein Mac sagt, dass die Datei nicht geöffnet werden kann: Öffne die Systemeinstellungen, Datenschutz & Sicherheit, und klicke auf „Dennoch öffnen“.",
+    linux: "Wenn die Installation fertig ist, öffne Uni VPN in deinen Apps.", macos: "macOS 14 oder neuer",
     win: "Wenn ein blaues Fenster erscheint: Klicke auf „Weitere Informationen“, dann auf „Trotzdem ausführen“.", arm: "ARM-Prozessor", help: "Weitere Hilfe"},
   fr: {tagline: "Les sites de votre université depuis chez vous, comme sur le campus.", download: "Télécharger pour {os}",
     others: "Autres appareils", source: "Code source", imprint: "Mentions légales", privacy: "Confidentialité", phone: "Pas encore sur iPhone et iPad. Ouvrez cette page sur votre ordinateur ou votre téléphone Android.", android: "Si Android le demande\u00a0: autorisez votre navigateur à installer des applications.",
     mac: "Si votre Mac indique que le fichier ne peut pas être ouvert\u00a0: ouvrez Réglages Système, Confidentialité et sécurité, puis cliquez sur «\u00a0Ouvrir quand même\u00a0».",
+    linux: "Une fois l’installation terminée, ouvrez Uni VPN depuis vos applications.", macos: "macOS 14 ou plus récent",
     win: "Si une fenêtre bleue apparaît\u00a0: cliquez sur «\u00a0Informations complémentaires\u00a0», puis sur «\u00a0Exécuter quand même\u00a0».", arm: "processeur ARM", help: "Plus d’aide"},
   es: {tagline: "Las webs de tu universidad desde casa, como si estuvieras en el campus.", download: "Descargar para {os}",
     others: "Otros dispositivos", source: "Código fuente", imprint: "Aviso legal", privacy: "Privacidad", phone: "Aún no disponible para iPhone y iPad. Abre esta página en tu ordenador o móvil Android.", android: "Si Android lo pide: permite que tu navegador instale aplicaciones.",
     mac: "Si tu Mac dice que el archivo no se puede abrir: abre Ajustes del Sistema, Privacidad y seguridad, y haz clic en «Abrir igualmente».",
+    linux: "Cuando termine la instalación, abre Uni VPN desde tus aplicaciones.", macos: "macOS 14 o posterior",
     win: "Si aparece un recuadro azul: haz clic en «Más información» y luego en «Ejecutar de todas formas».", arm: "procesador ARM", help: "Más ayuda"},
   "zh-Hans": {tagline: "在家访问学校网站，就像在校园里一样。", download: "下载 {os} 版",
     others: "其他设备", source: "源代码", imprint: "网站信息", privacy: "隐私", phone: "暂不支持 iPhone 和 iPad。请在电脑或 Android 手机上打开此页面。", android: "如果 Android 询问：允许浏览器安装应用。",
     mac: "如果 Mac 提示无法打开该文件：打开“系统设置”>“隐私与安全性”，然后点击“仍要打开”。",
+    linux: "安装完成后，从应用列表中打开 Uni VPN。", macos: "需要 macOS 14 或更高版本",
     win: "如果出现蓝色窗口：点击“更多信息”，然后点击“仍要运行”。", arm: "ARM 处理器", help: "更多帮助"},
   "zh-Hant": {tagline: "在家存取學校網站，就像在校園裡一樣。", download: "下載 {os} 版",
     others: "其他裝置", source: "原始碼", imprint: "網站資訊", privacy: "隱私權", phone: "尚不支援 iPhone 和 iPad。請在電腦或 Android 手機上開啟此頁面。", android: "如果 Android 詢問：允許瀏覽器安裝應用程式。",
     mac: "如果 Mac 提示無法打開該檔案：打開「系統設定」>「隱私權與安全性」，然後按一下「強制打開」。",
+    linux: "安裝完成後，從應用程式清單中開啟 Uni VPN。", macos: "需要 macOS 14 或更新版本",
     win: "如果出現藍色視窗：按一下「其他資訊」，然後按一下「仍要執行」。", arm: "ARM 處理器", help: "更多說明"},
 };
 function lang() {
@@ -177,11 +184,13 @@ async function detect() {
   if (/Win/i.test(plat) || /Windows/.test(ua)) return {kind: "windows"};
   if (/Mac/i.test(plat) || /Mac OS X/.test(ua)) return {kind: "mac"};
   if (/Linux|CrOS/i.test(plat + ua)) {
-    let arm = /aarch64|arm/i.test(plat + ua);
+    let arm = /aarch64|arm/i.test(plat + ua), arm32 = /armv[5-7]/i.test(plat + ua);
     try {
-      const h = await navigator.userAgentData.getHighEntropyValues(["architecture"]);
-      if (h.architecture) arm = h.architecture === "arm";
+      const h = await navigator.userAgentData.getHighEntropyValues(["architecture", "bitness"]);
+      if (h.architecture) { arm = h.architecture === "arm"; arm32 = arm && h.bitness === "32"; }
     } catch (e) {}
+    // The ARM packages are for 64-bit ARM only: a 32-bit system gets the full list.
+    if (arm32) return {kind: "unknown"};
     return {kind: "linux", fedora: /Fedora/i.test(ua), arm};
   }
   return {kind: "unknown"};
@@ -196,8 +205,16 @@ detect().then(d => {
     shown = d.fedora ? [...pick(FILES.rpm), ...pick(FILES.deb)] : [...pick(FILES.deb), ...pick(FILES.rpm)];
   }
   shown.forEach(f => main.appendChild(button(f)));
-  if (d.kind === "mac") note.appendChild(tip("mac"));
+  if (d.kind === "mac") {
+    // Installer only says the package cannot be installed on older systems.
+    const need = document.createElement("p");
+    need.className = "req";
+    need.textContent = t("macos");
+    note.before(need);
+    note.appendChild(tip("mac"));
+  }
   if (d.kind === "windows") note.appendChild(tip("win"));
+  if (d.kind === "linux") note.appendChild(tip("linux"));
   if (d.kind === "android") note.appendChild(tip("android"));
   if (d.kind === "phone") { note.textContent = t(d.kind); }
   if (!shown.length && d.kind !== "phone") document.querySelector(".others h2").hidden = true;

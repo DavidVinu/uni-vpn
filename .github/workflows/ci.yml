@@ -988,13 +988,15 @@ jobs:
             gh release create latest --title "Uni VPN" --latest \
               --notes "Download the file for your computer and open it: uni-vpn.pkg (Mac), uni-vpn-setup.exe (Windows), uni-vpn.deb (Ubuntu, Debian, Mint), uni-vpn.rpm (Fedora) or uni-vpn.apk (Android)."
           fi
-          # The manifest after its zips: it must never name a file that is not there yet. Both before
-          # the installers: a new installer that finds the old manifest would update itself back.
-          gh release upload latest core/uni-vpn-core-*.zip --clobber
-          gh release upload latest core/core-manifest.json --clobber
+          # Everything goes up under a temporary name first, then each file replaces its old one in
+          # this order (not "gh release upload --clobber", which deletes the old file before the
+          # upload: a 404 meanwhile, and for good if the upload fails). The manifest after its zips:
+          # it must never name a file that is not there yet. Both before the installers: a new
+          # installer that finds the old manifest would update itself back.
           # uni-vpn-openconnect-win64.zip: what install.ps1 downloads when run without the installer.
-          gh release upload latest out/uni-vpn.pkg out/uni-vpn-setup.exe out/uni-vpn.deb out/uni-vpn.rpm \
-            out/uni-vpn-arm64.deb out/uni-vpn-arm64.rpm out/uni-vpn-openconnect-win64.zip --clobber
+          packaging/release-put.sh latest core/uni-vpn-core-*.zip core/core-manifest.json \
+            out/uni-vpn.pkg out/uni-vpn-setup.exe out/uni-vpn.deb out/uni-vpn.rpm \
+            out/uni-vpn-arm64.deb out/uni-vpn-arm64.rpm out/uni-vpn-openconnect-win64.zip
           gh release edit latest --notes "Version $UNI_VPN_VERSION, $(date -u +%Y-%m-%d). Download the file for your computer and open it: uni-vpn.pkg (Mac), uni-vpn-setup.exe (Windows), uni-vpn.deb (Ubuntu, Debian, Mint), uni-vpn.rpm (Fedora) or uni-vpn.apk (Android)."
 
   # Only a signed app goes to the release page, where the download page links it. After
