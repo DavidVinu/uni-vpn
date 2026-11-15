@@ -27,6 +27,8 @@ import (
 
 	"github.com/DavidVinu/uni-vpn/internal/certs"
 	"github.com/DavidVinu/uni-vpn/internal/platform"
+	"github.com/DavidVinu/uni-vpn/internal/sockowner"
+	totppkg "github.com/DavidVinu/uni-vpn/internal/totp"
 )
 
 // Config holds what the tunnel reads from the daemon's configuration. The daemon fills it from
@@ -500,7 +502,7 @@ func (t *Tunnel) Start(password []byte, totp string) error {
 	t.once = once
 	t.mu.Unlock()
 	if totp != "" && t.Cfg.MFA == "totp_field" && !once {
-		if err := t.writeTokenFile(totp); err != nil {
+		if err := t.writeTokenFile(totppkg.ForOpenconnect(totp)); err != nil {
 			t.RemoveTokenFile() // a disk that is full: no part of the secret stays behind
 			return err
 		}
@@ -741,14 +743,14 @@ func exitCode(ps *os.ProcessState) int {
 	return ps.ExitCode()
 }
 
-// WaitReady polls the local proxy port until it accepts connections.
+// WaitReady polls the local proxy port until a program of this account accepts connections.
 func (t *Tunnel) WaitReady(timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if t.HasExited() {
 			return false
 		}
-		if port := t.Port(); port != 0 && PortOpen(port) {
+		if port := t.Port(); port != 0 && ownListener(port) {
 			t.MarkReady()
 			return true
 		}
@@ -997,6 +999,30 @@ func FreePort() (int, error) {
 	}
 	defer l.Close()
 	return l.Addr().(*net.TCPAddr).Port, nil
+}
+
+// otherAccount tells whether the end that accepted a connection belongs to another account;
+// tests replace it.
+var otherAccount = sockowner.OtherAccount
+
+// ownListener reports whether a program of this account accepts connections on 127.0.0.1:port.
+// The port is in openconnect's command line, which every account can read, and ocproxy listens
+// only after the sign-in: until then another account can listen there and would get the
+// browser's connections. The accepting end names its account once it took the connection,
+// which ocproxy does at once. When the system cannot tell, the port counts, as before.
+func ownListener(port int) bool {
+	c, err := net.DialTimeout("tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), 250*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	defer c.Close()
+	for range 10 {
+		if other, _ := otherAccount(c); !other {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return false
 }
 
 // PortOpen reports whether something accepts connections on 127.0.0.1:port.

@@ -28,6 +28,9 @@ var self = uint32(os.Getpid())
 func OtherAccount(c net.Conn) (bool, error) {
 	r, err := clientEnd(c)
 	if err != nil {
+		if broken(c) {
+			return true, nil
+		}
 		return false, err
 	}
 	if !r.known {

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -164,6 +165,46 @@ func TestReadyFileWhileThePortsAreOurs(t *testing.T) {
 	c.stop(t)
 	if _, err := os.Stat(ready); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal("ready file left behind", err)
+	}
+}
+
+// The ready file goes before the status port does: a phone app sends its token and password
+// while the file exists, and another app can listen on the port once the core lets go of it,
+// here while a request is still in progress.
+func TestReadyFileGoesBeforeTheStatusPort(t *testing.T) {
+	port := home(t)
+	ready := filepath.Join(t.TempDir(), "api-ready")
+	inRequest, release := make(chan struct{}), make(chan struct{})
+	c := start(t, Options{APIToken: "t0ken", Extend: func(_ *slog.Logger, o *daemon.Options) {
+		o.ReadyFile = ready
+		o.PasswordSetter = func(string) error { close(inRequest); <-release; return nil }
+	}})
+	go func() {
+		req, _ := http.NewRequest("POST", fmt.Sprintf("http://127.0.0.1:%d/api/password", port), strings.NewReader(`{"password": "x"}`))
+		req.Header.Set("X-Uni-VPN", "1")
+		req.Header.Set("X-Uni-VPN-Token", "t0ken")
+		if resp, err := http.DefaultClient.Do(req); err == nil {
+			resp.Body.Close()
+		}
+	}()
+	<-inRequest
+	c.cancel()
+	// Another app takes the port the moment it is free.
+	var other net.Listener
+	for deadline := time.Now().Add(4 * time.Second); other == nil && time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		other, _ = net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	}
+	if other == nil {
+		t.Fatal("the status port stayed taken")
+	}
+	_, err := os.Stat(ready)
+	other.Close()
+	close(release)
+	if e := <-c.done; e != nil {
+		t.Fatal(e)
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal("the ready file still vouched for the port another app had taken", err)
 	}
 }
 
