@@ -738,8 +738,10 @@ func (e *Engine) step(ctx context.Context, k *keys, remote Doc, version int64, s
 	// stamp offers a local value; the later change wins (docs/sync.md, Group document).
 	stamp := func(key string, v json.RawMessage, at int64) {
 		// A change made here comes after this device's own earlier one, also when the clock was
-		// set back since (it was ahead then): the earlier value must not come back over it.
-		if r, ok := merged[key]; ok && r.D == me && at <= r.T {
+		// set back since (it was ahead then), and after another device's that this one already
+		// had in step (sync.json has its time and device), also when that device's clock is
+		// ahead: the earlier value must not come back over it.
+		if r, ok := merged[key]; ok && at <= r.T && (r.D == me || st.Hashes[key].T == r.T && st.Hashes[key].D == r.D) {
 			at = r.T + 1
 		}
 		ent := Entry{V: compact(v), T: at, D: me}
