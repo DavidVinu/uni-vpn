@@ -371,6 +371,31 @@ func TestMacRestoreDisablesWhenPreviouslyOff(t *testing.T) {
 	}
 }
 
+// A rule of the user's own that was switched off: Install wrote ours over its address, so
+// uninstalling puts the address back and leaves it off.
+func TestMacUninstallKeepsAnAddressThatWasOff(t *testing.T) {
+	r := &runner{answers: []answer{
+		{"networksetup -listallnetworkservices", 0, "An asterisk (*) denotes that a network service is disabled.\nWi-Fi\n"},
+		{"networksetup -getautoproxyurl Wi-Fi", 0, "URL: http://wpad.example/proxy.pac\nEnabled: No\n"},
+	}}
+	backup := tempBackup(t, "b.json")
+	if got, err := mac(r).Install(1081, backup); got != "ok" || err != nil {
+		t.Fatal(got, err)
+	}
+	r.calls = nil
+	if got, err := mac(r).Uninstall(backup); got != "restored" || err != nil {
+		t.Fatal(got, err)
+	}
+	want := [][]string{
+		{"networksetup", "-listallnetworkservices"},
+		{"networksetup", "-setautoproxyurl", "Wi-Fi", "http://wpad.example/proxy.pac"},
+		{"networksetup", "-setautoproxystate", "Wi-Fi", "off"},
+	}
+	if !reflect.DeepEqual(r.calls, want) {
+		t.Fatal(r.calls)
+	}
+}
+
 func TestMacRestorePutsOldURLBack(t *testing.T) {
 	r := &runner{answers: macAnswers()}
 	mac(r).Restore(&Snapshot{Mac: &Mac{Services: []Service{{Name: "Wi-Fi", URL: "http://old/p.pac", Enabled: true}}}})

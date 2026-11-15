@@ -15,6 +15,9 @@ var self = uint32(os.Getuid())
 func OtherAccount(c net.Conn) (bool, error) {
 	r, err := clientEnd(c)
 	if err != nil {
+		if broken(c) {
+			return true, nil
+		}
 		return false, err
 	}
 	return otherOwner(r, self), nil

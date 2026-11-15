@@ -233,3 +233,23 @@ func keyOf(err error) string {
 	}
 	return err.Error()
 }
+
+func TestForOpenconnectPadsTheBase32Part(t *testing.T) {
+	for in, want := range map[string]string{
+		"base32:GEZDGNBVGY3TQOJQ":                      "base32:GEZDGNBVGY3TQOJQ",
+		"base32:GAYTEMZUGU3DOOBZMFRGGZDFMY":            "base32:GAYTEMZUGU3DOOBZMFRGGZDFMY======",
+		"base32:GAYTEMZUGU3DOOBZMFRGGZDFMY======":      "base32:GAYTEMZUGU3DOOBZMFRGGZDFMY======",
+		"sha512:base32:" + strings.Repeat("A", 103):    "sha512:base32:" + strings.Repeat("A", 103) + "=",
+		EightDigits + "sha256:base32:GAYTEMZUGU3DOOBZ": EightDigits + "sha256:base32:GAYTEMZUGU3DOOBZ",
+		"0x3132333435": "0x3132333435",
+	} {
+		if got := ForOpenconnect(in); got != want {
+			t.Errorf("%s: %s, want %s", in, got, want)
+		}
+		if code, err := CodeAt(ForOpenconnect(in), time.Unix(59, 0)); strings.Contains(in, "base32:") {
+			if old, oerr := CodeAt(in, time.Unix(59, 0)); err != nil || oerr != nil || code != old {
+				t.Errorf("%s: code %s %v, unpadded %s %v", in, code, err, old, oerr)
+			}
+		}
+	}
+}

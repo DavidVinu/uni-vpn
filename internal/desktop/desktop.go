@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strconv"
@@ -460,14 +461,17 @@ func (d *Desktop) stopRunning() {
 	case d.windows():
 		d.quiet("taskkill", "/F", "/IM", AppName+".exe")
 	default:
-		d.quiet("pkill", "-f", d.linuxScript())
+		d.quiet("pkill", "-f", regexp.QuoteMeta(d.linuxScript())) // a pattern: "+" or "(" in a path
 	}
 }
 
 // Windows --------------------------------------------------------------------
 
-// PSQuote quotes a value for PowerShell.
-func PSQuote(text string) string { return "'" + strings.ReplaceAll(text, "'", "''") + "'" }
+// PSQuote quotes a value for PowerShell, which also takes ‘ ’ ‚ ‛ as single quotes: each is
+// doubled.
+func PSQuote(text string) string {
+	return "'" + strings.NewReplacer("'", "''", "‘", "‘‘", "’", "’’", "‚", "‚‚", "‛", "‛‛").Replace(text) + "'"
+}
 
 // ShortcutScript creates a .lnk with PowerShell.
 func ShortcutScript(path, target, arguments, icon string) string {
@@ -595,9 +599,10 @@ func (d *Desktop) HasIndicator(python string) bool {
 	return err == nil && r.Code == 0
 }
 
-// DesktopQuote quotes an argument for Exec= in a desktop entry.
+// DesktopQuote quotes an argument for Exec= in a desktop entry. Exec= is a string value, whose
+// escapes are read before the quoting rule: every backslash the quoting needs is written as \\.
 func DesktopQuote(text string) string {
-	escaped := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "`", "\\`", "$", `\$`).Replace(text)
+	escaped := strings.NewReplacer(`\`, `\\\\`, `"`, `\\"`, "`", "\\\\`", "$", `\\$`).Replace(text)
 	return `"` + strings.ReplaceAll(escaped, "%", "%%") + `"`
 }
 
@@ -900,7 +905,7 @@ func (d *Desktop) ownService(command []string) bool {
 	return d.quiet(append([]string{run, "--user", "--quiet", "--collect", "--"}, command...)...)
 }
 
-// Running lists the processes whose command line has the argument arg; Linux only.
+// Running lists this account's processes whose command line has the argument arg; Linux only.
 func Running(arg string) []Process {
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
@@ -914,13 +919,29 @@ func Running(arg string) []Process {
 		}
 		cmdline, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "cmdline"))
 		args := strings.Split(strings.TrimRight(string(cmdline), "\x00"), "\x00")
-		if err != nil || !slices.Contains(args, arg) {
+		if err != nil || !slices.Contains(args, arg) || !ownProcess(entry.Name()) {
 			continue
 		}
 		environ, _ := os.ReadFile(filepath.Join("/proc", entry.Name(), "environ"))
 		out = append(out, Process{PID: pid, Args: args, Env: strings.Split(strings.TrimRight(string(environ), "\x00"), "\x00")})
 	}
 	return out
+}
+
+// ownProcess: the process runs as this account. Another account's shell may run the same
+// packaged script; it is not this one's, and this account cannot stop it.
+func ownProcess(pid string) bool {
+	status, err := os.ReadFile(filepath.Join("/proc", pid, "status"))
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(status), "\n") {
+		if rest, ok := strings.CutPrefix(line, "Uid:"); ok {
+			ids := strings.Fields(rest)
+			return len(ids) > 0 && ids[0] == strconv.Itoa(os.Getuid())
+		}
+	}
+	return false
 }
 
 // Uninstall stops the running app; the files themselves are in the installed-files list.

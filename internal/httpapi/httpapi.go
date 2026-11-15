@@ -328,7 +328,8 @@ func (s *Server) handle(c net.Conn) {
 		length, err = 0, nil
 	}
 	limit := MaxBody
-	if v, _ := hdrs.get("x-uni-vpn"); v == "1" && parts[0] == "POST" && strings.SplitN(target, "?", 2)[0] == pictureRoute {
+	if v, _ := hdrs.get("x-uni-vpn"); v == "1" && parts[0] == "POST" && strings.SplitN(target, "?", 2)[0] == pictureRoute &&
+		s.getsThrough(hdrs, other) {
 		limit = MaxPictureBody
 	}
 	if err != nil || length > limit {
@@ -363,6 +364,16 @@ func (s *Server) handle(c net.Conn) {
 	}
 	status, ctype, payload := s.routeSafe(method, path, query, hdrs, body)
 	s.respond(c, status, ctype, payload, hdrs)
+}
+
+// getsThrough: a POST with these headers passes the Host, token, account and Origin checks, so
+// it may send a picture as large as MaxPictureBody. One the server refuses keeps MaxBody.
+func (s *Server) getsThrough(hdrs headers, other bool) bool {
+	host, present := hdrs.get("host")
+	origin, hasOrigin := hdrs.get("origin")
+	got, _ := hdrs.get("x-uni-vpn-token")
+	return !other && AllowedHost(host, present, s.Port) && AllowedOrigin(origin, hasOrigin, s.Port) &&
+		(s.Token == "" || subtle.ConstantTimeCompare([]byte(got), []byte(s.Token)) == 1)
 }
 
 // otherAccount fails open: when the system cannot tell, the request goes through.

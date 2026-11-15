@@ -144,6 +144,15 @@ func TestMissingFile(t *testing.T) {
 	}
 }
 
+// A file that is not UTF-8 (edited in a Latin-1 editor, damaged on disk) is a problem in the
+// file like any other: the daemon must start and show it, and the assistant start over.
+func TestFileThatIsNotUTF8IsAConfigError(t *testing.T) {
+	path := write(t, "user = \"ab123\"\n# Universit\xe4t\n")
+	if err := loadErr(t, path); !strings.Contains(err.Error(), "utf-8") {
+		t.Errorf("err = %v", err)
+	}
+}
+
 func TestWriteInitialRoundtrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	if err := WriteInitial(path, "ab123", unis.DefaultID, nil); err != nil {
@@ -388,6 +397,9 @@ func TestPortsFromBroken(t *testing.T) {
 		{"socks_port = 99999\nhttp_port = 2001\n", map[string]int{"http_port": 2001}},
 		{"socks_port = 5\nhttp_port = 5\n", map[string]int{}},
 		{"[timing]\nsocks_port = 2000\n", map[string]int{}},
+		// Not UTF-8 (a Latin-1 editor): the app windows were set up with these ports, and the
+		// daemon must answer there, or nobody sees that the settings could not be read.
+		{"# Universit\xe4t\r\nsocks_port = 2000\r\nhttp_port = 2001\r\n", map[string]int{"socks_port": 2000, "http_port": 2001}},
 	}
 	for _, tt := range tests {
 		if got := PortsFromBroken(write(t, tt.text)); !reflect.DeepEqual(got, tt.want) {
