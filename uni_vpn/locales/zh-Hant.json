@@ -76,6 +76,7 @@
   "setup.all_set_sub": "大學網站現在會自動經由 VPN 開啟。請關閉並重新開啟瀏覽器一次。",
   "setup.all_set_signout": "大學網站現在會自動經由 VPN 開啟。請登出電腦一次，再重新登入。",
   "setup.all_set_no_domains": "請在「設定 > 網站」中加入需要經過大學網路的網站。",
+  "setup.all_set_no_domains_signout": "請在「設定 > 網站」中加入需要經過大學網路的網站，然後登出電腦一次，再重新登入。",
   "setup.finish_first": "請先完成設定",
   "main.connect": "連線",
   "main.disconnect": "中斷連線",

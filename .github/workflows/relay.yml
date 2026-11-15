@@ -1,5 +1,5 @@
 # Deploys the sync relay (relay/, docs/sync.md) to Cloudflare. Needs the repository secrets
-# CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID; without them it only says so.
+# CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID; without them it fails and says so.
 name: Relay
 on:
   push:
@@ -49,6 +49,10 @@ jobs:
           $wrangler deploy | tee deploy.log
           url=$(grep -o 'https://[^ ]*workers.dev' deploy.log | head -1)
           echo "Relay: $url" >> "$GITHUB_STEP_SUMMARY"
+      # Fails: the apps keep syncing through the relay deployed last, behind relay/ on main.
       - name: No credentials
         if: env.CLOUDFLARE_API_TOKEN == '' || env.CLOUDFLARE_ACCOUNT_ID == ''
-        run: echo "CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID is not set, nothing deployed" >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          echo "CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID is not set, nothing deployed" >> "$GITHUB_STEP_SUMMARY"
+          echo "::error::relay/ changed, but the live relay stays as deployed last: CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are not set (docs/sync.md, Deploying)"
+          exit 1

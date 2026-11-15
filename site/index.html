@@ -105,35 +105,35 @@ footer a{color:inherit}
 const BASE = "https://github.com/DavidVinu/uni-vpn/releases/latest/download/";
 const T = {
   en: {tagline: "Your university's websites from home, as if you were on campus.", download: "Download for {os}",
-    others: "Other devices", source: "Source code", imprint: "Imprint", privacy: "Privacy", phone: "Not on iPhone and iPad yet. Open this page on your computer or Android phone.", android: "If Android asks: allow your browser to install apps.",
+    others: "Other devices", source: "Source code", imprint: "Imprint", privacy: "Privacy", phone: "Not on iPhone and iPad yet. Open this page on your computer or Android phone.", cros: "Not on Chromebooks yet. Open this page on another computer or on an Android phone.", android: "If Android asks: allow your browser to install apps.",
     mac: "If your Mac says the file cannot be opened: open System Settings, Privacy & Security, and click \"Open Anyway\".",
     linux: "When the installation is done, open Uni VPN from your apps.", macos: "macOS 14 or newer", droid: "Android 10 or newer (64-bit)", droid32: "Uni VPN does not work on this phone yet: it needs 64-bit Android, and this phone has 32-bit Android.",
-    win: "If a blue box appears: click \"More info\", then \"Run anyway\". If Windows says Smart App Control blocked it, Uni VPN cannot run on this computer yet.", arm: "ARM processor", help: "More help"},
+    win: "If your browser says the file isn't commonly downloaded: click \"…\" next to the file, then \"Keep\", \"Show more\" and \"Keep anyway\". If a blue box appears: click \"More info\", then \"Run anyway\". If Windows says Smart App Control blocked it, Uni VPN cannot run on this computer yet.", arm: "ARM processor", help: "More help"},
   de: {tagline: "Die Webseiten deiner Uni von zu Hause, als wärst du auf dem Campus.", download: "Für {os} herunterladen",
-    others: "Andere Geräte", source: "Quellcode", imprint: "Impressum", privacy: "Datenschutz", phone: "Noch nicht für iPhone und iPad. Öffne diese Seite auf deinem Computer oder Android-Handy.", android: "Wenn Android fragt: Erlaube deinem Browser, Apps zu installieren.",
+    others: "Andere Geräte", source: "Quellcode", imprint: "Impressum", privacy: "Datenschutz", phone: "Noch nicht für iPhone und iPad. Öffne diese Seite auf deinem Computer oder Android-Handy.", cros: "Noch nicht für Chromebooks. Öffne diese Seite auf einem anderen Computer oder einem Android-Handy.", android: "Wenn Android fragt: Erlaube deinem Browser, Apps zu installieren.",
     mac: "Wenn dein Mac sagt, dass die Datei nicht geöffnet werden kann: Öffne die Systemeinstellungen, Datenschutz & Sicherheit, und klicke auf „Dennoch öffnen“.",
     linux: "Wenn die Installation fertig ist, öffne Uni VPN in deinen Apps.", macos: "macOS 14 oder neuer", droid: "Android 10 oder neuer (64 Bit)", droid32: "Uni VPN läuft auf diesem Handy noch nicht: Es braucht 64-Bit-Android, und dieses Handy hat 32-Bit-Android.",
-    win: "Wenn ein blaues Fenster erscheint: Klicke auf „Weitere Informationen“, dann auf „Trotzdem ausführen“. Wenn Windows meldet, dass die intelligente App-Steuerung die Datei blockiert hat, läuft Uni VPN auf diesem Computer noch nicht.", arm: "ARM-Prozessor", help: "Weitere Hilfe"},
+    win: "Wenn dein Browser meldet, dass die Datei selten heruntergeladen wird: Klicke neben der Datei auf „…“, dann auf „Beibehalten“, „Mehr anzeigen“ und „Trotzdem beibehalten“. Wenn ein blaues Fenster erscheint: Klicke auf „Weitere Informationen“, dann auf „Trotzdem ausführen“. Wenn Windows meldet, dass die intelligente App-Steuerung die Datei blockiert hat, läuft Uni VPN auf diesem Computer noch nicht.", arm: "ARM-Prozessor", help: "Weitere Hilfe"},
   fr: {tagline: "Les sites de votre université depuis chez vous, comme sur le campus.", download: "Télécharger pour {os}",
-    others: "Autres appareils", source: "Code source", imprint: "Mentions légales", privacy: "Confidentialité", phone: "Pas encore sur iPhone et iPad. Ouvrez cette page sur votre ordinateur ou votre téléphone Android.", android: "Si Android le demande\u00a0: autorisez votre navigateur à installer des applications.",
+    others: "Autres appareils", source: "Code source", imprint: "Mentions légales", privacy: "Confidentialité", phone: "Pas encore sur iPhone et iPad. Ouvrez cette page sur votre ordinateur ou votre téléphone Android.", cros: "Pas encore sur Chromebook. Ouvrez cette page sur un autre ordinateur ou sur un téléphone Android.", android: "Si Android le demande\u00a0: autorisez votre navigateur à installer des applications.",
     mac: "Si votre Mac indique que le fichier ne peut pas être ouvert\u00a0: ouvrez Réglages Système, Confidentialité et sécurité, puis cliquez sur «\u00a0Ouvrir quand même\u00a0».",
     linux: "Une fois l’installation terminée, ouvrez Uni VPN depuis vos applications.", macos: "macOS 14 ou plus récent", droid: "Android 10 ou plus récent (64\u00a0bits)", droid32: "Uni VPN ne fonctionne pas encore sur ce téléphone\u00a0: il faut Android 64\u00a0bits, et ce téléphone a Android 32\u00a0bits.",
-    win: "Si une fenêtre bleue apparaît\u00a0: cliquez sur «\u00a0Informations complémentaires\u00a0», puis sur «\u00a0Exécuter quand même\u00a0». Si Windows indique que le Contrôle intelligent des applications a bloqué le fichier, Uni VPN ne fonctionne pas encore sur cet ordinateur.", arm: "processeur ARM", help: "Plus d’aide"},
+    win: "Si le navigateur indique que le fichier n’est pas couramment téléchargé\u00a0: cliquez sur «\u00a0…\u00a0» à côté du fichier, choisissez de le conserver, puis «\u00a0Afficher plus\u00a0» et conservez-le quand même. Si une fenêtre bleue apparaît\u00a0: cliquez sur «\u00a0Informations complémentaires\u00a0», puis sur «\u00a0Exécuter quand même\u00a0». Si Windows indique que le Contrôle intelligent des applications a bloqué le fichier, Uni VPN ne fonctionne pas encore sur cet ordinateur.", arm: "processeur ARM", help: "Plus d’aide"},
   es: {tagline: "Las webs de tu universidad desde casa, como si estuvieras en el campus.", download: "Descargar para {os}",
-    others: "Otros dispositivos", source: "Código fuente", imprint: "Aviso legal", privacy: "Privacidad", phone: "Aún no disponible para iPhone y iPad. Abre esta página en tu ordenador o móvil Android.", android: "Si Android lo pide: permite que tu navegador instale aplicaciones.",
+    others: "Otros dispositivos", source: "Código fuente", imprint: "Aviso legal", privacy: "Privacidad", phone: "Aún no disponible para iPhone y iPad. Abre esta página en tu ordenador o móvil Android.", cros: "Aún no disponible para Chromebook. Abre esta página en otro ordenador o en un móvil Android.", android: "Si Android lo pide: permite que tu navegador instale aplicaciones.",
     mac: "Si tu Mac dice que el archivo no se puede abrir: abre Ajustes del Sistema, Privacidad y seguridad, y haz clic en «Abrir igualmente».",
     linux: "Cuando termine la instalación, abre Uni VPN desde tus aplicaciones.", macos: "macOS 14 o posterior", droid: "Android 10 o posterior (64 bits)", droid32: "Uni VPN aún no funciona en este móvil: necesita Android de 64 bits y este móvil tiene Android de 32 bits.",
-    win: "Si aparece un recuadro azul: haz clic en «Más información» y luego en «Ejecutar de todas formas». Si Windows dice que Control inteligente de aplicaciones bloqueó el archivo, Uni VPN aún no funciona en este ordenador.", arm: "procesador ARM", help: "Más ayuda"},
+    win: "Si el navegador dice que el archivo no se descarga con frecuencia: haz clic en «…» junto al archivo, elige conservarlo, luego «Mostrar más» y consérvalo de todas formas. Si aparece un recuadro azul: haz clic en «Más información» y luego en «Ejecutar de todas formas». Si Windows dice que Control inteligente de aplicaciones bloqueó el archivo, Uni VPN aún no funciona en este ordenador.", arm: "procesador ARM", help: "Más ayuda"},
   "zh-Hans": {tagline: "在家访问学校网站，就像在校园里一样。", download: "下载 {os} 版",
-    others: "其他设备", source: "源代码", imprint: "网站信息", privacy: "隐私", phone: "暂不支持 iPhone 和 iPad。请在电脑或 Android 手机上打开此页面。", android: "如果 Android 询问：允许浏览器安装应用。",
+    others: "其他设备", source: "源代码", imprint: "网站信息", privacy: "隐私", phone: "暂不支持 iPhone 和 iPad。请在电脑或 Android 手机上打开此页面。", cros: "暂不支持 Chromebook。请在其他电脑或 Android 手机上打开此页面。", android: "如果 Android 询问：允许浏览器安装应用。",
     mac: "如果 Mac 提示无法打开该文件：打开“系统设置”>“隐私与安全性”，然后点击“仍要打开”。",
     linux: "安装完成后，从应用列表中打开 Uni VPN。", macos: "需要 macOS 14 或更高版本", droid: "需要 Android 10 或更高版本（64 位）", droid32: "Uni VPN 暂不支持此手机：需要 64 位 Android，而此手机是 32 位 Android。",
-    win: "如果出现蓝色窗口：点击“更多信息”，然后点击“仍要运行”。如果 Windows 提示“智能应用控制”已阻止该文件，则 Uni VPN 暂时无法在这台电脑上运行。", arm: "ARM 处理器", help: "更多帮助"},
+    win: "如果浏览器提示该文件不常被下载：点击文件旁的“…”，选择保留，然后点击“显示更多”，再选择仍然保留。如果出现蓝色窗口：点击“更多信息”，然后点击“仍要运行”。如果 Windows 提示“智能应用控制”已阻止该文件，则 Uni VPN 暂时无法在这台电脑上运行。", arm: "ARM 处理器", help: "更多帮助"},
   "zh-Hant": {tagline: "在家存取學校網站，就像在校園裡一樣。", download: "下載 {os} 版",
-    others: "其他裝置", source: "原始碼", imprint: "網站資訊", privacy: "隱私權", phone: "尚不支援 iPhone 和 iPad。請在電腦或 Android 手機上開啟此頁面。", android: "如果 Android 詢問：允許瀏覽器安裝應用程式。",
+    others: "其他裝置", source: "原始碼", imprint: "網站資訊", privacy: "隱私權", phone: "尚不支援 iPhone 和 iPad。請在電腦或 Android 手機上開啟此頁面。", cros: "尚不支援 Chromebook。請在其他電腦或 Android 手機上開啟此頁面。", android: "如果 Android 詢問：允許瀏覽器安裝應用程式。",
     mac: "如果 Mac 提示無法打開該檔案：打開「系統設定」>「隱私權與安全性」，然後按一下「強制打開」。",
     linux: "安裝完成後，從應用程式清單中開啟 Uni VPN。", macos: "需要 macOS 14 或更新版本", droid: "需要 Android 10 或更新版本（64 位元）", droid32: "Uni VPN 尚不支援此手機：需要 64 位元 Android，而此手機是 32 位元 Android。",
-    win: "如果出現藍色視窗：按一下「其他資訊」，然後按一下「仍要執行」。如果 Windows 顯示「智慧型應用程式控制」已封鎖該檔案，Uni VPN 目前還無法在這台電腦上執行。", arm: "ARM 處理器", help: "更多說明"},
+    win: "如果瀏覽器提示該檔案不常被下載：按一下檔案旁的「…」，選擇保留，然後按一下「顯示更多」，再選擇仍要保留。如果出現藍色視窗：按一下「其他資訊」，然後按一下「仍要執行」。如果 Windows 顯示「智慧型應用程式控制」已封鎖該檔案，Uni VPN 目前還無法在這台電腦上執行。", arm: "ARM 處理器", help: "更多說明"},
 };
 function lang() {
   for (const l of navigator.languages || [navigator.language || "en"]) {
@@ -182,14 +182,17 @@ async function detect() {
   // (a 64-bit chip running 32-bit Android) or i686, where the browser still tells it.
   if (/Android/i.test(ua)) return {kind: /armv[5-8]l\b|i[3-6]86/i.test(navigator.platform || "") ? "android32" : "android"};
   if (/iPhone|iPad|iPod/i.test(ua) || (/Mac/.test(plat) && navigator.maxTouchPoints > 1)) return {kind: "phone"};
+  // A Linux package goes only into a Chromebook's Linux container, whose proxy rule ChromeOS's
+  // own browser never reads.
+  if (/CrOS|Chrome ?OS/i.test(plat + ua)) return {kind: "cros"};
   // One setup for Intel, AMD and ARM processors.
   if (/Win/i.test(plat) || /Windows/.test(ua)) return {kind: "windows"};
   if (/Mac/i.test(plat) || /Mac OS X/.test(ua)) return {kind: "mac"};
   // Android's "Desktop site", on by default on large tablets, says Linux: a touch screen with no
   // mouse or touchpad is a tablet, not a Linux computer.
-  if (!/CrOS/i.test(plat + ua) && /Linux/i.test(plat + ua) && navigator.maxTouchPoints > 0 &&
+  if (/Linux/i.test(plat + ua) && navigator.maxTouchPoints > 0 &&
       matchMedia("(pointer: coarse)").matches && !matchMedia("(any-pointer: fine)").matches) return {kind: "android"};
-  if (/Linux|CrOS/i.test(plat + ua)) {
+  if (/Linux/i.test(plat + ua)) {
     let arm = /aarch64|arm/i.test(plat + ua), arm32 = /armv[5-7]/i.test(plat + ua);
     try {
       const h = await navigator.userAgentData.getHighEntropyValues(["architecture", "bitness"]);
@@ -224,8 +227,9 @@ detect().then(d => {
   if (d.kind === "windows") note.appendChild(tip("win"));
   if (d.kind === "linux") note.appendChild(tip("linux"));
   if (d.kind === "android") note.appendChild(tip("android"));
-  if (d.kind === "phone" || d.kind === "android32") { note.textContent = t(d.kind === "phone" ? "phone" : "droid32"); }
-  if (!shown.length && d.kind !== "phone" && d.kind !== "android32") document.querySelector(".others h2").hidden = true;
+  const none = {phone: "phone", android32: "droid32", cros: "cros"}[d.kind];
+  if (none) note.textContent = t(none);
+  if (!shown.length && !none) document.querySelector(".others h2").hidden = true;
   const list = document.getElementById("list");
   ALL.filter(f => !shown.includes(f)).forEach(f => {
     const a = document.createElement("a");

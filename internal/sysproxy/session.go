@@ -55,6 +55,17 @@ func ChromeReadsSettings(getenv func(string) string) bool {
 	return getenv("GNOME_DESKTOP_SESSION_ID") != "" || getenv("KDE_FULL_SESSION") != ""
 }
 
+// NamesDesktop reports whether getenv names the desktop, as in a session, which a service may
+// not have.
+func NamesDesktop(getenv func(string) string) bool {
+	for _, name := range [...]string{"XDG_CURRENT_DESKTOP", "DESKTOP_SESSION", "GNOME_DESKTOP_SESSION_ID", "KDE_FULL_SESSION"} {
+		if getenv(name) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // linux: the setting is GNOME's or KDE's (not macOS or Windows).
 func (s *System) linux() bool { return !s.macOS() && !s.windows() }
 
@@ -153,3 +164,9 @@ func lineIndex(text, line string) int {
 		from = i + 1
 	}
 }
+
+// RuleAtStartName is the file in the state folder that says Chrome, Edge and Brave in this
+// account's sessions take the rule from the session files, which they read when they start: a
+// changed rule reaches them once they start again. Setup, which runs in the session, knows the
+// desktop; the service may not.
+const RuleAtStartName = "rule-at-browser-start"

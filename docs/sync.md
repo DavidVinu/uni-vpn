@@ -173,5 +173,6 @@ runs the Go tests against it instead of the in-memory copy.
 hand. It needs two repository secrets: `CLOUDFLARE_API_TOKEN` (a token with the "Edit
 Cloudflare Workers" template plus D1 Edit) and `CLOUDFLARE_ACCOUNT_ID`. It finds the D1
 database by name (it creates it on first run) and prints the Worker's URL, which goes into
-`SyncRelay`. The same steps work by hand with both variables set in the shell. The free plan
-covers 100,000 requests a day, about 2,000 devices at their usual pace.
+`SyncRelay`. The same steps work by hand with both variables set in the shell, schema.sql
+first. Without the secrets the workflow fails: the relay in use stays as deployed last. The
+free plan covers 100,000 requests a day, about 2,000 devices at their usual pace.

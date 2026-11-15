@@ -18,9 +18,11 @@ Download the file for your device and open it:
 | Android | [uni-vpn.apk](https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn.apk) |
 
 On a Mac, if it says the file "cannot be opened": open System Settings, Privacy & Security, and
-click "Open Anyway". On Windows, if a blue box appears: click "More info", then "Run anyway".
-On Linux, open **Uni VPN** from your apps when the installation is done. On Android, if it asks:
-allow your browser to install apps.
+click "Open Anyway". On Windows, if the browser says the file isn't commonly downloaded: click
+"…" next to the file, then "Keep", "Show more" and "Keep anyway"; if a blue box appears: click
+"More info", then "Run anyway". On Linux, open **Uni VPN** from your apps when the installation
+is done. On Android, if it asks: allow your browser to install apps. Chromebooks are not
+supported yet.
 
 A window opens and asks for your university, your user name and your password. When it says
 "All set", close and reopen your browser once. That's it.

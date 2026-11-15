@@ -76,6 +76,7 @@
   "setup.all_set_sub": "Las webs de la universidad ya se abren solas a través de la VPN. Cierra y vuelve a abrir el navegador una vez.",
   "setup.all_set_signout": "Las webs de la universidad ya se abren solas a través de la VPN. Cierra la sesión del ordenador una vez y vuelve a entrar.",
   "setup.all_set_no_domains": "Añade las webs que deben pasar por la universidad en Ajustes, Sitios web.",
+  "setup.all_set_no_domains_signout": "Añade las webs que deben pasar por la universidad en Ajustes, Sitios web. Después cierra la sesión del ordenador una vez y vuelve a entrar.",
   "setup.finish_first": "Termina primero la configuración",
   "main.connect": "Conectar",
   "main.disconnect": "Desconectar",

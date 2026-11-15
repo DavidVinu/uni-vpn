@@ -1010,7 +1010,7 @@ translations and docs. The full test suite on that commit passed first: `go test
 | FA-8 | Another local account that holds 127.0.0.1:1081 first answers this account's proxy rule and app window | High | fixed |
 | FA-9 | Another local account can use this account's VPN session through 127.0.0.1:1080 and start its sign-in | Medium | fixed |
 | FA-10 | Chrome, Edge and Brave on Xfce and LXQt never read the proxy rule, while setup reports success | Medium | fixed |
-| FA-11 | The sync relay can be filled for 400 days with a few thousand anonymous requests (not deployed yet) | Medium | fixed |
+| FA-11 | The sync relay can be filled for 400 days with a few thousand anonymous requests | Medium | fixed in the code; the live relay does not have it yet (SR-3) |
 
 ### FA-1 Android tablets offered the Linux packages
 
@@ -1227,9 +1227,10 @@ translations and docs. The full test suite on that commit passed first: `go test
   earlier version's install got the lines from Cover. The assistant's last step in Chromium
   with `signout=1`: the new text in English, German and Chinese (Taiwan); without it the old.
 - Left (Low): the lines take effect from the next login (the assistant says so on a new
-  install; an install from before gets them at the next login without a word). Chrome there
+  install, also without a website list since SR-1; an install from before gets them at the
+  next login without a word). Chrome there
   is not told when the rule changes (no setting to watch): an edited website list reaches it
-  when it restarts or loads the rule again on its own, while the app says only "Saved".
+  when it restarts or loads the rule again on its own (the app says so since SR-2).
   A program of another account that holds the
   status port before this account signs in gives Chrome there its rule for that one session
   (the app window shows the note, and the next login has no lines until the port is ours).
@@ -1282,3 +1283,126 @@ translations and docs. The full test suite on that commit passed first: `go test
   file still said it was not (Low: an app window could show the page until its next look).
   Reproduced on Linux: 7 of 40 runs with `-race` failed. Fix: the file is written first. Then
   100 of 100 runs passed.
+
+## Second re-audit
+
+Scope: the whole repository at 0c7bf0d (FA-1 to FA-11 in), read by five fresh reviewers in the
+same five areas. Their tests passed on that commit: `go test` and `go vet` for linux, darwin and
+windows, the relay's tests, the Go client against the real worker, test_i18n, and the page in
+headless Chromium with 16 browsers and platforms.
+
+| # | Bug | Severity | Status |
+|---|---|---|---|
+| SR-1 | Xfce and LXQt: "sign out once" was missing for 45 of 46 universities (no website list yet) | Medium | fixed |
+| SR-2 | Xfce and LXQt: a changed website list reaches Chrome only when it starts again, and the app said only "Saved" | Medium | fixed |
+| SR-3 | The live sync relay still runs the code of #18: FA-11 and the relay fixes of #28 and #29 never reached it | Medium | open: the deploy needs David (two repository secrets, or his go for a deploy from here) |
+| SR-4 | Chromebooks were offered the Linux packages, which cannot reach ChromeOS's own browser | Medium | fixed |
+| SR-5 | Windows: the browser's "isn't commonly downloaded" comes before the blue box, and the page did not say how to keep the file | Medium | fixed |
+| SR-6 | Another account of the computer can use this account's connected VPN through the tunnel's own SOCKS port | Low (reviewer: Medium) | left, see below |
+| SR-7 | Phones: any app can use the SOCKS port 1080, which also starts the sign-in | Low (reviewer: Medium) | left, see below |
+
+### SR-1 No "sign out" without a website list
+
+- Found by: the desktop reviewer. The assistant's last step showed `setup.all_set_signout`
+  only when the university has websites; 45 of the 46 listed (and "Not listed") have none, so
+  it said only "Add the websites ... under Settings, Websites", and Chrome on Xfce still never
+  read the rule in that session.
+- Reproduced: the real core, the page in Chromium with `?app=1&signout=1` and no websites:
+  the old text in all six languages (my FA-10 check had set a website first).
+- Root cause: the sign-out text was a variant of the "websites set" text only.
+- Fix: `setup.all_set_no_domains_signout` (six languages): add the websites, then sign out
+  once.
+- Verification: the same run: the new text in en, de, fr, es, zh-Hans, zh-Hant with
+  `signout=1` and no websites; the old texts without `signout`, and with websites.
+
+### SR-2 Xfce and LXQt: "Saved" after a change of the websites
+
+- Found by: the system reviewer, with the real Chromium (XFCE, `auto_proxy` to a PAC server
+  that logs fetches): after a change of the PAC file 3 fetches in 3 minutes, all at start, no
+  new one; after a restart of the browser the new rule. The app said "Saved"; it has "Saved.
+  Restart the browser" (`app.saved_restart`) for `pac_refresh: "manual"`, which the core never
+  reported.
+- Root cause: `pac_refresh` was always "auto"; the core cannot tell the desktop (its service
+  may start before the session's variables reach systemd).
+- Fix: setup, which runs in the session, records `rule-at-browser-start` in the state folder
+  where Chrome takes the rule only from the session files (written on Xfce, LXQt and others,
+  removed on GNOME and KDE, left as it is without a desktop, as in a repair the service
+  started); the core reports `pac_refresh: "manual"` while it is there.
+- Verification: TestSetupRecordsThatChromeTakesTheRuleAtItsStart and
+  TestStatusSaysToRestartTheBrowserWhereChromeTakesTheRuleAtItsStart fail before, pass after.
+  The real core: the page reads `pac_refresh` "auto", with the file "manual".
+
+### SR-3 The live relay is behind main
+
+- Found by: the website reviewer, read only: the Worker `uni-vpn-sync` (the `SyncRelay` every
+  released core uses) runs worker.js of #18, and its D1 has only `pairs` and `groups`. Every
+  run of relay.yml said "No credentials": the repository has no Cloudflare secrets, and the
+  relay was once deployed by hand. So FA-11 is not live, nor #28's limits (a new group at
+  most 64 KiB and gone after 7 days unless used, the hourly cleanup); the live relay can still
+  be filled.
+- Root cause: deploying needs secrets that are not set, and a run without them passed.
+- Fix: relay.yml now fails with an error when `relay/` changed and nothing could be deployed,
+  so a relay behind main shows. The deploy itself (schema.sql first, then the Worker; the
+  schema only adds tables and triggers and counts the existing rows) needs David: either the
+  two secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` (then re-run relay.yml), or
+  his go to deploy from this thread. Not done yet.
+
+### SR-4 Chromebooks
+
+- Found by: the website reviewer: ChromeOS (`CrOS`) counted as Linux and got the .deb, which
+  goes only into the Linux container; its proxy rule never reaches ChromeOS's own Chrome, and
+  the container has no password store by default.
+- Fix: the page says "Not on Chromebooks yet. Open this page on another computer or on an
+  Android phone." (six languages) and keeps the full list below; README says so.
+- Verification: the page in Chromium with ChromeOS x86, ARM and armv8l: the note, no button;
+  Windows, Mac, Linux (x86, ARM, 32-bit ARM), Fedora, Android and iPad as before.
+
+### SR-5 Windows download warning
+
+- Found by: the website reviewer, by reading: the unsigned installer gets a new hash with every
+  release, so Edge says it "isn't commonly downloaded" and keeps it only through "…", "Keep",
+  "Show more", "Keep anyway" (Microsoft Learn, "Troubleshoot download failures"). The page
+  and README named only the blue box after it.
+- Fix: the Windows tip and README start with that path. English and German name Edge's
+  buttons (both from Microsoft's pages); French, Spanish and Chinese say what to do in words,
+  as Microsoft's pages there are machine translations. Code signing (needs David) ends it.
+- Verification: the page in Chromium with a Windows browser in all six languages.
+
+### SR-6 and SR-7, rated Low
+
+- SR-6 (core reviewer): FA-9 refuses other accounts on 1080, but the connected tunnel's own
+  SOCKS port (ocproxy on Linux and macOS, the core's SOCKS server on Windows, a port from
+  20000-31999 that `ps` shows) answers anyone on the computer. Another account that looks for
+  it uses this account's VPN while it is connected; on Windows any program can also send
+  through the VPN's network adapter, as with every VPN there. Rated Low: it takes someone of
+  another account who does it on purpose; no browser does it by itself (other accounts get a
+  DIRECT rule and are refused on 1080 since FA-9), and it cannot start the sign-in. A VPN
+  that installs its own routes (Cisco's, openconnect with a tun device) gives every account
+  the same. Closing it on Linux and macOS means replacing ocproxy.
+- SR-7 (phone reviewer): on Android and iPhone every app can use 1080, and its connection
+  starts the sign-in, as a browser's does. Rated Low: that is how the VPN starts by itself for
+  any app that uses the phone's proxy setting (a university app, a web view); other VPN apps
+  give every app the VPN too. docs/android.md and docs/ios.md describe it ("Known gap: the
+  proxy port") and the way to close it (`getConnectionOwnerUid`).
+
+### Left as they are (Low), second re-audit
+
+- On a computer, an own listener that has not accepted yet can count as another account's in
+  `sockowner.OtherAccountListens` (7 of 300 runs), only when another program of the same
+  account holds 1081; and a service of another user there (root, `nobody`) gets the
+  "another user account" note, which does not fit.
+- `bindHTTP` does not announce a rule that an update changed while the port was held.
+- Linux app window: a load that fails just before the window notices the core is gone stays
+  blank until a click on the app; during a core restart, Settings from the menu or an
+  otpauth link do nothing.
+- Android: Off can end the service before its disconnect request is sent (the core then ends
+  the tunnel when idle; nothing goes through it); the setup page's error can say "tap Repair"
+  where only Home has the button; the release APK's R8 build is not run by the emulator tests.
+- Session files: a dangling `~/.profile` link becomes a file, a file of only spaces is removed
+  on uninstall, the newline we added stays, and an uninstall during a Cover tick can leave
+  the lines.
+- Texts: README and docs/windows-test.md name the task "uni-vpn" (it is "uni-vpn-<SID>"),
+  README has no row for `msg.keyring_missing`, the privacy page names the GNOME keyring where
+  KDE uses KWallet and "an IP address" where IPv6 counts a /48, and says computer where the
+  phone's name is used.
+- CI: `promote` cannot push after a force-push to main.

@@ -781,6 +781,9 @@ func (s *Setup) setup(a Args, created func(string)) (int, error) {
 			s.say("Proxy rule registered with the system (Chrome, Edge and Firefox read it on their own)")
 		}
 		signOut = (result == "ok" || result == "replaced") && s.sessionOnly(cfg.HTTPPort)
+		if (result == "ok" || result == "replaced") && !s.macOS() && !s.windows() && sysproxy.NamesDesktop(s.Getenv) {
+			s.recordRuleAtStart(!sysproxy.ChromeReadsSettings(s.Getenv))
+		}
 	}
 
 	if a.Repair && !dry {
@@ -872,6 +875,18 @@ func (s *Setup) setup(a Args, created func(string)) (int, error) {
 func (s *Setup) sessionOnly(port int) bool {
 	return !s.macOS() && !s.windows() && !sysproxy.ChromeReadsSettings(s.Getenv) &&
 		s.Getenv("auto_proxy") != sysproxy.PacURL(port)
+}
+
+// recordRuleAtStart writes or removes sysproxy.RuleAtStartName: after a change of the websites
+// the app then says to restart the browser.
+func (s *Setup) recordRuleAtStart(atStart bool) {
+	path := filepath.Join(platform.StateDir(), sysproxy.RuleAtStartName)
+	if !atStart {
+		os.Remove(path)
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(path), 0o700)
+	_ = os.WriteFile(path, nil, 0o600)
 }
 
 func (s *Setup) askSecrets(cfg *config.Config) error {

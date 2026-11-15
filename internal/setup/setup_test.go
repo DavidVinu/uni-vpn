@@ -19,6 +19,7 @@ import (
 	"github.com/DavidVinu/uni-vpn/internal/messages"
 	"github.com/DavidVinu/uni-vpn/internal/platform"
 	"github.com/DavidVinu/uni-vpn/internal/service"
+	"github.com/DavidVinu/uni-vpn/internal/sysproxy"
 	"github.com/DavidVinu/uni-vpn/internal/updater"
 )
 
@@ -619,6 +620,36 @@ func TestSetupOnXfceSaysToSignOutOnce(t *testing.T) {
 		t.Fatal(code, h.out.String())
 	}
 	h.wantOut(t, "Restart any open browser once so that it reads the proxy rule.\n"+signOutHint+"\n")
+}
+
+// Chrome on Xfce takes a changed rule only when it starts again. Setup, which runs in the
+// session and so knows the desktop, records that for the app's "Saved. Restart the browser".
+// Without a desktop (a repair that the service started) the record stays as it is.
+func TestSetupRecordsThatChromeTakesTheRuleAtItsStart(t *testing.T) {
+	h := newHarness(t)
+	record := filepath.Join(platform.StateDir(), sysproxy.RuleAtStartName)
+	for _, tc := range []struct {
+		desktop, result string
+		want            bool
+	}{
+		{"XFCE", "ok", true},
+		{"", "ok", true},
+		{"ubuntu:GNOME", "replaced", false},
+		{"LXQt", "replaced", true},
+		{"XFCE", "unavailable", true},
+		{"KDE", "ok", false},
+		{"", "ok", false},
+	} {
+		t.Setenv("XDG_CURRENT_DESKTOP", tc.desktop)
+		t.Setenv("DESKTOP_SESSION", "")
+		h.proxyResult = tc.result
+		if code := h.setup(Args{User: "ab123"}); code != 0 {
+			t.Fatal(code, h.out.String())
+		}
+		if _, err := os.Stat(record); (err == nil) != tc.want {
+			t.Fatal(tc, err)
+		}
+	}
 }
 
 // recordingApp stands in for desktop.Desktop where only the calls count.

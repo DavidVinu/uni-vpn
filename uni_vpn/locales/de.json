@@ -76,6 +76,7 @@
   "setup.all_set_sub": "Uni-Websites öffnen sich jetzt von selbst über das VPN. Schließe den Browser einmal und öffne ihn neu.",
   "setup.all_set_signout": "Uni-Websites öffnen sich jetzt von selbst über das VPN. Melde dich einmal am Computer ab und wieder an.",
   "setup.all_set_no_domains": "Füge die Websites, die über die Universität gehen sollen, unter Einstellungen, Websites hinzu.",
+  "setup.all_set_no_domains_signout": "Füge die Websites, die über die Universität gehen sollen, unter Einstellungen, Websites hinzu. Melde dich danach einmal am Computer ab und wieder an.",
   "setup.finish_first": "Schließe zuerst die Einrichtung ab",
   "main.connect": "Verbinden",
   "main.disconnect": "Trennen",
