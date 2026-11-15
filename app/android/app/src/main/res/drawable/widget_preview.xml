@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The widget in the picker on Android 10 and 11 (Android 12 shows widget_on itself). -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@drawable/widget_on" android:width="56dp" android:height="56dp" />
+    <item android:drawable="@drawable/ic_tile" android:width="28dp" android:height="28dp" android:gravity="center" />
+</layer-list>
