@@ -65,20 +65,37 @@ class UniVpnService : VpnService() {
         Toggles.update(this)
         if (poll?.isActive == true) return
         poll = scope.launch {
-            // The rule names the core's port: Android gets it once our own core holds it, not
-            // while another app listens there (Core.ready).
-            while (!core.ready()) {
-                core.ensureRunning()
-                delay(250)
-            }
-            applyRule(force = true)
-            // Websites can change on another device (syncing): the rule follows.
             while (isActive) {
-                update()
-                delay(30_000)
-                applyRule(force = false)
+                // The rule names the core's port: Android gets it once our own core holds it,
+                // not while another app listens there (Core.ready).
+                while (!core.ready()) {
+                    core.ensureRunning()
+                    delay(250)
+                }
+                applyRule(force = true)
+                // Websites can change on another device (syncing): the rule follows, every
+                // 30 s. Our core ending (a crash, Android ending it, Repair) takes the rule down
+                // within a second, not at the next round: another app could take the free ports
+                // before the next core does and answer the browsers. The next core brings it back.
+                var seconds = 0
+                while (isActive && core.ready()) {
+                    if (seconds % 30 == 0) update()
+                    delay(1_000)
+                    if (++seconds % 30 == 0) applyRule(force = false)
+                }
+                withdraw()
             }
         }
+    }
+
+    /** No rule until our own core holds its ports again. */
+    private fun withdraw() {
+        synchronized(tunLock) {
+            tun?.close()
+            tun = null
+            pacVersion = null
+        }
+        blocking.value = false
     }
 
     /** (Re)establishes the VPN when the rule changed, so browsers reload it. */
@@ -93,12 +110,7 @@ class UniVpnService : VpnService() {
         if (status == null && core.portTaken) {
             // Our core ended and another app took its port (Core.ready): the rule would hand that
             // app the browsers. It comes back with the next answer from our own core.
-            synchronized(tunLock) {
-                tun?.close()
-                tun = null
-                pacVersion = null
-            }
-            blocking.value = false
+            withdraw()
             return
         }
         // Without an answer the rule is unknown: keep it as it is (the first start still hands
