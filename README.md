@@ -83,8 +83,8 @@ them.
 | What you see | What to do |
 |---|---|
 | "Your university did not accept the password" | Click **Update password** and type it again. |
-| "The one-time code was not accepted" | Turn on "Set time automatically" in your computer's date and time settings, then click **Try again**. If it still fails, click **Update second factor** and set it up again. |
-| "The second factor is not set up yet" | Click **Update second factor**. |
+| "The one-time code was not accepted" | Turn on "Set time automatically" in your computer's date and time settings, then click **Try again**. If it still fails, click **Update sign-in code** and set it up again. |
+| "No setup key saved yet" | Click **Update sign-in code**. |
 | "Confirm the sign-in request on your phone in time" | Click **Try again** and confirm the request on your phone. |
 | "Waiting a few seconds for a new one-time code" | Nothing, it continues by itself. |
 | "Paused while Cisco Secure Client is connected" | Disconnect the Cisco VPN. Uni VPN continues by itself. |
@@ -103,25 +103,27 @@ Everything below is for people who are comfortable with technical details.
 
 ### Command line
 
-The app does everything; the `uni-vpn` command does the same in a terminal (Windows: new
-terminals only).
+The app does everything. The program behind it is `bin/uni-vpn-core` (Windows:
+`bin\uni-vpn-core.exe`) in `~/Library/Application Support/uni-vpn/app` (macOS),
+`~/.local/share/uni-vpn/app` (Linux) or `%ProgramFiles%\uni-vpn` (Windows). It is not on the
+`PATH`; run it with its full path.
 
 | What | Command |
 |---|---|
-| Status, connect, disconnect, open the window | `uni-vpn status`, `uni-vpn connect`, `uni-vpn disconnect`, `uni-vpn app` |
-| Change password or TOTP secret | `uni-vpn password`, `uni-vpn totp` |
-| Diagnosis, log | `uni-vpn doctor` (paste the output into an issue), `uni-vpn log` |
-| Update now (it updates itself anyway) | `uni-vpn update` |
-| Repair (what the app's Repair button runs) | `./install.sh --repair`, on Windows `install.ps1 -Repair` |
-| Remove | `uni-vpn uninstall` (Linux, macOS) or, on Windows, `install.ps1 -Uninstall` from `%ProgramFiles%\uni-vpn` (it asks for administrator rights); both also reset the proxy setting |
+| Version | `uni-vpn-core --version` |
+| Open the window, or its Settings | `uni-vpn-core app`, `uni-vpn-core app --settings` |
+| Update now (it updates itself anyway) | `uni-vpn-core update` |
+| Repair (what the app's Repair button runs) | `uni-vpn-core setup --no-browser --repair` |
+| Remove (also resets the proxy setting) | `uni-vpn-core uninstall`; on Windows rather Settings, Apps, **Uni VPN**, Uninstall |
+| Log (paste it into an issue) | Settings, **Log** in the app, or `daemon.log` in `~/Library/Logs/uni-vpn` (macOS), `~/.local/state/uni-vpn` (Linux) or `%LOCALAPPDATA%\uni-vpn\logs` (Windows) |
 
 ### Troubleshooting details
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Browser: `ERR_PROXY_CONNECTION_FAILED` or "proxy refused the connection" | service not running, or tunnel in an error state | the app's message and button; otherwise `uni-vpn doctor` |
-| A university page loads without the VPN | the browser has not read the proxy rule | restart the browser; `uni-vpn doctor` shows whether the rule is registered with the system |
-| Sign-in fails with the right password | the gateway asks for something openconnect cannot answer non-interactively | check `uni-vpn log`, open an issue |
+| Browser: `ERR_PROXY_CONNECTION_FAILED` or "proxy refused the connection" | service not running, or tunnel in an error state | the app's message and button; otherwise the log |
+| A university page loads without the VPN | the browser has not read the proxy rule | restart the browser; the system's proxy settings should name `http://127.0.0.1:1081/proxy.pac` as automatic configuration |
+| Sign-in fails with the right password | the gateway asks for something openconnect cannot answer non-interactively | check the log, open an issue |
 | Windows: "missing a permission" | the service runs without elevation, Wintun needs it | Repair in the app registers the scheduled task "uni-vpn" again, with highest privileges |
 | The page is there but the tab keeps loading for minutes | the page embeds something from another university host that is not on the list | in the browser's developer tools, under Network, find the host with `ERR_CONNECTION_TIMED_OUT` and add it under Settings, Websites |
 | Firefox: a university page loads without the VPN shortly after a hiccup | after a failed proxy attempt Firefox sends requests directly for 10 s | reload the page after a few seconds |
@@ -180,7 +182,7 @@ macOS, Internet Options on Windows). Chrome, Edge and Firefox read it from there
 every network service has its own setting; one added later (a dock's Ethernet, an iPhone over
 USB) gets the rule within a few minutes, and uninstalling turns it off again. On other
 desktops (Xfce and others), enter the address as a PAC URL in the browser's own proxy
-settings. `uni-vpn doctor` prints it.
+settings.
 
 ### Universities
 
@@ -280,7 +282,7 @@ no WebKitGTK on Linux) the entry opens `http://127.0.0.1:1081/` in the browser i
 
 ### What the machine notices
 
-- One background process (`uni-vpn daemon`) with two local ports: 1080 (SOCKS5) and 1081
+- One background process (`uni-vpn-core daemon`) with two local ports: 1080 (SOCKS5) and 1081
   (app and proxy rule). Both are reachable only from this machine. Any program on the
   machine could use `127.0.0.1:1080` as a proxy, and that is intended, for example
   `curl --socks5-hostname 127.0.0.1:1080`.
@@ -293,7 +295,7 @@ no WebKitGTK on Linux) the entry opens `http://127.0.0.1:1081/` in the browser i
 - Windows: while connected, a network adapter "uni-vpn" exists, with an address but no
   gateway and no DNS. The service runs elevated as the signed-in user (Task Scheduler,
   "uni-vpn"), because Wintun needs administrator rights. For the same reason the program sits in
-  `%ProgramFiles%\uni-vpn` and runs only Python and openconnect from Program Files, so nothing
+  `%ProgramFiles%\uni-vpn` and runs only its own programs and openconnect from Program Files, so nothing
   the user account can change runs elevated. Updates install without asking for a password.
 - Updates: uni-vpn keeps itself up to date. A few times a day it asks GitHub whether there
   is a new version. If there is, it installs it while you are not on a university website.

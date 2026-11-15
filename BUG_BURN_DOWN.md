@@ -26,6 +26,14 @@ and the "stable" branch, the build scripts (packaging/, get.sh, install.sh), the
 | WC-12 | French HKU steps name a "Changer" button, Microsoft's French page says "Modifier" | Low | fixed |
 | WC-13 | Wording slips in French, German and Spanish messages | Low | fixed |
 | WC-14 | Chinese texts mix terms for the same thing (for example two words for "sign out") | Low | left: each term is a correct, common one; unifying them is style |
+| WC-15 | A failed release upload deletes the download (gh's --clobber deletes first) | Medium | fixed |
+| WC-16 | README's helper commands and two button names are from the Python version | Low | fixed |
+| WC-17 | Download page gives Linux users no hint to open the app after installing | Low | fixed |
+| WC-18 | Download page does not say the Mac package needs macOS 14 | Low | fixed |
+| WC-19 | 32-bit ARM Linux is offered the 64-bit ARM packages | Low | fixed |
+| WC-20 | An older run's queued publish can replace a newer one's, so the newest green commit waits for the next push | Low | left: GitHub's concurrency queue keeps one waiting job; nothing is lost, the next green push publishes |
+| WC-21 | CI removes the Linux package only after uninstalling, so the "removed in the app store" path runs only in unit tests | Low | left: covered by removal_test.go; an end-to-end run waits two 5-minute checks |
+| WC-22 | Windows in Chinese (Hong Kong, Macau) probably gets the installer's few texts in Simplified Chinese | Low | left: unverified, the installer shows almost no text and the app itself picks Traditional |
 
 ### WC-1 Updates never replace the helper files the installers put next to the core
 
@@ -50,8 +58,9 @@ and the "stable" branch, the build scripts (packaging/, get.sh, install.sh), the
   on impressum.html and privacy.html into "[email protected]" plus a decoding script. Without
   JavaScript the imprint had no email address, which § 5 DDG requires.
 - Fix: both pages wrap their text in Cloudflare's email_off markers.
-- Verification: curl of the live pages showed the rewritten addresses before; after the merge the
-  live pages are checked again (the server refreshes from main every 10 minutes).
+- Verification: curl of the live pages showed the rewritten addresses before (2 on the imprint, 4
+  on the privacy page); 6 minutes after the merge (#75) none, and both pages show
+  info@davidvinu.de in their HTML.
 
 ### WC-3 Privacy page leaves out the Android app
 
@@ -101,6 +110,47 @@ and the "stable" branch, the build scripts (packaging/, get.sh, install.sh), the
   (failed before the copies were updated, passes after).
 - Verification: every file still loads, keeps its keys, has the placeholders of en.json, and keeps
   its formatting (json.dumps round trip byte for byte); the Python test suite (592 tests) passes.
+
+### WC-15 A failed release upload deletes the download
+
+- Found by: the re-audit after #75.
+- Root cause: the publish job replaced each file of release "latest" with `gh release upload
+  --clobber`, which deletes the old file before it uploads the new one (gh's own help: "If the
+  upload fails, the original assets will be lost"). While a file uploads its
+  releases/latest/download/ link answers 404, and if the upload fails (a GitHub 5xx or timeout)
+  the step stops and the file stays gone until the next green push: the download page's button
+  for that system, or the update zip or manifest, is missing meanwhile.
+- Fix: packaging/release-put.sh uploads every file under a temporary name first (retried), then
+  in the given order deletes the old file and renames the new one (GitHub's "update a release
+  asset"), so a link is missing only between those two calls and a failed upload leaves the old
+  file. The publish job uses it in the order it had (zips, manifest, installers), and
+  publish-android for the APK and then its uni-vpn-apk.json.
+- Verification: with a stand-in for gh that applies --clobber like gh, the old step left the
+  release without uni-vpn.pkg after one failed upload. tests/test_release_put.py runs the script
+  against the same stand-in: all uploads before any delete, each file missing only between its
+  delete and rename, swaps in the given order, a failed upload retried, uploads that keep failing
+  leave every old file, a lost answer to a delete, a file left over from a failed run.
+
+### WC-16 to WC-19
+
+- WC-16: README's "Command line" listed the Python version's `uni-vpn status`, `doctor`, `log`,
+  `install.sh --repair` and `install.ps1 -Uninstall` (the installers ship none of them), and the
+  table of messages named an "Update second factor" button and a "second factor is not set up"
+  message that do not exist. It now lists what `uni-vpn-core` has (`--version`, `app`, `update`,
+  `setup --no-browser --repair` as the Repair button runs it, `uninstall`), where it is, and
+  where the log is; "Update sign-in code" and "No setup key saved yet" as en.json has them.
+  Checked every quoted text of that table against en.json and every command against
+  cmd/uni-vpn.
+- WC-17: the .deb and .rpm have no setup step of their own; nothing happens until "Uni VPN" is
+  opened once. Linux visitors now get the tip "When the installation is done, open Uni VPN from
+  your apps" in all six languages.
+- WC-18: distribution.xml allows macOS 14 and newer, and Installer only says it cannot install.
+  The Mac button now has "macOS 14 or newer" under it (browsers do not tell the macOS version).
+- WC-19: "armv7l" matched /arm/ and got the arm64 packages, which do not install there. 32-bit
+  ARM now sees the full list, like an unknown system.
+- Verification for WC-17 to WC-19: headless Chromium with the user agents of WC-8 plus Linux
+  armv7l, in English, German and Traditional Chinese; screenshots at 375 px with the tip closed
+  and open (French Mac, German Linux); no horizontal scroll.
 
 ## Go core
 
