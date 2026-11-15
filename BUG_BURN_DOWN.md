@@ -166,6 +166,12 @@ Scope: `app/android`, `app/ios`, `packaging/android`, `packaging/ios`, `cmd/uni-
   core, see below.
 - **Both apps: the "not running" page had no switch;** it now has the one the port-taken page
   has, so the VPN can be turned off there.
+- **Second re-audit, Android:** a tap on an update whose file did not match downloaded it again
+  at every tap (now the offer waits for the next check); turning the phone on the "not running"
+  page brought back 20 s of spinner (the count now restarts only after the app was away for
+  5 s); a restart of the phone was missed by M10's count once the new uptime passed the old
+  one (the count now keeps Android's boot count). `test_android_texts_without_the_core_are_the_cores`
+  now also checks "Update Uni VPN".
 
 ### Left as they are (Low)
 
@@ -175,6 +181,11 @@ Scope: `app/android`, `app/ios`, `packaging/android`, `packaging/ios`, `cmd/uni-
   config and the PAC address to follow; not worth it for a clash this rare.
 - **Texts without the core follow the phone's language** on Android (`port_in_use`,
   `not_running`, the notification), not a language chosen in the app's Settings.
+- **Home can show the last status after the core stops answering** (both apps): a core that
+  answered once, then ended and cannot start again (the Keystore failing, say), leaves Home on
+  its last state until the core is back; actions do say that Uni VPN is not running. Needs a
+  lasting start failure after a working start; clearing the status after 20 s would instead
+  hide iPhone's "Connecting" while a slow tunnel starts.
 - **The core's ready file around a start and a stop** (`internal/daemon`): a starting core holds
   the lock a few milliseconds before it removes a file left by a killed one, and a stopping core
   frees port 1081 up to 5 s before it removes its file. Another app would have to bind 1081 in

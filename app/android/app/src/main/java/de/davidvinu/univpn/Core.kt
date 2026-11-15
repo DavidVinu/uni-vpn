@@ -162,7 +162,7 @@ class Core(private val context: Context) {
         readSecretsKey().also { keyOk() }
     } catch (e: Exception) {
         val lasting = keyFailures.failed(SystemClock.elapsedRealtime())
-        prefs.edit { putLong("key_failing", keyFailures.failing); putLong("key_failed_at", keyFailures.last) }
+        prefs.edit { putLong("key_failing", keyFailures.failing); putLong("key_failed_at", keyFailures.last); putInt("key_boot", boot) }
         if (!lasting) throw e
         // A minute of the same failure is no Keystore still starting up: its key is broken (seen
         // on some phones after a system update). A new key, after which the core asks for the
@@ -178,18 +178,24 @@ class Core(private val context: Context) {
      * The Keystore failing at every start (about every second) for a minute, also over a few
      * closings of the app in between (elapsedRealtime counts on). Under [lock].
      */
-    private val keyFailures = LastingFailure(
-        patienceMs = 60_000,
-        gapMs = 10_000,
-        pauseMs = 10 * 60_000,
-        failing = prefs.getLong("key_failing", 0),
-        last = prefs.getLong("key_failed_at", -1),
-    )
+    private val keyFailures = run {
+        // elapsedRealtime starts again with the phone, maybe past the count's last failure.
+        val sameBoot = prefs.getInt("key_boot", boot) == boot
+        LastingFailure(
+            patienceMs = 60_000,
+            gapMs = 10_000,
+            pauseMs = 10 * 60_000,
+            failing = if (sameBoot) prefs.getLong("key_failing", 0) else 0,
+            last = if (sameBoot) prefs.getLong("key_failed_at", -1) else -1,
+        )
+    }
+
+    private val boot: Int get() = Settings.Global.getInt(context.contentResolver, Settings.Global.BOOT_COUNT, -1)
 
     private fun keyOk() {
         if (keyFailures.last < 0) return
         keyFailures.ok()
-        prefs.edit { remove("key_failing"); remove("key_failed_at") }
+        prefs.edit { remove("key_failing"); remove("key_failed_at"); remove("key_boot") }
     }
 
     private fun readSecretsKey(): String {

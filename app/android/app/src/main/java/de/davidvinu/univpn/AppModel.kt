@@ -55,6 +55,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     var stuck by mutableStateOf(false)
         private set
     private var unreachableSince = 0L
+    private var lastRefresh = 0L
     /** Another app holds the core's port (Core.portTaken). */
     var portTaken by mutableStateOf(false)
         private set
@@ -230,9 +231,12 @@ class AppModel(app: Application) : AndroidViewModel(app) {
 
     /** Polls status.json while the app is on screen, like the desktop apps. */
     suspend fun pollWhileVisible() {
-        // The 20 s until "not running" count while on screen, not from before the app left it.
-        unreachable = false
-        stuck = false
+        // The 20 s until "not running" count while on screen, not from before the app left it
+        // (a turn of the phone, which also starts this again, is no leaving).
+        if (SystemClock.elapsedRealtime() - lastRefresh > 5_000) {
+            unreachable = false
+            stuck = false
+        }
         withContext(Dispatchers.IO) { core.ensureRunning() }
         // Once a day, also with the VPN off (ApkUpdate).
         viewModelScope.launch(Dispatchers.IO) { ApkUpdate.check(getApplication()) }
@@ -247,6 +251,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         portTaken = core.portTaken
         val json = reply.json
         val now = SystemClock.elapsedRealtime()
+        lastRefresh = now
         if (!reply.ok || json == null) {
             if (!unreachable) unreachableSince = now
             unreachable = true

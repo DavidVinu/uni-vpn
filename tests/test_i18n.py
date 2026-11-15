@@ -113,7 +113,8 @@ class CatalogTests(unittest.TestCase):
             xml = (res / folder / "strings.xml").read_text(encoding="utf-8")
             texts = {m.group(1): m.group(2).replace("\\'", "'")
                      for m in re.finditer(r'<string name="(\w+)"[^>]*>([^<]*)</string>', xml)}
-            for name, key in (("port_in_use", "phone.msg.port_in_use"), ("not_running", "phone.msg.not_running")):
+            for name, key in (("port_in_use", "phone.msg.port_in_use"), ("not_running", "phone.msg.not_running"),
+                              ("update", "phone.update")):
                 with self.subTest(lang=lang, text=name):
                     self.assertEqual(texts.get(name), i18n.catalog(lang)[key])
 

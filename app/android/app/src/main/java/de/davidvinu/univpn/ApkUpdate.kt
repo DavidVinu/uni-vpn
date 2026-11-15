@@ -71,6 +71,8 @@ object ApkUpdate {
     val tapKey: String = UUID.randomUUID().toString()
     /** The tap's work outlives the screen: leaving the app mid-download does not leave it busy. */
     private val taps = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    /** The SHA-256 of a release whose download did not match it. */
+    @Volatile private var mismatched: String? = null
 
     private val lock = Any()
     @Volatile private var loaded = false
@@ -156,7 +158,13 @@ object ApkUpdate {
         taps.launch {
             val handed = runCatching { prepare(app)?.let { install(app, it) } == true }.getOrDefault(false)
             // Else the installer answers (UpdateReceiver).
-            if (!handed) installing.value = false
+            if (!handed) {
+                // A file that did not match: offered again by the next check (with its back-off),
+                // not downloaded again at every tap.
+                val release = newer.value
+                if (release != null && release.sha256 == mismatched) newer.value = null
+                installing.value = false
+            }
         }
     }
 
@@ -193,8 +201,10 @@ object ApkUpdate {
             if (!sums(part, release)) {
                 Log.i(TAG, "update download does not match uni-vpn-apk.json")
                 part.delete()
+                mismatched = release.sha256
                 return null
             }
+            mismatched = null
             file.delete()
             if (!part.renameTo(file)) return null
         }
