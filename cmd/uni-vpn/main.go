@@ -121,6 +121,13 @@ func cmdDaemon(configArg string) int {
 					log.Info("The service runs as an interactive job from the next login on, no longer throttled as a background one")
 				}
 			}
+			if platform.IsWindows {
+				go func() {
+					if service.New().AddAccountTask() {
+						log.Info("This account's service now starts from its own scheduled task")
+					}
+				}()
+			}
 			windows := &appWindows{restart: app.RestartApp, log: log}
 			o.Updater, o.AppPolled = u, windows.polled
 			if apiToken != "" {

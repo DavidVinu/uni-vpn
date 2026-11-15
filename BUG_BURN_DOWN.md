@@ -1006,7 +1006,7 @@ translations and docs. The full test suite on that commit passed first: `go test
 | FA-4 | The privacy page does not say that the Android app's QR scanner (Google Play services) sends data to Google | Medium | fixed |
 | FA-5 | The privacy page says only the terminal scripts fetch from the Linux package sources; the normal .deb and .rpm do too | Low | fixed |
 | FA-6 | Linux with no password store at all (no gnome-keyring, KDE before 5.97): "Your saved passwords are locked. Sign out..." and no way through | Medium | fixed |
-| FA-7 | Windows PC with two accounts: the second account's install takes over the scheduled task, and the first account's Uni VPN never starts again | Medium | open |
+| FA-7 | Windows PC with two accounts: the second account's install takes over the scheduled task, and the first account's Uni VPN never starts again | Medium | fixed |
 | FA-8 | Another local account that holds 127.0.0.1:1081 first answers this account's proxy rule and app window | High | open |
 | FA-9 | Another local account can use this account's VPN session through 127.0.0.1:1080 and start its sign-in | Medium | open |
 | FA-10 | Chrome, Edge and Brave on Xfce, MATE and LXQt never read the proxy rule, while setup reports success | Medium | open |
@@ -1079,3 +1079,35 @@ translations and docs. The full test suite on that commit passed first: `go test
   KeyringError; never on macOS), TestNoPasswordStore (status and Settings); the real core with
   the real secret-tool and no keyring now answers /api/setup and /api/password with
   msg.keyring_missing.
+
+### FA-7 Windows PC with two accounts
+
+- Found by: the desktop reviewer, by reading (no second Windows account here). Task names
+  hold for the whole computer. Setup registered "uni-vpn" with `schtasks /Create /F` and this
+  account as the logon trigger and principal, so the second account's install replaced the
+  first account's task. The first account's Uni VPN then never started again: not at login,
+  and the tray app's `schtasks /Run /TN uni-vpn` ran the other account's task (or failed).
+  Its install again took the task back.
+- Root cause: one fixed task name, winsys.TaskName, for a per-account service.
+- Fix: every account has its own task, "uni-vpn-" and the account's SID (as OneDrive names
+  its per-user tasks): winsys.TaskName(sid), winsys.CurrentSID, service.Manager.SID. Setup and
+  uninstall end and delete the task of earlier versions only when it is this account's
+  (Task Scheduler's principal, a name or a SID, compared as a SID), never another account's.
+  An update replaces only the program, so the service, started from the earlier version's
+  task, registers its own task from the service file it wrote at install
+  (AddAccountTask); until setup runs again, both start it at login and the second copy ends
+  at once (the lock). The tray app starts this account's task, falling back to the earlier
+  one; the installer stops every "uni-vpn*" task before it replaces the files.
+- Verification: TestWindowsEveryAccountHasItsOwnTask (no earlier task, another account's,
+  this account's: only this account's is ended and deleted, after the service ended and
+  before its own task starts), TestWindowsServiceAddsItsOwnTaskAfterAnUpdate,
+  TestTaskName; on Windows CI against the real Task Scheduler:
+  TestTaskOwnerScriptAgainstTaskScheduler, and test-install.ps1 now installs (own task, no
+  "uni-vpn"), turns the install into an earlier version's (only "uni-vpn", priority 7),
+  checks that its service registers its own task, and that the Repair button deletes
+  "uni-vpn" again; test-uninstall.ps1 checks that no "uni-vpn*" task is left. Failing first:
+  the new Go tests fail with the old fixed name.
+- Left (Low): a computer where a second install already took the task before this version:
+  the account without a task needs the installer once more (its "Restart the computer" does
+  not bring a task back); after that neither takes the other's again. Uninstalling from one
+  account leaves the other accounts' tasks, which then start nothing.

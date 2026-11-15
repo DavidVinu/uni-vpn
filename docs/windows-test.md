@@ -15,7 +15,7 @@ Note: Windows version and build, CPU, Python version, Chrome, Edge and Firefox v
    at `http://127.0.0.1:1081/`. Note every dialog (UAC, SmartScreen, Defender, firewall).
 3. Assistant: university ID and password, then TOTP secret (the check code must match the
    phone app or the MFA portal), then "All set".
-4. Task Scheduler: task `uni-vpn` exists, runs with highest privileges, state Running, and
+4. Task Scheduler: task `uni-vpn-` followed by the account's SID (one per account) exists, runs with highest privileges, state Running, and
    starts `pythonw.exe -I "C:\Program Files\uni-vpn\bin\uni-vpn" daemon`. As the normal
    user, creating a file in `C:\Program Files\uni-vpn` is refused.
    `uni-vpn status` in a new terminal shows `connected` or `idle`.
@@ -38,7 +38,7 @@ Note: Windows version and build, CPU, Python version, Chrome, Edge and Firefox v
 13. Automatic update: in an administrator PowerShell, `Set-Content "$env:ProgramFiles\uni-vpn\.commit" ("0" * 40)`.
     In the app, gear icon, switch "Automatic updates" off and on again (that checks at once).
     Within a minute `uni-vpn log` shows "Updated to ..., restarting" and the app's Version row
-    the new commit. `Get-ScheduledTask uni-vpn` stays "Running", Task Manager shows two
+    the new commit. `Get-ScheduledTask uni-vpn-*` stays "Running", Task Manager shows two
     `pythonw.exe` (the old one waits for the new one). No UAC prompt.
 14. `uni-vpn service stop`: both `pythonw.exe` are gone.
 15. App: the installer ends with a "Uni VPN" window (not a browser tab) with its own taskbar
@@ -67,7 +67,7 @@ D1. Download [uni-vpn-setup.exe](https://github.com/DavidVinu/uni-vpn/releases/l
 D2. Finish the assistant and open a university page in Edge: it loads through the VPN.
 D3. Sign out and in: the shield is back in the notification area.
 D4. Settings, Apps, "Uni VPN", Uninstall. Expected: the shield is gone, the proxy setting is
-    off (Settings, Network, Proxy), the task "uni-vpn" is gone from Task Scheduler,
+    off (Settings, Network, Proxy), the task "uni-vpn-" and the SID is gone from Task Scheduler,
     `C:\Program Files\uni-vpn` no longer exists and Credential Manager has no `uni-vpn`
     entries.
 

@@ -111,6 +111,16 @@ func AwakeSeconds() float64 {
 	return float64(value) / 1e7 // 100 ns units
 }
 
+// CurrentSID is the SID of this process's account ("S-1-5-21-..."), "" when Windows cannot
+// tell. Elevation keeps it: the elevated setup and the service see the user's own SID.
+func CurrentSID() string {
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		return ""
+	}
+	return user.User.Sid.String()
+}
+
 func IsAdmin() bool {
 	if procIsUserAnAdmin.Find() != nil {
 		return false
