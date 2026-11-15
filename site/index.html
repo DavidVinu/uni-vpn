@@ -54,13 +54,14 @@ details.info[open] p{display:block}
 .others h2{font-size:13px;font-weight:500;color:var(--muted);margin:0 0 8px 4px}
 .list{background:var(--card);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}
 .list a{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 18px;color:var(--text);text-decoration:none;border-top:1px solid var(--line)}
-.list a:first-child{border-top:0}
+.list a:first-of-type{border-top:0}
 .list a:hover{background:var(--bg)}
 .list .file{color:var(--muted);font-size:13px;white-space:nowrap}
 footer{margin-top:40px;font-size:13px;color:var(--muted);display:flex;flex-wrap:wrap;gap:6px 18px;justify-content:center}
 footer a{color:inherit}
 @media (prefers-reduced-motion: no-preference){.btn{transition:filter .15s}.btn:hover{filter:brightness(1.08)}}
 </style>
+<noscript><style>.btns,.size{display:none}</style></noscript>
 </head>
 <body>
 <main>
@@ -82,7 +83,16 @@ footer a{color:inherit}
   </section>
   <section class="others">
     <h2 data-t="others">Other devices</h2>
-    <nav class="list" id="list"></nav>
+    <!-- Without JavaScript: every file, as the list below the button shows them. -->
+    <nav class="list" id="list"><noscript>
+      <a href="https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn.pkg"><span>Mac</span><span class="file">pkg</span></a>
+      <a href="https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn-setup.exe"><span>Windows</span><span class="file">exe</span></a>
+      <a href="https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn.deb"><span>Ubuntu, Debian, Mint</span><span class="file">deb</span></a>
+      <a href="https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn-arm64.deb"><span>Ubuntu, Debian, Mint, ARM processor</span><span class="file">deb</span></a>
+      <a href="https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn.rpm"><span>Fedora</span><span class="file">rpm</span></a>
+      <a href="https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn-arm64.rpm"><span>Fedora, ARM processor</span><span class="file">rpm</span></a>
+      <a href="https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn.apk"><span>Android</span><span class="file">apk</span></a>
+    </noscript></nav>
   </section>
 </main>
 <footer>
@@ -94,27 +104,27 @@ footer a{color:inherit}
 const BASE = "https://github.com/DavidVinu/uni-vpn/releases/latest/download/";
 const T = {
   en: {tagline: "Your university's websites from home, as if you were on campus.", download: "Download for {os}",
-    others: "Other devices", source: "Source code", imprint: "Imprint", privacy: "Privacy", phone: "Not on iPhone yet. Open this page on your computer or Android phone.", android: "If Android asks: allow your browser to install apps.",
+    others: "Other devices", source: "Source code", imprint: "Imprint", privacy: "Privacy", phone: "Not on iPhone and iPad yet. Open this page on your computer or Android phone.", android: "If Android asks: allow your browser to install apps.",
     mac: "If your Mac says the file cannot be opened: open System Settings, Privacy & Security, and click \"Open Anyway\".",
     win: "If a blue box appears: click \"More info\", then \"Run anyway\".", arm: "ARM processor", help: "More help"},
   de: {tagline: "Die Webseiten deiner Uni von zu Hause, als wärst du auf dem Campus.", download: "Für {os} herunterladen",
-    others: "Andere Geräte", source: "Quellcode", imprint: "Impressum", privacy: "Datenschutz", phone: "Noch nicht für iPhone. Öffne diese Seite auf deinem Computer oder Android-Handy.", android: "Wenn Android fragt: Erlaube deinem Browser, Apps zu installieren.",
-    mac: "Wenn dein Mac sagt, dass die Datei nicht geöffnet werden kann: Öffne die Systemeinstellungen, Datenschutz & Sicherheit, und klicke auf \"Dennoch öffnen\".",
-    win: "Wenn ein blaues Fenster erscheint: Klicke auf \"Weitere Informationen\", dann auf \"Trotzdem ausführen\".", arm: "ARM-Prozessor", help: "Weitere Hilfe"},
+    others: "Andere Geräte", source: "Quellcode", imprint: "Impressum", privacy: "Datenschutz", phone: "Noch nicht für iPhone und iPad. Öffne diese Seite auf deinem Computer oder Android-Handy.", android: "Wenn Android fragt: Erlaube deinem Browser, Apps zu installieren.",
+    mac: "Wenn dein Mac sagt, dass die Datei nicht geöffnet werden kann: Öffne die Systemeinstellungen, Datenschutz & Sicherheit, und klicke auf „Dennoch öffnen“.",
+    win: "Wenn ein blaues Fenster erscheint: Klicke auf „Weitere Informationen“, dann auf „Trotzdem ausführen“.", arm: "ARM-Prozessor", help: "Weitere Hilfe"},
   fr: {tagline: "Les sites de votre université depuis chez vous, comme sur le campus.", download: "Télécharger pour {os}",
-    others: "Autres appareils", source: "Code source", imprint: "Mentions légales", privacy: "Confidentialité", phone: "Pas encore sur iPhone. Ouvrez cette page sur votre ordinateur ou votre téléphone Android.", android: "Si Android le demande : autorisez votre navigateur à installer des applications.",
-    mac: "Si votre Mac indique que le fichier ne peut pas être ouvert : ouvrez Réglages Système, Confidentialité et sécurité, puis cliquez sur « Ouvrir quand même ».",
-    win: "Si une fenêtre bleue apparaît : cliquez sur « Informations complémentaires », puis sur « Exécuter quand même ».", arm: "Processeur ARM", help: "Plus d’aide"},
+    others: "Autres appareils", source: "Code source", imprint: "Mentions légales", privacy: "Confidentialité", phone: "Pas encore sur iPhone et iPad. Ouvrez cette page sur votre ordinateur ou votre téléphone Android.", android: "Si Android le demande\u00a0: autorisez votre navigateur à installer des applications.",
+    mac: "Si votre Mac indique que le fichier ne peut pas être ouvert\u00a0: ouvrez Réglages Système, Confidentialité et sécurité, puis cliquez sur «\u00a0Ouvrir quand même\u00a0».",
+    win: "Si une fenêtre bleue apparaît\u00a0: cliquez sur «\u00a0Informations complémentaires\u00a0», puis sur «\u00a0Exécuter quand même\u00a0».", arm: "processeur ARM", help: "Plus d’aide"},
   es: {tagline: "Las webs de tu universidad desde casa, como si estuvieras en el campus.", download: "Descargar para {os}",
-    others: "Otros dispositivos", source: "Código fuente", imprint: "Aviso legal", privacy: "Privacidad", phone: "Aún no disponible para iPhone. Abre esta página en tu ordenador o móvil Android.", android: "Si Android lo pide: permite que tu navegador instale aplicaciones.",
-    mac: "Si tu Mac dice que el archivo no se puede abrir: abre Ajustes del Sistema, Privacidad y seguridad, y haz clic en \"Abrir igualmente\".",
-    win: "Si aparece un recuadro azul: haz clic en \"Más información\" y luego en \"Ejecutar de todas formas\".", arm: "Procesador ARM", help: "Más ayuda"},
+    others: "Otros dispositivos", source: "Código fuente", imprint: "Aviso legal", privacy: "Privacidad", phone: "Aún no disponible para iPhone y iPad. Abre esta página en tu ordenador o móvil Android.", android: "Si Android lo pide: permite que tu navegador instale aplicaciones.",
+    mac: "Si tu Mac dice que el archivo no se puede abrir: abre Ajustes del Sistema, Privacidad y seguridad, y haz clic en «Abrir igualmente».",
+    win: "Si aparece un recuadro azul: haz clic en «Más información» y luego en «Ejecutar de todas formas».", arm: "procesador ARM", help: "Más ayuda"},
   "zh-Hans": {tagline: "在家访问学校网站，就像在校园里一样。", download: "下载 {os} 版",
-    others: "其他设备", source: "源代码", imprint: "网站信息", privacy: "隐私", phone: "暂不支持 iPhone。请在电脑或 Android 手机上打开此页面。", android: "如果 Android 询问：允许浏览器安装应用。",
+    others: "其他设备", source: "源代码", imprint: "网站信息", privacy: "隐私", phone: "暂不支持 iPhone 和 iPad。请在电脑或 Android 手机上打开此页面。", android: "如果 Android 询问：允许浏览器安装应用。",
     mac: "如果 Mac 提示无法打开该文件：打开“系统设置”>“隐私与安全性”，然后点击“仍要打开”。",
     win: "如果出现蓝色窗口：点击“更多信息”，然后点击“仍要运行”。", arm: "ARM 处理器", help: "更多帮助"},
   "zh-Hant": {tagline: "在家存取學校網站，就像在校園裡一樣。", download: "下載 {os} 版",
-    others: "其他裝置", source: "原始碼", imprint: "網站資訊", privacy: "隱私權", phone: "尚不支援 iPhone。請在電腦或 Android 手機上開啟此頁面。", android: "如果 Android 詢問：允許瀏覽器安裝應用程式。",
+    others: "其他裝置", source: "原始碼", imprint: "網站資訊", privacy: "隱私權", phone: "尚不支援 iPhone 和 iPad。請在電腦或 Android 手機上開啟此頁面。", android: "如果 Android 詢問：允許瀏覽器安裝應用程式。",
     mac: "如果 Mac 提示無法打開該檔案：打開「系統設定」>「隱私權與安全性」，然後按一下「強制打開」。",
     win: "如果出現藍色視窗：按一下「其他資訊」，然後按一下「仍要執行」。", arm: "ARM 處理器", help: "更多說明"},
 };
@@ -166,7 +176,7 @@ async function detect() {
   // One setup for Intel, AMD and ARM processors.
   if (/Win/i.test(plat) || /Windows/.test(ua)) return {kind: "windows"};
   if (/Mac/i.test(plat) || /Mac OS X/.test(ua)) return {kind: "mac"};
-  if (/Linux|X11|CrOS/i.test(plat + ua)) {
+  if (/Linux|CrOS/i.test(plat + ua)) {
     let arm = /aarch64|arm/i.test(plat + ua);
     try {
       const h = await navigator.userAgentData.getHighEntropyValues(["architecture"]);
