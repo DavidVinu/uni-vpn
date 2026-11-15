@@ -466,8 +466,11 @@ func (d *Desktop) stopRunning() {
 
 // Windows --------------------------------------------------------------------
 
-// PSQuote quotes a value for PowerShell.
-func PSQuote(text string) string { return "'" + strings.ReplaceAll(text, "'", "''") + "'" }
+// PSQuote quotes a value for PowerShell, which also takes ‘ ’ ‚ ‛ as single quotes: each is
+// doubled.
+func PSQuote(text string) string {
+	return "'" + strings.NewReplacer("'", "''", "‘", "‘‘", "’", "’’", "‚", "‚‚", "‛", "‛‛").Replace(text) + "'"
+}
 
 // ShortcutScript creates a .lnk with PowerShell.
 func ShortcutScript(path, target, arguments, icon string) string {

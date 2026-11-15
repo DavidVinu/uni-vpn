@@ -391,6 +391,14 @@ func TestShortcutScriptQuotesPaths(t *testing.T) {
 	}
 }
 
+// PowerShell ends a single-quoted string at any of its single quotes, also the typographic
+// ones (‘ ’ ‚ ‛), as in a user name like D’Angelo; each is doubled to stay in the string.
+func TestPSQuoteDoublesEverySingleQuote(t *testing.T) {
+	if got := PSQuote("C:\\Users\\D’Angelo O'Neil ‘x‚y‛"); got != "'C:\\Users\\D’’Angelo O''Neil ‘‘x‚‚y‛‛'" {
+		t.Fatal(got)
+	}
+}
+
 func TestWindowsRegistersTheShippedApp(t *testing.T) {
 	h := newHarness(t, "windows")
 	exe := h.d.WindowsExe()
