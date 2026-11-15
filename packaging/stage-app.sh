@@ -1,22 +1,46 @@
 #!/bin/sh
 # Copies the program files the installers ship into DIR, with .commit for the automatic
 # updates when GITHUB_SHA is set.
-# Usage: packaging/stage-app.sh [--go TARGET] DIR
+# Usage: packaging/stage-app.sh [--go TARGET | --support] DIR
 # --go: the Go core without Python (docs/go-switch.md): bin/uni-vpn-core built for TARGET
 # (linux/amd64, linux/arm64, windows/amd64, darwin/universal for both Mac processors in one
-# file, or windows/both: amd64 in bin and arm64 in bin/arm64, the installer picks one), its
-# helpers in bin, the app windows' sources and icons in app, the licences of Go and the core's
-# Go modules in licenses. Needs Go.
-# Without --go: the Python program (uni_vpn/updater.py).
+# file, or windows/both: amd64 in bin and arm64 in bin/arm64, the installer picks one), the
+# files of --support, the licences of Go and the core's Go modules in licenses. Needs Go.
+# --support: only what goes next to the core, in the installers and in every update
+# (packaging/build-core.sh): its helpers in bin, the app windows' sources and icons in app (not
+# the phone apps), LICENSE and README.md.
+# Without either: the Python program (uni_vpn/updater.py).
 set -eu
 repo=$(cd "$(dirname "$0")/.." && pwd)
 target=""
-if [ "${1:-}" = --go ]; then
-  target="$2"
-  shift 2
-fi
+case "${1:-}" in
+  --go)
+    target="$2"
+    shift 2
+    ;;
+  --support)
+    target=support
+    shift
+    ;;
+esac
 mkdir -p "$1"
 out=$(cd "$1" && pwd)
+
+support() {
+  mkdir -p "$out/bin" "$out/app"
+  cp "$repo/bin/uni-vpn-vpnc.js" "$repo/bin/uni-vpn-ocproxy" "$out/bin/"
+  for item in "$repo"/app/*; do
+    case "${item##*/}" in
+      android | ios) ;;
+      *) cp -R "$item" "$out/app/" ;;
+    esac
+  done
+  cp "$repo/LICENSE" "$repo/README.md" "$out/"
+}
+if [ "$target" = support ]; then
+  support
+  exit 0
+fi
 
 # build GOOS GOARCH FILE: the core as the release zips have it, with the commit it updates from.
 build() {
@@ -30,9 +54,7 @@ if [ -z "$target" ]; then
   done
   find "$out" -name __pycache__ -type d -prune -exec rm -rf {} +
 else
-  mkdir -p "$out/bin"
-  cp "$repo/bin/uni-vpn-vpnc.js" "$repo/bin/uni-vpn-ocproxy" "$out/bin/"
-  cp -R "$repo/app" "$repo/LICENSE" "$repo/README.md" "$out/"
+  support
   case "$target" in
     darwin/universal)
       tmp=$(mktemp -d)
