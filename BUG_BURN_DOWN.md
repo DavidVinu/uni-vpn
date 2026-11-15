@@ -162,7 +162,8 @@ Scope: `app/android`, `app/ios`, `packaging/android`, `packaging/ios`, `cmd/uni-
   left. The 20 s now count on screen.
 - **iPhone: `api-ready` left by a core that iOS ended** let requests with the token go, for
   about a second, to another app that took port 1081. `CoreHost.ready` now also needs a core to
-  hold the lock (flock), as Android checks its own process.
+  hold the lock (flock), as Android checks its own process. Two narrower windows remain in the
+  core, see below.
 - **Both apps: the "not running" page had no switch;** it now has the one the port-taken page
   has, so the VPN can be turned off there.
 
@@ -174,6 +175,10 @@ Scope: `app/android`, `app/ios`, `packaging/android`, `packaging/ios`, `cmd/uni-
   config and the PAC address to follow; not worth it for a clash this rare.
 - **Texts without the core follow the phone's language** on Android (`port_in_use`,
   `not_running`, the notification), not a language chosen in the app's Settings.
+- **The core's ready file around a start and a stop** (`internal/daemon`): a starting core holds
+  the lock a few milliseconds before it removes a file left by a killed one, and a stopping core
+  frees port 1081 up to 5 s before it removes its file. Another app would have to bind 1081 in
+  exactly that window to get the app's token. Reported to the Go core section with fixes.
 - **ocproxy's port is chosen, closed, then bound later** (`internal/tunnel` `FreePort`): an app
   holding every other free port could take it in between. Needs tens of thousands of sockets;
   reported to the Go core section.
