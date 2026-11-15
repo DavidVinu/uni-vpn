@@ -583,7 +583,14 @@ func (e *Engine) Run(stop <-chan struct{}) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go func() { <-stop; cancel() }()
+	go func() {
+		<-stop
+		cancel()
+		// The round after a join too, at once: a round of this loop may wait for it to let go.
+		e.mu.Lock()
+		e.bgStop()
+		e.mu.Unlock()
+	}()
 	first := time.After(10 * time.Second)
 	for {
 		select {

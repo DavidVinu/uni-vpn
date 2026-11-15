@@ -3,8 +3,14 @@ package devsync
 import (
 	"bytes"
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -54,6 +60,57 @@ func TestJoinFromARequestCodeEndsWithTheCore(t *testing.T) {
 	time.Sleep(time.Second)
 	if after, _ := os.ReadFile(opts.StatePath); !bytes.Equal(before, after) {
 		t.Errorf("sync.json was written after Run returned:\nbefore %s\nafter  %s", before, after)
+	}
+}
+
+// A stop does not wait behind the round after a join while the relay hangs (no answer until
+// the client's 30 s run out): Run's own round waits for that one, and the stop ends both.
+func TestStopDoesNotWaitBehindTheRoundAfterAJoin(t *testing.T) {
+	ctx := context.Background()
+	_, target := startRelay(t)
+	var hold atomic.Bool
+	blocked, release := make(chan struct{}, 1), make(chan struct{})
+	u, _ := url.Parse(target)
+	proxy := httputil.NewSingleHostReverseProxy(u)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if hold.Load() && r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/v1/group/") {
+			select {
+			case blocked <- struct{}{}:
+			default:
+			}
+			<-release
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	var once sync.Once
+	t.Cleanup(func() { once.Do(func() { close(release) }) })
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	laptop := newDevice(t, srv.URL, "Laptop", setUpLaptop(), c)
+	phone := newDevice(t, srv.URL, "Phone", newLocal(false, nil), c)
+	stop, ran := make(chan struct{}), make(chan struct{})
+	go func() { laptop.Run(stop); close(ran) }()
+
+	p, err := laptop.Offer(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := phone.Enter(ctx, p.Code); err != nil {
+		t.Fatal(err)
+	}
+	hold.Store(true) // the laptop's round after the join hangs at its read
+	select {
+	case <-blocked:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the laptop did not start the round after the join")
+	}
+	laptop.Wake() // Run's own round now waits for that one
+	time.Sleep(200 * time.Millisecond)
+	close(stop)
+	select {
+	case <-ran:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Run did not return while the round after the join waited for the relay")
 	}
 }
 
