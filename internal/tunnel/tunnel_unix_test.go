@@ -3,7 +3,9 @@
 package tunnel
 
 import (
+	"bufio"
 	"cmp"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -16,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DavidVinu/uni-vpn/internal/platform"
 	"github.com/DavidVinu/uni-vpn/internal/tunnel/fakeoc"
 )
 
@@ -460,6 +463,67 @@ func waitFor(d time.Duration, cond func() bool) {
 	deadline := time.Now().Add(d)
 	for !cond() && time.Now().Before(deadline) {
 		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// The service dies by SIGKILL while connected. launchd then ends what is left of it by its
+// process group (launchd.plist, AbandonProcessGroup), so openconnect must be in that group.
+// Before, it kept running with its own session: ocproxy's port stayed open.
+func TestOpenconnectEndsWithAKilledService(t *testing.T) {
+	if os.Getenv("UNI_VPN_TEST_SERVICE") == "1" {
+		// The service: connect, say where, then wait for the SIGKILL.
+		f := newFlow(t)
+		tn := f.make()
+		f.start(tn, "x", "")
+		if !tn.WaitReady(10 * time.Second) {
+			t.Fatal("not ready")
+		}
+		fmt.Printf("pid=%d port=%d\n", tn.Pid(), tn.Port())
+		select {}
+	}
+	if !platform.IsMacOS {
+		t.Skip("launchd's clean-up; systemd ends the unit's whole cgroup")
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(exe, "-test.run=^TestOpenconnectEndsWithAKilledService$")
+	cmd.Env = append(os.Environ(), "UNI_VPN_TEST_SERVICE=1", "TMPDIR="+t.TempDir())
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // like a launchd job: a group of its own
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	lines := make(chan string, 1)
+	go func() {
+		sc := bufio.NewScanner(out)
+		for sc.Scan() {
+			if strings.HasPrefix(sc.Text(), "pid=") {
+				lines <- sc.Text()
+			}
+		}
+	}()
+	var pid, port int
+	select {
+	case line := <-lines:
+		if _, err := fmt.Sscanf(line, "pid=%d port=%d", &pid, &port); err != nil {
+			t.Fatal(line, err)
+		}
+	case <-time.After(20 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Fatal("the service did not connect")
+	}
+	_ = cmd.Process.Kill()
+	_ = cmd.Wait()
+	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) // what launchd does with the rest of the job
+	waitFor(5*time.Second, func() bool { return !PortOpen(port) })
+	if PortOpen(port) {
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+		t.Fatal("openconnect outlived the service")
 	}
 }
 
