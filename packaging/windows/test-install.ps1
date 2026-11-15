@@ -98,3 +98,51 @@ Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\app.log" -ErrorAction SilentlyContin
 if ($icon.HasExited -or (NewWebViews).Count -eq 0) { Explain; throw "the app window did not open on a second start" }
 $lnk = Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter "Uni VPN.lnk"
 if (-not $lnk) { throw "no Start menu entry" }
+# The tray app starts a stopped service again: nobody should need a terminal.
+$sw = [Diagnostics.Stopwatch]::StartNew()
+schtasks /End /TN uni-vpn | Out-Null
+$down = $null; $up = $null
+while ($sw.Elapsed.TotalSeconds -lt 30 -and -not $up) {
+  $answers = $true
+  try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 1 http://127.0.0.1:1081/status.json | Out-Null } catch { $answers = $false }
+  if (-not $answers -and -not $down) { $down = $sw.Elapsed.TotalSeconds }
+  if ($answers -and $down) { $up = $sw.Elapsed.TotalSeconds }
+  Start-Sleep -Milliseconds 250
+}
+Write-Host "service ended at $down s, the tray app started it again at $up s"
+if (-not $up) { Explain; throw "the tray app did not start the stopped service again" }
+# Installing again while it all runs (the website's installer over an installed one): the
+# installer stops everything that runs from Program Files, the tray app first, or it starts
+# the service again meanwhile, which then holds its files ("DeleteFile failed; code 5").
+$sweep = Measure-Command { powershell -NoProfile -NonInteractive -Command "Get-Process | Where-Object { `$_.Path -like '$env:ProgramFiles\uni-vpn\*' } | Out-Null" }
+Write-Host "the installer's search for running programs takes $($sweep.TotalSeconds) s"
+$process = Start-Process -FilePath out\uni-vpn-setup.exe -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/LOG=reinstall-setup.log" -PassThru
+if (-not $process.WaitForExit(300000)) { Explain; throw "installing again did not finish within 5 minutes" }
+if ($process.ExitCode -ne 0) { Get-Content reinstall-setup.log -Tail 40; Explain; throw "installing again over the running app failed" }
+$ok = $false
+foreach ($i in 1..30) {
+  try { $status = Invoke-RestMethod http://127.0.0.1:1081/status.json; $ok = $true; break } catch { Start-Sleep 1 }
+}
+if (-not $ok -or $status.commit -ne $env:GITHUB_SHA) { Explain; throw "the service does not run after installing again" }
+# A page process that ends (crash, out of memory, Task Manager) loads the page again; without
+# its browser process the window gets a new one. Both left the window blank until Exit.
+function AppBrowser { @(AppWebViews | Where-Object { $_.CommandLine -notmatch "--type=" }) }
+function Renderers($browser) { @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $browser" | Where-Object { $_.CommandLine -match "--type=renderer" }) }
+foreach ($i in 1..30) { if ((AppBrowser).Count -gt 0 -and (Renderers (AppBrowser)[0].ProcessId).Count -gt 0) { break }; Start-Sleep 1 }
+if ((AppBrowser).Count -eq 0) { Explain; throw "the installer did not open the app window" }
+$browser = (AppBrowser)[0].ProcessId
+$renderers = @(Renderers $browser | ForEach-Object ProcessId)
+Write-Host "app window: browser process $browser, page processes $($renderers -join ', ')"
+$renderers | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
+Start-Sleep 5
+Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\app.log" -ErrorAction SilentlyContinue
+$new = @(Renderers $browser | Where-Object { $renderers -notcontains $_.ProcessId })
+if ((Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\app.log" -Raw -ErrorAction SilentlyContinue) -notlike "*RenderProcessExited*" -or $new.Count -eq 0) {
+  Explain; throw "the page did not load again after its process ended"
+}
+Stop-Process -Id $browser -Force
+function NewBrowser { @(AppBrowser | Where-Object { $_.ProcessId -ne $browser }) }
+foreach ($i in 1..20) { if ((NewBrowser).Count -gt 0) { break }; Start-Sleep 1 }
+Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\app.log" -ErrorAction SilentlyContinue
+if ((NewBrowser).Count -eq 0) { Explain; throw "the window did not come back after its browser process ended" }
+if ((Trays).Count -eq 0) { Explain; throw "the tray app ended with the window's browser process" }
