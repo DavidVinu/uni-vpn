@@ -67,20 +67,20 @@ $browser = @(Get-CimInstance Win32_Process -Filter "Name = 'msedge.exe' OR Name 
 Write-Host "app window WebView2 processes: $($web.Count); browser with the page: $($browser.Count)"
 Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\app.log" -ErrorAction SilentlyContinue
 # In a process of its own: one that loaded the DLLs from Program Files keeps them in use, and
-# installing again could not replace them.
+# installing again could not replace them. Its output, not Write-Host: that comes back as XML.
 powershell -NoProfile -NonInteractive -Command {
   $desktop = "$env:ProgramFiles\uni-vpn\desktop"
   $env:PATH = "$desktop;$env:PATH"
   try {
     Add-Type -Path "$desktop\Microsoft.Web.WebView2.Core.dll"
-    Write-Host "WebView2 found: $([Microsoft.Web.WebView2.Core.CoreWebView2Environment]::GetAvailableBrowserVersionString())"
+    Write-Output "WebView2 found: $([Microsoft.Web.WebView2.Core.CoreWebView2Environment]::GetAvailableBrowserVersionString())"
     # As the window does it (a failure here comes at once, as in the window's constructor).
     $start = [Microsoft.Web.WebView2.Core.CoreWebView2Environment]::CreateAsync($null, "$env:LOCALAPPDATA\uni-vpn\WebView2", $null)
-    if ($start.Wait(30000)) { Write-Host "WebView2 starts: $($start.Result.BrowserVersionString)" } else { Write-Host "WebView2 did not start within 30 s" }
+    if ($start.Wait(30000)) { Write-Output "WebView2 starts: $($start.Result.BrowserVersionString)" } else { Write-Output "WebView2 did not start within 30 s" }
   } catch {
     $e = $_.Exception
     while ($e.InnerException) { $e = $e.InnerException }
-    Write-Host "WebView2 cannot start: $($e.GetType().FullName): $($e.Message)"
+    Write-Output "WebView2 cannot start: $($e.GetType().FullName): $($e.Message)"
   }
 }
 if ($web.Count -eq 0) { Explain; throw "the app window did not open on the handover" }
@@ -176,6 +176,23 @@ $daemon = @(Get-CimInstance Win32_Process -Filter "Name = 'uni-vpn-core.exe'" | 
 Write-Host "task priority $taskPriority; service base priority $(($daemon | ForEach-Object Priority) -join ', ') (8 is normal, 6 below normal)"
 if ($taskPriority -ne 4) { $problems += "the task has priority $taskPriority, not 4" }
 if ($daemon.Count -eq 0 -or ($daemon | Where-Object { $_.Priority -lt 8 })) { $problems += "the service does not run at normal priority" }
+# An update replaces only the program, so an earlier version's task keeps priority 7: the
+# service still runs at normal priority then (it sets its own when it starts).
+$xml = "$PWD\task-priority-7.xml"
+(Export-ScheduledTask -TaskName uni-vpn) -replace "<Priority>4</Priority>", "<Priority>7</Priority>" | Set-Content -Encoding Unicode $xml
+$out = cmd /c "schtasks /Create /TN uni-vpn /XML `"$xml`" /F 2>&1"
+if ($LASTEXITCODE -ne 0) { throw "could not give the task an earlier version's priority: $out" }
+$old = @(Daemons | ForEach-Object ProcessId)
+cmd /c "schtasks /End /TN uni-vpn 2>&1" | Out-Null
+$old | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
+cmd /c "schtasks /Run /TN uni-vpn 2>&1" | Out-Null
+function NewDaemons { @(Daemons | Where-Object { $old -notcontains $_.ProcessId }) }
+foreach ($i in 1..30) { if ((Answers) -and (NewDaemons).Count -gt 0) { break }; Start-Sleep 1 }
+$taskPriority = (Get-ScheduledTask -TaskName uni-vpn).Settings.Priority
+$daemon = NewDaemons
+Write-Host "an earlier version's task: priority $taskPriority; service base priority $(($daemon | ForEach-Object Priority) -join ', ')"
+if ($taskPriority -ne 7) { throw "the task has priority $taskPriority, not an earlier version's 7" }
+if ($daemon.Count -eq 0 -or ($daemon | Where-Object { $_.Priority -lt 8 })) { Explain; $problems += "with an earlier version's task the service does not run at normal priority" }
 # An otpauth:// link's key must not stay on disk in the window's browsing history, as it does
 # not in the browser's (the fallback without WebView2 leaves it out): uninstall deletes the key
 # everywhere else. Looked for again below, once the window's browser process has ended.
@@ -216,13 +233,15 @@ $browser = (AppBrowser)[0].ProcessId
 $renderers = @(Renderers $browser | ForEach-Object ProcessId)
 Write-Host "app window: browser process $browser, page processes $($renderers -join ', ')"
 $renderers | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
-Start-Sleep 5
-Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\app.log" -ErrorAction SilentlyContinue
 # WebView2 shows an error page in a new page process by itself: only the window's note says the
-# page itself loaded again.
-if ((Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\app.log" -Raw -ErrorAction SilentlyContinue) -notlike "*RenderProcessExited, the page loaded again*") {
-  Explain; $problems += "the page did not load again after its process ended"
+# page itself loaded again. The note keeps the latest line only, so it is looked for meanwhile.
+$reloaded = $false
+foreach ($i in 1..60) {
+  if ((Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\app.log" -Raw -ErrorAction SilentlyContinue) -like "*RenderProcessExited, the page loaded again*") { $reloaded = $true; break }
+  Start-Sleep -Milliseconds 250
 }
+Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\app.log" -ErrorAction SilentlyContinue
+if (-not $reloaded) { Explain; $problems += "the page did not load again after its process ended" }
 Stop-Process -Id $browser -Force
 function NewBrowser { @(AppBrowser | Where-Object { $_.ProcessId -ne $browser }) }
 foreach ($i in 1..20) { if ((NewBrowser).Count -gt 0) { break }; Start-Sleep 1 }

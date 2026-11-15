@@ -143,10 +143,13 @@ desktop.
   that carries every university website and the tunnel wait behind every normal program.
 - Fix: priority 4 (normal) in internal/winsys. An update replaces only the program, so the
   service also sets its own priority class to normal when it starts (cmd/uni-vpn), before it
-  starts openconnect.
+  starts openconnect. That fixes the CPU priority only: an updated install keeps low I/O and
+  memory priority until the next setup or Repair writes the task again (the service reads
+  and writes little on disk).
 - Verification: Go test for the task priority. CI (windows-installer, windows-arm-install)
   checks the installed task's priority and that the running service has base priority 8
-  (normal; below normal is 6).
+  (normal; below normal is 6), then gives the task an earlier version's priority 7, starts
+  the service again and checks it once more.
 
 ### D9. The Linux and Mac app windows keep an otpauth link's key on disk (Linux, macOS)
 
@@ -166,18 +169,21 @@ desktop.
   macos-pkg opens an otpauth link in the installed app and looks for the key in the app's
   WebKit, cache and saved state folders, before and after the app quits.
 
-### D10. After the page's process ends, an old otpauth link is offered again (Linux, Windows)
+### D10. After the page's process ends, an old otpauth link is offered again (Linux, Windows, macOS)
 
 - Severity: Low
 - Status: fixed
 - Root cause: the shells keep the page asked for last (D4) to load it again (D5, a failed load),
   and that included `#otpauth=<key>`. A page process that ended much later put the user back
   into "Change second factor" with the old key, during a first setup possibly over a newer one.
-- Fix: once the page has loaded (Linux: load committed; Windows: navigation succeeded), the
-  shells drop the otpauth part from the page they load again.
+- Fix: once the page has loaded (Linux and macOS: load committed; Windows: navigation
+  succeeded), the shells drop the otpauth part from the page they load again. On macOS WebKit
+  reloads an ended page by itself, and a reload that fails while the service restarts was
+  tried again with the key.
 - Verification: Linux under Xvfb: open with an otpauth link, then Main, then kill
   WebKitWebProcess: the page came back in the change with the old key before the fix, on the
-  main screen after it. Windows: same code path, compiled with mcs.
+  main screen after it. Windows: same code path, compiled with mcs. macOS: same code path,
+  compiled in CI.
 
 ### D11. The Windows window loses the page asked for while WebView2 starts (Windows)
 
@@ -194,7 +200,8 @@ desktop.
 - Status: fixed
 - Root cause: D5's new window after a browser process exit had no limit; a browser process
   that ended at once each time (security software) made a window take the focus each time.
-- Fix: a new window at most once in 10 s, as for the page process.
+- Fix: a new window at most once in 10 s, as for the page process. Only a window that comes
+  back counts: one that ended while hidden does not keep the next one from coming back.
 - Verification: traced in the code; compiled with mcs as C# 5.
 
 ### D13. Other programs could run JavaScript in the Mac app window (macOS)
@@ -261,6 +268,13 @@ desktop.
   to the user's other programs that listen for that notification.
 - Windows: after its browser process ended, the new window shows the main page, not the page
   shown before.
+- macOS: setup counts a job that runs after its own bootstrap failed as the one the menu bar
+  app loaded. If no job ran when setup looked (the service in launchd's wait between crashes)
+  and launchd starts the old job in the milliseconds before setup unloads it, setup reports
+  success with nothing loaded. The menu bar app loads it again within a minute.
+- CI: the checks that no otpauth key stays on disk find nothing, but do not show that the page
+  got the key (the Linux check was shown to fail before the fix under Xvfb). The macOS Repair
+  race is tested only when the test's bootstrap comes before setup's; CI says when not.
 - Linux: after a self-restart the old WebKit processes stay as zombies (two per restart);
   `pkill -f` takes the script path as a pattern (a home path with `+`, `(` or `[` misses);
   a restart after an update can drop a half-done change while the window is hidden.

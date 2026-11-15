@@ -406,12 +406,15 @@ jobs:
         run: |
           core="$HOME/Library/Application Support/uni-vpn/app/bin/uni-vpn-core"
           plist="$HOME/Library/LaunchAgents/de.davidvinu.uni-vpn.plist"
-          ( while :; do launchctl bootstrap "gui/$(id -u)" "$plist" 2>/dev/null && { echo "the test loaded the service again"; exit 0; }; sleep 0.05; done ) &
+          rm -f raced
+          ( while :; do launchctl bootstrap "gui/$(id -u)" "$plist" 2>/dev/null && { touch raced; exit 0; }; sleep 0.05; done ) &
           racer=$!
           code=0
           "$core" setup --no-browser --repair </dev/null >repair.log 2>&1 || code=$?
           kill $racer 2>/dev/null || true
           tail -n 30 repair.log
+          # Setup's own bootstrap can come first: then this run did not test the race.
+          if [ -e raced ]; then echo "the test loaded the service before setup did"; else echo "::warning::setup loaded the service before the test could, the race was not tested"; fi
           if [ $code -ne 0 ]; then echo "::error::setup failed when the service was loaded again meanwhile"; exit 1; fi
           for i in $(seq 30); do curl -fsS http://127.0.0.1:1081/status.json >/dev/null 2>&1 && break; sleep 1; done
           test "$(curl -fsS http://127.0.0.1:1081/status.json | jq -r .commit)" = "$GITHUB_SHA"

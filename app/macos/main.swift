@@ -342,6 +342,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         }
     }
 
+    // The page has an otpauth link's key now: a page loaded again (its process ended, a retry
+    // below) does not offer it once more.
+    @objc(webView:didCommitNavigation:)
+    func webView(_ view: WKWebView, didCommit nav: WKNavigation!) {
+        guard target.fragment?.hasPrefix("otpauth=") == true,
+              var parts = URLComponents(url: target, resolvingAgainstBaseURL: false) else { return }
+        parts.fragment = nil
+        if let url = parts.url { target = url }
+    }
+
     // The daemon is still starting (login) or restarting (update): try again shortly.
     @objc(webView:didFailProvisionalNavigation:withError:)
     func webView(_ view: WKWebView, didFailProvisionalNavigation nav: WKNavigation!, withError error: Error) {

@@ -569,8 +569,10 @@ class MainWindow : Form
             {
                 // This WebView2 is closed for good: a new window takes this one's place, not
                 // over and over when it ends at once again.
+                // Counted only for a window that comes back: one that was hidden does not hold
+                // back the next.
                 bool open = Visible && (DateTime.Now - browserEnded).TotalSeconds >= 10;
-                browserEnded = DateTime.Now;
+                if (open) browserEnded = DateTime.Now;
                 quitting = true;
                 BeginInvoke((MethodInvoker)delegate { Close(); if (open) reopen(); });
             }
