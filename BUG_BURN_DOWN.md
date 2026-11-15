@@ -123,7 +123,8 @@ and the "stable" branch, the build scripts (packaging/, get.sh, install.sh), the
 - Fix: packaging/release-put.sh uploads every file under a temporary name first (retried), then
   in the given order deletes the old file and renames the new one (GitHub's "update a release
   asset"), so a link is missing only between those two calls and a failed upload leaves the old
-  file. The publish job uses it in the order it had (zips, manifest, installers).
+  file. The publish job uses it in the order it had (zips, manifest, installers), and
+  publish-android for the APK and then its uni-vpn-apk.json.
 - Verification: with a stand-in for gh that applies --clobber like gh, the old step left the
   release without uni-vpn.pkg after one failed upload. tests/test_release_put.py runs the script
   against the same stand-in: all uploads before any delete, each file missing only between its

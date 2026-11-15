@@ -1031,7 +1031,7 @@ jobs:
           if [ ! -f out/uni-vpn.apk ]; then echo "no upload key yet, nothing to publish"; exit 0; fi
           git fetch --quiet origin main
           if [ "$(git rev-parse FETCH_HEAD)" != "$GITHUB_SHA" ]; then echo "main has moved on, the newer run publishes"; exit 0; fi
-          gh release upload latest out/uni-vpn.apk --clobber
-          # After the APK: a phone that reads the new version code finds its file in place
-          # (ApkUpdate checks size and SHA-256 and tries again later when they differ).
-          gh release upload latest out/uni-vpn-apk.json --clobber
+          # The JSON after the APK: a phone that reads the new version code finds its file in place
+          # (ApkUpdate checks size and SHA-256 and tries again later when they differ). No gap
+          # meanwhile and no lost file after a failed upload (release-put.sh, as in "publish").
+          packaging/release-put.sh latest out/uni-vpn.apk out/uni-vpn-apk.json
