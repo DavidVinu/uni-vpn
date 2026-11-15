@@ -997,13 +997,15 @@ jobs:
             gh release create latest --title "Uni VPN" --latest \
               --notes "Download the file for your computer and open it: uni-vpn.pkg (Mac), uni-vpn-setup.exe (Windows), uni-vpn.deb (Ubuntu, Debian, Mint), uni-vpn.rpm (Fedora) or uni-vpn.apk (Android)."
           fi
-          # The manifest after its zips: it must never name a file that is not there yet. Both before
-          # the installers: a new installer that finds the old manifest would update itself back.
-          gh release upload latest core/uni-vpn-core-*.zip --clobber
-          gh release upload latest core/core-manifest.json --clobber
+          # Everything goes up under a temporary name first, then each file replaces its old one in
+          # this order (not "gh release upload --clobber", which deletes the old file before the
+          # upload: a 404 meanwhile, and for good if the upload fails). The manifest after its zips:
+          # it must never name a file that is not there yet. Both before the installers: a new
+          # installer that finds the old manifest would update itself back.
           # uni-vpn-openconnect-win64.zip: what install.ps1 downloads when run without the installer.
-          gh release upload latest out/uni-vpn.pkg out/uni-vpn-setup.exe out/uni-vpn.deb out/uni-vpn.rpm \
-            out/uni-vpn-arm64.deb out/uni-vpn-arm64.rpm out/uni-vpn-openconnect-win64.zip --clobber
+          packaging/release-put.sh latest core/uni-vpn-core-*.zip core/core-manifest.json \
+            out/uni-vpn.pkg out/uni-vpn-setup.exe out/uni-vpn.deb out/uni-vpn.rpm \
+            out/uni-vpn-arm64.deb out/uni-vpn-arm64.rpm out/uni-vpn-openconnect-win64.zip
           gh release edit latest --notes "Version $UNI_VPN_VERSION, $(date -u +%Y-%m-%d). Download the file for your computer and open it: uni-vpn.pkg (Mac), uni-vpn-setup.exe (Windows), uni-vpn.deb (Ubuntu, Debian, Mint), uni-vpn.rpm (Fedora) or uni-vpn.apk (Android)."
 
   # Only a signed app goes to the release page, where the download page links it. After
@@ -1029,7 +1031,7 @@ jobs:
           if [ ! -f out/uni-vpn.apk ]; then echo "no upload key yet, nothing to publish"; exit 0; fi
           git fetch --quiet origin main
           if [ "$(git rev-parse FETCH_HEAD)" != "$GITHUB_SHA" ]; then echo "main has moved on, the newer run publishes"; exit 0; fi
-          gh release upload latest out/uni-vpn.apk --clobber
-          # After the APK: a phone that reads the new version code finds its file in place
-          # (ApkUpdate checks size and SHA-256 and tries again later when they differ).
-          gh release upload latest out/uni-vpn-apk.json --clobber
+          # The JSON after the APK: a phone that reads the new version code finds its file in place
+          # (ApkUpdate checks size and SHA-256 and tries again later when they differ). No gap
+          # meanwhile and no lost file after a failed upload (release-put.sh, as in "publish").
+          packaging/release-put.sh latest out/uni-vpn.apk out/uni-vpn-apk.json
