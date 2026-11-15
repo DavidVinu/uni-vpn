@@ -7,18 +7,20 @@ university website.
 
 ## Install
 
-Download the file for your computer and open it:
+Download the file for your device and open it:
 
-| Computer | Download |
+| Device | Download |
 |---|---|
 | Mac | [uni-vpn.pkg](https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn.pkg) |
 | Windows | [uni-vpn-setup.exe](https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn-setup.exe) |
 | Ubuntu, Debian, Mint | [uni-vpn.deb](https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn.deb), with an ARM processor [uni-vpn-arm64.deb](https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn-arm64.deb) |
 | Fedora | [uni-vpn.rpm](https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn.rpm), with an ARM processor [uni-vpn-arm64.rpm](https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn-arm64.rpm) |
+| Android | [uni-vpn.apk](https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn.apk) |
 
 On a Mac, if it says the file "cannot be opened": open System Settings, Privacy & Security, and
 click "Open Anyway". On Windows, if a blue box appears: click "More info", then "Run anyway".
-On Linux, open **Uni VPN** from your apps when the installation is done.
+On Linux, open **Uni VPN** from your apps when the installation is done. On Android, if it asks:
+allow your browser to install apps.
 
 A window opens and asks for your university, your user name and your password. When it says
 "All set", close and reopen your browser once. That's it.

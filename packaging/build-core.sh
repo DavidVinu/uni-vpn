@@ -7,7 +7,8 @@
 # (darwin/runtime/<arch> with ocproxy, windows/openconnect), and the signed cores windows/bin
 # and windows-arm64/bin when there are signing secrets (CI: macos-pkg, windows-installer).
 # Without it the macOS and Windows zips have the core alone. Linux's app window is a script from
-# the repository, and its openconnect comes from the distribution.
+# the repository, and its openconnect comes from the distribution. Every zip also has what
+# stage-app.sh --support puts next to the core in the installers (check-core-zips.sh checks it).
 set -euo pipefail
 commit="$1"
 repo=$(cd "$(dirname "$0")/.." && pwd)
@@ -44,6 +45,9 @@ for target in linux/amd64 linux/arm64 darwin/arm64 darwin/amd64 windows/amd64 wi
   exe=uni-vpn-core
   [ "$goos" = windows ] && exe=uni-vpn-core.exe
   rm -rf "${stage:?}"/* && mkdir -p "$stage/bin"
+  # What the installers put next to the core (its helpers, the app windows' sources and icons,
+  # LICENSE): an update that left them out would keep the installer's copies forever.
+  packaging/stage-app.sh --support "$stage"
   packaging/go-licenses.sh "$goos" "$goarch" "$stage/licenses"
   if [ "$goos" = darwin ]; then
     cp "$mac/uni-vpn-core" "$stage/bin/"
@@ -51,7 +55,7 @@ for target in linux/amd64 linux/arm64 darwin/arm64 darwin/amd64 windows/amd64 wi
     build "$goos" "$goarch" "$stage/bin/$exe"
   fi
   case "$target" in
-    linux/*) mkdir -p "$stage/app/linux" && cp app/linux/uni-vpn-app.py "$stage/app/linux/" ;;
+    linux/*) ;;
     # The same x64 app window and openconnect as windows/amd64; the signed ARM core is in
     # windows-arm64/bin.
     windows/arm64)
