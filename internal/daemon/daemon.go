@@ -1509,10 +1509,11 @@ func (d *Daemon) bindHTTP() {
 		return
 	}
 	d.logf(slog.LevelInfo, "Status port %d is free again", server.Port)
+	// The page goes before HTTP says the port is ours.
+	d.writeInstance(d.instance, "")
 	d.mu.Lock()
 	d.http, d.httpWaiting = server, nil
 	d.mu.Unlock()
-	d.writeInstance(d.instance, "")
 	d.reinstateRule(server.Port)
 }
 

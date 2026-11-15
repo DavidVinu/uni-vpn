@@ -3,6 +3,7 @@ package sysproxy
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -76,7 +77,7 @@ func TestLinuxInstallWritesTheSessionFilesAndUninstallTakesThemOut(t *testing.T)
 	if got := read(t, filepath.Join(home, ".xprofile")); got != lines1081 {
 		t.Fatalf("%q", got)
 	}
-	if st, _ := os.Stat(filepath.Join(home, ".profile")); st.Mode().Perm() != 0o644 {
+	if st, _ := os.Stat(filepath.Join(home, ".profile")); runtime.GOOS != "windows" && st.Mode().Perm() != 0o644 {
 		t.Fatal(st.Mode())
 	}
 	// Again (repair): the same lines once.

@@ -1270,3 +1270,15 @@ translations and docs. The full test suite on that commit passed first: `go test
   syncing. Requests that add nothing (reads) are not limited: they can use up the plan's
   requests for a day. Campus networks behind one address share the 4 MiB: about 2,000
   pairings a day (in the Go tests a new group is about 1 KB, a pairing slot about 100 bytes). The Go client shows "Can't reach the sync service" for 429 and 507.
+
+### CI on #84
+
+- go (windows-latest): the new session test checked that `.profile` keeps mode 0644; Windows
+  reports 0666 for every writable file. The check now runs on macOS and Linux only, as the
+  daemon's mode checks do.
+- go (macos-latest): `TestInstanceFileTellsTheAppWindowsWhatIsOurs` (from #83) failed once. Root
+  cause: once the status port was free again, `bindHTTP` set `d.http` before it took the
+  "another account" page out of the instance file, so for a moment the port was ours while the
+  file still said it was not (Low: an app window could show the page until its next look).
+  Reproduced on Linux: 7 of 40 runs with `-race` failed. Fix: the file is written first. Then
+  100 of 100 runs passed.
