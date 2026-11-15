@@ -230,7 +230,8 @@ fun WebsitesScreen(model: AppModel) {
                     leadingContent = { Icon(Icons.Outlined.Language, contentDescription = null) },
                     trailingContent = {
                         IconButton(onClick = { save(domains - host) }) {
-                            Icon(Icons.Outlined.Close, contentDescription = model.t("sync.remove"))
+                            // Screen readers name the website: touched on its own, "Remove" alone says not which.
+                            Icon(Icons.Outlined.Close, contentDescription = model.t("sync.remove") + " " + host)
                         }
                     },
                 )
