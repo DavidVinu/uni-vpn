@@ -21,6 +21,7 @@ import (
 	"github.com/DavidVinu/uni-vpn/internal/daemon"
 	"github.com/DavidVinu/uni-vpn/internal/desktop"
 	"github.com/DavidVinu/uni-vpn/internal/platform"
+	"github.com/DavidVinu/uni-vpn/internal/service"
 	"github.com/DavidVinu/uni-vpn/internal/wintunnel"
 )
 
@@ -115,6 +116,9 @@ func cmdDaemon(configArg string) int {
 			app := desktop.New(u.Root)
 			if platform.IsMacOS {
 				go app.UseUpdatedApp()
+				if service.New().UpgradeProcessType() {
+					log.Info("The service runs as an interactive job from the next login on, no longer throttled as a background one")
+				}
 			}
 			windows := &appWindows{restart: app.RestartApp, log: log}
 			o.Updater, o.AppPolled = u, windows.polled

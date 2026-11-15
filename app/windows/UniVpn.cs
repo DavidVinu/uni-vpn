@@ -163,6 +163,7 @@ class TrayApp : ApplicationContext
     bool polling;
     int misses;
     DateTime lastStart = DateTime.MinValue;
+    DateTime repairing = DateTime.MinValue;  // when the service last said that Repair runs
     string program = Stamp();
     string seen;
     bool restarting;
@@ -240,7 +241,7 @@ class TrayApp : ApplicationContext
 
     public void Show(string page)
     {
-        if (window == null || window.IsDisposed) window = new MainWindow(baseUrl, page);
+        if (window == null || window.IsDisposed) window = new MainWindow(baseUrl, page, delegate { Show(""); });
         // No WebView2 runtime: the window closed itself at once and the page is open in the browser.
         if (window.IsDisposed) return;
         window.Open(page);
@@ -278,6 +279,7 @@ class TrayApp : ApplicationContext
                     object value;
                     state = json.TryGetValue("state", out value) ? Convert.ToString(value) : "unknown";
                     busy = json.TryGetValue("busy", out value) && value is bool && (bool)value;
+                    if (json.TryGetValue("repairing", out value) && value is bool && (bool)value) repairing = DateTime.Now;
                     if (json.TryGetValue("menu", out value) && value is Dictionary<string, object>)
                         foreach (KeyValuePair<string, object> entry in (Dictionary<string, object>)value)
                             texts[entry.Key] = Convert.ToString(entry.Value);
@@ -334,11 +336,12 @@ class TrayApp : ApplicationContext
         Exit();
     }
 
-    // Nobody should need a terminal: a stopped service is started again from here.
+    // Nobody should need a terminal: a stopped service is started again from here. Not while
+    // Repair restarts it: its setup ends the task and fails if it runs again before "/Run".
     void StartServiceIfDown()
     {
         misses = reachable ? 0 : misses + 1;
-        if (misses < 2 || (DateTime.Now - lastStart).TotalSeconds < 60) return;
+        if (misses < 2 || (DateTime.Now - lastStart).TotalSeconds < 60 || (DateTime.Now - repairing).TotalSeconds < 60) return;
         lastStart = DateTime.Now;
         try
         {
@@ -454,10 +457,14 @@ class MainWindow : Form
     bool quitting;
     string pending;
     string target;
+    readonly Action reopen;
+    DateTime reloaded = DateTime.MinValue;
 
-    public MainWindow(string baseUrl, string page)
+    // reopen: a new window in this one's place (TrayApp.Show), when this one cannot show anything any more.
+    public MainWindow(string baseUrl, string page, Action reopen)
     {
         this.baseUrl = baseUrl;
+        this.reopen = reopen;
         pending = page;
         Text = "Uni VPN";
         Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
@@ -478,6 +485,11 @@ class MainWindow : Form
         string data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "uni-vpn", "WebView2");
         view.CreationProperties = new CoreWebView2CreationProperties();
         view.CreationProperties.UserDataFolder = data;
+        // InPrivate: nothing of the page goes to disk, not the browsing history either, which
+        // would keep an otpauth link's key (#otpauth=). The profile of earlier versions goes.
+        view.CreationProperties.IsInPrivateModeEnabled = true;
+        try { Directory.Delete(Path.Combine(data, "EBWebView", "Default"), true); }
+        catch (Exception) { }
         Controls.Add(view);
         Init();
     }
@@ -538,6 +550,28 @@ class MainWindow : Form
             // Hidden, it stops; opening the window again loads the page (ShowPage, !loaded).
             retry.Tick += delegate { retry.Dispose(); if (Visible && !loaded && !quitting) view.CoreWebView2.Navigate(target); };
             retry.Start();
+        };
+        // A process of the page ended (crash, out of memory, ended in Task Manager): WebView2
+        // shows an error page instead, or without its browser process nothing at all.
+        view.CoreWebView2.ProcessFailed += delegate(object sender, CoreWebView2ProcessFailedEventArgs e)
+        {
+            if (quitting) return;
+            Note("A WebView2 process ended: " + e.ProcessFailedKind);
+            if (e.ProcessFailedKind == CoreWebView2ProcessFailedKind.BrowserProcessExited)
+            {
+                // This WebView2 is closed for good: a new window takes this one's place.
+                bool open = Visible;
+                quitting = true;
+                BeginInvoke((MethodInvoker)delegate { Close(); if (open) reopen(); });
+            }
+            else if (e.ProcessFailedKind == CoreWebView2ProcessFailedKind.RenderProcessExited)
+            {
+                loaded = false;  // opening the window again loads the page (ShowPage)
+                // Not over and over for a page that ends it at once.
+                if ((DateTime.Now - reloaded).TotalSeconds < 10) return;
+                reloaded = DateTime.Now;
+                view.CoreWebView2.Reload();
+            }
         };
         ready = true;
         ShowPage(pending ?? "");

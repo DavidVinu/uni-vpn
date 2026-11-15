@@ -152,8 +152,10 @@ var
   ResultCode: Integer;
 begin
   { An earlier version keeps its files open while it runs: the service (also the Python one),
-    openconnect and the app window. Ending the task first keeps Task Scheduler from starting
-    it again. }
+    openconnect and the app window. The app window goes first: it starts a stopped service
+    again (within 6 s, before PowerShell below may have started). Ending the task then keeps
+    Task Scheduler from starting it again. }
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM "Uni VPN.exe"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec(ExpandConstant('{sys}\schtasks.exe'), '/End /TN uni-vpn', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), '-NoProfile -NonInteractive -Command "Get-Process | Where-Object { $_.Path -like ''' +
        ExpandConstant('{app}') + '\*'' } | Stop-Process -Force"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);

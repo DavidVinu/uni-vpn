@@ -38,6 +38,7 @@ struct Status {
     var state = "unknown"
     var busy = false
     var reachable = false
+    var repairing = false
     var menu: [String: String] = [:]
     var on: Bool { state == "connected" || (busy && state != "disconnecting") }
 }
@@ -109,6 +110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     var launched = false
     var misses = 0
     var lastStart = Date.distantPast
+    var repairSeen = Date.distantPast  // when the service last said that Repair runs
     var program: String?
     var seen: String?
     var restarting = false
@@ -256,7 +258,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
             if !page.isEmpty { view.evaluateJavaScript("location.hash = '\(page)'") }
             return
         }
-        target = URL(string: "?app=1" + page, relativeTo: base)!.absoluteURL
+        // Nothing shown (a load that failed): "as it is" is the page asked for last (Settings,
+        // setup's prefill), not the main page.
+        if !page.isEmpty { target = URL(string: "?app=1" + page, relativeTo: base)!.absoluteURL }
         view.load(URLRequest(url: target))
     }
 
@@ -371,10 +375,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
                let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
                 next.state = json["state"] as? String ?? "unknown"
                 next.busy = json["busy"] as? Bool ?? false
+                next.repairing = json["repairing"] as? Bool ?? false
                 next.menu = json["menu"] as? [String: String] ?? [:]
                 next.reachable = true
             }
             DispatchQueue.main.async {
+                if next.repairing { self?.repairSeen = Date() }
                 self?.status = next
                 self?.render()
                 self?.startServiceIfDown()
@@ -407,10 +413,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         }
     }
 
-    // Nobody should need a terminal: a stopped service is started again from here.
+    // Nobody should need a terminal: a stopped service is started again from here. Not while
+    // Repair restarts it: its setup boots the service out and fails if it is loaded again first.
     func startServiceIfDown() {
         misses = status.reachable ? 0 : misses + 1
-        guard misses >= 2, Date().timeIntervalSince(lastStart) > 60 else { return }
+        guard misses >= 2, Date().timeIntervalSince(lastStart) > 60, Date().timeIntervalSince(repairSeen) > 60 else { return }
         lastStart = Date()
         let domain = "gui/\(getuid())"
         let plist = NSHomeDirectory() + "/Library/LaunchAgents/de.davidvinu.uni-vpn.plist"

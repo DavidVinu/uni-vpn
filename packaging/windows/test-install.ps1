@@ -148,6 +148,7 @@ Start-Process $exe -ArgumentList "otpauth://totp/uni-vpn-ci?secret=$key"
 Start-Sleep 20  # Chromium writes its history every 10 s
 $found = KeyOnDisk
 if ($found) { $problems += "the otpauth link's key is on disk in $found" }
+Get-ChildItem "$env:LOCALAPPDATA\uni-vpn\WebView2" -Depth 2 -ErrorAction SilentlyContinue | ForEach-Object FullName
 # A page process that ends (crash, out of memory, Task Manager) loads the page again; without
 # its browser process the window gets a new one. Both left the window blank until Exit.
 function AppBrowser { @(AppWebViews | Where-Object { $_.CommandLine -notmatch "--type=" }) }

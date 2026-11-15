@@ -219,6 +219,47 @@ func TestLaunchdPlist(t *testing.T) {
 	}
 }
 
+// A background job runs throttled on macOS: the lowest CPU priority, and its sockets give way
+// to all other traffic, while all of the browser's traffic to the university goes through it.
+func TestLaunchdPlistIsAnInteractiveJob(t *testing.T) {
+	text := mustRender(RenderUnit(true, "/opt/uni-vpn/uni-vpn", "/Users/x/Library/Logs/uni-vpn", "", nil))
+	if !strings.Contains(text, interactiveProcessType) || strings.Contains(text, "Background") {
+		t.Fatal(text)
+	}
+}
+
+func TestUpgradeProcessTypeRewritesAnOlderPlistOnce(t *testing.T) {
+	h := setupHome(t)
+	m, _ := manager("darwin", &recorder{})
+	if m.UpgradeProcessType() {
+		t.Fatal("no plist, nothing to change")
+	}
+	path := filepath.Join(h, "Library", "LaunchAgents", "de.davidvinu.uni-vpn.plist")
+	current := mustRender(RenderUnit(true, "/opt/uni-vpn/uni-vpn", "/Users/x/Library/Logs/uni-vpn", "", nil))
+	older := strings.Replace(current, interactiveProcessType, "<key>ProcessType</key>\n  <string>Background</string>", 1)
+	if older == current {
+		t.Fatal("the test's older plist is the current one")
+	}
+	os.MkdirAll(filepath.Dir(path), 0o755)
+	os.WriteFile(path, []byte(older), 0o644)
+	if !m.UpgradeProcessType() {
+		t.Fatal("the older plist was not changed")
+	}
+	if data, _ := os.ReadFile(path); string(data) != current {
+		t.Fatal(string(data))
+	}
+	if st, _ := os.Stat(path); st.Mode().Perm() != 0o644 {
+		t.Fatal(st.Mode())
+	}
+	if m.UpgradeProcessType() {
+		t.Fatal("changed again")
+	}
+	os.WriteFile(path, []byte(older), 0o644)
+	if linux, _ := manager("linux", &recorder{}); linux.UpgradeProcessType() {
+		t.Fatal("only macOS has the plist")
+	}
+}
+
 func TestBinaryUnitDiffersOnlyInTheProgram(t *testing.T) {
 	env := []Pair{{"XDG_CONFIG_HOME", "/home/x/.cfg"}}
 	for _, extra := range [][]Pair{nil, env} {

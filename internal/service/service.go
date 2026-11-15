@@ -20,6 +20,7 @@ import (
 	"time"
 	"unicode/utf16"
 
+	"github.com/DavidVinu/uni-vpn/internal/atomicfile"
 	"github.com/DavidVinu/uni-vpn/internal/platform"
 	"github.com/DavidVinu/uni-vpn/internal/winsys"
 )
@@ -398,6 +399,23 @@ func (m *Manager) Install(dryRun bool) ([]string, error) {
 		}
 	}
 	return files, nil
+}
+
+// UpgradeProcessType gives the service file of an earlier version, a background job, the
+// process type of this one (interactiveProcessType). launchd reads it at the next login: an
+// update replaces only the program. Reports whether it changed the file.
+func (m *Manager) UpgradeProcessType() bool {
+	if !m.macOS() {
+		return false
+	}
+	path := m.UnitTargetPath()
+	data, err := os.ReadFile(path)
+	background := strings.Replace(interactiveProcessType, "Interactive", "Background", 1)
+	if err != nil || !strings.Contains(string(data), background) {
+		return false
+	}
+	// In one step: a half written file would keep the service from starting at the next login.
+	return atomicfile.Write(path, []byte(strings.Replace(string(data), background, interactiveProcessType, 1))) == nil
 }
 
 // Uninstall stops and removes the service. False if it could not be removed (also without

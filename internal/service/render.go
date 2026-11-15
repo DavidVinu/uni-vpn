@@ -55,7 +55,7 @@ const LaunchdTemplate = `<?xml version="1.0" encoding="UTF-8"?>
   <key>KeepAlive</key>
   <true/>
   <key>ProcessType</key>
-  <string>Background</string>
+  <string>Interactive</string>
   <key>StandardOutPath</key>
   <string>@LOG_DIR@/launchd.log</string>
   <key>StandardErrorPath</key>
@@ -63,6 +63,12 @@ const LaunchdTemplate = `<?xml version="1.0" encoding="UTF-8"?>
 </dict>
 </plist>
 `
+
+// Interactive, not Background: macOS runs a background job throttled, at the lowest CPU
+// priority and with network traffic that gives way to all other, while all of the browser's
+// traffic to the university goes through the service (launchd.plist(5): "Interactive jobs run
+// with the same resource limitations as apps, that is to say, none").
+const interactiveProcessType = "<key>ProcessType</key>\n  <string>Interactive</string>"
 
 // The Go core is one binary: the interpreter goes, @UNI_VPN@ becomes the binary.
 var binaryEdits = map[bool][2]string{
