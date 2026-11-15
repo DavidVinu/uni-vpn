@@ -364,6 +364,9 @@ func (u *Updater) stage(data []byte, commit string) (*staged, error) {
 	return s, nil
 }
 
+// syncFile is (*os.File).Sync; tests count the calls.
+var syncFile = (*os.File).Sync
+
 func unpack(f *zip.File, dest string) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
@@ -379,6 +382,11 @@ func unpack(f *zip.File, dest string) error {
 	}
 	// The archive's own size is checked by archive/zip while reading, like the checksum.
 	_, err = io.Copy(out, io.LimitReader(r, int64(f.UncompressedSize64)+1))
+	if err == nil {
+		// On disk before install renames it into place: after a power cut the program must
+		// not be an empty file (macOS and Windows do not order the rename after the data).
+		err = syncFile(out)
+	}
 	if cerr := out.Close(); err == nil {
 		err = cerr
 	}

@@ -571,6 +571,26 @@ func TestAReleaseWithoutOpenConnectLeavesIt(t *testing.T) {
 	}
 }
 
+// Every unpacked file is on disk before install renames it over the old one: after a power
+// cut right after an update the program must not be an empty file.
+func TestUnpackedFilesAreOnDiskBeforeTheInstall(t *testing.T) {
+	var synced []string
+	syncFile = func(f *os.File) error {
+		synced = append(synced, filepath.ToSlash(f.Name()))
+		return f.Sync()
+	}
+	t.Cleanup(func() { syncFile = (*os.File).Sync })
+	f := newFixture(t, makeZip(t, append([]file{{name: "licenses/LICENSE", body: "text"}}, coreZip...)...))
+	if _, err := f.u.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{"/bin/uni-vpn-core", "/licenses/LICENSE"} {
+		if !slices.ContainsFunc(synced, func(name string) bool { return strings.HasSuffix(name, rel) }) {
+			t.Fatalf("%s not synced: %v", rel, synced)
+		}
+	}
+}
+
 // failFS fails the rename of one staged file, like a disk error or a file Windows keeps open
 // (a virus scanner) halfway through an install.
 type failFS struct {
