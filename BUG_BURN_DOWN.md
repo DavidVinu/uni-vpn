@@ -30,10 +30,15 @@ and the "stable" branch, the build scripts (packaging/, get.sh, install.sh), the
 | WC-16 | README's helper commands and two button names are from the Python version | Low | fixed |
 | WC-17 | Download page gives Linux users no hint to open the app after installing | Low | fixed |
 | WC-18 | Download page does not say the Mac package needs macOS 14 | Low | fixed |
-| WC-19 | 32-bit ARM Linux is offered the 64-bit ARM packages | Low | fixed |
+| WC-19 | 32-bit ARM Linux is offered the 64-bit ARM packages | Low | partly: no button for armv7l any more; the list's ARM files are 64-bit only, and a browser that reports aarch64 on a 32-bit system still gets them (rare) |
 | WC-20 | An older run's queued publish can replace a newer one's, so the newest green commit waits for the next push | Low | left: GitHub's concurrency queue keeps one waiting job; nothing is lost, the next green push publishes |
 | WC-21 | CI removes the Linux package only after uninstalling, so the "removed in the app store" path runs only in unit tests | Low | left: covered by removal_test.go; an end-to-end run waits two 5-minute checks |
 | WC-22 | Windows in Chinese (Hong Kong, Macau) probably gets the installer's few texts in Simplified Chinese | Low | left: unverified, the installer shows almost no text and the app itself picks Traditional |
+| WC-23 | Privacy page says the Android app asks GitHub "at most once a day"; after a failed check it asks again 10 minutes later | Medium | fixed |
+| WC-24 | Privacy page points to "number 4" for syncing, which is number 5 since the Android item | Low | fixed |
+| WC-25 | One GitHub error answer makes release-put.sh fail instead of trying again | Low | fixed |
+| WC-26 | README says the core is not on the PATH, but setup creates a `uni-vpn` command | Low | fixed |
+| WC-27 | Download page does not say the Android app needs Android 10 | Low | fixed |
 
 ### WC-1 Updates never replace the helper files the installers put next to the core
 
@@ -151,6 +156,25 @@ and the "stable" branch, the build scripts (packaging/, get.sh, install.sh), the
 - Verification for WC-17 to WC-19: headless Chromium with the user agents of WC-8 plus Linux
   armv7l, in English, German and Traditional Chinese; screenshots at 375 px with the tip closed
   and open (French Mac, German Linux); no horizontal scroll.
+
+### WC-23 to WC-27
+
+- Found by: the final re-audit after #79.
+- WC-23: privacy.html (both languages) said "at most once a day". ApkUpdate.check sets the next
+  check 10 minutes ahead before each request and keeps it there when the request fails (no
+  network, 404, unreadable JSON), and a download that does not match its JSON is tried again
+  after 10, 20, 40 minutes up to a day. The page now says once a day, and after a failed check
+  again after 10 minutes. Checked against ApkUpdate.kt (RETRY = 10 minutes, DAY).
+- WC-24: "(unten, Nummer 4)" / "(below, number 4)" now say 5; headless Chromium numbers the list
+  the same way.
+- WC-25: on an HTTP error `gh api` prints GitHub's error body to stdout, and retry() kept the
+  output of every try, so the release id became "{...error...}7" and every later call failed.
+  retry() now prints only the successful try's output. tests/test_release_put.py's stand-in
+  for gh prints such a body now; the new test failed with the old script and passes.
+- WC-26: setup always writes a `uni-vpn` wrapper (internal/setup CommandPath, Wrapper). README
+  names it, where it goes, and the core's full path for when it is not on the PATH.
+- WC-27: minSdk is 29; older phones only hear "App not installed". The Android button now has
+  "Android 10 or newer" under it, in all six languages (checked in headless Chromium).
 
 ## Go core
 

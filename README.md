@@ -103,18 +103,20 @@ Everything below is for people who are comfortable with technical details.
 
 ### Command line
 
-The app does everything. The program behind it is `bin/uni-vpn-core` (Windows:
-`bin\uni-vpn-core.exe`) in `~/Library/Application Support/uni-vpn/app` (macOS),
-`~/.local/share/uni-vpn/app` (Linux) or `%ProgramFiles%\uni-vpn` (Windows). It is not on the
-`PATH`; run it with its full path.
+The app does everything; the `uni-vpn` command does the same in a terminal. Setup puts it in
+`~/.local/bin` (Linux), `/opt/homebrew/bin`, `/usr/local/bin` or `~/.local/bin` (macOS) or
+`%LOCALAPPDATA%\uni-vpn\bin` (Windows, new terminals only). It runs `bin/uni-vpn-core`
+(Windows: `bin\uni-vpn-core.exe`) in `~/Library/Application Support/uni-vpn/app` (macOS),
+`~/.local/share/uni-vpn/app` (Linux) or `%ProgramFiles%\uni-vpn` (Windows), which takes the same
+commands when `uni-vpn` is not on the `PATH`.
 
 | What | Command |
 |---|---|
-| Version | `uni-vpn-core --version` |
-| Open the window, or its Settings | `uni-vpn-core app`, `uni-vpn-core app --settings` |
-| Update now (it updates itself anyway) | `uni-vpn-core update` |
-| Repair (what the app's Repair button runs) | `uni-vpn-core setup --no-browser --repair` |
-| Remove (also resets the proxy setting) | `uni-vpn-core uninstall`; on Windows rather Settings, Apps, **Uni VPN**, Uninstall |
+| Version | `uni-vpn --version` |
+| Open the window, or its Settings | `uni-vpn app`, `uni-vpn app --settings` |
+| Update now (it updates itself anyway) | `uni-vpn update` |
+| Repair (what the app's Repair button runs) | `uni-vpn setup --no-browser --repair` |
+| Remove (also resets the proxy setting) | `uni-vpn uninstall`; on Windows rather Settings, Apps, **Uni VPN**, Uninstall |
 | Log (paste it into an issue) | Settings, **Log** in the app, or `daemon.log` in `~/Library/Logs/uni-vpn` (macOS), `~/.local/state/uni-vpn` (Linux) or `%LOCALAPPDATA%\uni-vpn\logs` (Windows) |
 
 ### Troubleshooting details

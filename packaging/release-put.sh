@@ -13,14 +13,19 @@ repo="${GITHUB_REPOSITORY:?}"
 api="repos/$repo/releases"
 
 # retry COMMAND...: four tries with a pause in between, for GitHub's occasional 5xx or timeout.
+# Only the successful try's output counts: on an error gh api prints GitHub's error body to
+# stdout, which must not end up in a caller's $(...).
 retry() {
-  local n
-  for n in 1 2 3; do
-    "$@" && return 0
+  local n out
+  for n in 1 2 3 4; do
+    if out=$("$@"); then
+      if [ -n "$out" ]; then printf '%s\n' "$out"; fi
+      return 0
+    fi
+    if [ "$n" = 4 ]; then return 1; fi
     echo "failed ($*), trying again" >&2
     sleep $((n * ${RELEASE_PUT_PAUSE:-10}))
   done
-  "$@"
 }
 
 # gone ID: the asset no longer exists (after a DELETE whose answer got lost).
