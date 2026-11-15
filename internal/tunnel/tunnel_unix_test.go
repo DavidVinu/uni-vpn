@@ -3,7 +3,10 @@
 package tunnel
 
 import (
+	"bufio"
 	"cmp"
+	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,9 +14,11 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
+	"github.com/DavidVinu/uni-vpn/internal/platform"
 	"github.com/DavidVinu/uni-vpn/internal/tunnel/fakeoc"
 )
 
@@ -112,6 +117,28 @@ func TestTOTPSecretReachesOpenconnectByFileAndIsRemovedWhenReady(t *testing.T) {
 		t.Fatal("secret file must be gone once connected", got)
 	}
 	tn.Stop(2 * time.Second)
+}
+
+// openconnect before 9.21 (the Linux distributions' packages) refuses a base32 secret that is
+// not padded to whole groups of eight ("Invalid base32 token string"): a 128-bit secret is 26
+// characters, a 256-bit SHA256 one 52. Tokens stored by every version so far have no padding.
+func TestTokenFileIsPaddedForOlderOpenconnect(t *testing.T) {
+	for stored, want := range map[string]string{
+		"base32:GAYTEMZUGU3DOOBZMFRGGZDFMY":        "base32:GAYTEMZUGU3DOOBZMFRGGZDFMY======",
+		"sha256:base32:" + strings.Repeat("A", 52): "sha256:base32:" + strings.Repeat("A", 52) + "====",
+		token: token, // 16 characters: already whole groups
+	} {
+		f := newFlow(t)
+		tn := f.make()
+		f.start(tn, "secret", stored)
+		if !tn.WaitReady(3 * time.Second) {
+			t.Fatal("not ready")
+		}
+		if data, _ := os.ReadFile(f.tokenfile); string(data) != want+"\n" {
+			t.Fatalf("%s: %q", stored, data)
+		}
+		tn.Stop(2 * time.Second)
+	}
 }
 
 func TestTokenFileRemovedWhenOpenconnectExitsEarly(t *testing.T) {
@@ -439,6 +466,67 @@ func waitFor(d time.Duration, cond func() bool) {
 	}
 }
 
+// The service dies by SIGKILL while connected. launchd then ends what is left of it by its
+// process group (launchd.plist, AbandonProcessGroup), so openconnect must be in that group.
+// Before, it kept running with its own session: ocproxy's port stayed open.
+func TestOpenconnectEndsWithAKilledService(t *testing.T) {
+	if os.Getenv("UNI_VPN_TEST_SERVICE") == "1" {
+		// The service: connect, say where, then wait for the SIGKILL.
+		f := newFlow(t)
+		tn := f.make()
+		f.start(tn, "x", "")
+		if !tn.WaitReady(10 * time.Second) {
+			t.Fatal("not ready")
+		}
+		fmt.Printf("pid=%d port=%d\n", tn.Pid(), tn.Port())
+		select {}
+	}
+	if !platform.IsMacOS {
+		t.Skip("launchd's clean-up; systemd ends the unit's whole cgroup")
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(exe, "-test.run=^TestOpenconnectEndsWithAKilledService$")
+	cmd.Env = append(os.Environ(), "UNI_VPN_TEST_SERVICE=1", "TMPDIR="+t.TempDir())
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // like a launchd job: a group of its own
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	lines := make(chan string, 1)
+	go func() {
+		sc := bufio.NewScanner(out)
+		for sc.Scan() {
+			if strings.HasPrefix(sc.Text(), "pid=") {
+				lines <- sc.Text()
+			}
+		}
+	}()
+	var pid, port int
+	select {
+	case line := <-lines:
+		if _, err := fmt.Sscanf(line, "pid=%d port=%d", &pid, &port); err != nil {
+			t.Fatal(line, err)
+		}
+	case <-time.After(20 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Fatal("the service did not connect")
+	}
+	_ = cmd.Process.Kill()
+	_ = cmd.Wait()
+	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) // what launchd does with the rest of the job
+	waitFor(5*time.Second, func() bool { return !PortOpen(port) })
+	if PortOpen(port) {
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+		t.Fatal("openconnect outlived the service")
+	}
+}
+
 func TestIgnoreSigtermGetsKilled(t *testing.T) {
 	f := newFlow(t)
 	t.Setenv("FAKE_MODE", "ignore_sigterm")
@@ -470,6 +558,81 @@ func TestNeverReadyTimeout(t *testing.T) {
 	tn.Stop(time.Second)
 	if !tn.HasExited() {
 		t.Fatal("running")
+	}
+}
+
+// Another account reads the port in openconnect's command line and listens on it while the
+// sign-in runs (the fake listens only after 3 s). That is not the tunnel: before, WaitReady
+// counted it at once and removed the token file openconnect had yet to read.
+func TestWaitReadyIgnoresAnotherAccountsListener(t *testing.T) {
+	f := newFlow(t)
+	t.Setenv("FAKE_DELAY", "3")
+	tn := f.make()
+	f.start(tn, "secret", "base32:JBSWY3DP")
+	foreign, err := net.Listen("tcp4", "127.0.0.1:"+itoa(tn.Port()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer foreign.Close()
+	go func() {
+		for {
+			c, err := foreign.Accept()
+			if err != nil {
+				return
+			}
+			defer c.Close()
+		}
+	}()
+	saved := otherAccount
+	otherAccount = func(net.Conn) (bool, error) { return true, nil } // this listener is another account's
+	defer func() { otherAccount = saved }()
+	if tn.WaitReady(time.Second) {
+		t.Fatal("counted another account's listener as the tunnel")
+	}
+	if tn.TokenFile() == "" {
+		t.Fatal("token file removed before the sign-in ended")
+	}
+}
+
+// The same with a real other account (nobody): only root can start a program as another account.
+func TestWaitReadyIgnoresARealOtherAccountsListener(t *testing.T) {
+	if os.Getuid() != 0 {
+		t.Skip("starting a program as another account needs root")
+	}
+	f := newFlow(t)
+	t.Setenv("FAKE_DELAY", "3")
+	tn := f.make()
+	f.start(tn, "secret", "base32:JBSWY3DP")
+	// The test binary, where nobody may run it, as a program that listens on the port.
+	dir, err := os.MkdirTemp("", "uni-vpn-other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	data, err := os.ReadFile(f.fake)
+	if err != nil {
+		t.Fatal(err)
+	}
+	holder := filepath.Join(dir, "holder")
+	if err := os.WriteFile(holder, data, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(holder, "ocproxy", "-D", "127.0.0.1:"+itoa(tn.Port()), "-k", "30")
+	cmd.Env = append(os.Environ(), fakeoc.EnvVar+"=portholder")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 65534, Gid: 65534}}
+	if err := cmd.Start(); err != nil {
+		t.Skip("cannot start a program as nobody:", err)
+	}
+	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	waitFor(3*time.Second, func() bool { return PortOpen(tn.Port()) })
+	if !PortOpen(tn.Port()) {
+		t.Skip("nobody cannot run the test binary here")
+	}
+	if tn.WaitReady(time.Second) {
+		t.Fatal("counted another account's listener as the tunnel")
 	}
 }
 

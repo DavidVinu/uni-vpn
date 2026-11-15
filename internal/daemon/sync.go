@@ -411,7 +411,17 @@ func (d *Daemon) syncStatus() pyjson.Object {
 // Sync is the app's /api/sync/<action>: offer, request, enter (code), cancel, remove
 // (device), refresh.
 func (d *Daemon) Sync(action string, data pyjson.Object) (pyjson.Object, error) {
-	ctx := context.Background()
+	// Ends with the core: a stop does not wait for the relay behind it, and a join started here
+	// writes nothing once the core stopped (the iPhone's next core may run by then).
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		select {
+		case <-d.stop:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
 	e := d.sync
 	switch action {
 	case "offer", "request":

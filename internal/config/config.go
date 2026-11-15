@@ -354,7 +354,8 @@ func readText(path string) (string, error) {
 		return "", err
 	}
 	if !utf8.Valid(data) {
-		return "", fmt.Errorf("%s: 'utf-8' codec can't decode the file", path)
+		// A problem in the file like a TOML error: the daemon starts and shows it.
+		return "", &ConfigError{Message: fmt.Sprintf("%s: 'utf-8' codec can't decode the file", path)}
 	}
 	text := strings.ReplaceAll(string(data), "\r\n", "\n")
 	return strings.ReplaceAll(text, "\r", "\n"), nil
@@ -817,10 +818,12 @@ func PortsFromBroken(path string) map[string]int {
 		path = DefaultPath()
 	}
 	ports := map[string]int{}
-	text, err := readText(path)
+	data, err := atomicfile.Read(path)
 	if err != nil {
 		return ports
 	}
+	// Also from a file that is not UTF-8: the port lines are ASCII.
+	text := strings.ToValidUTF8(string(data), "�")
 	for _, line := range splitLines(text) {
 		if strings.HasPrefix(strings.TrimFunc(line, isSpace), "[") {
 			break // tables like [timing] from here on, no more top-level keys
