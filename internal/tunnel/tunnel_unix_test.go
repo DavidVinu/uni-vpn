@@ -4,6 +4,7 @@ package tunnel
 
 import (
 	"cmp"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -492,6 +494,81 @@ func TestNeverReadyTimeout(t *testing.T) {
 	tn.Stop(time.Second)
 	if !tn.HasExited() {
 		t.Fatal("running")
+	}
+}
+
+// Another account reads the port in openconnect's command line and listens on it while the
+// sign-in runs (the fake listens only after 3 s). That is not the tunnel: before, WaitReady
+// counted it at once and removed the token file openconnect had yet to read.
+func TestWaitReadyIgnoresAnotherAccountsListener(t *testing.T) {
+	f := newFlow(t)
+	t.Setenv("FAKE_DELAY", "3")
+	tn := f.make()
+	f.start(tn, "secret", "base32:JBSWY3DP")
+	foreign, err := net.Listen("tcp4", "127.0.0.1:"+itoa(tn.Port()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer foreign.Close()
+	go func() {
+		for {
+			c, err := foreign.Accept()
+			if err != nil {
+				return
+			}
+			defer c.Close()
+		}
+	}()
+	saved := otherAccount
+	otherAccount = func(net.Conn) (bool, error) { return true, nil } // this listener is another account's
+	defer func() { otherAccount = saved }()
+	if tn.WaitReady(time.Second) {
+		t.Fatal("counted another account's listener as the tunnel")
+	}
+	if tn.TokenFile() == "" {
+		t.Fatal("token file removed before the sign-in ended")
+	}
+}
+
+// The same with a real other account (nobody): only root can start a program as another account.
+func TestWaitReadyIgnoresARealOtherAccountsListener(t *testing.T) {
+	if os.Getuid() != 0 {
+		t.Skip("starting a program as another account needs root")
+	}
+	f := newFlow(t)
+	t.Setenv("FAKE_DELAY", "3")
+	tn := f.make()
+	f.start(tn, "secret", "base32:JBSWY3DP")
+	// The test binary, where nobody may run it, as a program that listens on the port.
+	dir, err := os.MkdirTemp("", "uni-vpn-other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	data, err := os.ReadFile(f.fake)
+	if err != nil {
+		t.Fatal(err)
+	}
+	holder := filepath.Join(dir, "holder")
+	if err := os.WriteFile(holder, data, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(holder, "ocproxy", "-D", "127.0.0.1:"+itoa(tn.Port()), "-k", "30")
+	cmd.Env = append(os.Environ(), fakeoc.EnvVar+"=portholder")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 65534, Gid: 65534}}
+	if err := cmd.Start(); err != nil {
+		t.Skip("cannot start a program as nobody:", err)
+	}
+	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	waitFor(3*time.Second, func() bool { return PortOpen(tn.Port()) })
+	if !PortOpen(tn.Port()) {
+		t.Skip("nobody cannot run the test binary here")
+	}
+	if tn.WaitReady(time.Second) {
+		t.Fatal("counted another account's listener as the tunnel")
 	}
 }
 
