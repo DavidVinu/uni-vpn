@@ -71,8 +71,24 @@ class MainActivity : ComponentActivity() {
 
     fun turnOff() = UniVpnService.stop(this)
 
+    /** The notification's "Update Uni VPN": straight to Android's installer. */
+    private fun handle(intent: Intent?) {
+        if (intent?.action != ACTION_UPDATE || intent.getStringExtra(EXTRA_KEY) != ApkUpdate.tapKey) return
+        // Opened again from Recents, Android hands over the first intent again: not a new tap.
+        if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return
+        // Once only, not again when the phone is turned.
+        setIntent(Intent(this, MainActivity::class.java))
+        model.installUpdate()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handle(intent)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null) handle(intent)
         enableEdgeToEdge()
         setContent {
             UniVpnTheme {
@@ -85,6 +101,11 @@ class MainActivity : ComponentActivity() {
                 App(model, vpnOn, this)
             }
         }
+    }
+
+    companion object {
+        const val ACTION_UPDATE = "de.davidvinu.univpn.UPDATE"
+        const val EXTRA_KEY = "key"
     }
 
     override fun onResume() {

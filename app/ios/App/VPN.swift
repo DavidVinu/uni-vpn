@@ -31,9 +31,12 @@ final class VPN {
         let managers = try? await NETunnelProviderManager.loadAllFromPreferences()
         if let managers {
             // The enabled one is what iOS runs. Further copies (two saves at once) would show
-            // up as a second "Uni VPN" in Settings: they go.
-            manager = managers.first(where: \.isEnabled) ?? managers.first
-            for extra in managers where extra !== manager {
+            // up as a second "Uni VPN" in Settings: they go. Compared with this load's own
+            // choice: a removal posts a configuration change, whose load sets `manager` to its
+            // own copy of the same configuration meanwhile, and that one must not go too.
+            let keep = managers.first(where: \.isEnabled) ?? managers.first
+            manager = keep
+            for extra in managers where extra !== keep {
                 try? await extra.removeFromPreferences()
             }
         }

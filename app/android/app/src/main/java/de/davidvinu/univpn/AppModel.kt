@@ -51,6 +51,11 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     /** The core did not answer the last poll. */
     var unreachable by mutableStateOf(false)
         private set
+    /** Nor the polls of the last 20 s (App.kt says so instead of a spinner without end). */
+    var stuck by mutableStateOf(false)
+        private set
+    private var unreachableSince = 0L
+    private var lastRefresh = 0L
     /** Another app holds the core's port (Core.portTaken). */
     var portTaken by mutableStateOf(false)
         private set
@@ -221,9 +226,20 @@ class AppModel(app: Application) : AndroidViewModel(app) {
 
     val setupNeeded get() = status?.optBoolean("setup_needed", false) == true
 
+    /** Home's and the notification's "Update Uni VPN": the new version to Android's installer. */
+    fun installUpdate() = ApkUpdate.start(getApplication())
+
     /** Polls status.json while the app is on screen, like the desktop apps. */
     suspend fun pollWhileVisible() {
+        // The 20 s until "not running" count while on screen, not from before the app left it
+        // (a turn of the phone, which also starts this again, is no leaving).
+        if (SystemClock.elapsedRealtime() - lastRefresh > 5_000) {
+            unreachable = false
+            stuck = false
+        }
         withContext(Dispatchers.IO) { core.ensureRunning() }
+        // Once a day, also with the VPN off (ApkUpdate).
+        viewModelScope.launch(Dispatchers.IO) { ApkUpdate.check(getApplication()) }
         while (true) {
             refresh()
             delay(if (unreachable) 500 else 1500)
@@ -234,13 +250,21 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         val reply = withContext(Dispatchers.IO) { core.get("/status.json") }
         portTaken = core.portTaken
         val json = reply.json
+        val now = SystemClock.elapsedRealtime()
+        lastRefresh = now
         if (!reply.ok || json == null) {
+            if (!unreachable) unreachableSince = now
             unreachable = true
+            stuck = now - unreachableSince > 20_000
             return
         }
         unreachable = false
+        stuck = false
         status = json
         core.setupDone = !json.optBoolean("setup_needed", true)
+        if (ApkUpdate.setAutomatic(getApplication(), json.optBoolean("auto_update", true))) {
+            viewModelScope.launch(Dispatchers.IO) { ApkUpdate.check(getApplication()) }
+        }
         if (!enrollChecked) {
             enrollChecked = true
             resumeEnroll(json)

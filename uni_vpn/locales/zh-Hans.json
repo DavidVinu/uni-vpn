@@ -251,6 +251,7 @@
   "phone.camera_denied": "Uni VPN 无法使用相机。请在“设置”中允许。",
   "phone.vpn_refused": "Android 没有让 Uni VPN 开启。如果另一个 VPN 应用设为始终开启，请在 VPN 设置中关闭。",
   "phone.vpn_settings": "VPN 设置",
+  "phone.update": "更新 Uni VPN",
   "phone.lockdown": "Android 屏蔽了不经过 VPN 的连接，所以应用无法访问互联网。请在 VPN 设置中关闭此项。",
   "phone.scan_failed": "扫描器没有打开。请稍后再试，或手动输入。",
   "phone.vpn_not_allowed": "iPhone 没有让 Uni VPN 开启。轻点开关后会再问你一次。",
