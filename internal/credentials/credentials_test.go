@@ -301,6 +301,37 @@ func TestStoreFailureRaises(t *testing.T) {
 	}
 }
 
+// Nothing provides the Secret Service (secret-tool 0.21 under dbus-daemon and dbus-broker): not
+// a locked keyring, which signing out would open.
+func TestNoSecretServiceIsNoStore(t *testing.T) {
+	for _, stderr := range []string{
+		"secret-tool: The name org.freedesktop.secrets was not provided by any .service files\n",
+		"secret-tool: The name is not activatable\n",
+	} {
+		r := &recorder{res: Result{Code: 1, Stderr: []byte(stderr)}}
+		err := linux(r).StorePassword("ab1", "x")
+		var none *NoStoreError
+		if !errors.As(err, &none) || !strings.Contains(err.Error(), "could not be saved: secret-tool: The name") {
+			t.Errorf("store: %v", err)
+		}
+		_, err = linux(r).GetPassword(context.Background(), "ab1", time.Second, nil)
+		if !errors.As(err, &none) || !errors.Is(err, ErrSecretMissing) {
+			t.Errorf("lookup: %v", err)
+		}
+	}
+	// A keyring that refuses for another reason stays a KeyringError.
+	r := &recorder{res: Result{Code: 1, Stderr: []byte("secret-tool: Cannot create an item in a locked collection\n")}}
+	var ke *KeyringError
+	if err := linux(r).StorePassword("ab1", "x"); !errors.As(err, &ke) {
+		t.Errorf("locked: %v", err)
+	}
+	// On a Mac security's words never count as no store.
+	r = &recorder{res: Result{Code: 1, Stderr: []byte("The name is not activatable")}}
+	if err := macos(r).StorePassword("ab1", "x"); !errors.As(err, &ke) {
+		t.Errorf("mac: %v", err)
+	}
+}
+
 func TestStoreTimeout(t *testing.T) {
 	r := &recorder{err: ErrTimeout}
 	err := linux(r).StorePassword("ab1", "x")

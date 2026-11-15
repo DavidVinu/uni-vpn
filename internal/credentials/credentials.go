@@ -88,6 +88,24 @@ type KeyringError struct{ Msg string }
 
 func (e *KeyringError) Error() string { return e.Msg }
 
+// NoStoreError means the computer has no password store at all: on Linux nothing provides the
+// Secret Service (no gnome-keyring, and no KDE wallet that offers it). Signing out, as for a
+// locked keyring, does not help; installing one does. It also counts as no secret saved.
+type NoStoreError struct{ Msg string }
+
+func (e *NoStoreError) Error() string { return e.Msg }
+
+func (e *NoStoreError) Is(target error) bool { return target == ErrSecretMissing }
+
+// noSecretService: secret-tool's words when nobody provides org.freedesktop.secrets, from
+// dbus-daemon ("The name org.freedesktop.secrets was not provided by any .service files") or
+// dbus-broker ("The name is not activatable"). D-Bus does not translate them.
+func noSecretService(stderr []byte) bool {
+	text := string(stderr)
+	return strings.Contains(text, "was not provided by any .service files") ||
+		strings.Contains(text, "is not activatable") || strings.Contains(text, "org.freedesktop.DBus.Error.ServiceUnknown")
+}
+
 // CredentialError is a failed Credential Manager call (Python: windows.CredentialError).
 type CredentialError struct{ Msg string }
 
@@ -276,6 +294,9 @@ func (k *Keyring) GetSecret(ctx context.Context, user string, kind Kind, timeout
 		return nil, a.err
 	}
 	out := a.res.Stdout
+	if a.res.Code != 0 && !k.isMacOS() && noSecretService(a.res.Stderr) {
+		return nil, &NoStoreError{strings.TrimSpace(decodeReplace(a.res.Stderr))}
+	}
 	if a.res.Code != 0 || len(out) == 0 {
 		return nil, &MissingError{Kind: kind}
 	}
@@ -378,6 +399,9 @@ func (k *Keyring) StoreSecret(user string, kind Kind, value string) error {
 		detail := strings.TrimSpace(decodeReplace(res.Stderr))
 		if detail == "" {
 			detail = strconv.Itoa(res.Code)
+		}
+		if !k.isMacOS() && noSecretService(res.Stderr) {
+			return &NoStoreError{fmt.Sprintf("%s could not be saved: %s", label, detail)}
 		}
 		return &KeyringError{fmt.Sprintf("%s could not be saved: %s", label, detail)}
 	}
