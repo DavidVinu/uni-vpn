@@ -39,6 +39,7 @@ and the "stable" branch, the build scripts (packaging/, get.sh, install.sh), the
 | WC-25 | One GitHub error answer makes release-put.sh fail instead of trying again | Low | fixed |
 | WC-26 | README says the core is not on the PATH, but setup creates a `uni-vpn` command | Low | fixed |
 | WC-27 | Download page does not say the Android app needs Android 10 | Low | fixed |
+| WC-28 | CI test TestOnlyTOTPFieldWritesATokenFile failed once ("duo_push not ready") on go (macos-latest) | Low | left: not reproduced (80 runs with -race, half under full CPU load); the test now reports how the fake ended |
 
 ### WC-1 Updates never replace the helper files the installers put next to the core
 
@@ -182,6 +183,18 @@ and the "stable" branch, the build scripts (packaging/, get.sh, install.sh), the
   names it, where it goes, and the core's full path for when it is not on the PATH.
 - WC-27: minSdk is 29; older phones only hear "App not installed". The Android button now has
   "Android 10 or newer" under it, in all six languages (checked in headless Chromium).
+
+### WC-28 A tunnel test failed once on macOS
+
+- Found by: CI of #80's first commit (go (macos-latest), `go test -race ./...`), a change with
+  no Go code; the same test passed on Linux and Windows in that run.
+- What is known: the test took 0.52 s, so WaitReady returned because the fake openconnect had
+  exited (its 3 s limit was not reached), about the time the fake listens on its port. The
+  failure printed nothing about why.
+- Reproduction: 40 runs with -race on Linux, and 40 more with every CPU busy, all passed.
+- Change: the test now prints the exit code and the fake's last output lines when it is not
+  ready, so a next failure shows the cause (checked by forcing the fake to fail once).
+- Left as Low: no user-facing path is known to fail; a release only waits for a rerun.
 
 ## Go core
 

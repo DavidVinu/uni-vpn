@@ -221,7 +221,9 @@ func TestOnlyTOTPFieldWritesATokenFile(t *testing.T) {
 			}
 		}
 		if !tn.WaitReady(3 * time.Second) {
-			t.Fatal(mfa, "not ready")
+			// Seen once on macos-latest with -race (2026-11-15), not reproduced: how it ended.
+			code, exited := tn.ReturnCode()
+			t.Fatal(mfa, "not ready; exited:", exited, code, tn.StderrTail())
 		}
 		tn.Stop(2 * time.Second)
 	}
