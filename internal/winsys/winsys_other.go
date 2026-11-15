@@ -14,6 +14,7 @@ func AwakeSeconds() float64                                           { return 0
 func IsAdmin() bool                                                   { return false }
 func AllowCtrlCForChildren()                                          {}
 func KillChildrenWithUs() bool                                        { return false }
+func ChildrenEndWithUs(end bool) bool                                 { return false }
 func CtrlCHelper(pid int) int                                         { return 1 }
 func SendCtrlC(pid int, timeout time.Duration, helper ...string) bool { return false }
 func HiddenNewConsole(cmd *exec.Cmd)                                  {}

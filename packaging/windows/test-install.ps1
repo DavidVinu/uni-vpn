@@ -56,9 +56,9 @@ $runtime = Get-ItemProperty "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Cli
 Write-Host "WebView2 runtime: $(if ($runtime) { $runtime.pv } else { 'none' }); session: $((Get-Process -Id $PID).SessionId); interactive: $([Environment]::UserInteractive)"
 Start-Sleep 5
 ShowTrays
-if ((Trays).Count -eq 0) { Explain; throw "no tray app runs after the install" }
+if (@(Trays).Count -eq 0) { Explain; throw "no tray app runs after the install" }
 Start-Sleep 10
-if ((Trays).Count -eq 0) { Explain; throw "the tray app ends at start" }
+if (@(Trays).Count -eq 0) { Explain; throw "the tray app ends at start" }
 # The installer's copy handed its window over: the app window opened (its WebView2 runs
 # with the app's data folder), not the browser. A window that cannot start on a handover
 # would open the browser on every Start menu click while the icon runs.
@@ -66,35 +66,233 @@ $web = @(Get-CimInstance Win32_Process -Filter "Name = 'msedgewebview2.exe'" | W
 $browser = @(Get-CimInstance Win32_Process -Filter "Name = 'msedge.exe' OR Name = 'chrome.exe' OR Name = 'firefox.exe'" | Where-Object { $_.CommandLine -like "*127.0.0.1:1081*" })
 Write-Host "app window WebView2 processes: $($web.Count); browser with the page: $($browser.Count)"
 Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\app.log" -ErrorAction SilentlyContinue
-$desktop = "$env:ProgramFiles\uni-vpn\desktop"
-$env:PATH = "$desktop;$env:PATH"
-try {
-  Add-Type -Path "$desktop\Microsoft.Web.WebView2.Core.dll"
-  Write-Host "WebView2 found: $([Microsoft.Web.WebView2.Core.CoreWebView2Environment]::GetAvailableBrowserVersionString())"
-  # As the window does it (a failure here comes at once, as in the window's constructor).
-  $start = [Microsoft.Web.WebView2.Core.CoreWebView2Environment]::CreateAsync($null, "$env:LOCALAPPDATA\uni-vpn\WebView2", $null)
-  if ($start.Wait(30000)) { Write-Host "WebView2 starts: $($start.Result.BrowserVersionString)" } else { Write-Host "WebView2 did not start within 30 s" }
-} catch {
-  $e = $_.Exception
-  while ($e.InnerException) { $e = $e.InnerException }
-  Write-Host "WebView2 cannot start: $($e.GetType().FullName): $($e.Message)"
+# In a process of its own: one that loaded the DLLs from Program Files keeps them in use, and
+# installing again could not replace them. Its output, not Write-Host: that comes back as XML.
+powershell -NoProfile -NonInteractive -Command {
+  $desktop = "$env:ProgramFiles\uni-vpn\desktop"
+  $env:PATH = "$desktop;$env:PATH"
+  try {
+    Add-Type -Path "$desktop\Microsoft.Web.WebView2.Core.dll"
+    Write-Output "WebView2 found: $([Microsoft.Web.WebView2.Core.CoreWebView2Environment]::GetAvailableBrowserVersionString())"
+    # As the window does it (a failure here comes at once, as in the window's constructor).
+    $start = [Microsoft.Web.WebView2.Core.CoreWebView2Environment]::CreateAsync($null, "$env:LOCALAPPDATA\uni-vpn\WebView2", $null)
+    if ($start.Wait(30000)) { Write-Output "WebView2 starts: $($start.Result.BrowserVersionString)" } else { Write-Output "WebView2 did not start within 30 s" }
+  } catch {
+    $e = $_.Exception
+    while ($e.InnerException) { $e = $e.InnerException }
+    Write-Output "WebView2 cannot start: $($e.GetType().FullName): $($e.Message)"
+  }
 }
 if ($web.Count -eq 0) { Explain; throw "the app window did not open on the handover" }
 # A second start on purpose: the install's two starts race, and the copy that stays may
 # have opened the window itself, without a handover.
 function AppWebViews { @(Get-CimInstance Win32_Process -Filter "Name = 'msedgewebview2.exe'" | Where-Object { $_.CommandLine -like "*uni-vpn\WebView2*" }) }
 Get-Process -Name "Uni VPN" -ErrorAction SilentlyContinue | Stop-Process -Force
-foreach ($i in 1..30) { if ((AppWebViews).Count -eq 0) { break }; Start-Sleep 1 }
+foreach ($i in 1..30) { if (@(AppWebViews).Count -eq 0) { break }; Start-Sleep 1 }
 $old = @(AppWebViews | ForEach-Object ProcessId)
 function NewWebViews { @(AppWebViews | Where-Object { $old -notcontains $_.ProcessId }) }
 $exe = "$env:ProgramFiles\uni-vpn\desktop\Uni VPN.exe"
 $icon = Start-Process $exe -ArgumentList "--port 1081 --hidden" -PassThru
 Start-Sleep 5
-if ($icon.HasExited -or (NewWebViews).Count -ne 0) { Explain; throw "the icon alone did not run as it should" }
+if ($icon.HasExited -or @(NewWebViews).Count -ne 0) { Explain; throw "the icon alone did not run as it should" }
 $second = Start-Process $exe -ArgumentList "--port 1081" -PassThru
 if (-not $second.WaitForExit(10000)) { Explain; throw "the second start did not hand over" }
-foreach ($i in 1..15) { if ((NewWebViews).Count -gt 0) { break }; Start-Sleep 1 }
+foreach ($i in 1..15) { if (@(NewWebViews).Count -gt 0) { break }; Start-Sleep 1 }
 Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\app.log" -ErrorAction SilentlyContinue
-if ($icon.HasExited -or (NewWebViews).Count -eq 0) { Explain; throw "the app window did not open on a second start" }
+if ($icon.HasExited -or @(NewWebViews).Count -eq 0) { Explain; throw "the app window did not open on a second start" }
 $lnk = Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter "Uni VPN.lnk"
 if (-not $lnk) { throw "no Start menu entry" }
+$problems = @()
+# The service's processes: the task runs conhost.exe, which starts uni-vpn-core.exe. Counted as
+# @(Daemons).Count: a function's single result comes back as itself, and in PowerShell 5.1 a
+# single process object has no Count, so (Daemons).Count -gt 0 is never true for one.
+function Daemons { @(Get-CimInstance Win32_Process -Filter "Name = 'uni-vpn-core.exe'" | Where-Object { $_.CommandLine -like "* daemon*" }) }
+function ShowService {
+  Write-Host "task: $((Get-ScheduledTask -TaskName uni-vpn).State)"
+  Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq "uni-vpn-core.exe" -or $_.Name -eq "conhost.exe") -and $_.CommandLine -like "*uni-vpn*" } |
+    Format-Table ProcessId, ParentProcessId, CreationDate, CommandLine -AutoSize -Wrap | Out-String -Width 400 | Write-Host
+}
+# curl, not Invoke-WebRequest: setup registers the system's proxy rule, which PowerShell's web
+# requests read (served by the service itself) before they ask the service.
+function Answers {
+  $code = & curl.exe -s -o NUL --noproxy "*" -m 2 -w "%{http_code}" http://127.0.0.1:1081/status.json
+  $script:answer = "HTTP $code, curl exit $LASTEXITCODE"
+  return ($LASTEXITCODE -eq 0 -and "$code" -eq "200")
+}
+# Who has the port, and how long each way of asking takes, for a check that fails.
+function HowItAnswers {
+  $listen = @(Get-NetTCPConnection -LocalPort 1081 -State Listen -ErrorAction SilentlyContinue | ForEach-Object OwningProcess)
+  $sw = [Diagnostics.Stopwatch]::StartNew()
+  $code = & curl.exe -s -o NUL --noproxy "*" -m 5 -w "%{http_code}" http://127.0.0.1:1081/status.json
+  $curl = "HTTP $code (exit $LASTEXITCODE) in $($sw.Elapsed.TotalSeconds) s"
+  $sw = [Diagnostics.Stopwatch]::StartNew()
+  $iwr = "answered"
+  try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 http://127.0.0.1:1081/status.json | Out-Null } catch { $iwr = $_.Exception.Message }
+  Write-Host "port 1081: listening process $($listen -join ', '); curl: $curl; Invoke-WebRequest: $iwr in $($sw.Elapsed.TotalSeconds) s; last poll: $script:answer"
+}
+# The tray app starts a stopped service again: nobody should need a terminal. Here it ends as
+# in a crash. "/End" alone ends only conhost, not the service it started: Repair, setup and
+# uninstall end that one too (checked below and in test-uninstall.ps1).
+ShowService
+$end = cmd /c "schtasks /End /TN uni-vpn 2>&1"  # stderr through PowerShell would stop the script
+Write-Host "schtasks /End: $end (exit $LASTEXITCODE)"
+$sw = [Diagnostics.Stopwatch]::StartNew()
+Daemons | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+$down = $null; $up = $null
+while ($sw.Elapsed.TotalSeconds -lt 30 -and -not $up) {
+  $answers = Answers
+  if (-not $answers -and -not $down) { $down = $sw.Elapsed.TotalSeconds }
+  if ($answers -and $down) { $up = $sw.Elapsed.TotalSeconds }
+  Start-Sleep -Milliseconds 250
+}
+ShowService
+Write-Host "service ended at $down s, the tray app started it again at $up s"
+if (-not $up) { Explain; $problems += "the tray app did not start the stopped service again" }
+foreach ($i in 1..30) { if (Answers) { break }; Start-Sleep 1 }
+# Installing again while it all runs (the website's installer over an installed one): the
+# installer stops everything that runs from Program Files, the tray app first, or it starts
+# the service again meanwhile, which then holds its files ("DeleteFile failed; code 5").
+$sweep = Measure-Command { powershell -NoProfile -NonInteractive -Command "Get-Process | Where-Object { `$_.Path -like '$env:ProgramFiles\uni-vpn\*' } | Out-Null" }
+Write-Host "the installer's search for running programs takes $($sweep.TotalSeconds) s"
+$process = Start-Process -FilePath out\uni-vpn-setup.exe -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/LOG=reinstall-setup.log" -PassThru
+if (-not $process.WaitForExit(300000)) { Explain; throw "installing again did not finish within 5 minutes" }
+if ($process.ExitCode -ne 0) { Get-Content reinstall-setup.log -Tail 40; Explain; throw "installing again over the running app failed" }
+$ok = $false
+foreach ($i in 1..30) {
+  try { $status = Invoke-RestMethod http://127.0.0.1:1081/status.json; $ok = $true; break } catch { Start-Sleep 1 }
+}
+if (-not $ok -or $status.commit -ne $env:GITHUB_SHA) { Explain; throw "the service does not run after installing again" }
+# Repair stops and starts the service while the tray app starts a stopped one again. Here at the
+# worst moment, as soon as Task Scheduler no longer counts it as running: setup ends it again,
+# else it fails ("The running service did not stop") and skips the proxy rule and the app.
+$core = "$env:ProgramFiles\uni-vpn\bin\uni-vpn-core.exe"
+$before = @(Daemons | ForEach-Object ProcessId)
+[IO.File]::WriteAllText("$PWD\empty-input.txt", "")
+$repair = Start-Process -FilePath $core -ArgumentList "setup --no-browser --repair" -RedirectStandardInput empty-input.txt `
+  -RedirectStandardOutput repair.log -RedirectStandardError repair-err.log -NoNewWindow -PassThru
+$null = $repair.Handle  # else ExitCode stays empty
+$sw = [Diagnostics.Stopwatch]::StartNew()
+$restarted = $null
+while (-not $repair.HasExited -and $sw.Elapsed.TotalSeconds -lt 60) {
+  if ((Get-ScheduledTask -TaskName uni-vpn).State -ne "Running") { schtasks /Run /TN uni-vpn | Out-Null; $restarted = $sw.Elapsed.TotalSeconds; break }
+  Start-Sleep -Milliseconds 50
+}
+if (-not $repair.WaitForExit(300000)) { Explain; throw "Repair's setup did not finish within 5 minutes" }
+Get-Content repair.log, repair-err.log -ErrorAction SilentlyContinue
+Write-Host "the test started the task again at $restarted s; setup ended with $($repair.ExitCode) at $($sw.Elapsed.TotalSeconds) s"
+if ($repair.ExitCode -ne 0) { Explain; $problems += "Repair failed when the service was started again meanwhile" }
+$ok = $false
+foreach ($i in 1..30) {
+  try { $status = Invoke-RestMethod http://127.0.0.1:1081/status.json; $ok = $true; break } catch { Start-Sleep 1 }
+}
+if (-not $ok -or $status.commit -ne $env:GITHUB_SHA) { Explain; throw "the service does not run after Repair" }
+ShowService
+if (@(Daemons | Where-Object { $before -contains $_.ProcessId }).Count -gt 0) { $problems += "Repair left the old service running" }
+# Normal priority: Task Scheduler's default runs a task below normal, with low I/O and memory
+# priority, while all of the browser's traffic to the university goes through the service.
+$taskPriority = (Get-ScheduledTask -TaskName uni-vpn).Settings.Priority
+$daemon = @(Get-CimInstance Win32_Process -Filter "Name = 'uni-vpn-core.exe'" | Where-Object { $_.CommandLine -like "* daemon*" })
+Write-Host "task priority $taskPriority; service base priority $(($daemon | ForEach-Object Priority) -join ', ') (8 is normal, 6 below normal)"
+if ($taskPriority -ne 4) { $problems += "the task has priority $taskPriority, not 4" }
+if ($daemon.Count -eq 0 -or ($daemon | Where-Object { $_.Priority -lt 8 })) { $problems += "the service does not run at normal priority" }
+# An update replaces only the program, so an earlier version's task keeps priority 7: the
+# service still runs at normal priority then (it sets its own when it starts).
+$xml = "$PWD\task-priority-7.xml"
+(Export-ScheduledTask -TaskName uni-vpn) -replace "<Priority>4</Priority>", "<Priority>7</Priority>" | Set-Content -Encoding Unicode $xml
+$out = cmd /c "schtasks /Create /TN uni-vpn /XML `"$xml`" /F 2>&1"
+if ($LASTEXITCODE -ne 0) { throw "could not give the task an earlier version's priority: $out" }
+ShowService
+$old = @(Daemons | ForEach-Object ProcessId)
+cmd /c "schtasks /End /TN uni-vpn 2>&1" | Out-Null
+$old | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
+cmd /c "schtasks /Run /TN uni-vpn 2>&1" | Out-Null
+function NewDaemons { @(Daemons | Where-Object { $old -notcontains $_.ProcessId }) }
+$up = $false
+foreach ($i in 1..30) { if (@(NewDaemons).Count -gt 0 -and (Answers)) { $up = $true; break }; Start-Sleep 1 }
+ShowService
+$taskPriority = (Get-ScheduledTask -TaskName uni-vpn).Settings.Priority
+$daemon = @(NewDaemons)
+Write-Host "an earlier version's task: priority $taskPriority; service base priority $(($daemon | ForEach-Object Priority) -join ', ')"
+if (-not $up) { Explain; HowItAnswers; $problems += "the service started with an earlier version's task did not answer" }
+if ($taskPriority -ne 7) { throw "the task has priority $taskPriority, not an earlier version's 7" }
+if ($daemon.Count -eq 0 -or ($daemon | Where-Object { $_.Priority -lt 8 })) { Explain; $problems += "with an earlier version's task the service does not run at normal priority" }
+# The Repair button: the service starts setup, which ends that service and starts a new one, so
+# setup must outlive it. Ended with it, only the tray app starts the service again, a minute
+# later, and the rest of Repair is not done. Repair also writes the earlier version's task again.
+$old = @(Daemons | ForEach-Object ProcessId)
+Invoke-WebRequest -UseBasicParsing -Method Post -Headers @{ "X-Uni-VPN" = "1" } http://127.0.0.1:1081/api/repair | Out-Null
+$sw = [Diagnostics.Stopwatch]::StartNew()
+$back = $null
+while (-not $back -and $sw.Elapsed.TotalSeconds -lt 90) {
+  if (@(NewDaemons).Count -gt 0 -and @(Daemons | Where-Object { $old -contains $_.ProcessId }).Count -eq 0 -and (Answers)) { $back = $sw.Elapsed.TotalSeconds }
+  else { Start-Sleep -Milliseconds 250 }
+}
+ShowService
+$taskPriority = (Get-ScheduledTask -TaskName uni-vpn).Settings.Priority
+Write-Host "the Repair button: the new service answered at $back s; task priority $taskPriority"
+Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\daemon.log" -Tail 12 -ErrorAction SilentlyContinue
+if (-not $back) { Explain; HowItAnswers; throw "no new service answers after the Repair button" }
+if ($back -gt 40) { Explain; $problems += "after the Repair button only the tray app started the service again ($back s)" }
+if ($taskPriority -ne 4) { $problems += "the Repair button did not write the task again (priority $taskPriority)" }
+$status = Invoke-RestMethod http://127.0.0.1:1081/status.json
+if ($status.commit -ne $env:GITHUB_SHA) { throw "the service after the Repair button is not this commit's ($($status.commit))" }
+# An otpauth:// link's key must not stay on disk in the window's browsing history, as it does
+# not in the browser's (the fallback without WebView2 leaves it out): uninstall deletes the key
+# everywhere else. Looked for again below, once the window's browser process has ended.
+$key = "UNIVPNCIKEYABCDEFG"
+function KeyOnDisk {
+  $read = 0; $unread = @()
+  foreach ($file in Get-ChildItem "$env:LOCALAPPDATA\uni-vpn\WebView2" -Recurse -File -ErrorAction SilentlyContinue) {
+    try {
+      # Also files the running WebView2 has open.
+      $stream = [IO.File]::Open($file.FullName, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+      $bytes = New-Object byte[] $stream.Length
+      $n = 0
+      while ($n -lt $bytes.Length) { $got = $stream.Read($bytes, $n, $bytes.Length - $n); if ($got -le 0) { break }; $n += $got }
+      $stream.Close()
+      $read++
+      if ([Text.Encoding]::ASCII.GetString($bytes).Contains($key) -or [Text.Encoding]::Unicode.GetString($bytes).Contains($key)) { return $file.FullName }
+    } catch { $unread += "$($file.Name): $($_.Exception.Message)" }
+  }
+  Write-Host "looked for the key in $read files of the WebView2 folder; could not read $($unread.Count) $($unread -join '; ')"
+  if ($read -eq 0 -and $unread.Count -gt 0) { return "none of its files (none could be read)" }
+  return $null
+}
+# The link starts the app (here without a window yet, so the page loads with the key in it).
+Get-Process -Name "Uni VPN" -ErrorAction SilentlyContinue | Stop-Process -Force
+foreach ($i in 1..30) { if (@(AppWebViews).Count -eq 0) { break }; Start-Sleep 1 }
+Start-Process $exe -ArgumentList "otpauth://totp/uni-vpn-ci?secret=$key"
+Start-Sleep 20  # Chromium writes its history every 10 s
+$found = KeyOnDisk
+if ($found) { $problems += "the otpauth link's key is on disk in $found" }
+Get-ChildItem "$env:LOCALAPPDATA\uni-vpn\WebView2" -Depth 2 -ErrorAction SilentlyContinue | ForEach-Object FullName
+# A page process that ends (crash, out of memory, Task Manager) loads the page again; without
+# its browser process the window gets a new one. Both left the window blank until Exit.
+function AppBrowser { @(AppWebViews | Where-Object { $_.CommandLine -notmatch "--type=" }) }
+function Renderers($browser) { @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $browser" | Where-Object { $_.CommandLine -match "--type=renderer" }) }
+foreach ($i in 1..30) { if (@(AppBrowser).Count -gt 0 -and @(Renderers (@(AppBrowser)[0].ProcessId)).Count -gt 0) { break }; Start-Sleep 1 }
+if (@(AppBrowser).Count -eq 0) { Explain; throw "the otpauth link did not open the app window" }
+$browser = @(AppBrowser)[0].ProcessId
+$renderers = @(Renderers $browser | ForEach-Object ProcessId)
+Write-Host "app window: browser process $browser, page processes $($renderers -join ', ')"
+$renderers | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
+# WebView2 shows an error page in a new page process by itself: only the window's note says the
+# page itself loaded again. The note keeps the latest line only, so it is looked for meanwhile.
+$reloaded = $false
+foreach ($i in 1..60) {
+  if ((Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\app.log" -Raw -ErrorAction SilentlyContinue) -like "*RenderProcessExited, the page loaded again*") { $reloaded = $true; break }
+  Start-Sleep -Milliseconds 250
+}
+Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\app.log" -ErrorAction SilentlyContinue
+if (-not $reloaded) { Explain; $problems += "the page did not load again after its process ended" }
+Stop-Process -Id $browser -Force
+function NewBrowser { @(AppBrowser | Where-Object { $_.ProcessId -ne $browser }) }
+foreach ($i in 1..20) { if (@(NewBrowser).Count -gt 0) { break }; Start-Sleep 1 }
+Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\app.log" -ErrorAction SilentlyContinue
+if (@(NewBrowser).Count -eq 0) { Explain; $problems += "the window did not come back after its browser process ended" }
+if (@(Trays).Count -eq 0) { Explain; $problems += "the tray app ended with the window's browser process" }
+if (-not $found) {
+  $found = KeyOnDisk
+  if ($found) { $problems += "the otpauth link's key is on disk in $found once the browser process ended" }
+}
+if ($problems.Count -gt 0) { throw ($problems -join "; ") }

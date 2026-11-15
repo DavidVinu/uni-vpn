@@ -92,3 +92,10 @@ func TestUserPathComparison(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+// Task Scheduler's default priority 7 runs a task below normal, with low I/O and memory priority.
+func TestTaskRunsAtNormalPriority(t *testing.T) {
+	if text := RenderTaskBinary("", `C:\x\uni-vpn-core.exe`, "u", `C:\w`); !strings.Contains(text, "<Priority>4</Priority>") {
+		t.Fatal(text)
+	}
+}

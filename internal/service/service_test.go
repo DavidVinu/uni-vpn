@@ -219,6 +219,47 @@ func TestLaunchdPlist(t *testing.T) {
 	}
 }
 
+// A background job runs throttled on macOS: the lowest CPU priority, and its sockets give way
+// to all other traffic, while all of the browser's traffic to the university goes through it.
+func TestLaunchdPlistIsAnInteractiveJob(t *testing.T) {
+	text := mustRender(RenderUnit(true, "/opt/uni-vpn/uni-vpn", "/Users/x/Library/Logs/uni-vpn", "", nil))
+	if !strings.Contains(text, interactiveProcessType) || strings.Contains(text, "Background") {
+		t.Fatal(text)
+	}
+}
+
+func TestUpgradeProcessTypeRewritesAnOlderPlistOnce(t *testing.T) {
+	h := setupHome(t)
+	m, _ := manager("darwin", &recorder{})
+	if m.UpgradeProcessType() {
+		t.Fatal("no plist, nothing to change")
+	}
+	path := filepath.Join(h, "Library", "LaunchAgents", "de.davidvinu.uni-vpn.plist")
+	current := mustRender(RenderUnit(true, "/opt/uni-vpn/uni-vpn", "/Users/x/Library/Logs/uni-vpn", "", nil))
+	older := strings.Replace(current, interactiveProcessType, "<key>ProcessType</key>\n  <string>Background</string>", 1)
+	if older == current {
+		t.Fatal("the test's older plist is the current one")
+	}
+	os.MkdirAll(filepath.Dir(path), 0o755)
+	os.WriteFile(path, []byte(older), 0o644)
+	if !m.UpgradeProcessType() {
+		t.Fatal("the older plist was not changed")
+	}
+	if data, _ := os.ReadFile(path); string(data) != current {
+		t.Fatal(string(data))
+	}
+	if st, _ := os.Stat(path); st.Mode().Perm() != 0o644 {
+		t.Fatal(st.Mode())
+	}
+	if m.UpgradeProcessType() {
+		t.Fatal("changed again")
+	}
+	os.WriteFile(path, []byte(older), 0o644)
+	if linux, _ := manager("linux", &recorder{}); linux.UpgradeProcessType() {
+		t.Fatal("only macOS has the plist")
+	}
+}
+
 func TestBinaryUnitDiffersOnlyInTheProgram(t *testing.T) {
 	env := []Pair{{"XDG_CONFIG_HOME", "/home/x/.cfg"}}
 	for _, extra := range [][]Pair{nil, env} {
@@ -453,6 +494,43 @@ func TestMacOSBootstrapIsRetried(t *testing.T) {
 	}
 }
 
+// The menu bar app loads a stopped service again after two missed polls, also between setup's
+// bootout and bootstrap (Repair, a reinstall): setup's bootstrap then fails, but the job runs,
+// loaded from the file setup wrote.
+func TestMacOSInstallAcceptsTheJobTheMenuBarAppLoaded(t *testing.T) {
+	setupHome(t)
+	pid := "100"
+	r := &recorder{}
+	r.reply = func(c Cmd) (Result, error) {
+		switch c.Args[1] {
+		case "bootout":
+			pid = "200"
+		case "bootstrap":
+			return Result{Code: 5, Stderr: "Bootstrap failed: 5: Input/output error"}, nil
+		case "print":
+			return Result{Stdout: "gui/501/de.davidvinu.uni-vpn = {\n\tstate = running\n\tpid = " + pid + "\n}\n"}, nil
+		}
+		return Result{}, nil
+	}
+	m, _ := manager("darwin", r)
+	if _, err := m.Install(false); err != nil {
+		t.Fatal(err, r.calls)
+	}
+	// The old job, still going away: not taken for the new one.
+	r.reply = func(c Cmd) (Result, error) {
+		switch c.Args[1] {
+		case "bootstrap":
+			return Result{Code: 5, Stderr: "Bootstrap failed: 5: Input/output error"}, nil
+		case "print":
+			return Result{Stdout: "\tstate = running\n\tpid = 100\n"}, nil
+		}
+		return Result{}, nil
+	}
+	if _, err := m.Install(false); err == nil || !strings.Contains(err.Error(), "Bootstrap failed: 5") {
+		t.Fatal(err)
+	}
+}
+
 func TestUninstallRemovesUnit(t *testing.T) {
 	setupHome(t)
 	r := &recorder{}
@@ -599,7 +677,11 @@ func TestWindowsControlEndsTaskAfterLoggingOut(t *testing.T) {
 		names = append(names, strings.Join(c, " "))
 	}
 	ps := "powershell -NoProfile -NonInteractive -Command (Get-ScheduledTask -TaskName 'uni-vpn').State"
-	if !reflect.DeepEqual(names, []string{"schtasks /End /TN uni-vpn", ps, ps, ps, "schtasks /Run /TN uni-vpn"}) {
+	// Still running: ended again (the tray app may have started it again), each time with the
+	// service that conhost started.
+	end := "schtasks /End /TN uni-vpn"
+	kill := fmt.Sprintf("taskkill /F /FI IMAGENAME eq uni-vpn /FI PID ne %d /FI USERNAME eq %s", os.Getpid(), winsys.CurrentUser())
+	if !reflect.DeepEqual(names, []string{end, kill, ps, end, kill, ps, end, kill, ps, "schtasks /Run /TN uni-vpn"}) {
 		t.Fatal(names)
 	}
 }
@@ -703,6 +785,77 @@ func TestWindowsInstallWritesUTF16TaskAndRuns(t *testing.T) {
 	}
 	if !r.called("schtasks", "/Create", "/TN", "uni-vpn", "/XML", files[0], "/F") ||
 		!reflect.DeepEqual(r.calls[len(r.calls)-1], []string{"schtasks", "/Run", "/TN", "uni-vpn"}) {
+		t.Fatal(r.calls)
+	}
+}
+
+// The tray app starts a stopped service again after two missed polls (3 to 6 s), also while
+// Repair's setup waits for the old one to end: the task runs again, and with IgnoreNew setup's
+// own "/Run" would be dropped. Setup ends it again until it stays ended.
+func TestWindowsInstallEndsATaskThatWasStartedAgain(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	var mu sync.Mutex
+	queries := 0
+	r := &recorder{reply: func(c Cmd) (Result, error) {
+		if c.Args[0] != "powershell" {
+			return Result{}, nil
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		queries++
+		if queries <= 2 {
+			return Result{Stdout: "Running"}, nil
+		}
+		return Result{Stdout: "Ready"}, nil
+	}}
+	m, _ := manager("windows", r)
+	m.HTTPPort = func() (int, error) { return 9, nil }
+	if _, err := m.Install(false); err != nil {
+		t.Fatal(err)
+	}
+	ends, last := 0, -1
+	for i, c := range r.calls {
+		if reflect.DeepEqual(c, []string{"schtasks", "/End", "/TN", "uni-vpn"}) {
+			ends, last = ends+1, i
+		}
+	}
+	if ends != 3 || !reflect.DeepEqual(r.calls[len(r.calls)-1], []string{"schtasks", "/Run", "/TN", "uni-vpn"}) || last > len(r.calls)-2 {
+		t.Fatal(r.calls)
+	}
+}
+
+// The task's program is conhost.exe, which starts the service: "schtasks /End" ends conhost
+// only, and the service went on running (Repair did not restart it, uninstall left it).
+func TestWindowsEndTaskAlsoEndsTheService(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("USERDOMAIN", "UNI")
+	t.Setenv("USERNAME", "ab123")
+	r := &recorder{reply: func(c Cmd) (Result, error) {
+		if c.Args[0] == "powershell" {
+			return Result{Stdout: "Ready"}, nil
+		}
+		return Result{}, nil
+	}}
+	m, _ := manager("windows", r)
+	m.HTTPPort = func() (int, error) { return 9, nil }
+	if _, err := m.Install(false); err != nil {
+		t.Fatal(err)
+	}
+	kill := []string{"taskkill", "/F", "/FI", "IMAGENAME eq uni-vpn", "/FI", fmt.Sprintf("PID ne %d", os.Getpid()), "/FI", `USERNAME eq UNI\ab123`}
+	end, killed, run := -1, -1, -1
+	for i, c := range r.calls {
+		switch {
+		case reflect.DeepEqual(c, []string{"schtasks", "/End", "/TN", "uni-vpn"}) && end < 0:
+			end = i
+		case reflect.DeepEqual(c, kill):
+			killed = i
+		case reflect.DeepEqual(c, []string{"schtasks", "/Run", "/TN", "uni-vpn"}):
+			run = i
+		}
+	}
+	if end < 0 || killed < end || run < killed {
 		t.Fatal(r.calls)
 	}
 }

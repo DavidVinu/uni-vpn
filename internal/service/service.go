@@ -15,11 +15,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 	"unicode/utf16"
 
+	"github.com/DavidVinu/uni-vpn/internal/atomicfile"
 	"github.com/DavidVinu/uni-vpn/internal/platform"
 	"github.com/DavidVinu/uni-vpn/internal/winsys"
 )
@@ -255,20 +257,37 @@ func (m *Manager) disconnectDaemon(timeout time.Duration) {
 	}
 }
 
-// endTask logs out, ends the task and waits until Task Scheduler no longer counts it as
-// running (with IgnoreNew a "/Run" right after "/End" is otherwise silently dropped).
+// endTask logs out, ends the task and the service, and waits until Task Scheduler no longer
+// counts it as running (with IgnoreNew a "/Run" right after "/End" is otherwise silently dropped).
 func (m *Manager) endTask() (bool, error) {
 	m.disconnectDaemon(15 * time.Second)
-	if _, err := m.Run(Cmd{Args: schtasks("/End", "/TN", winsys.TaskName), Capture: true, NoWindow: true}); err != nil {
-		return false, err
-	}
 	for range 20 {
+		// Again while it runs: the tray app starts a stopped service again after two missed
+		// polls (3 to 6 s), once a minute at most. Ended again, it stays ended.
+		if _, err := m.Run(Cmd{Args: schtasks("/End", "/TN", winsys.TaskName), Capture: true, NoWindow: true}); err != nil {
+			return false, err
+		}
+		m.endService()
 		if !m.IsActive() {
 			return true, nil
 		}
 		m.Sleep(500 * time.Millisecond)
 	}
 	return false, nil
+}
+
+// endService ends the service the task started. The task's program is conhost.exe, which
+// starts the service, and "/End" ends only conhost: the service went on running. Every copy of
+// this program of this account but this one goes (also a restart supervisor; Repair's setup
+// is this one), openconnect with it (KillChildrenWithUs).
+func (m *Manager) endService() {
+	binary, err := m.binary()
+	if err != nil {
+		return
+	}
+	m.Run(Cmd{Args: []string{"taskkill", "/F", "/FI", "IMAGENAME eq " + filepath.Base(binary),
+		"/FI", fmt.Sprintf("PID ne %d", os.Getpid()), "/FI", "USERNAME eq " + winsys.CurrentUser()},
+		Capture: true, NoWindow: true})
 }
 
 // writeText writes like Python's Path.write_text: "\n" becomes "\r\n" on Windows.
@@ -371,6 +390,7 @@ func (m *Manager) Install(dryRun bool) ([]string, error) {
 	}
 	files := []string{target}
 	if m.macOS() {
+		old := m.runningPid()
 		if _, err := m.Run(Cmd{Args: []string{"launchctl", "bootout", m.guiDomain(), target}, Capture: true}); err != nil {
 			return files, err
 		}
@@ -378,6 +398,11 @@ func (m *Manager) Install(dryRun bool) ([]string, error) {
 		for attempt := 0; ; attempt++ {
 			err := m.runChecked([]string{"launchctl", "bootstrap", m.guiDomain(), target}, files)
 			if err == nil {
+				break
+			}
+			// The menu bar app loads a stopped service again after two missed polls: another job
+			// than the old one runs, loaded from the file written above.
+			if pid := m.runningPid(); pid != 0 && pid != old {
 				break
 			}
 			if attempt == 4 {
@@ -398,6 +423,40 @@ func (m *Manager) Install(dryRun bool) ([]string, error) {
 		}
 	}
 	return files, nil
+}
+
+// runningPid is the pid of the running launchd job, 0 if none runs.
+func (m *Manager) runningPid() int {
+	r, err := m.Run(Cmd{Args: []string{"launchctl", "print", m.guiDomain() + "/" + Label},
+		Capture: true, Timeout: 5 * time.Second})
+	if err != nil || r.Code != 0 || !strings.Contains(r.Stdout, "state = running") {
+		return 0
+	}
+	for _, line := range strings.Split(r.Stdout, "\n") {
+		if value, ok := strings.CutPrefix(strings.TrimSpace(line), "pid = "); ok {
+			if pid, err := strconv.Atoi(value); err == nil {
+				return pid
+			}
+		}
+	}
+	return 0
+}
+
+// UpgradeProcessType gives the service file of an earlier version, a background job, the
+// process type of this one (interactiveProcessType). launchd reads it at the next login: an
+// update replaces only the program. Reports whether it changed the file.
+func (m *Manager) UpgradeProcessType() bool {
+	if !m.macOS() {
+		return false
+	}
+	path := m.UnitTargetPath()
+	data, err := os.ReadFile(path)
+	background := strings.Replace(interactiveProcessType, "Interactive", "Background", 1)
+	if err != nil || !strings.Contains(string(data), background) {
+		return false
+	}
+	// In one step: a half written file would keep the service from starting at the next login.
+	return atomicfile.Write(path, []byte(strings.Replace(string(data), background, interactiveProcessType, 1))) == nil
 }
 
 // Uninstall stops and removes the service. False if it could not be removed (also without

@@ -140,12 +140,7 @@ func KillChildrenWithUs() bool {
 	if err != nil {
 		return false
 	}
-	var info windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
-	// Breakaway allowed: the Repair installer must outlive the service it restarts.
-	info.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE |
-		windows.JOB_OBJECT_LIMIT_BREAKAWAY_OK
-	if _, err := windows.SetInformationJobObject(job, windows.JobObjectExtendedLimitInformation,
-		uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info))); err != nil {
+	if setJobLimits(job, true) != nil {
 		windows.CloseHandle(job)
 		return false
 	}
@@ -155,6 +150,26 @@ func KillChildrenWithUs() bool {
 	}
 	jobHandle = job
 	return true
+}
+
+// ChildrenEndWithUs(false) lets the children outlive this process until it is called with
+// true again: Repair's setup, when an outer job keeps it from leaving ours, ends this service.
+func ChildrenEndWithUs(end bool) bool {
+	jobMu.Lock()
+	defer jobMu.Unlock()
+	return jobHandle != 0 && setJobLimits(jobHandle, end) == nil
+}
+
+func setJobLimits(job windows.Handle, kill bool) error {
+	var info windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+	// Breakaway allowed: the Repair installer must outlive the service it restarts.
+	info.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_BREAKAWAY_OK
+	if kill {
+		info.BasicLimitInformation.LimitFlags |= windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+	}
+	_, err := windows.SetInformationJobObject(job, windows.JobObjectExtendedLimitInformation,
+		uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info)))
+	return err
 }
 
 // CtrlCHelper is the body of the helper process SendCtrlC starts: attach to the console of pid

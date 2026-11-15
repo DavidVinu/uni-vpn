@@ -12,6 +12,7 @@ Arguments: --port N, --hidden (sign-in: panel icon only), --page P ("#settings",
 import json
 import locale
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -132,6 +133,8 @@ class App(Gtk.Application):
         self.port = "1081"
         self.window = None
         self.view = None
+        self.target = None  # the page asked for last, which a failed or ended page loads again
+        self.reloaded = float("-inf")
         self.indicator = None
         self.status = {}
         self.reachable = False
@@ -139,6 +142,7 @@ class App(Gtk.Application):
         self.started = False
         self.misses = 0
         self.last_start = float("-inf")  # time.monotonic() counts from boot: no wait right after it
+        self.repairing = float("-inf")  # when the service last said that Repair runs
         self.program = stamp()
         self.seen = None
         self.restarting = False
@@ -207,9 +211,11 @@ class App(Gtk.Application):
         return True
 
     def start_service_if_down(self):
-        """Nobody should need a terminal: a stopped service is started again from here."""
+        """Nobody should need a terminal: a stopped service is started again from here. Not while
+        Repair restarts it (as on Windows and macOS, where that would make it fail)."""
         self.misses = 0 if self.reachable else self.misses + 1
-        if self.misses < 2 or time.monotonic() - self.last_start < 60:
+        now = time.monotonic()
+        if self.misses < 2 or now - self.last_start < 60 or now - self.repairing < 60:
             return
         self.last_start = time.monotonic()
         try:
@@ -237,6 +243,8 @@ class App(Gtk.Application):
 
     def render(self, data):
         self.reachable = data is not None
+        if data and data.get("repairing") is True:
+            self.repairing = time.monotonic()
         self.start_service_if_down()
         self.restart_if_updated()
         self.status = data or {}
@@ -281,7 +289,11 @@ class App(Gtk.Application):
             self.window.set_resizable(False)
             self.window.set_position(Gtk.WindowPosition.CENTER)
             self.window.set_icon_name(APP_ID)
-            self.view = WebKit2.WebView()
+            # Nothing of the page on disk: WebKit's cache kept an otpauth link's key (#otpauth=),
+            # also after uninstall. The page stores nothing. What earlier versions kept goes.
+            for base in (GLib.get_user_cache_dir(), GLib.get_user_data_dir()):
+                shutil.rmtree(os.path.join(base, APP_ID), ignore_errors=True)
+            self.view = WebKit2.WebView(is_ephemeral=True)
             settings = self.view.get_settings()
             settings.set_enable_developer_extras(False)
             settings.set_user_agent_with_application_details("UniVPN", "")
@@ -289,6 +301,8 @@ class App(Gtk.Application):
             # No browser menu, except Cut/Copy/Paste in text fields (the page blocks it elsewhere).
             self.view.connect("context-menu", lambda _view, _menu, *rest: not rest[-1].context_is_editable())
             self.view.connect("load-failed", self.on_failed)
+            self.view.connect("web-process-terminated", self.on_terminated)
+            self.view.connect("load-changed", self.on_load_changed)
             self.window.add(self.view)
             self.window.connect("delete-event", self.on_close)
         self.load(page)
@@ -308,7 +322,10 @@ class App(Gtk.Application):
             if page:
                 self.view.run_javascript(f"location.hash = {json.dumps(page)}", None, None, None)
             return
-        self.target = self.base + "?app=1" + page
+        # Nothing shown (a load that failed, a page process that ended): "as it is" is the page
+        # asked for last (Settings, setup's prefill), not the main page.
+        if page or self.target is None:
+            self.target = self.base + "?app=1" + page
         self.view.load_uri(self.target)
 
     def on_policy(self, _view, decision, kind):
@@ -335,6 +352,21 @@ class App(Gtk.Application):
 
         GLib.timeout_add_seconds(2, retry)
         return True
+
+    def on_load_changed(self, _view, event):
+        # The page has an otpauth link's key now: a page loaded again (ended process, retry) does
+        # not offer it once more.
+        if event == WebKit2.LoadEvent.COMMITTED and self.target and "#otpauth=" in self.target:
+            self.target = self.target.split("#", 1)[0]
+
+    def on_terminated(self, view, reason):
+        # The page's process ended (crash, out of memory): the window stays blank until the page
+        # loads again. Not over and over for a page that ends it at once; a click on the app or
+        # the panel menu loads it then (load).
+        if reason == WebKit2.WebProcessTerminationReason.TERMINATED_BY_API or time.monotonic() - self.reloaded < 10:
+            return
+        self.reloaded = time.monotonic()
+        view.load_uri(self.target)
 
     def on_close(self, window, _event):
         if self.indicator:

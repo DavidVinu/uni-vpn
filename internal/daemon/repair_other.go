@@ -7,8 +7,8 @@ import (
 	"syscall"
 )
 
-func startRepair(newCmd func() *exec.Cmd, _ bool) (*exec.Cmd, error) {
+func startRepair(newCmd func() *exec.Cmd, _ bool) (*exec.Cmd, func(), error) {
 	cmd := newCmd() // stdin, stdout and stderr stay nil: /dev/null
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	return cmd, cmd.Start()
+	return cmd, nil, cmd.Start()
 }
