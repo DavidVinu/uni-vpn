@@ -42,6 +42,14 @@ windows, installers, phone apps, website and CI.
 | GC-27 | macOS keychain: a password with a tab, or one that looks like hex, reads back wrong | Low | left: how `security -w` prints; very unlikely for real passwords |
 | GC-28 | Hidden tuning key `tick = 0` in config.toml makes the core spin | Low | left: undocumented key, nobody sets it |
 | GC-29 | Removing sync keys counts a keyring time-out as done; they come back at the next start | Low | left: only with a locked keyring |
+| GC-30 | A connection that breaks during sign-in is shown as a refused password, with no retry | Medium | fixed |
+| GC-31 | Another account can take the proxy port during sign-in and be counted as the VPN | Medium | fixed |
+| GC-32 | macOS: openconnect keeps the VPN session up after the service was killed | Medium | fixed |
+| GC-33 | macOS uninstall loses a network service's own switched-off rule address | Low | fixed |
+| GC-34 | Small SOCKS and DNS edges: a truncated DNS answer is not retried over TCP; a cancel can wait for the full DNS time-out; an unknown address type waits for 2 more bytes; a half-closed connection waits for the remote end; the "no acceptable method" reply can be lost on Windows | Low | left: each only delays or fails one request that the browser retries |
+| GC-35 | Small tunnel edges: an empty `openconnect --help` (fork failure) adds `--no-external-auth` once; pipes leak if a second pipe cannot be made; a server banner with a marker word could be misread | Low | left: rare, and the next start corrects it |
+| GC-36 | Proxy backup files are written without an atomic rename | Low | left: only a crash during the write; Restore falls back to the defaults |
+| GC-37 | A UTF-8 BOM in domains.txt makes its first line invalid | Low | left: hand-edited files only |
 
 ### GC-1 Another account's request gets through the account check if it resets the connection first
 
@@ -204,4 +212,49 @@ windows, installers, phone apps, website and CI.
 - Fix: the stop watcher also cancels the background context at once.
 - Verification: `TestStopDoesNotWaitBehindTheRoundAfterAJoin` took 30 s and failed before, passes
   at once after.
+
+### GC-30 A connection that breaks during sign-in is shown as a refused password
+
+- Severity: Medium (a Wi-Fi switch or a gateway hiccup during sign-in stops the VPN for good and
+  tells the user to check the password, which was never checked).
+- Root cause: openconnect prints "Error reading HTTP response" when the connection breaks while it
+  waits for the gateway, then "Failed to complete authentication"; the classifier mapped the
+  second line to a refused password whatever came before.
+- Fix: the classifier remembers a failed request until the next request line; "Failed to complete
+  authentication" right after one is a connect failure, retried with the usual back-off.
+- Verification: a new case in `TestGatewayTroubleIsNotASignInFailure` gave `auth_failed` before
+  and `error` / connect failed after; `TestARetriedRequestStillReportsTheSignIn` keeps a retried
+  request followed by "Login failed." a refused password.
+
+### GC-31 Another account can take the proxy port during sign-in
+
+- Severity: Medium (needs a second account that races for the port: it then gets the browsers'
+  connections, the core shows Connected before the sign-in, and the TOTP file is removed early).
+- Root cause: `FreePort` picks a port and closes it; ocproxy binds it only after the sign-in, and
+  the port is in openconnect's command line, which every account can read. `WaitReady` counted
+  whoever listened there first as the tunnel.
+- Fix: `WaitReady` counts the port only when the end that accepted its test connection belongs to
+  this account (`sockowner`, a few 10 ms retries because Linux names the owner once the listener
+  accepted). When the system cannot tell, it counts as before.
+- Verification: `TestWaitReadyIgnoresAnotherAccountsListener` and, as root,
+  `TestWaitReadyIgnoresARealOtherAccountsListener` (listener of `nobody`) failed before ("counted
+  another account's listener as the tunnel"), pass after.
+
+### GC-32 macOS: openconnect keeps the VPN session up after the service was killed
+
+- Root cause: openconnect was started in a session of its own (`Setsid`). When the service dies
+  (crash, SIGKILL, launchd's exit time-out), launchd ends only the job's process group, so
+  openconnect and ocproxy stayed, holding a VPN session beside the one of the next start. Linux
+  (systemd ends the cgroup) and Windows (job object) already clean up.
+- Fix: no `Setsid` on macOS; openconnect stays in the service's process group.
+- Verification: `TestOpenconnectEndsWithAKilledService` (macOS only, runs in CI): a killed
+  "service" in a group of its own, then launchd's `kill(-pgid)`; red and green shown on Linux with
+  the macOS branch forced on (5.3 s and still alive before, ended in 0.36 s after).
+
+### GC-33 macOS uninstall loses a network service's own switched-off rule address
+
+- Root cause: Restore only switched the rule off for a service whose own address was off, leaving
+  uni-vpn's address in the field.
+- Fix: Restore writes the service's own address back, then switches it off.
+- Verification: `TestMacUninstallKeepsAnAddressThatWasOff` failed before, passes after.
 
