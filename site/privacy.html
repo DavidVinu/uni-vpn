@@ -187,7 +187,12 @@ Tage nach der letzten Nutzung. Zweck: Ihre Einstellungen auf Ihre
 anderen Geräte bringen. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO,
 weil Sie die Funktion selbst nutzen. Wenn Sie in den Einstellungen alle
 Geräte entfernen, werden die Daten nicht mehr gelesen und dann
-gelöscht.</li>
+gelöscht. Damit niemand den Dienst für alle füllen kann, zählt er, wie
+viele neue Daten jedes Netz (eine IP-Adresse) am Tag sendet. Dafür
+speichert er statt der Adresse nur einen Hashwert, gebildet mit einem
+Schlüssel, der jeden Tag wechselt, und löscht ihn am nächsten Tag.
+Rechtsgrundlage dafür ist Art. 6 Abs. 1 lit. f DSGVO (berechtigtes
+Interesse, den Dienst vor Missbrauch zu schützen).</li>
 <li><strong>Google, beim Scannen eines QR-Codes</strong> (Android-App).
 Für "QR-Code scannen" und "Code scannen" nutzt die App den Code-Scanner
 der Google-Play-Dienste; das Handy lädt ihn bei Bedarf aus Google
@@ -364,7 +369,12 @@ deleted at most an hour later, your devices' data 400 days after it was last use
 Purpose: bringing your settings to your other devices. The legal basis
 is Art. 6(1)(b) GDPR, because you use the feature yourself. If you
 remove all devices in Settings, the data is no longer read and is then
-deleted.</li>
+deleted. So that nobody can fill the service for everyone, it counts how
+much new data each network (an IP address) sends per day. For this it
+stores not the address but only a hash of it, made with a key that
+changes every day, and deletes it the next day. The legal basis for this
+is Art. 6(1)(f) GDPR (legitimate interest in protecting the service from
+abuse).</li>
 <li><strong>Google, when you scan a QR code</strong> (Android app). For
 "Scan QR code" and "Scan code" the app uses the code scanner of Google
 Play services; the phone downloads it from Google Play when needed.

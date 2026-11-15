@@ -1171,8 +1171,13 @@ function setupProgress() {
 for (const b of document.querySelectorAll("[data-back]")) b.onclick = () => { if (!submitting) { setupDone = false; step(b.dataset.back); } };
 $("s3-back").onclick = () => { if (!submitting) { setupDone = false; step(needsTotp() ? autoOK() ? "step2a" : "step2" : "step1"); } };
 // Without default domains nothing goes through the university yet: say where to add them.
+// "signout": Chrome on this desktop (Xfce, LXQt) reads the rule from the next login (setup),
+// also the websites added later.
 function finish() {
-  $("s4-msg").textContent = t((S.domains || []).length ? "setup.all_set_sub" : "setup.all_set_no_domains");
+  const signout = params.get("signout") === "1";
+  const key = (S.domains || []).length ? signout ? "setup.all_set_signout" : "setup.all_set_sub"
+    : signout ? "setup.all_set_no_domains_signout" : "setup.all_set_no_domains";
+  $("s4-msg").textContent = t(key);
   step("step4");
 }
 $("s3-skip").onclick = () => { if (setupDone) { if (changing) endChange(); else finish(); } };

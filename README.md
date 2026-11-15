@@ -18,9 +18,11 @@ Download the file for your device and open it:
 | Android | [uni-vpn.apk](https://github.com/DavidVinu/uni-vpn/releases/latest/download/uni-vpn.apk) |
 
 On a Mac, if it says the file "cannot be opened": open System Settings, Privacy & Security, and
-click "Open Anyway". On Windows, if a blue box appears: click "More info", then "Run anyway".
-On Linux, open **Uni VPN** from your apps when the installation is done. On Android, if it asks:
-allow your browser to install apps.
+click "Open Anyway". On Windows, if the browser says the file isn't commonly downloaded: click
+"…" next to the file, then "Keep", "Show more" and "Keep anyway"; if a blue box appears: click
+"More info", then "Run anyway". On Linux, open **Uni VPN** from your apps when the installation
+is done. On Android, if it asks: allow your browser to install apps. Chromebooks are not
+supported yet.
 
 A window opens and asks for your university, your user name and your password. When it says
 "All set", close and reopen your browser once. That's it.
@@ -182,9 +184,12 @@ The service serves a rule at `http://127.0.0.1:1081/proxy.pac`: listed domains o
 system's automatic proxy configuration (GNOME and KDE settings on Linux, network settings on
 macOS, Internet Options on Windows). Chrome, Edge and Firefox read it from there. On macOS
 every network service has its own setting; one added later (a dock's Ethernet, an iPhone over
-USB) gets the rule within a few minutes, and uninstalling turns it off again. On other
-desktops (Xfce and others), enter the address as a PAC URL in the browser's own proxy
-settings.
+USB) gets the rule within a few minutes, and uninstalling turns it off again. Chrome, Edge
+and Brave on Linux read the GNOME or KDE setting only on those desktops (and Cinnamon, MATE,
+Budgie, Pantheon); on Xfce, LXQt and others they read the variable `auto_proxy`, so the
+installer also sets it in `~/.profile` and `~/.xprofile`, from the next login on (the setup
+assistant then says to sign out once). Uninstalling takes those lines out again. Without GNOME
+or KDE settings at all, enter the address in Firefox's own proxy settings.
 
 ### Universities
 

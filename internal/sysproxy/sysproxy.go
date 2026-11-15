@@ -2,7 +2,8 @@
 // networksetup on macOS, the registry on Windows. It mirrors uni_vpn/sysproxy.py.
 //
 // Chrome and Firefox read the system's "automatic proxy configuration" setting and fetch the
-// PAC file from the daemon. The previous state is backed up and restored on removal; the
+// PAC file from the daemon; Chrome on Xfce and LXQt reads it from the session files instead
+// (session.go). The previous state is backed up and restored on removal; the
 // backup file is shared with the Python core, so either core restores what the other saved.
 package sysproxy
 
@@ -414,9 +415,17 @@ func (s *System) Refresh(httpPort int) {
 // use. Only while another service uses our rule, and only services without an automatic proxy
 // that the backup does not know, each backed up first, so that uninstalling turns it off again.
 // Our rule switched off (the uni-vpn of another account waits for the port, Withdraw) is
-// switched on again, while this account's install has its backup. Errors are ignored. backup
-// "" means BackupPath().
+// switched on again, while this account's install has its backup. On Linux the session files
+// get our lines while the rule is ours (installed by an earlier version). Errors are ignored.
+// backup "" means BackupPath().
 func (s *System) Cover(httpPort int, backup string) {
+	if s.linux() {
+		// Installed before Chrome on Xfce and LXQt got the rule from the session files.
+		if s.State(httpPort) == "ok" {
+			s.setSession(httpPort)
+		}
+		return
+	}
 	if !s.macOS() {
 		return
 	}
@@ -570,8 +579,9 @@ func (s *System) isForeign(before *Snapshot, httpPort int) bool {
 }
 
 // Install backs up the current setting (unless a backup exists) and points the system at our
-// PAC. Returns "ok", "replaced" (a foreign setting was replaced), "unavailable" or "failed";
-// the error is for a backup that could not be written. backup "" means BackupPath().
+// PAC, on Linux also in the session files. Returns "ok", "replaced" (a foreign setting was
+// replaced), "unavailable" or "failed"; the error is for a backup that could not be written.
+// backup "" means BackupPath().
 func (s *System) Install(httpPort int, backup string) (string, error) {
 	if backup == "" {
 		backup = BackupPath()
@@ -605,6 +615,9 @@ func (s *System) Install(httpPort int, backup string) (string, error) {
 	}
 	if err := s.Apply(PacURLVersion(httpPort, version)); err != nil {
 		return "failed", nil
+	}
+	if s.linux() {
+		s.setSession(httpPort)
 	}
 	if s.isForeign(before, httpPort) {
 		return "replaced", nil
@@ -649,6 +662,10 @@ func (s *System) Withdraw(httpPort int) bool {
 	if k := now.KDE; k != nil && k.Type == KDEPAC && IsOurs(k.URL, httpPort) && s.kdeSet("0", k.URL, true) == nil {
 		off = true
 	}
+	// Chrome on Xfce and LXQt keeps the address until the next login: from then on not.
+	if s.clearSession() {
+		off = true
+	}
 	return off
 }
 
@@ -664,11 +681,15 @@ func mkdirLast(dir string, mode os.FileMode) error {
 	return nil
 }
 
-// Uninstall restores the backup. Returns "restored", "unset" (no backup, so uni-vpn did not
-// set it) or "failed" (the backup is kept); the error is for a backup that could not be removed.
+// Uninstall restores the backup and takes our lines out of the session files. Returns
+// "restored", "unset" (no backup, so uni-vpn did not set it) or "failed" (the backup is kept);
+// the error is for a backup that could not be removed.
 func (s *System) Uninstall(backup string) (string, error) {
 	if backup == "" {
 		backup = BackupPath()
+	}
+	if s.linux() {
+		s.clearSession()
 	}
 	data, err := os.ReadFile(backup)
 	if err != nil {

@@ -719,9 +719,9 @@ func (d *Daemon) Status() (pyjson.Object, error) {
 		"last_error", lastErr,
 		"domains", domains,
 		"pac_url", sysproxy.PacURL(cfg.HTTPPort),
-		// "manual" (restart the browser after a change) only from the older core on macOS: this
-		// one gives the rule a new address there too.
-		"pac_refresh", "auto",
+		// "manual": the app says to restart the browser after a change of the websites, where
+		// Chrome reads the rule only when it starts (Xfce). On macOS the rule gets a new address.
+		"pac_refresh", d.pacRefresh(),
 		"log_tail", append([]string{}, tail...),
 		"setup_needed", d.needsSetup || d.configError != "",
 		"repairing", d.repairingLocked(),
@@ -1509,10 +1509,11 @@ func (d *Daemon) bindHTTP() {
 		return
 	}
 	d.logf(slog.LevelInfo, "Status port %d is free again", server.Port)
+	// The page goes before HTTP says the port is ours.
+	d.writeInstance(d.instance, "")
 	d.mu.Lock()
 	d.http, d.httpWaiting = server, nil
 	d.mu.Unlock()
-	d.writeInstance(d.instance, "")
 	d.reinstateRule(server.Port)
 }
 
@@ -1542,6 +1543,15 @@ func (d *Daemon) portHeld(port int) {
 	// On macOS the setting is the computer's: the uni-vpn that holds the port switches it on
 	// again at once.
 	d.opts.Knock(port)
+}
+
+// pacRefresh is status.json's pac_refresh: "manual" where setup recorded that Chrome takes the
+// rule only when it starts (sysproxy.RuleAtStartName), else "auto".
+func (d *Daemon) pacRefresh() string {
+	if _, err := os.Stat(filepath.Join(d.opts.TokenDir, sysproxy.RuleAtStartName)); err == nil {
+		return "manual"
+	}
+	return "auto"
 }
 
 // instanceName: the instance file, see writeInstance.

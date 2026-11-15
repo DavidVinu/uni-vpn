@@ -30,6 +30,7 @@ import (
 	"github.com/DavidVinu/uni-vpn/internal/messages"
 	"github.com/DavidVinu/uni-vpn/internal/pac"
 	"github.com/DavidVinu/uni-vpn/internal/pyjson"
+	"github.com/DavidVinu/uni-vpn/internal/sysproxy"
 	"github.com/DavidVinu/uni-vpn/internal/tunnel"
 )
 
@@ -2126,6 +2127,32 @@ func TestInstanceFileTellsTheAppWindowsWhatIsOurs(t *testing.T) {
 	h.d = nil
 	if id3, page := readInstance(t, h); id3 == id || len(id3) != 32 || page != "" {
 		t.Fatal(id3, page)
+	}
+}
+
+// Chrome on Xfce takes a changed rule only when it starts again (setup's record): the app says
+// to restart the browser after a change of the websites.
+func TestStatusSaysToRestartTheBrowserWhereChromeTakesTheRuleAtItsStart(t *testing.T) {
+	h := newHarness(t)
+	d := h.start(nil)
+	refresh := func() string {
+		s, _ := d.Status()
+		v, _ := s.Get("pac_refresh")
+		return v.(string)
+	}
+	if got := refresh(); got != "auto" {
+		t.Fatal(got)
+	}
+	record := filepath.Join(h.tokenDir, sysproxy.RuleAtStartName)
+	if err := os.WriteFile(record, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := refresh(); got != "manual" {
+		t.Fatal(got)
+	}
+	os.Remove(record)
+	if got := refresh(); got != "auto" {
+		t.Fatal(got)
 	}
 }
 

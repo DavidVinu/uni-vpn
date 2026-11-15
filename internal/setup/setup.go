@@ -46,6 +46,7 @@ const (
 		"   %s"
 	manualProxyFailed = "   Registering the proxy rule with the system failed. Enter it by hand in the browser:\n" +
 		"   Settings -> Network/Proxy -> automatic proxy configuration (PAC): %s"
+	signOutHint = "Chrome, Edge and Brave read it once you sign out of the computer and back in."
 )
 
 // MFAChoices are the second factors the terminal setup offers, in order.
@@ -761,6 +762,7 @@ func (s *Setup) setup(a Args, created func(string)) (int, error) {
 	}
 
 	pac := sysproxy.PacURL(cfg.HTTPPort)
+	signOut := false // see sessionOnly
 	if dry {
 		s.say("would register the proxy rule %s with the system (the previous setting is backed up)", pac)
 	} else {
@@ -777,6 +779,10 @@ func (s *Setup) setup(a Args, created func(string)) (int, error) {
 			s.say("Proxy rule registered with the system; an existing proxy setting was replaced (backed up, uninstall restores it)")
 		default:
 			s.say("Proxy rule registered with the system (Chrome, Edge and Firefox read it on their own)")
+		}
+		signOut = (result == "ok" || result == "replaced") && s.sessionOnly(cfg.HTTPPort)
+		if (result == "ok" || result == "replaced") && !s.macOS() && !s.windows() && sysproxy.NamesDesktop(s.Getenv) {
+			s.recordRuleAtStart(!sysproxy.ChromeReadsSettings(s.Getenv))
 		}
 	}
 
@@ -803,6 +809,10 @@ func (s *Setup) setup(a Args, created func(string)) (int, error) {
 		if !configured {
 			given = []desktop.Pair{{Key: "user", Value: user}, {Key: "university", Value: university}}
 		}
+		if signOut {
+			// The assistant's last step says so instead of "reopen your browser".
+			given = append(given, desktop.Pair{Key: "signout", Value: "1"})
+		}
 		if query := desktop.Query(given); query != "" {
 			link += "?" + query
 		}
@@ -823,11 +833,17 @@ func (s *Setup) setup(a Args, created func(string)) (int, error) {
 		if s.App.OpenApp(cfg.HTTPPort, desktop.PageFor(given)) {
 			s.printf("\nFinish in the Uni VPN window that just opened.")
 			s.printf("Restart any open browser once so that it reads the proxy rule.")
+			if signOut {
+				s.printf(signOutHint)
+			}
 			return 0, nil
 		}
 		if s.OpenURL(link) {
 			s.printf("\nFinish in the browser window that just opened (%s).", link)
 			s.printf("Restart any other open browser once so that it reads the proxy rule.")
+			if signOut {
+				s.printf(signOutHint)
+			}
 			return 0, nil
 		}
 		gui = false
@@ -846,8 +862,31 @@ func (s *Setup) setup(a Args, created func(string)) (int, error) {
 	} else if err := s.askSecrets(cfg); err != nil {
 		return 1, err
 	}
-	fmt.Fprintf(s.Out, finalHint+"\n", cfg.HTTPPort)
+	fmt.Fprintf(s.Out, finalHint, cfg.HTTPPort)
+	if signOut {
+		fmt.Fprintln(s.Out, signOutHint)
+	}
+	fmt.Fprintln(s.Out)
 	return 0, nil
+}
+
+// sessionOnly: Chrome in this session reads the rule only from the session files, and the
+// session started before they had it (sysproxy.ChromeReadsSettings): Xfce, LXQt and others.
+func (s *Setup) sessionOnly(port int) bool {
+	return !s.macOS() && !s.windows() && !sysproxy.ChromeReadsSettings(s.Getenv) &&
+		s.Getenv("auto_proxy") != sysproxy.PacURL(port)
+}
+
+// recordRuleAtStart writes or removes sysproxy.RuleAtStartName: after a change of the websites
+// the app then says to restart the browser.
+func (s *Setup) recordRuleAtStart(atStart bool) {
+	path := filepath.Join(platform.StateDir(), sysproxy.RuleAtStartName)
+	if !atStart {
+		os.Remove(path)
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(path), 0o700)
+	_ = os.WriteFile(path, nil, 0o600)
 }
 
 func (s *Setup) askSecrets(cfg *config.Config) error {
