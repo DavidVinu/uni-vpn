@@ -100,7 +100,8 @@ object ApkUpdate {
 
     /** Checks once a day; cheap otherwise. Blocks: call off the main thread. */
     fun check(context: Context) {
-        if (!BuildConfig.SELF_UPDATE) return
+        // A debug build is signed with its own key: no release goes over it.
+        if (!BuildConfig.SELF_UPDATE || BuildConfig.DEBUG) return
         synchronized(lock) {
             load(context)
             val prefs = prefs(context)
@@ -115,7 +116,7 @@ object ApkUpdate {
                 Log.i(TAG, "no update check: $e")
                 return
             } ?: return
-            if (release.versionCode <= BuildConfig.VERSION_CODE) {
+            if (release.versionCode <= BuildConfig.VERSION_CODE || release.sha256 == prefs.getString("refused", null)) {
                 newer.value = null
                 apk(context).delete()
                 prefs.edit { remove("release"); putLong("checked", now) }
@@ -124,8 +125,8 @@ object ApkUpdate {
             prefs.edit { putString("release", JSONObject().put("version_code", release.versionCode).put("size", release.size).put("sha256", release.sha256).toString()) }
             newer.value = release
             // A file that does not match yet (uni-vpn.apk of the next release, uploaded just
-            // before its uni-vpn-apk.json) tries again in 10 minutes.
-            if (!unmetered(context) || download(context, release) != null) prefs.edit { putLong("checked", now) }
+            // before its uni-vpn-apk.json) tries again in 10 minutes; a refused one tomorrow.
+            if (!unmetered(context) || download(context, release) != null || newer.value == null) prefs.edit { putLong("checked", now) }
         }
     }
 
@@ -147,26 +148,38 @@ object ApkUpdate {
 
     private fun download(context: Context, release: ApkRelease): File? {
         val file = apk(context)
-        if (file.length() == release.size && runCatching { sha256(file) }.getOrNull() == release.sha256 && matches(context, file, release)) return file
-        file.parentFile?.mkdirs()
-        val part = File(file.path + ".part")
-        try {
-            open(RELEASE + "uni-vpn.apk").use { input ->
-                part.outputStream().use { out -> copy(input, out, release.size) }
+        if (!sums(file, release)) {
+            file.parentFile?.mkdirs()
+            val part = File(file.path + ".part")
+            try {
+                open(RELEASE + "uni-vpn.apk").use { input ->
+                    part.outputStream().use { out -> copy(input, out, release.size) }
+                }
+            } catch (e: Exception) {
+                Log.i(TAG, "update not downloaded: $e")
+                part.delete()
+                return null
             }
-        } catch (e: Exception) {
-            Log.i(TAG, "update not downloaded: $e")
-            part.delete()
-            return null
+            if (!sums(part, release)) {
+                Log.i(TAG, "update download does not match uni-vpn-apk.json")
+                part.delete()
+                return null
+            }
+            file.delete()
+            if (!part.renameTo(file)) return null
         }
-        if (part.length() != release.size || runCatching { sha256(part) }.getOrNull() != release.sha256 || !matches(context, part, release)) {
-            Log.i(TAG, "update download does not match uni-vpn-apk.json")
-            part.delete()
-            return null
-        }
+        if (matches(context, file, release)) return file
+        // The release's own file, but Android would not put it over this copy (a build signed
+        // with another key): not offered, and not downloaded again, until the next release.
+        Log.i(TAG, "update is not for this copy")
         file.delete()
-        return if (part.renameTo(file)) file else null
+        newer.value = null
+        prefs(context).edit { putString("refused", release.sha256); remove("release") }
+        return null
     }
+
+    private fun sums(file: File, release: ApkRelease) =
+        file.length() == release.size && runCatching { sha256(file) }.getOrNull() == release.sha256
 
     /** At most [limit] bytes; more fails, as the file would not match anyway. */
     private fun copy(input: InputStream, out: java.io.OutputStream, limit: Long) {
@@ -226,12 +239,14 @@ object ApkUpdate {
 
     private fun sameApp(context: Context, file: File, release: ApkRelease): Boolean {
         val pm = context.packageManager
+        // Android 10 reads an archive's signatures only with GET_SIGNATURES.
         @Suppress("DEPRECATION")
-        val info = pm.getPackageArchiveInfo(file.path, PackageManager.GET_SIGNING_CERTIFICATES) ?: return false
+        val info = pm.getPackageArchiveInfo(file.path, PackageManager.GET_SIGNING_CERTIFICATES or PackageManager.GET_SIGNATURES) ?: return false
         if (info.packageName != context.packageName || info.longVersionCode != release.versionCode) return false
         @Suppress("DEPRECATION")
         val own = pm.getPackageInfo(context.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
-        return signers(info.signingInfo) == signers(own.signingInfo)
+        val theirs = signers(info.signingInfo) ?: return false
+        return theirs == signers(own.signingInfo)
     }
 
     private fun signers(info: SigningInfo?): Set<String>? =

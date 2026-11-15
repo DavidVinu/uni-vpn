@@ -25,11 +25,16 @@ Scope: `app/android`, `app/ios`, `packaging/android`, `packaging/ios`, `cmd/uni-
   the APK. `ApkUpdate` checks it at most once a day while the VPN is on or the app is open (not at
   all with Settings, Automatic updates off), downloads on Wi-Fi (on mobile data only on a tap),
   checks size, SHA-256, package and signing key, and Home plus the VPN's notification offer
-  "Update Uni VPN"; a tap hands the file to `PackageInstaller`. Copies installed before this have
-  no update check and need the new APK once by hand.
+  "Update Uni VPN"; a tap hands the file to `PackageInstaller`. A release file that is not this
+  copy (a build signed with another key) is not offered or downloaded again until the next
+  release; debug builds do not check. Copies installed before this have no update check and need
+  the new APK once by hand.
 - **Verification:** `ApkReleaseTest` (what CI writes is read, anything malformed refused, the
   digest) passes; lint clean; both flavors compile. `ApkUpdateTest` (the signing check accepts
-  this app's own APK and refuses another package) runs on the CI emulator.
+  this app's own APK and refuses another package) runs on the CI emulator (Android 14). Android 10
+  reads an archive's signatures only with `GET_SIGNATURES` (AOSP android-10.0.0_r1
+  `getPackageArchiveInfo`; 11 also with `GET_SIGNING_CERTIFICATES`), so both flags are passed;
+  without that, Android 10 would never be offered an update.
 
 ### M2. Android: when the core ends, the proxy rule stays up for up to a minute
 
