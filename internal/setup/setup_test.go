@@ -84,6 +84,10 @@ func newHarness(t *testing.T) *harness {
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))
 	t.Setenv("XDG_DATA_HOME", "")
 	t.Setenv("PATH", "/usr/bin:"+filepath.Join(home, ".local", "bin"))
+	// A GNOME session, whose Chrome reads GNOME's proxy setting.
+	t.Setenv("XDG_CURRENT_DESKTOP", "ubuntu:GNOME")
+	t.Setenv("DESKTOP_SESSION", "ubuntu")
+	t.Setenv("auto_proxy", "")
 	h := &harness{t: t, home: home, out: &bytes.Buffer{}, svc: &fakeService{home: home, result: true},
 		keyring:     map[credentials.Kind]string{credentials.KindPassword: "missing", credentials.KindTOTP: "missing"},
 		proxyResult: "ok", answers: map[string][]string{}}
@@ -569,6 +573,52 @@ func TestGUISetup(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Chrome on Xfce and LXQt reads the rule from the next login on: the assistant's last step and
+// the terminal say to sign out once instead of only "restart the browser". Not when this
+// session has the rule already, or none was registered.
+func TestSetupOnXfceSaysToSignOutOnce(t *testing.T) {
+	for _, tc := range []struct {
+		name, desktop, autoProxy, result string
+		signOut                          bool
+	}{
+		{"xfce", "XFCE", "", "ok", true},
+		{"lxqt, a foreign setting replaced", "LXQt", "", "replaced", true},
+		{"gnome", "ubuntu:GNOME", "", "ok", false},
+		{"xfce, signed in again since", "XFCE", "http://127.0.0.1:1081/proxy.pac", "ok", false},
+		{"xfce without a rule", "XFCE", "", "unavailable", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			t.Setenv("XDG_CURRENT_DESKTOP", tc.desktop)
+			t.Setenv("DESKTOP_SESSION", "")
+			t.Setenv("auto_proxy", tc.autoProxy)
+			h.proxyResult = tc.result
+			h.s.HasDesktop = func() bool { return true }
+			h.opened = true
+			if code := h.setup(Args{User: "ab123"}); code != 0 {
+				t.Fatal(code, h.out.String())
+			}
+			want := "http://127.0.0.1:1081/?user=ab123"
+			if tc.signOut {
+				want += "&signout=1"
+				h.wantOut(t, signOutHint)
+			} else {
+				h.notOut(t, signOutHint)
+			}
+			if !reflect.DeepEqual(h.urls, []string{want}) {
+				t.Fatal(h.urls)
+			}
+		})
+	}
+	// In the terminal.
+	h := newHarness(t)
+	t.Setenv("XDG_CURRENT_DESKTOP", "XFCE")
+	if code := h.setup(Args{User: "ab123"}); code != 0 {
+		t.Fatal(code, h.out.String())
+	}
+	h.wantOut(t, "Restart any open browser once so that it reads the proxy rule.\n"+signOutHint+"\n")
 }
 
 // recordingApp stands in for desktop.Desktop where only the calls count.

@@ -74,6 +74,7 @@
   "setup.finish": "完成",
   "setup.all_set": "设置完成",
   "setup.all_set_sub": "大学网站现在会自动通过 VPN 打开。请关闭并重新打开一次浏览器。",
+  "setup.all_set_signout": "大学网站现在会自动通过 VPN 打开。请注销电脑一次，然后重新登录。",
   "setup.all_set_no_domains": "请在“设置 > 网站”中添加需要经过大学网络的网站。",
   "setup.finish_first": "请先完成设置",
   "main.connect": "连接",

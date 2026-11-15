@@ -1009,7 +1009,7 @@ translations and docs. The full test suite on that commit passed first: `go test
 | FA-7 | Windows PC with two accounts: the second account's install takes over the scheduled task, and the first account's Uni VPN never starts again | Medium | fixed |
 | FA-8 | Another local account that holds 127.0.0.1:1081 first answers this account's proxy rule and app window | High | fixed |
 | FA-9 | Another local account can use this account's VPN session through 127.0.0.1:1080 and start its sign-in | Medium | fixed |
-| FA-10 | Chrome, Edge and Brave on Xfce, MATE and LXQt never read the proxy rule, while setup reports success | Medium | open |
+| FA-10 | Chrome, Edge and Brave on Xfce and LXQt never read the proxy rule, while setup reports success | Medium | fixed |
 | FA-11 | The sync relay can be filled for 400 days with a few thousand anonymous requests (not deployed yet) | Medium | open |
 
 ### FA-1 Android tablets offered the Linux packages
@@ -1182,3 +1182,55 @@ translations and docs. The full test suite on that commit passed first: `go test
   SOCKS connection was reset and its PAC file was DIRECT, this account's got `05 00` and a PAC
   file with SOCKS; while nobody held 1080 this account's PAC file was DIRECT, and the rule's
   address changed when 1080 was taken and again when it was free.
+
+### FA-10 Chrome on Xfce and LXQt
+
+- Found by: the system reviewer, with the real Chromium. Chromium picks where it reads the proxy
+  setting by desktop (base::nix::GetDesktopEnvironment, ProxyConfigServiceLinux): GNOME's on
+  GNOME, Cinnamon, Pantheon, Budgie, Unity, Deepin, UKUI and MATE (Chromium counts
+  DESKTOP_SESSION=mate as GNOME), KDE's on KDE, and on Xfce, LXQt and any other desktop only
+  the environment variable `auto_proxy`. Setup wrote only GNOME's and KDE's setting and said
+  "Chrome, Edge and Firefox read it on their own"; README said to enter the address in the
+  browser, which Chrome on Linux has no setting for.
+- Reproduced: Chromium 1243 under dbus-run-session, GNOME setting "auto" with a PAC server that
+  logs fetches. XDG_CURRENT_DESKTOP=GNOME: 2 fetches; XFCE, LXQt, MATE without DESKTOP_SESSION:
+  0; MATE with DESKTOP_SESSION=mate (as a real MATE session has it): 2, so MATE is not
+  affected; XFCE with `auto_proxy` set: 2; GNOME with `auto_proxy` set: the GNOME setting's
+  address, not the variable's.
+- Root cause: the rule reached only the settings Chromium reads on GNOME-like desktops and KDE.
+- Fix:
+  - sysproxy (Linux): Install also puts three lines into `~/.profile` and `~/.xprofile`
+    (`export auto_proxy=http://127.0.0.1:1081/proxy.pac` between marker lines), which a session
+    reads at login: LightDM's session wrapper reads both, GDM both, SDDM `~/.profile` through
+    a login shell and `~/.xprofile` for X11 (read in Ubuntu 24.04's lightdm, gdm3 and sddm
+    packages). Lines there before are replaced where they are; a linked file (dotfiles) stays
+    a link; lines whose end marker is gone are left alone. Uninstall takes them out (a file
+    left empty is removed). Withdraw (FA-8) takes them out too, so a session that starts while
+    another account holds the status port does not take its rule from there; Install puts them
+    back. Cover adds them while the rule is ours, for installs from before.
+  - Setup: in a session whose Chrome reads only the variable, and does not have it yet, the
+    assistant's last step says "Sign out of the computer and back in once" instead of
+    "Close and reopen your browser once" (`setup.all_set_signout`, in all six languages), and
+    so does the terminal.
+  - README says how the rule reaches Chrome there.
+- Verification: TestChromeReadsSettings (Chromium's choice, table above),
+  TestLinuxInstallWritesTheSessionFilesAndUninstallTakesThemOut,
+  TestLinuxUninstallWithoutBackupTakesTheSessionLinesOut,
+  TestSessionLinesAreReplacedWhereTheyAre, TestSessionFileThatIsALinkStaysALink,
+  TestSessionLinesWithoutTheirEndAreLeftAlone, TestWithdrawTakesTheSessionLinesOut,
+  TestLinuxCoverAddsTheSessionLinesWhileTheRuleIsOurs, TestNoSessionFilesOnMacAndWindows,
+  TestSetupOnXfceSaysToSignOutOnce; all but the first fail without the change. End to end
+  with the real Chromium, sysproxy on Ubuntu's own `.profile`, and the login steps of LightDM
+  and SDDM as their scripts do them: Xfce 0 fetches before, 2 after setup (LightDM), LXQt 2
+  (SDDM), GNOME still the GNOME setting's address; after Withdraw the next Xfce login 0, after
+  setup again 2; after uninstall `.profile` byte for byte as before, `.xprofile` gone, 0; an
+  earlier version's install got the lines from Cover. The assistant's last step in Chromium
+  with `signout=1`: the new text in English, German and Chinese (Taiwan); without it the old.
+- Left (Low): the lines take effect from the next login (the assistant says so on a new
+  install; an install from before gets them at the next login without a word). Chrome there
+  is not told when the rule changes (no setting to watch): an edited website list reaches it
+  when it restarts or loads the rule again on its own, while the app says only "Saved".
+  A program of another account that holds the
+  status port before this account signs in gives Chrome there its rule for that one session
+  (the app window shows the note, and the next login has no lines until the port is ours).
+  Sessions that read neither file (zsh on SDDM with Wayland, startx) do not get it.

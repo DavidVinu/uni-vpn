@@ -74,6 +74,7 @@
   "setup.finish": "Terminer",
   "setup.all_set": "Tout est prêt",
   "setup.all_set_sub": "Les sites de l’université passent désormais automatiquement par le VPN. Fermez et rouvrez votre navigateur une fois.",
+  "setup.all_set_signout": "Les sites de l’université passent désormais automatiquement par le VPN. Fermez votre session sur l’ordinateur une fois et rouvrez-la.",
   "setup.all_set_no_domains": "Ajoutez les sites qui doivent passer par l’université dans Réglages, Sites web.",
   "setup.finish_first": "Terminez d’abord la configuration",
   "main.connect": "Se connecter",
