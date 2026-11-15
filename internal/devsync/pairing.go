@@ -214,7 +214,16 @@ func (e *Engine) await(ctx context.Context, cancel context.CancelFunc, shown *Pa
 			}
 			e.mu.Unlock()
 		case shown.Mode == "request" && m.Kind == "root":
-			err := e.join(context.WithoutCancel(ctx), m.Root)
+			// Not ended by a cancel or the code's expiry, but with the core, like the round above.
+			e.mu.Lock()
+			if e.bgCtx.Err() != nil {
+				e.mu.Unlock()
+				return
+			}
+			e.bg.Add(1)
+			e.mu.Unlock()
+			err := e.join(e.bgCtx, m.Root)
+			e.bg.Done()
 			var ae *ApplyError
 			if err != nil && !errors.As(err, &ae) {
 				finish("failed", offline(err))
