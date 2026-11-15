@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="background">#121316</color>
+    <color name="widget_on">#A8C7FA</color>
+    <color name="widget_on_icon">#062E6F</color>
+    <color name="widget_off">#2D2F31</color>
+    <color name="widget_off_icon">#E3E3E3</color>
 </resources>

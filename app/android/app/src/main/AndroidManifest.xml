@@ -79,6 +79,28 @@
                 android:value="true" />
         </service>
 
+        <!-- Home screen widget: one tap on or off, as the tile. -->
+        <receiver
+            android:name=".VpnWidget"
+            android:exported="false"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget" />
+        </receiver>
+
+        <!-- The widget's tap (ToggleActivity): no window, no entry in Recents. -->
+        <activity
+            android:name=".ToggleActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.NoDisplay" />
+
         <!-- Google's code scanner arrives with the app instead of on the first scan, which
              would fail while it downloads. -->
         <meta-data
