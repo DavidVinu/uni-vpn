@@ -65,7 +65,12 @@ type harness struct {
 	probeResult atomic.Bool
 	unversioned atomic.Bool
 	covered     atomic.Int64 // ProxyCover calls
-	cisco       atomic.Bool
+	// otherListens: another account holds the status port (OtherAccountListens).
+	otherListens atomic.Bool
+	withdrawn    atomic.Int64 // ProxyWithdraw calls
+	reinstated   atomic.Int64 // ProxyInstall calls
+	knocked      atomic.Int64 // Knock calls
+	cisco        atomic.Bool
 
 	mu          sync.Mutex
 	password    []byte
@@ -187,10 +192,14 @@ func (h *harness) start(edit func(*Options), before ...func(*Daemon)) *Daemon {
 			defer h.mu.Unlock()
 			h.refreshed = append(h.refreshed, port)
 		},
-		ProxyUnversioned: func(int) bool { return h.unversioned.Load() },
-		ProxyCover:       func(int) { h.covered.Add(1) },
-		RepairStart:      func() (Process, error) { panic("no repair in tests") },
-		Elevated:         func() *bool { return nil },
+		ProxyUnversioned:    func(int) bool { return h.unversioned.Load() },
+		ProxyCover:          func(int) { h.covered.Add(1) },
+		ProxyWithdraw:       func(int) bool { h.withdrawn.Add(1); return true },
+		ProxyInstall:        func(int) { h.reinstated.Add(1) },
+		OtherAccountListens: func(int) bool { return h.otherListens.Load() },
+		Knock:               func(int) { h.knocked.Add(1) },
+		RepairStart:         func() (Process, error) { panic("no repair in tests") },
+		Elevated:            func() *bool { return nil },
 	}
 	if edit != nil {
 		edit(&opts)
@@ -240,6 +249,12 @@ func (h *harness) start(edit func(*Options), before ...func(*Daemon)) *Daemon {
 		time.Sleep(time.Millisecond)
 	}
 	return d
+}
+
+func (h *harness) refreshCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.refreshed)
 }
 
 func (h *harness) pwLines() []string {

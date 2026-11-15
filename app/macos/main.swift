@@ -39,8 +39,26 @@ struct Status {
     var busy = false
     var reachable = false
     var repairing = false
+    var instance = ""
     var menu: [String: String] = [:]
     var on: Bool { state == "connected" || (busy && state != "disconnecting") }
+}
+
+// The service's instance file (internal/daemon writeInstance), next to its log, which only this
+// account can read: its id, and the page that says another account holds the port.
+let instancePath = NSHomeDirectory() + "/Library/Logs/uni-vpn/instance"
+
+struct Instance {
+    var id: String
+    var page: String
+}
+
+// nil without the file (a version before it); a file that cannot be read just now keeps the last one.
+func readInstance(_ last: Instance?) -> Instance? {
+    guard FileManager.default.fileExists(atPath: instancePath) else { return nil }
+    guard let data = FileManager.default.contents(atPath: instancePath),
+          let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return last }
+    return Instance(id: json["id"] as? String ?? "", page: json["page"] as? String ?? "")
 }
 
 // English until the service answers with the menus in the user's language (status.json?menu=).
@@ -116,6 +134,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     var restarting = false
     var setupStarted = false
     var askedBackground = false
+    // The window loads the status port's page only once status.json says the id in the
+    // instance file (or without the file, as before): another account may run anything on the
+    // port. shown is what the window has instead: nil (that page), "" (nothing), or the page
+    // that says another account holds the port.
+    var instance = readInstance(nil)
+    lazy var allowed: Bool = instance == nil
+    var shown: String?
 
     func applicationDidFinishLaunching(_ note: Notification) {
         // Started by the copy it replaces after an update: that one quits first.
@@ -238,6 +263,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
             window = win
             webView = view
         }
+        instance = readInstance(instance)
+        if let file = instance, !file.page.isEmpty {
+            allowed = false
+            showInstead(file.page)
+        }
         load(page)
         // A Dock icon while the window is open, like Tailscale.
         NSApp.setActivationPolicy(.regular)
@@ -262,7 +292,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     // page: "" (as it is), "#main", "#settings", or "&user=ab123&university=ethz" from setup.
     func load(_ page: String) {
         guard let view = webView else { return }
-        if let current = view.url, current.host == base.host, current.port == base.port, page.isEmpty || page.hasPrefix("#") {
+        if shown == nil, let current = view.url, current.host == base.host, current.port == base.port, page.isEmpty || page.hasPrefix("#") {
             // As a string, never as code: other apps can ask for a page too (showNote).
             if !page.isEmpty, let json = try? JSONSerialization.data(withJSONObject: [page]),
                let list = String(data: json, encoding: .utf8) {
@@ -273,7 +303,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         // Nothing shown (a load that failed): "as it is" is the page asked for last (Settings,
         // setup's prefill), not the main page.
         if !page.isEmpty, let url = URL(string: "?app=1" + page, relativeTo: base) { target = url.absoluteURL }
-        view.load(URLRequest(url: target))
+        if allowed {
+            shown = nil
+            view.load(URLRequest(url: target))
+        } else if shown == nil {
+            showInstead("")  // until this account's uni-vpn answers (check)
+        }
+    }
+
+    // Whether what answers on the port is this account's uni-vpn (next.reachable: it answered).
+    func check(_ next: Status) {
+        instance = readInstance(instance)
+        guard let file = instance else { return guardWindow(true, nil) }
+        let ours = next.reachable && !file.id.isEmpty && next.instance == file.id
+        if !file.page.isEmpty {
+            guardWindow(false, file.page)
+        } else if ours {
+            guardWindow(true, nil)
+        } else if next.reachable {
+            guardWindow(false, "")  // not this account's uni-vpn: nothing of it
+        } else {
+            guardWindow(false, nil)  // nothing answers (a restart): the page stays, nothing loads
+        }
+    }
+
+    func guardWindow(_ allowed: Bool, _ instead: String?) {
+        let was = self.allowed
+        self.allowed = allowed
+        guard let view = webView else { return }
+        if let instead = instead, instead != shown {
+            showInstead(instead)
+        } else if allowed && !was && shown != nil && windowOpen {
+            shown = nil
+            view.load(URLRequest(url: target))  // this account's again: the page asked for last
+        }
+    }
+
+    func showInstead(_ instead: String) {
+        shown = instead
+        if instead.isEmpty {
+            webView?.load(URLRequest(url: URL(string: "about:blank")!))
+        } else {
+            webView?.loadHTMLString(instead, baseURL: nil)
+        }
     }
 
     func windowWillClose(_ note: Notification) {
@@ -311,6 +383,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     // Links to anything but the page itself (MFA portal) open in the default browser.
     @objc(webView:decidePolicyForNavigationAction:decisionHandler:)
     func webView(_ view: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        // What the window shows instead (showInstead); the status port's page only while allowed
+        // (the page reloads itself).
+        if action.request.url?.scheme == "about" {
+            decisionHandler(.allow)
+            return
+        }
+        if let url = action.request.url, url.host == base.host, url.port == base.port, !allowed {
+            decisionHandler(.cancel)
+            return
+        }
         if let url = action.request.url, url.host != "127.0.0.1" && url.host != "localhost" {
             // Only web links: another scheme (a file, an app's own) would run without the browser's question.
             if ["http", "https"].contains(url.scheme?.lowercased() ?? "") { NSWorkspace.shared.open(url) }
@@ -346,7 +428,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     // below) does not offer it once more.
     @objc(webView:didCommitNavigation:)
     func webView(_ view: WKWebView, didCommit nav: WKNavigation!) {
-        guard target.fragment?.hasPrefix("otpauth=") == true,
+        guard view.url?.host == base.host, view.url?.port == base.port, target.fragment?.hasPrefix("otpauth=") == true,
               var parts = URLComponents(url: target, resolvingAgainstBaseURL: false) else { return }
         parts.fragment = nil
         if let url = parts.url { target = url }
@@ -356,7 +438,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     @objc(webView:didFailProvisionalNavigation:withError:)
     func webView(_ view: WKWebView, didFailProvisionalNavigation nav: WKNavigation!, withError error: Error) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            guard let self = self, self.windowOpen else { return }
+            guard let self = self, self.windowOpen, self.shown == nil else { return }
             view.load(URLRequest(url: self.target))  // the page asked for (Settings), not the main one
         }
     }
@@ -399,14 +481,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
                 next.busy = json["busy"] as? Bool ?? false
                 next.repairing = json["repairing"] as? Bool ?? false
                 next.menu = json["menu"] as? [String: String] ?? [:]
+                next.instance = json["instance"] as? String ?? ""
                 next.reachable = true
             }
             DispatchQueue.main.async {
-                if next.repairing { self?.repairSeen = Date() }
-                self?.status = next
-                self?.render()
-                self?.startServiceIfDown()
-                self?.restartIfUpdated()
+                guard let self = self else { return }
+                self.check(next)
+                let latest = self.allowed ? next : Status()  // else the menu says "Not running"
+                if latest.repairing { self.repairSeen = Date() }
+                self.status = latest
+                self.render()
+                self.startServiceIfDown()
+                self.restartIfUpdated()
             }
         }.resume()
     }

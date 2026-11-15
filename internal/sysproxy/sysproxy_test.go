@@ -856,3 +856,70 @@ func TestMacInstallAgainBacksUpServicesAddedSince(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+// Another account holds the status port: the browsers must not take their rule from it. Only
+// our rule is switched off; another proxy setting stays as it is.
+func TestWithdrawSwitchesOffOnlyOurRule(t *testing.T) {
+	ours := "http://127.0.0.1:1081/proxy.pac?v=7"
+	r := &runner{answers: gsettings("auto", ours)}
+	if !gnome(r.run).Withdraw(1081) || !r.called("gsettings", "set", Schema, "mode", "none") {
+		t.Fatal(r.calls)
+	}
+	r = &runner{answers: gsettings("auto", "http://corp/wpad.dat")}
+	if gnome(r.run).Withdraw(1081) || r.called("gsettings", "set", Schema, "mode", "none") {
+		t.Fatal(r.calls)
+	}
+	reg := &registry{url: ours}
+	if !windowsSystem(reg).Withdraw(1081) || reg.url != "" {
+		t.Fatal(reg)
+	}
+	reg = &registry{url: "http://corp/wpad.dat"}
+	if windowsSystem(reg).Withdraw(1081) || reg.url != "http://corp/wpad.dat" {
+		t.Fatal(reg)
+	}
+	r = &runner{answers: []answer{
+		{"networksetup -listallnetworkservices", 0, "An asterisk (*) denotes that a network service is disabled.\nWi-Fi\niPhone USB\n"},
+		{"networksetup -getautoproxyurl Wi-Fi", 0, "URL: " + ours + "\nEnabled: Yes\n"},
+		{"networksetup -getautoproxyurl iPhone USB", 0, "URL: http://corp/wpad.dat\nEnabled: Yes\n"},
+	}}
+	if !mac(r).Withdraw(1081) || !r.called("networksetup", "-setautoproxystate", "Wi-Fi", "off") ||
+		r.called("networksetup", "-setautoproxystate", "iPhone USB", "off") {
+		t.Fatal(r.calls)
+	}
+	for _, s := range []*System{mac(&runner{}), gnome((&runner{}).run)} {
+		if s.Withdraw(1081) {
+			t.Fatal(s.GOOS, "withdrew without our rule")
+		}
+	}
+}
+
+// On a Mac the setting is the computer's: what the uni-vpn of another account switched off
+// while it waited for the port, the one that holds the port switches on again, while this
+// account's install has its backup.
+func TestMacCoverSwitchesOnWhatAnotherAccountSwitchedOff(t *testing.T) {
+	ours := "http://127.0.0.1:1081/proxy.pac?v=7"
+	answers := []answer{
+		{"networksetup -listallnetworkservices", 0, "An asterisk (*) denotes that a network service is disabled.\nWi-Fi\n"},
+		{"networksetup -getautoproxyurl Wi-Fi", 0, "URL: " + ours + "\nEnabled: No\n"},
+	}
+	backup := tempBackup(t, "b.json")
+	os.WriteFile(backup, []byte(`{"services": {"Wi-Fi": {"url": "", "enabled": false}}}`), 0o600)
+	r := &runner{answers: answers}
+	mac(r).Cover(1081, backup)
+	on := false
+	for _, c := range r.calls {
+		if len(c) == 4 && c[1] == "-setautoproxyurl" && c[2] == "Wi-Fi" && IsOurs(c[3], 1081) && c[3] != ours {
+			on = true
+		}
+	}
+	if !on {
+		t.Fatal(r.calls)
+	}
+	r = &runner{answers: answers}
+	mac(r).Cover(1081, tempBackup(t, "none.json"))
+	for _, c := range r.calls {
+		if len(c) > 1 && c[1] == "-setautoproxyurl" {
+			t.Fatal("switched on without this account's install:", r.calls)
+		}
+	}
+}

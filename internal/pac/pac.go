@@ -133,6 +133,11 @@ func Matches(host string, domains []string) bool {
 	return false
 }
 
+// Direct is the rule that sends everything directly: for another account of this computer,
+// whose browser must not use this account's VPN, and while another program holds the SOCKS
+// port.
+const Direct = "function FindProxyForURL(url, host) {\n  return \"DIRECT\";\n}\n"
+
 // BuildPAC returns the PAC script for domains via SOCKS5 127.0.0.1:port.
 func BuildPAC(domains []string, port int) string { return BuildPACOrDirect(domains, nil, port) }
 

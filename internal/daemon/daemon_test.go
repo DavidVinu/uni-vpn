@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -433,7 +434,7 @@ func TestTOTPSecretReachesOpenconnect(t *testing.T) {
 	}
 	// Only the certificates file and the last used code window stay (tunnel.CAFileName).
 	for _, e := range func() []os.DirEntry { entries, _ := os.ReadDir(h.tokenDir); return entries }() {
-		if !slices.Contains([]string{tunnel.CAFileName, otpStepName, signedInName, addedDefaultsName, pacSumName}, e.Name()) {
+		if !slices.Contains([]string{tunnel.CAFileName, otpStepName, signedInName, addedDefaultsName, pacSumName, instanceName}, e.Name()) {
 			t.Fatal(e.Name())
 		}
 	}
@@ -1842,7 +1843,7 @@ func TestStatusKeys(t *testing.T) {
 }
 
 // The keys and their order are those of daemon.py's status(), then the Go core's own (sync, enroll,
-// usergroup, authgroup); values Python would write the same.
+// usergroup, authgroup, instance); values Python would write the same.
 func TestStatusKeyOrderLikePython(t *testing.T) {
 	h := newHarness(t)
 	d := h.start(nil)
@@ -1855,7 +1856,7 @@ func TestStatusKeyOrderLikePython(t *testing.T) {
 		"message_id", "message_t", "action", "since", "host", "user", "university", "university_name", "mfa", "mfa_portal_url",
 		"mfa_steps", "socks_port", "http_port", "idle_minutes", "active_connections", "bytes_in", "bytes_out",
 		"connects", "last_error", "domains", "pac_url", "pac_refresh", "log_tail", "setup_needed", "repairing",
-		"busy", "error_kind", "platform", "elevated", "sync", "enroll", "usergroup", "authgroup"}
+		"busy", "error_kind", "platform", "elevated", "sync", "enroll", "usergroup", "authgroup", "instance"}
 	if !slices.Equal(keys, want) {
 		t.Fatal(keys)
 	}
@@ -1968,5 +1969,200 @@ func TestPhoneScreenOffCountsTowardsIdle(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 	if s, _ := d.snapshot(); s != Idle || len(h.pwLines()) != 1 || !strings.Contains(h.logs.String(), "Idle for") {
 		t.Fatal(s, h.pwLines(), h.logs.String())
+	}
+}
+
+// Another account of this computer holds the status port (its uni-vpn started first, or any
+// program of it listens there): the browsers take their rule from that port, so the rule is
+// off until this account's uni-vpn has the port, also across a restart. A port this account's
+// own program holds changes nothing.
+func TestRuleIsOffWhileAnotherAccountHoldsTheStatusPort(t *testing.T) {
+	for _, other := range []bool{false, true} {
+		t.Run(fmt.Sprint("other account ", other), func(t *testing.T) {
+			h := newHarness(t)
+			h.otherListens.Store(other)
+			blocker, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(h.cfg.HTTPPort))
+			if err != nil {
+				t.Fatal(err)
+			}
+			d := h.start(nil)
+			marker := filepath.Join(h.tokenDir, withdrawnName)
+			if d.HTTP() != nil || (h.withdrawn.Load() == 1) != other || exists(marker) != other || h.reinstated.Load() != 0 ||
+				(h.knocked.Load() == 1) != other {
+				blocker.Close()
+				t.Fatal(d.HTTP() != nil, h.withdrawn.Load(), exists(marker), h.reinstated.Load(), h.knocked.Load())
+			}
+			if !other {
+				blocker.Close()
+				return
+			}
+			// Stopped meanwhile: the rule stays off, and the next start puts it back once the
+			// port is free.
+			h.teardown()
+			h.d = nil
+			blocker.Close()
+			h.otherListens.Store(false)
+			d = h.start(nil)
+			if !waitFor(3*time.Second, func() bool { return h.reinstated.Load() == 1 }) || exists(marker) || d.HTTP() == nil {
+				t.Fatal(h.reinstated.Load(), exists(marker))
+			}
+		})
+	}
+}
+
+func TestRuleIsOnAgainOnceTheStatusPortIsFree(t *testing.T) {
+	h := newHarness(t)
+	h.otherListens.Store(true)
+	blocker, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(h.cfg.HTTPPort))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := h.start(nil)
+	if h.withdrawn.Load() != 1 {
+		blocker.Close()
+		t.Fatal(h.withdrawn.Load())
+	}
+	blocker.Close()
+	if !waitFor(3*time.Second, func() bool { return d.HTTP() != nil && h.reinstated.Load() == 1 }) {
+		t.Fatal(d.HTTP() != nil, h.reinstated.Load())
+	}
+	if exists(filepath.Join(h.tokenDir, withdrawnName)) || h.withdrawn.Load() != 1 {
+		t.Fatal("marker left or withdrawn again")
+	}
+}
+
+// Whatever holds the SOCKS port would get the browser's connections: the rule sends everything
+// directly until the port is uni-vpn's, and the browsers load it again each time.
+func TestRuleIsDirectWhileTheSocksPortIsTaken(t *testing.T) {
+	h := newHarness(t)
+	blocker, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(h.cfg.SocksPort))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := h.start(nil)
+	if r := h.http("GET", "/proxy.pac", nil, ""); r.status != 200 || string(r.body) != pac.Direct {
+		blocker.Close()
+		t.Fatal(r.status, string(r.body))
+	}
+	if !waitFor(3*time.Second, func() bool { return h.refreshCount() >= 1 }) {
+		blocker.Close()
+		t.Fatal("the browsers were not told")
+	}
+	told := h.refreshCount()
+	blocker.Close()
+	waitState(t, d, Idle)
+	if r := h.http("GET", "/proxy.pac", nil, ""); !strings.Contains(string(r.body), "SOCKS5 127.0.0.1:"+strconv.Itoa(h.cfg.SocksPort)) {
+		t.Fatal(string(r.body))
+	}
+	if !waitFor(3*time.Second, func() bool { return h.refreshCount() > told }) {
+		t.Fatal("the browsers were not told again")
+	}
+}
+
+// Another account's browser must not use this account's VPN nor start its sign-in.
+func TestSocksPortRefusesOtherAccounts(t *testing.T) {
+	h := newHarness(t)
+	d := h.start(func(o *Options) { o.OtherAccount = func(net.Conn) (bool, error) { return true, nil } })
+	c, err := net.Dial("tcp", "127.0.0.1:"+strconv.Itoa(h.cfg.SocksPort))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.Write([]byte{5, 1, 0})
+	c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if n, err := c.Read(make([]byte, 2)); n != 0 || err == nil {
+		t.Fatal(n, err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if s, _ := d.snapshot(); s != Idle || h.pwLines() != nil {
+		t.Fatal(s, h.pwLines())
+	}
+}
+
+func readInstance(t *testing.T, h *harness) (id, page string) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(h.tokenDir, instanceName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var file struct{ ID, Page string }
+	if err := json.Unmarshal(data, &file); err != nil {
+		t.Fatal(err)
+	}
+	return file.ID, file.Page
+}
+
+// The app windows show the status port's page only when status.json says the id in the
+// instance file, which only this account can read; while another account holds the port,
+// the page that says so instead.
+func TestInstanceFileTellsTheAppWindowsWhatIsOurs(t *testing.T) {
+	h := newHarness(t)
+	h.otherListens.Store(true)
+	blocker, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(h.cfg.HTTPPort))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := h.start(nil)
+	s, _ := d.Status()
+	instance, _ := s.Get("instance")
+	id, page := readInstance(t, h)
+	if id == "" || id != instance || !strings.Contains(page, "another user account") {
+		blocker.Close()
+		t.Fatal(id, instance, page)
+	}
+	if info, err := os.Stat(filepath.Join(h.tokenDir, instanceName)); err != nil || runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
+		blocker.Close()
+		t.Fatal(info, err)
+	}
+	blocker.Close()
+	if !waitFor(3*time.Second, func() bool { return d.HTTP() != nil }) {
+		t.Fatal("the port stays taken")
+	}
+	if id2, page := readInstance(t, h); id2 != id || page != "" {
+		t.Fatal(id2, page)
+	}
+	// Once it ends, no uni-vpn answers with the id in the file.
+	h.teardown()
+	h.d = nil
+	if id3, page := readInstance(t, h); id3 == id || len(id3) != 32 || page != "" {
+		t.Fatal(id3, page)
+	}
+}
+
+// Its own program on the port is no other account's: nothing says another account has it (the
+// app windows show nothing of that program, its status.json has not the id).
+func TestInstanceFileHasNoPageForThisAccountsProgram(t *testing.T) {
+	h := newHarness(t)
+	blocker, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(h.cfg.HTTPPort))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocker.Close()
+	h.start(nil)
+	if _, page := readInstance(t, h); page != "" {
+		t.Fatal(page)
+	}
+}
+
+// The uni-vpn of another account switched the computer's rule off (macOS) and asks for the PAC
+// file: the rule gets its look 2 s later, not only every 10 retry intervals.
+func TestAnotherAccountsRequestBringsTheRulesLookForward(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.RetryInterval = 1 // the regular look: every 10 s
+	d := h.start(nil)
+	if !waitFor(3*time.Second, func() bool { return h.covered.Load() == 1 }) {
+		t.Fatal("no look at the start", h.covered.Load())
+	}
+	d.otherAccountSeen()
+	time.Sleep(1500 * time.Millisecond)
+	if h.covered.Load() != 1 {
+		t.Fatal("too early", h.covered.Load())
+	}
+	if !waitFor(2*time.Second, func() bool { return h.covered.Load() == 2 }) {
+		t.Fatal("no look after the request", h.covered.Load())
+	}
+	time.Sleep(300 * time.Millisecond)
+	if h.covered.Load() != 2 {
+		t.Fatal("looked again", h.covered.Load())
 	}
 }
