@@ -1361,6 +1361,9 @@ func (d *Daemon) Run() {
 	if tun != nil {
 		tun.Stop(grace)
 	}
+	// Before the ports: another app may listen on them once they are free, and the phone app
+	// sends its token wherever the ready file says.
+	d.dropReady()
 	d.forwarder.Stop()
 	if server := d.HTTP(); server != nil {
 		server.Stop()
@@ -1380,16 +1383,16 @@ func (d *Daemon) Stop() { d.stopOnce.Do(func() { close(d.stop) }) }
 // not wait for Run to end (cmd/uni-vpn-ios). Call it after Stop, so the ticker no longer binds
 // the SOCKS port again.
 func (d *Daemon) Unbind() {
+	d.dropReady() // first: the ports may be another app's once free
 	d.forwarder.Unbind()
 	if server := d.HTTP(); server != nil {
 		server.Unbind()
 	}
-	d.dropReady()
 }
 
-// dropReady removes the ready file once: in Unbind, while the lock is still ours, or when Run
-// ends. A daemon still ending after Unbind must not remove the file of the core that has the
-// ports by then (the iPhone's app and its tunnel hand them over).
+// dropReady removes the ready file once, before the ports go: in Unbind, while the lock is
+// still ours, or when Run stops. A daemon still ending after Unbind must not remove the file of
+// the core that has the ports by then (the iPhone's app and its tunnel hand them over).
 func (d *Daemon) dropReady() {
 	d.readyOnce.Do(func() {
 		if d.opts.ReadyFile != "" {
