@@ -8,7 +8,7 @@ $process = Start-Process -FilePath "$env:ProgramFiles\uni-vpn\unins000.exe" -Arg
 Start-Sleep 5
 if (Test-Path "$env:ProgramFiles\uni-vpn\bin\uni-vpn-core.exe") { throw "files are left in Program Files" }
 if (Test-Path $staged) { throw "a waiting update is left in Program Files" }
-if (Get-ScheduledTask -TaskName uni-vpn -ErrorAction SilentlyContinue) { throw "the task is still registered" }
+if (Get-ScheduledTask -TaskName "uni-vpn*" -ErrorAction SilentlyContinue) { throw "the task is still registered" }
 $left = @(Get-CimInstance Win32_Process -Filter "Name = 'uni-vpn-core.exe' OR Name = 'openconnect.exe'")
 $left | Format-Table ProcessId, ParentProcessId, CommandLine -AutoSize -Wrap | Out-String -Width 400 | Write-Host
 if ($left.Count -gt 0) { throw "the service still runs after the uninstall" }

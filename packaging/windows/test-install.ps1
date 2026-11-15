@@ -1,6 +1,9 @@
 # Installs out\uni-vpn-setup.exe like a user would and checks what it set up (ci.yml:
 # windows-installer, and windows-arm-install on an ARM runner).
 $ErrorActionPreference = "Stop"  # as in a GitHub Actions powershell step
+# Every account has its own task (task names hold for the whole computer); "uni-vpn" alone is
+# the one of earlier versions.
+$task = "uni-vpn-$([Security.Principal.WindowsIdentity]::GetCurrent().User.Value)"
 $process = Start-Process -FilePath out\uni-vpn-setup.exe -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/LOG=install-setup.log" -PassThru
 if (-not $process.WaitForExit(300000)) {
   Write-Host "The installer did not finish within 5 minutes"
@@ -27,7 +30,8 @@ $status = Invoke-RestMethod http://127.0.0.1:1081/status.json
 if ($status.commit -ne $env:GITHUB_SHA) { throw "the service is not the Go core of this commit ($($status.commit))" }
 if (Test-Path "$env:ProgramFiles\uni-vpn\python") { throw "Python is in uni-vpn's folder" }
 if (Test-Path "$env:ProgramFiles\uni-vpn\uni_vpn") { throw "the Python program is in uni-vpn's folder" }
-$action = (Get-ScheduledTask -TaskName uni-vpn).Actions[0]
+$action = (Get-ScheduledTask -TaskName $task).Actions[0]
+if (Get-ScheduledTask -TaskName uni-vpn -ErrorAction SilentlyContinue) { throw "the install registered the task of earlier versions" }
 Write-Host "task: $($action.Execute) $($action.Arguments)"
 if ($action.Execute -notlike "*\conhost.exe" -or $action.Arguments -notlike "--headless *\bin\uni-vpn-core.exe* daemon") {
   throw "the task does not run uni-vpn-core.exe in conhost.exe --headless"
@@ -108,7 +112,7 @@ $problems = @()
 # single process object has no Count, so (Daemons).Count -gt 0 is never true for one.
 function Daemons { @(Get-CimInstance Win32_Process -Filter "Name = 'uni-vpn-core.exe'" | Where-Object { $_.CommandLine -like "* daemon*" }) }
 function ShowService {
-  Write-Host "task: $((Get-ScheduledTask -TaskName uni-vpn).State)"
+  Write-Host "task: $((Get-ScheduledTask -TaskName $task).State); of earlier versions: $((Get-ScheduledTask -TaskName uni-vpn -ErrorAction SilentlyContinue).State)"
   Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq "uni-vpn-core.exe" -or $_.Name -eq "conhost.exe") -and $_.CommandLine -like "*uni-vpn*" } |
     Format-Table ProcessId, ParentProcessId, CreationDate, CommandLine -AutoSize -Wrap | Out-String -Width 400 | Write-Host
 }
@@ -134,7 +138,7 @@ function HowItAnswers {
 # in a crash. "/End" alone ends only conhost, not the service it started: Repair, setup and
 # uninstall end that one too (checked below and in test-uninstall.ps1).
 ShowService
-$end = cmd /c "schtasks /End /TN uni-vpn 2>&1"  # stderr through PowerShell would stop the script
+$end = cmd /c "schtasks /End /TN $task 2>&1"  # stderr through PowerShell would stop the script
 Write-Host "schtasks /End: $end (exit $LASTEXITCODE)"
 $sw = [Diagnostics.Stopwatch]::StartNew()
 Daemons | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
@@ -174,7 +178,7 @@ $null = $repair.Handle  # else ExitCode stays empty
 $sw = [Diagnostics.Stopwatch]::StartNew()
 $restarted = $null
 while (-not $repair.HasExited -and $sw.Elapsed.TotalSeconds -lt 60) {
-  if ((Get-ScheduledTask -TaskName uni-vpn).State -ne "Running") { schtasks /Run /TN uni-vpn | Out-Null; $restarted = $sw.Elapsed.TotalSeconds; break }
+  if ((Get-ScheduledTask -TaskName $task).State -ne "Running") { schtasks /Run /TN $task | Out-Null; $restarted = $sw.Elapsed.TotalSeconds; break }
   Start-Sleep -Milliseconds 50
 }
 if (-not $repair.WaitForExit(300000)) { Explain; throw "Repair's setup did not finish within 5 minutes" }
@@ -190,21 +194,24 @@ ShowService
 if (@(Daemons | Where-Object { $before -contains $_.ProcessId }).Count -gt 0) { $problems += "Repair left the old service running" }
 # Normal priority: Task Scheduler's default runs a task below normal, with low I/O and memory
 # priority, while all of the browser's traffic to the university goes through the service.
-$taskPriority = (Get-ScheduledTask -TaskName uni-vpn).Settings.Priority
+$taskPriority = (Get-ScheduledTask -TaskName $task).Settings.Priority
 $daemon = @(Get-CimInstance Win32_Process -Filter "Name = 'uni-vpn-core.exe'" | Where-Object { $_.CommandLine -like "* daemon*" })
 Write-Host "task priority $taskPriority; service base priority $(($daemon | ForEach-Object Priority) -join ', ') (8 is normal, 6 below normal)"
 if ($taskPriority -ne 4) { $problems += "the task has priority $taskPriority, not 4" }
 if ($daemon.Count -eq 0 -or ($daemon | Where-Object { $_.Priority -lt 8 })) { $problems += "the service does not run at normal priority" }
-# An update replaces only the program, so an earlier version's task keeps priority 7: the
-# service still runs at normal priority then (it sets its own when it starts).
+# An update replaces only the program, so an earlier version's task stays: one task "uni-vpn"
+# for the whole computer, with priority 7. The service still runs at normal priority then (it
+# sets its own when it starts), and registers this account's own task.
 $xml = "$PWD\task-priority-7.xml"
-(Export-ScheduledTask -TaskName uni-vpn) -replace "<Priority>4</Priority>", "<Priority>7</Priority>" | Set-Content -Encoding Unicode $xml
-$out = cmd /c "schtasks /Create /TN uni-vpn /XML `"$xml`" /F 2>&1"
-if ($LASTEXITCODE -ne 0) { throw "could not give the task an earlier version's priority: $out" }
+(Export-ScheduledTask -TaskName $task) -replace "<Priority>4</Priority>", "<Priority>7</Priority>" | Set-Content -Encoding Unicode $xml
 ShowService
 $old = @(Daemons | ForEach-Object ProcessId)
-cmd /c "schtasks /End /TN uni-vpn 2>&1" | Out-Null
+cmd /c "schtasks /End /TN $task 2>&1" | Out-Null
 $old | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
+$out = cmd /c "schtasks /Delete /TN $task /F 2>&1"
+if ($LASTEXITCODE -ne 0) { throw "could not delete this account's task: $out" }
+$out = cmd /c "schtasks /Create /TN uni-vpn /XML `"$xml`" /F 2>&1"
+if ($LASTEXITCODE -ne 0) { throw "could not register an earlier version's task: $out" }
 cmd /c "schtasks /Run /TN uni-vpn 2>&1" | Out-Null
 function NewDaemons { @(Daemons | Where-Object { $old -notcontains $_.ProcessId }) }
 $up = $false
@@ -212,13 +219,18 @@ foreach ($i in 1..30) { if (@(NewDaemons).Count -gt 0 -and (Answers)) { $up = $t
 ShowService
 $taskPriority = (Get-ScheduledTask -TaskName uni-vpn).Settings.Priority
 $daemon = @(NewDaemons)
+$own = $false
+foreach ($i in 1..20) { if (Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue) { $own = $true; break }; Start-Sleep 1 }
+Write-Host "this account's own task registered by the service of an earlier version's task: $own"
+if (-not $own) { Explain; $problems += "the service started with an earlier version's task did not register this account's own task" }
 Write-Host "an earlier version's task: priority $taskPriority; service base priority $(($daemon | ForEach-Object Priority) -join ', ')"
 if (-not $up) { Explain; HowItAnswers; $problems += "the service started with an earlier version's task did not answer" }
 if ($taskPriority -ne 7) { throw "the task has priority $taskPriority, not an earlier version's 7" }
 if ($daemon.Count -eq 0 -or ($daemon | Where-Object { $_.Priority -lt 8 })) { Explain; $problems += "with an earlier version's task the service does not run at normal priority" }
 # The Repair button: the service starts setup, which ends that service and starts a new one, so
 # setup must outlive it. Ended with it, only the tray app starts the service again, a minute
-# later, and the rest of Repair is not done. Repair also writes the earlier version's task again.
+# later, and the rest of Repair is not done. Repair also writes this account's task again and
+# deletes the earlier version's one, which it ends with the service.
 $old = @(Daemons | ForEach-Object ProcessId)
 Invoke-WebRequest -UseBasicParsing -Method Post -Headers @{ "X-Uni-VPN" = "1" } http://127.0.0.1:1081/api/repair | Out-Null
 $sw = [Diagnostics.Stopwatch]::StartNew()
@@ -228,8 +240,10 @@ while (-not $back -and $sw.Elapsed.TotalSeconds -lt 90) {
   else { Start-Sleep -Milliseconds 250 }
 }
 ShowService
-$taskPriority = (Get-ScheduledTask -TaskName uni-vpn).Settings.Priority
-Write-Host "the Repair button: the new service answered at $back s; task priority $taskPriority"
+$taskPriority = (Get-ScheduledTask -TaskName $task).Settings.Priority
+$legacy = Get-ScheduledTask -TaskName uni-vpn -ErrorAction SilentlyContinue
+Write-Host "the Repair button: the new service answered at $back s; task priority $taskPriority; earlier version's task left: $([bool]$legacy)"
+if ($legacy) { $problems += "the Repair button left the earlier version's task" }
 Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\daemon.log" -Tail 12 -ErrorAction SilentlyContinue
 if (-not $back) { Explain; HowItAnswers; throw "no new service answers after the Repair button" }
 if ($back -gt 40) { Explain; $problems += "after the Repair button only the tray app started the service again ($back s)" }

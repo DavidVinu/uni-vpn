@@ -107,6 +107,11 @@ type Manager struct {
 	// Conhost is System32's conhost.exe on Windows: the task runs the binary in a console
 	// that is never shown (winsys.RenderTaskBinary). "" runs the binary directly.
 	Conhost string
+	// SID is this account's on Windows (winsys.CurrentSID): its task is winsys.TaskName(SID).
+	// "" is the one task of earlier versions, winsys.LegacyTaskName.
+	SID string
+
+	legacy *bool // legacyOurs, once asked
 }
 
 // New acts on this machine.
@@ -119,11 +124,81 @@ func New() *Manager {
 		Getenv:     os.Getenv,
 		BrewPrefix: brewPrefix,
 		Conhost:    winsys.Conhost(),
+		SID:        winsys.CurrentSID(),
 	}
 }
 
 func (m *Manager) macOS() bool   { return m.GOOS == "darwin" }
 func (m *Manager) windows() bool { return m.GOOS == "windows" }
+
+// task is this account's scheduled task on Windows.
+func (m *Manager) task() string { return winsys.TaskName(m.SID) }
+
+// legacyOurs reports whether the task of earlier versions (winsys.LegacyTaskName), one for the
+// whole computer, is this account's: then this account's own task replaces it. One of another
+// account stays; that account's core moves to its own task (AddAccountTask). Its principal is
+// a name or a SID, so both are compared as SIDs.
+func (m *Manager) legacyOurs() bool {
+	if m.SID == "" || m.task() == winsys.LegacyTaskName {
+		return false
+	}
+	if m.legacy == nil {
+		r, err := m.Run(Cmd{Args: []string{"powershell", "-NoProfile", "-NonInteractive", "-Command",
+			taskOwnerScript(winsys.LegacyTaskName, m.SID)}, Capture: true, Timeout: 15 * time.Second, NoWindow: true})
+		ours := err == nil && strings.TrimSpace(r.Stdout) == "ours"
+		m.legacy = &ours
+	}
+	return *m.legacy
+}
+
+// taskOwnerScript prints "ours" when the task in Task Scheduler's top folder runs as the
+// account with this SID, "other" for another account, nothing without the task. Both
+// names are plain (letters, digits, "-"). "exit 0": without the task the silenced error of
+// Get-ScheduledTask would make powershell -Command end with exit code 1.
+func taskOwnerScript(task, sid string) string {
+	return fmt.Sprintf(`$ErrorActionPreference = 'Stop'; `+
+		`$t = Get-ScheduledTask -TaskPath '\' -TaskName '%s' -ErrorAction SilentlyContinue; `+
+		`if ($t) { $u = $t.Principal.UserId; `+
+		`try { $u = (New-Object Security.Principal.NTAccount $u).Translate([Security.Principal.SecurityIdentifier]).Value } catch {}; `+
+		`if ($u -eq '%s') { 'ours' } else { 'other' } }; exit 0`, task, sid)
+}
+
+// tasks are the scheduled tasks that start this account's service: its own, and until it is
+// removed the one of earlier versions.
+func (m *Manager) tasks() []string {
+	if m.legacyOurs() {
+		return []string{m.task(), winsys.LegacyTaskName}
+	}
+	return []string{m.task()}
+}
+
+// removeLegacy deletes the task of earlier versions when it is this account's, once the
+// service it started has ended. Left (it could not be deleted), it only starts a second copy at
+// login, which ends at once (the lock).
+func (m *Manager) removeLegacy() {
+	if m.legacyOurs() {
+		m.Run(Cmd{Args: schtasks("/Delete", "/TN", winsys.LegacyTaskName, "/F"), Capture: true, NoWindow: true})
+	}
+}
+
+// AddAccountTask registers this account's own task from the service file when it is missing:
+// an update replaces only the program, and the service of an earlier version started from the
+// one task for the whole computer. Called when the service starts (elevated, as Task Scheduler
+// needs for the highest run level). Reports whether it registered the task.
+func (m *Manager) AddAccountTask() bool {
+	if !m.windows() || m.SID == "" {
+		return false
+	}
+	target := m.UnitTargetPath()
+	if _, err := os.Stat(target); err != nil {
+		return false // not installed: nothing to start at login
+	}
+	if r, err := m.Run(Cmd{Args: schtasks("/Query", "/TN", m.task()), Capture: true, NoWindow: true}); err != nil || r.Code == 0 {
+		return false
+	}
+	r, err := m.Run(Cmd{Args: schtasks("/Create", "/TN", m.task(), "/XML", target, "/F"), Capture: true, NoWindow: true})
+	return err == nil && r.Code == 0
+}
 
 func brewPrefix() string {
 	for _, prefix := range []string{"/opt/homebrew", "/usr/local"} {
@@ -264,8 +339,10 @@ func (m *Manager) endTask() (bool, error) {
 	for range 20 {
 		// Again while it runs: the tray app starts a stopped service again after two missed
 		// polls (3 to 6 s), once a minute at most. Ended again, it stays ended.
-		if _, err := m.Run(Cmd{Args: schtasks("/End", "/TN", winsys.TaskName), Capture: true, NoWindow: true}); err != nil {
-			return false, err
+		for _, task := range m.tasks() {
+			if _, err := m.Run(Cmd{Args: schtasks("/End", "/TN", task), Capture: true, NoWindow: true}); err != nil {
+				return false, err
+			}
 		}
 		m.endService()
 		if !m.IsActive() {
@@ -328,7 +405,7 @@ func (m *Manager) installWindows(target, binary string, dryRun bool) ([]string, 
 	// The working directory is the installation, the parent of bin, as for the Python core.
 	text := winsys.RenderTaskBinary(m.Conhost, binary, winsys.CurrentUser(), filepath.Dir(filepath.Dir(binary)))
 	if dryRun {
-		m.printf("-> would register the scheduled task %s (%s) and start it", winsys.TaskName, target)
+		m.printf("-> would register the scheduled task %s (%s) and start it", m.task(), target)
 		return []string{target}, nil
 	}
 	if err := os.MkdirAll(filepath.Dir(target), 0o777); err != nil {
@@ -341,7 +418,7 @@ func (m *Manager) installWindows(target, binary string, dryRun bool) ([]string, 
 		return nil, err
 	}
 	files := []string{target}
-	if err := m.runChecked(schtasks("/Create", "/TN", winsys.TaskName, "/XML", target, "/F"), files); err != nil {
+	if err := m.runChecked(schtasks("/Create", "/TN", m.task(), "/XML", target, "/F"), files); err != nil {
 		return files, err
 	}
 	// Like "systemctl restart": a running old daemon makes way for the new code.
@@ -353,7 +430,8 @@ func (m *Manager) installWindows(target, binary string, dryRun bool) ([]string, 
 		// With IgnoreNew, "/Run" would be dropped silently and the old code keep running.
 		return files, &Error{"The running service did not stop, log out and in, then run the installer again", files}
 	}
-	return files, m.runChecked(schtasks("/Run", "/TN", winsys.TaskName), files)
+	m.removeLegacy()
+	return files, m.runChecked(schtasks("/Run", "/TN", m.task()), files)
 }
 
 // Install writes the service file for the Go binary and loads the service. Returns the files
@@ -468,11 +546,12 @@ func (m *Manager) Uninstall() (bool, error) {
 		if _, err := m.endTask(); err != nil {
 			return false, err
 		}
-		result, err := m.Run(Cmd{Args: schtasks("/Delete", "/TN", winsys.TaskName, "/F"), Capture: true, NoWindow: true})
+		result, err := m.Run(Cmd{Args: schtasks("/Delete", "/TN", m.task(), "/F"), Capture: true, NoWindow: true})
 		if err != nil {
 			return false, err
 		}
-		query, err := m.Run(Cmd{Args: schtasks("/Query", "/TN", winsys.TaskName), Capture: true, NoWindow: true})
+		m.removeLegacy()
+		query, err := m.Run(Cmd{Args: schtasks("/Query", "/TN", m.task()), Capture: true, NoWindow: true})
 		if err != nil {
 			return false, err
 		}
@@ -505,10 +584,23 @@ func (m *Manager) Uninstall() (bool, error) {
 func (m *Manager) IsActive() bool {
 	if m.windows() {
 		// The state name from PowerShell is not localized, unlike the schtasks output.
-		r, err := m.Run(Cmd{Args: []string{"powershell", "-NoProfile", "-NonInteractive", "-Command",
-			fmt.Sprintf("(Get-ScheduledTask -TaskName '%s').State", winsys.TaskName)},
+		tasks := m.tasks()
+		script := fmt.Sprintf("(Get-ScheduledTask -TaskName '%s').State", strings.Join(tasks, "','"))
+		if len(tasks) > 1 {
+			// Also once the task of earlier versions is gone.
+			script = fmt.Sprintf("(Get-ScheduledTask -TaskName '%s' -ErrorAction SilentlyContinue).State", strings.Join(tasks, "','"))
+		}
+		r, err := m.Run(Cmd{Args: []string{"powershell", "-NoProfile", "-NonInteractive", "-Command", script},
 			Capture: true, Timeout: 15 * time.Second, NoWindow: true})
-		return err == nil && strings.TrimSpace(r.Stdout) == "Running"
+		if err != nil {
+			return false
+		}
+		for _, state := range strings.Fields(r.Stdout) {
+			if state == "Running" {
+				return true
+			}
+		}
+		return false
 	}
 	if m.macOS() {
 		r, err := m.Run(Cmd{Args: []string{"launchctl", "print", m.guiDomain() + "/" + Label},
@@ -539,7 +631,7 @@ func (m *Manager) Control(action string) (int, error) {
 			m.printf("Service file is missing (%s), please run install.ps1", target)
 			return 1, nil
 		}
-		start := schtasks("/Run", "/TN", winsys.TaskName)
+		start := schtasks("/Run", "/TN", m.task())
 		if action == "stop" || action == "restart" || action == "disable" {
 			stopped, err := m.endTask()
 			if err != nil {
@@ -550,11 +642,15 @@ func (m *Manager) Control(action string) (int, error) {
 				return 1, nil
 			}
 		}
+		var disable [][]string
+		for _, task := range m.tasks() {
+			disable = append(disable, schtasks("/Change", "/TN", task, "/DISABLE"))
+		}
 		steps := map[string][][]string{
 			"start": {start}, "stop": {}, "restart": {start},
-			"enable":  {schtasks("/Change", "/TN", winsys.TaskName, "/ENABLE"), start},
-			"disable": {schtasks("/Change", "/TN", winsys.TaskName, "/DISABLE")},
-			"status":  {schtasks("/Query", "/TN", winsys.TaskName, "/V", "/FO", "LIST")},
+			"enable":  {schtasks("/Change", "/TN", m.task(), "/ENABLE"), start},
+			"disable": disable,
+			"status":  {schtasks("/Query", "/TN", m.task(), "/V", "/FO", "LIST")},
 		}[action]
 		rc := 0
 		for _, args := range steps {

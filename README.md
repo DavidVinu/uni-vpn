@@ -126,7 +126,7 @@ commands when `uni-vpn` is not on the `PATH`.
 | Browser: `ERR_PROXY_CONNECTION_FAILED` or "proxy refused the connection" | service not running, or tunnel in an error state | the app's message and button; otherwise the log |
 | A university page loads without the VPN | the browser has not read the proxy rule | restart the browser; the system's proxy settings should name `http://127.0.0.1:1081/proxy.pac` as automatic configuration |
 | Sign-in fails with the right password | the gateway asks for something openconnect cannot answer non-interactively | check the log, open an issue |
-| Windows: "missing a permission" | the service runs without elevation, Wintun needs it | Repair in the app registers the scheduled task "uni-vpn" again, with highest privileges |
+| Windows: "missing a permission" | the service runs without elevation, Wintun needs it | Repair in the app registers the account's scheduled task ("uni-vpn-" and the account's SID) again, with highest privileges |
 | The page is there but the tab keeps loading for minutes | the page embeds something from another university host that is not on the list | in the browser's developer tools, under Network, find the host with `ERR_CONNECTION_TIMED_OUT` and add it under Settings, Websites |
 | Firefox: a university page loads without the VPN shortly after a hiccup | after a failed proxy attempt Firefox sends requests directly for 10 s | reload the page after a few seconds |
 | Firefox: "server not found" for a university host that works in Chrome | Firefox resolves names locally, ahead of the proxy; the host exists only in the university DNS | in `about:config`, set `network.proxy.socks_remote_dns` to `true` |

@@ -72,6 +72,13 @@ func TestTrustedEnv(t *testing.T) {
 	}
 }
 
+// Task names hold for the whole computer: every account has its own.
+func TestTaskName(t *testing.T) {
+	if TaskName("") != "uni-vpn" || TaskName("S-1-5-21-1-2-3-1001") != "uni-vpn-S-1-5-21-1-2-3-1001" {
+		t.Fatal(TaskName(""), TaskName("S-1-5-21-1-2-3-1001"))
+	}
+}
+
 func TestCurrentUser(t *testing.T) {
 	t.Setenv("USERDOMAIN", "UNI")
 	t.Setenv("USERNAME", "ab123")

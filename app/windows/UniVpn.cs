@@ -345,7 +345,11 @@ class TrayApp : ApplicationContext
         lastStart = DateTime.Now;
         try
         {
-            ProcessStartInfo info = new ProcessStartInfo("schtasks.exe", "/Run /TN uni-vpn");
+            // This account's own task (task names hold for the whole computer), or the one of an
+            // earlier version until the service has registered its own (service.AddAccountTask).
+            string task = "uni-vpn-" + WindowsIdentity.GetCurrent().User.Value;
+            ProcessStartInfo info = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"),
+                "/d /c schtasks /Run /TN " + task + " || schtasks /Run /TN uni-vpn");
             info.CreateNoWindow = true;
             info.UseShellExecute = false;
             Process.Start(info).Dispose();

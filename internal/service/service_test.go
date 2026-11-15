@@ -860,6 +860,127 @@ func TestWindowsEndTaskAlsoEndsTheService(t *testing.T) {
 	}
 }
 
+// Task names hold for the whole computer: with one name, the install of a second account
+// replaced the task of the first, whose service then never started again. Every account has
+// its own task; the one of earlier versions goes when it is this account's, else it stays.
+func TestWindowsEveryAccountHasItsOwnTask(t *testing.T) {
+	const sid = "S-1-5-21-1-2-3-1001"
+	own := "uni-vpn-" + sid
+	for _, legacy := range []string{"", "other", "ours"} {
+		t.Run("legacy "+legacy, func(t *testing.T) {
+			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+			t.Setenv("XDG_STATE_HOME", t.TempDir())
+			var states []string
+			r := &recorder{reply: func(c Cmd) (Result, error) {
+				if c.Args[0] != "powershell" {
+					return Result{}, nil
+				}
+				script := c.Args[len(c.Args)-1]
+				if strings.Contains(script, "Principal.UserId") {
+					if !strings.Contains(script, "'"+sid+"'") || !strings.Contains(script, "-TaskName 'uni-vpn'") {
+						t.Error(script)
+					}
+					return Result{Stdout: legacy + "\r\n"}, nil
+				}
+				states = append(states, script)
+				return Result{Stdout: "Ready\r\nReady\r\n"}, nil
+			}}
+			m, _ := manager("windows", r)
+			m.SID = sid
+			m.HTTPPort = func() (int, error) { return 9, nil }
+			files, err := m.Install(false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !r.called("schtasks", "/Create", "/TN", own, "/XML", files[0], "/F") ||
+				!reflect.DeepEqual(r.calls[len(r.calls)-1], []string{"schtasks", "/Run", "/TN", own}) {
+				t.Fatal(r.calls)
+			}
+			ended, deleted := -1, -1
+			for i, c := range r.calls {
+				switch {
+				case reflect.DeepEqual(c, []string{"schtasks", "/End", "/TN", "uni-vpn"}):
+					ended = i
+				case reflect.DeepEqual(c, []string{"schtasks", "/Delete", "/TN", "uni-vpn", "/F"}):
+					deleted = i
+				case len(c) > 2 && c[0] == "schtasks" && c[1] != "/End" && c[len(c)-1] == "uni-vpn":
+					t.Fatal("the task of earlier versions changed:", c)
+				}
+			}
+			wantState := "(Get-ScheduledTask -TaskName '" + own + "').State"
+			if legacy == "ours" {
+				// Ended with this account's service, deleted before its own task starts it.
+				wantState = "(Get-ScheduledTask -TaskName '" + own + "','uni-vpn' -ErrorAction SilentlyContinue).State"
+				if ended < 0 || deleted < ended || deleted > len(r.calls)-2 {
+					t.Fatal(r.calls)
+				}
+			} else if ended >= 0 || deleted >= 0 {
+				t.Fatal("another account's task was ended or deleted:", r.calls)
+			}
+			if len(states) == 0 || states[0] != wantState {
+				t.Fatal(states)
+			}
+			questions := 0
+			for _, c := range r.calls {
+				if c[0] == "powershell" && strings.Contains(c[len(c)-1], "Principal.UserId") {
+					questions++
+				}
+			}
+			if questions != 1 {
+				t.Fatal("asked", questions, "times whose the task of earlier versions is")
+			}
+
+			r.calls = nil
+			um, _ := manager("windows", r)
+			um.SID = sid
+			um.HTTPPort = func() (int, error) { return 9, nil }
+			if removed, err := um.Uninstall(); err != nil || !removed {
+				t.Fatal(removed, err)
+			}
+			if !r.called("schtasks", "/Delete", "/TN", own, "/F") ||
+				r.called("schtasks", "/Delete", "/TN", "uni-vpn", "/F") != (legacy == "ours") {
+				t.Fatal(r.calls)
+			}
+		})
+	}
+}
+
+// An update replaces only the program: the service, started from the one task of an earlier
+// version, registers this account's own task from the service file.
+func TestWindowsServiceAddsItsOwnTaskAfterAnUpdate(t *testing.T) {
+	const sid = "S-1-5-21-1-2-3-1001"
+	own := "uni-vpn-" + sid
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	exists := false
+	r := &recorder{reply: func(c Cmd) (Result, error) {
+		if reflect.DeepEqual(c.Args, []string{"schtasks", "/Query", "/TN", own}) && !exists {
+			return Result{Code: 1}, nil
+		}
+		return Result{}, nil
+	}}
+	m, _ := manager("windows", r)
+	m.SID = sid
+	if m.AddAccountTask() || len(r.calls) != 0 {
+		t.Fatal("registered a task without a service file:", r.calls)
+	}
+	target := m.UnitTargetPath()
+	os.MkdirAll(filepath.Dir(target), 0o700)
+	os.WriteFile(target, []byte("x"), 0o600)
+	if !m.AddAccountTask() || !r.called("schtasks", "/Create", "/TN", own, "/XML", target, "/F") {
+		t.Fatal(r.calls)
+	}
+	r.calls, exists = nil, true
+	if m.AddAccountTask() || r.called("schtasks", "/Create", "/TN", own, "/XML", target, "/F") {
+		t.Fatal("registered the task again:", r.calls)
+	}
+	for _, other := range []*Manager{{GOOS: "windows", Run: r.run}, {GOOS: "linux", Run: r.run, SID: sid}} {
+		r.calls = nil
+		if other.AddAccountTask() || len(r.calls) != 0 {
+			t.Fatal(other.GOOS, r.calls)
+		}
+	}
+}
+
 func TestWindowsInstallRefusesWhenTheOldTaskKeepsRunning(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())

@@ -21,3 +21,4 @@ func HiddenNewConsole(cmd *exec.Cmd)                                  {}
 func AddUserPath(directory string) (bool, error)                      { return false, ErrUnsupported }
 func RemoveUserPath(directory string) error                           { return ErrUnsupported }
 func Conhost() string                                                 { return "" }
+func CurrentSID() string                                              { return "" }

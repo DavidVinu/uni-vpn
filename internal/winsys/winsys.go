@@ -13,7 +13,9 @@ import (
 
 const (
 	InternetSettings = `Software\Microsoft\Windows\CurrentVersion\Internet Settings`
-	TaskName         = "uni-vpn"
+	// LegacyTaskName is the task of versions before 2026-11-16: one name for the whole
+	// computer, so the install of a second account took the task of the first one away.
+	LegacyTaskName   = "uni-vpn"
 	CreateNoWindow   = 0x08000000
 	CreateNewConsole = 0x00000010
 )
@@ -71,6 +73,15 @@ func TrustedEnv(current []string, system, windows string) []string {
 }
 
 // CurrentUser is DOMAIN\user as Task Scheduler expects it.
+// TaskName is the scheduled task of the account with this SID (CurrentSID): task names hold
+// for the whole computer, and every account has its own task. "" is LegacyTaskName.
+func TaskName(sid string) string {
+	if sid == "" {
+		return LegacyTaskName
+	}
+	return LegacyTaskName + "-" + sid
+}
+
 func CurrentUser() string {
 	domain, user := os.Getenv("USERDOMAIN"), os.Getenv("USERNAME")
 	if domain != "" {
