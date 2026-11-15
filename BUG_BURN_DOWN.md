@@ -1010,7 +1010,7 @@ translations and docs. The full test suite on that commit passed first: `go test
 | FA-8 | Another local account that holds 127.0.0.1:1081 first answers this account's proxy rule and app window | High | fixed |
 | FA-9 | Another local account can use this account's VPN session through 127.0.0.1:1080 and start its sign-in | Medium | fixed |
 | FA-10 | Chrome, Edge and Brave on Xfce and LXQt never read the proxy rule, while setup reports success | Medium | fixed |
-| FA-11 | The sync relay can be filled for 400 days with a few thousand anonymous requests (not deployed yet) | Medium | open |
+| FA-11 | The sync relay can be filled for 400 days with a few thousand anonymous requests (not deployed yet) | Medium | fixed |
 
 ### FA-1 Android tablets offered the Linux packages
 
@@ -1234,3 +1234,39 @@ translations and docs. The full test suite on that commit passed first: `go test
   status port before this account signs in gives Chrome there its rule for that one session
   (the app window shows the note, and the next login has no lines until the port is ours).
   Sessions that read neither file (zsh on SDDM with Wayland, startx) do not get it.
+
+### FA-11 The sync relay filled by anyone
+
+- Found by: the system reviewer. Anyone can make groups at random ids with a token of their
+  own (256 KiB each) and read each once, which makes it live 400 days (a read moves `updated`
+  once a day). The database's limit (500 MB on the free plan) is reached with about 2,000
+  groups, about 4,000 requests; then no pairing slot or group can be written, for anyone,
+  until the operator clears it. Nothing limited a client.
+- Reproduced: the reviewer's test against the real worker.js and d1.mjs: 50 groups of 256 KiB,
+  each made and read once, all still there after the cleanup on day 399 (13,107,200 bytes).
+- Root cause: the relay had a size limit per blob, but none per client and none for the whole
+  database.
+- Fix (relay/worker.js, schema.sql):
+  - A network (CF-Connecting-IP: an IPv4 address, an IPv6 /48) may add 4 MiB a day: pairing
+    slots, new groups, and what a group grows by. Above it: 429. Only a SHA-256 of the network
+    with a secret of the day is kept (tables `quota`, `meta`); counts and secret are replaced
+    on the first request of the next day, and the hourly cron deletes old counts. Without the
+    header (the local test server) nothing is counted.
+  - The size of all blobs is kept in table `usage` by triggers. New groups and pairing slots
+    stop at 400 MB (507); groups in use may still be written up to 450 MB, and smaller always.
+    The answers that were there (409, 412, 403, 404, 410) stay.
+  - docs/sync.md says so; the privacy page (German and English) says that a hash of the
+    address is kept for a day, and on what legal basis.
+- Verification: `node --test relay/worker.test.mjs`, new: one network cannot fill the
+  database (16 groups of 256 KiB, then 429; a pairing slot too; the same /48 counts as one, the
+  next day it may add again, no header no count), a group that grows counts like new data, a
+  full database takes no new groups or slots while groups in use still change, the database
+  knows its size (usage equals the blobs after writes, reads, deletes and the cleanup), only a
+  hash of the network is kept for one day, and `network` for IPv4 and IPv6 forms. All but the
+  size test fail with the old worker.js. The reviewer's test, with a network address, now gets
+  429 at the 17th group. The Go client's tests against `relay/serve.mjs` pass.
+- Left (Low): many networks together (a botnet, cloud machines) can still fill it, at 4 MiB
+  per network a day; then new pairings fail until the junk expires, while existing groups keep
+  syncing. Requests that add nothing (reads) are not limited: they can use up the plan's
+  requests for a day. Campus networks behind one address share the 4 MiB: about 2,000
+  pairings a day (in the Go tests a new group is about 1 KB, a pairing slot about 100 bytes). The Go client shows "Can't reach the sync service" for 429 and 507.

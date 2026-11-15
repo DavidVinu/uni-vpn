@@ -147,6 +147,15 @@ bodies are `application/octet-stream`.
 | `GET /v1/group/<id>`, `Authorization: Bearer <token>` | 200 with the blob and `ETag: "<version>"`; 404; 403 wrong token |
 | `PUT /v1/group/<id>` with `If-None-Match: *` (create) or `If-Match: "<version>"`, up to 256 KiB, optionally `Sync-Final: 1` | 200 with the new `ETag`; 412 changed meanwhile; 410 closed; 403; 413 |
 
+A write that adds data (a pairing slot, a new group, a group that grows) also gets 429 when
+its network (CF-Connecting-IP: an IPv4 address or an IPv6 /48) added 4 MiB that day, and 507
+when the database holds 400 MB; a group in use may still grow up to 450 MB (the free plan's
+limit is 500 MB). So a few dozen requests no longer fill the database for everyone, and a full
+one still syncs the groups it has. The relay keeps no address: per network a SHA-256 with a
+secret of the day (table `meta`), whose counts and secret go with the first request of the
+next day and the hourly cron. The triggers in `schema.sql` keep the size of all blobs in
+table `usage`.
+
 Pairing slots expire after 10 minutes, groups 400 days after they were last read or written
 (reads count once a day), a new group that no device read or wrote again after 7 days; an
 hourly cron deletes. Taking a code off the screen reads its slot, which empties it, so a code
