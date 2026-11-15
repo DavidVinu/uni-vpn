@@ -6,8 +6,10 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DavidVinu/uni-vpn/internal/i18n"
 )
@@ -119,6 +121,44 @@ func TestOwnerLookupFailsOpen(t *testing.T) {
 	s.Stop()
 	if strings.Count(logs.String(), "Could not tell which account") != 1 {
 		t.Fatal(logs.String())
+	}
+}
+
+// The screenshot limit is for the app only: a request the server is going to refuse (no
+// token, a foreign Host or Origin, another account) keeps the small limit, so it is answered
+// from its Content-Length alone instead of the server taking 32 MB first.
+func TestPictureLimitOnlyForRequestsThatGetThrough(t *testing.T) {
+	length := "Content-Length: " + strconv.Itoa(MaxBody+1) + "\r\n"
+	for _, c := range []struct {
+		name, host, extra string
+		token             string
+		other             bool
+	}{
+		{name: "no token", host: "127.0.0.1", token: "t0ken"},
+		{name: "wrong token", host: "127.0.0.1", token: "t0ken", extra: "X-Uni-VPN-Token: wrong\r\n"},
+		{name: "foreign host", host: "evil.example"},
+		{name: "foreign origin", host: "127.0.0.1", extra: "Origin: https://evil.example\r\n"},
+		{name: "other account", host: "127.0.0.1", other: true},
+	} {
+		s := New(pacOnly{}, "127.0.0.1", 0, nil)
+		s.Token = c.token
+		s.OtherAccount = func(net.Conn) (bool, error) { return c.other, nil }
+		if err := s.Start(); err != nil {
+			t.Fatal(err)
+		}
+		conn, err := net.Dial("tcp", s.Addr().String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Only the head: a server waiting for the body does not answer before its read times out.
+		conn.Write([]byte("POST " + pictureRoute + " HTTP/1.1\r\nHost: " + c.host + "\r\nX-Uni-VPN: 1\r\n" + length + c.extra + "\r\n"))
+		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		data, _ := io.ReadAll(conn)
+		conn.Close()
+		s.Stop()
+		if !bytes.HasPrefix(data, []byte("HTTP/1.1 413 ")) {
+			t.Errorf("%s: %q", c.name, data)
+		}
 	}
 }
 

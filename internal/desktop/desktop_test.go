@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -365,7 +366,7 @@ func TestRestartAppLinuxUsesTheDesktopOfTheRunningShell(t *testing.T) {
 		spawned = append(spawned, args)
 		return true
 	}
-	if !h.d.RestartApp(1081) || !h.ran("pkill", "-f", script) ||
+	if !h.d.RestartApp(1081) || !h.ran("pkill", "-f", regexp.QuoteMeta(script)) ||
 		!reflect.DeepEqual(spawned, [][]string{{"/usr/bin/python3", script, "--port", "1081", "--hidden"}}) {
 		t.Fatal(h.commands, spawned)
 	}
@@ -388,6 +389,14 @@ func TestShortcutScriptQuotesPaths(t *testing.T) {
 		if !strings.Contains(script, want) {
 			t.Fatal(want, script)
 		}
+	}
+}
+
+// PowerShell ends a single-quoted string at any of its single quotes, also the typographic
+// ones (‘ ’ ‚ ‛), as in a user name like D’Angelo; each is doubled to stay in the string.
+func TestPSQuoteDoublesEverySingleQuote(t *testing.T) {
+	if got := PSQuote("C:\\Users\\D’Angelo O'Neil ‘x‚y‛"); got != "'C:\\Users\\D’’Angelo O''Neil ‘‘x‚‚y‛‛'" {
+		t.Fatal(got)
 	}
 }
 
@@ -468,7 +477,10 @@ func TestDesktopEntryQuotesAndNamesTheWindowClass(t *testing.T) {
 	if !strings.Contains(hidden, "--hidden") || !strings.Contains(hidden, "NoDisplay=true") || strings.Contains(hidden, "otpauth") {
 		t.Fatal(hidden)
 	}
-	if got := DesktopQuote(`a "b" $c 100%`); got != `"a \"b\" \$c 100%%"` {
+	// Exec= is a string value: its escapes (\\ for a backslash) come off before the quoting
+	// rule reads the argument, so each backslash of the quoting is written twice. GLib refuses
+	// an entry with \" or \$ ("Desktop file didn't specify Exec field").
+	if got := DesktopQuote("a \"b\" $c `d` 100% e\\f"); got != `"a \\"b\\" \\$c \\`+"`"+`d\\`+"`"+` 100%% e\\\\f"` {
 		t.Fatal(got)
 	}
 }
@@ -567,7 +579,7 @@ func TestLinuxRepair(t *testing.T) {
 			}
 			return service.Result{}
 		}
-		if !h.d.Repair(1081, func(path string) { h.created = append(h.created, path) }) || h.ran("pkill", "-f", script) {
+		if !h.d.Repair(1081, func(path string) { h.created = append(h.created, path) }) || h.ran("pkill", "-f", regexp.QuoteMeta(script)) {
 			t.Fatal(tc.name, h.commands)
 		}
 		if !slices.Contains(h.created, h.d.LoginPath()) {

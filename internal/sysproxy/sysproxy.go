@@ -337,7 +337,14 @@ func (s *System) Restore(saved *Snapshot) error {
 			if e.Enabled && e.URL != "" {
 				err = s.set("networksetup", "-setautoproxyurl", e.Name, e.URL)
 			} else {
-				err = s.set("networksetup", "-setautoproxystate", e.Name, "off")
+				if e.URL != "" {
+					// Its own address, switched off, which Install wrote ours over. Setting
+					// an address also switches the rule on.
+					err = s.set("networksetup", "-setautoproxyurl", e.Name, e.URL)
+				}
+				if off := s.set("networksetup", "-setautoproxystate", e.Name, "off"); err == nil {
+					err = off
+				}
 			}
 			if first == nil {
 				first = err
