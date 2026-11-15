@@ -818,10 +818,12 @@ func PortsFromBroken(path string) map[string]int {
 		path = DefaultPath()
 	}
 	ports := map[string]int{}
-	text, err := readText(path)
+	data, err := atomicfile.Read(path)
 	if err != nil {
 		return ports
 	}
+	// Also from a file that is not UTF-8: the port lines are ASCII.
+	text := strings.ToValidUTF8(string(data), "�")
 	for _, line := range splitLines(text) {
 		if strings.HasPrefix(strings.TrimFunc(line, isSpace), "[") {
 			break // tables like [timing] from here on, no more top-level keys

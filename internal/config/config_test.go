@@ -397,6 +397,9 @@ func TestPortsFromBroken(t *testing.T) {
 		{"socks_port = 99999\nhttp_port = 2001\n", map[string]int{"http_port": 2001}},
 		{"socks_port = 5\nhttp_port = 5\n", map[string]int{}},
 		{"[timing]\nsocks_port = 2000\n", map[string]int{}},
+		// Not UTF-8 (a Latin-1 editor): the app windows were set up with these ports, and the
+		// daemon must answer there, or nobody sees that the settings could not be read.
+		{"# Universit\xe4t\r\nsocks_port = 2000\r\nhttp_port = 2001\r\n", map[string]int{"socks_port": 2000, "http_port": 2001}},
 	}
 	for _, tt := range tests {
 		if got := PortsFromBroken(write(t, tt.text)); !reflect.DeepEqual(got, tt.want) {
