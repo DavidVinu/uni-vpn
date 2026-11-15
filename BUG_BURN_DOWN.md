@@ -25,9 +25,10 @@ desktop.
 - Fix: packaging/windows/uni-vpn.iss stops "Uni VPN.exe" with taskkill before it ends the task,
   so nothing is left that starts the service again.
 - Verification: test-install.ps1 (CI windows-installer and windows-arm-install) now ends the
-  task with the tray app running and records how fast the tray app starts it again, measures the
-  installer's process search, and installs again over the running app, then checks that the
-  core of this commit answers.
+  service with the tray app running and records how fast the tray app starts it again (10 s
+  in CI), measures the installer's process search, and installs again over the running app,
+  then checks that the core of this commit answers. Its first run failed on the test itself:
+  its WebView2 probe had loaded the DLLs from Program Files, now it runs in a process of its own.
 
 ### D2. Repair can fail because the tray or menu bar app starts the service in the middle of it (Windows, macOS)
 
@@ -73,9 +74,10 @@ desktop.
   An update replaces only the program, so on macOS the service rewrites the LaunchAgent of an
   earlier version once (UpgradeProcessType, written in one step); launchd reads it at the next
   login.
-- Verification: CI macos-pkg checks the priority of the installed service with `ps -o pri`
-  (a background job shows 4). Go tests: the rendered plist is interactive; an older plist is
-  rewritten once, keeps its mode, and only on macOS.
+- Verification: CI macos-pkg checks the priority of the installed service with `ps -o pri`.
+  On the commit with only that check it failed: priority 4, `TASK_APPTYPE_DAEMON_BACKGROUND`.
+  Go tests: the rendered plist is interactive; an older plist is rewritten once, keeps its
+  mode, and only on macOS.
 
 ### D4. The window loses the page it was asked for when the service is still starting (Linux, macOS)
 
@@ -207,6 +209,26 @@ desktop.
   ignored instead of being force-unwrapped.
 - Verification: the re-audit ran the old script text with such a name in node and the injected
   code ran; the JSON string cannot end early. The macOS shell compiles in CI.
+
+### D14. Ending the Windows service's task left the service running (Windows)
+
+- Severity: Medium (Repair did not restart the service; uninstall left it running until the
+  user signed out)
+- Status: fixed
+- Root cause: the task runs `conhost.exe --headless uni-vpn-core.exe daemon`, so its program is
+  conhost, which starts the service. `schtasks /End` ends only the task's own program
+  (Microsoft's schtasks documentation: "Stops only the instances of a program started by a
+  scheduled task"). Setup, Repair, uninstall and a restart from a terminal relied on it: the old
+  service went on running, the new one could not take over, and after an uninstall it ran on
+  (the uninstall moves the running program aside, so its file was gone anyway).
+- Fix: after `/End`, setup ends the service too: every copy of this program of the signed-in
+  account except setup itself (`taskkill` by image name, process id and user name), openconnect
+  with it through the service's job object.
+- Verification: reproduced in CI (windows-installer): after `schtasks /End` said "SUCCESS" and
+  the task was "Ready", the conhost was gone but `uni-vpn-core.exe daemon`, its child, still
+  ran and answered. Go test: ending the task also ends the service, before it is started
+  again. CI: after Repair no old service is left running, and after the uninstall no
+  uni-vpn-core.exe or openconnect.exe runs.
 
 ### Left as they are (Low)
 

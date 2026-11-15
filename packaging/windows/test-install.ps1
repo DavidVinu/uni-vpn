@@ -66,18 +66,22 @@ $web = @(Get-CimInstance Win32_Process -Filter "Name = 'msedgewebview2.exe'" | W
 $browser = @(Get-CimInstance Win32_Process -Filter "Name = 'msedge.exe' OR Name = 'chrome.exe' OR Name = 'firefox.exe'" | Where-Object { $_.CommandLine -like "*127.0.0.1:1081*" })
 Write-Host "app window WebView2 processes: $($web.Count); browser with the page: $($browser.Count)"
 Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\app.log" -ErrorAction SilentlyContinue
-$desktop = "$env:ProgramFiles\uni-vpn\desktop"
-$env:PATH = "$desktop;$env:PATH"
-try {
-  Add-Type -Path "$desktop\Microsoft.Web.WebView2.Core.dll"
-  Write-Host "WebView2 found: $([Microsoft.Web.WebView2.Core.CoreWebView2Environment]::GetAvailableBrowserVersionString())"
-  # As the window does it (a failure here comes at once, as in the window's constructor).
-  $start = [Microsoft.Web.WebView2.Core.CoreWebView2Environment]::CreateAsync($null, "$env:LOCALAPPDATA\uni-vpn\WebView2", $null)
-  if ($start.Wait(30000)) { Write-Host "WebView2 starts: $($start.Result.BrowserVersionString)" } else { Write-Host "WebView2 did not start within 30 s" }
-} catch {
-  $e = $_.Exception
-  while ($e.InnerException) { $e = $e.InnerException }
-  Write-Host "WebView2 cannot start: $($e.GetType().FullName): $($e.Message)"
+# In a process of its own: one that loaded the DLLs from Program Files keeps them in use, and
+# installing again could not replace them.
+powershell -NoProfile -NonInteractive -Command {
+  $desktop = "$env:ProgramFiles\uni-vpn\desktop"
+  $env:PATH = "$desktop;$env:PATH"
+  try {
+    Add-Type -Path "$desktop\Microsoft.Web.WebView2.Core.dll"
+    Write-Host "WebView2 found: $([Microsoft.Web.WebView2.Core.CoreWebView2Environment]::GetAvailableBrowserVersionString())"
+    # As the window does it (a failure here comes at once, as in the window's constructor).
+    $start = [Microsoft.Web.WebView2.Core.CoreWebView2Environment]::CreateAsync($null, "$env:LOCALAPPDATA\uni-vpn\WebView2", $null)
+    if ($start.Wait(30000)) { Write-Host "WebView2 starts: $($start.Result.BrowserVersionString)" } else { Write-Host "WebView2 did not start within 30 s" }
+  } catch {
+    $e = $_.Exception
+    while ($e.InnerException) { $e = $e.InnerException }
+    Write-Host "WebView2 cannot start: $($e.GetType().FullName): $($e.Message)"
+  }
 }
 if ($web.Count -eq 0) { Explain; throw "the app window did not open on the handover" }
 # A second start on purpose: the install's two starts race, and the copy that stays may
@@ -107,27 +111,23 @@ function ShowService {
     Format-Table ProcessId, ParentProcessId, CreationDate, CommandLine -AutoSize -Wrap | Out-String -Width 400 | Write-Host
 }
 function Answers { try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 1 http://127.0.0.1:1081/status.json | Out-Null; return $true } catch { return $false } }
-# Ending the task ends the service (Repair, setup and uninstall rely on it), and the tray app
-# starts a stopped service again: nobody should need a terminal.
+# The tray app starts a stopped service again: nobody should need a terminal. Here it ends as
+# in a crash. "/End" alone ends only conhost, not the service it started: Repair, setup and
+# uninstall end that one too (checked below and in test-uninstall.ps1).
 ShowService
-$sw = [Diagnostics.Stopwatch]::StartNew()
 $end = cmd /c "schtasks /End /TN uni-vpn 2>&1"  # stderr through PowerShell would stop the script
 Write-Host "schtasks /End: $end (exit $LASTEXITCODE)"
-$down = $null; $up = $null; $byHand = $false
-while ($sw.Elapsed.TotalSeconds -lt 40 -and -not $up) {
+$sw = [Diagnostics.Stopwatch]::StartNew()
+Daemons | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+$down = $null; $up = $null
+while ($sw.Elapsed.TotalSeconds -lt 30 -and -not $up) {
   $answers = Answers
   if (-not $answers -and -not $down) { $down = $sw.Elapsed.TotalSeconds }
   if ($answers -and $down) { $up = $sw.Elapsed.TotalSeconds }
-  if (-not $down -and -not $byHand -and $sw.Elapsed.TotalSeconds -gt 5) {
-    ShowService
-    $problems += "the service still runs after its task ended"
-    $byHand = $true
-    Daemons | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-  }
   Start-Sleep -Milliseconds 250
 }
 ShowService
-Write-Host "service ended at $down s (by hand: $byHand), the tray app started it again at $up s"
+Write-Host "service ended at $down s, the tray app started it again at $up s"
 if (-not $up) { Explain; $problems += "the tray app did not start the stopped service again" }
 foreach ($i in 1..30) { if (Answers) { break }; Start-Sleep 1 }
 # Installing again while it all runs (the website's installer over an installed one): the

@@ -677,9 +677,11 @@ func TestWindowsControlEndsTaskAfterLoggingOut(t *testing.T) {
 		names = append(names, strings.Join(c, " "))
 	}
 	ps := "powershell -NoProfile -NonInteractive -Command (Get-ScheduledTask -TaskName 'uni-vpn').State"
-	// Still running: ended again (the tray app may have started it again).
+	// Still running: ended again (the tray app may have started it again), each time with the
+	// service that conhost started.
 	end := "schtasks /End /TN uni-vpn"
-	if !reflect.DeepEqual(names, []string{end, ps, end, ps, end, ps, "schtasks /Run /TN uni-vpn"}) {
+	kill := fmt.Sprintf("taskkill /F /FI IMAGENAME eq uni-vpn /FI PID ne %d /FI USERNAME eq %s", os.Getpid(), winsys.CurrentUser())
+	if !reflect.DeepEqual(names, []string{end, kill, ps, end, kill, ps, end, kill, ps, "schtasks /Run /TN uni-vpn"}) {
 		t.Fatal(names)
 	}
 }
@@ -819,6 +821,41 @@ func TestWindowsInstallEndsATaskThatWasStartedAgain(t *testing.T) {
 		}
 	}
 	if ends != 3 || !reflect.DeepEqual(r.calls[len(r.calls)-1], []string{"schtasks", "/Run", "/TN", "uni-vpn"}) || last > len(r.calls)-2 {
+		t.Fatal(r.calls)
+	}
+}
+
+// The task's program is conhost.exe, which starts the service: "schtasks /End" ends conhost
+// only, and the service went on running (Repair did not restart it, uninstall left it).
+func TestWindowsEndTaskAlsoEndsTheService(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("USERDOMAIN", "UNI")
+	t.Setenv("USERNAME", "ab123")
+	r := &recorder{reply: func(c Cmd) (Result, error) {
+		if c.Args[0] == "powershell" {
+			return Result{Stdout: "Ready"}, nil
+		}
+		return Result{}, nil
+	}}
+	m, _ := manager("windows", r)
+	m.HTTPPort = func() (int, error) { return 9, nil }
+	if _, err := m.Install(false); err != nil {
+		t.Fatal(err)
+	}
+	kill := []string{"taskkill", "/F", "/FI", "IMAGENAME eq uni-vpn", "/FI", fmt.Sprintf("PID ne %d", os.Getpid()), "/FI", `USERNAME eq UNI\ab123`}
+	end, killed, run := -1, -1, -1
+	for i, c := range r.calls {
+		switch {
+		case reflect.DeepEqual(c, []string{"schtasks", "/End", "/TN", "uni-vpn"}) && end < 0:
+			end = i
+		case reflect.DeepEqual(c, kill):
+			killed = i
+		case reflect.DeepEqual(c, []string{"schtasks", "/Run", "/TN", "uni-vpn"}):
+			run = i
+		}
+	}
+	if end < 0 || killed < end || run < killed {
 		t.Fatal(r.calls)
 	}
 }

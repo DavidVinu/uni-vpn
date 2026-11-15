@@ -257,25 +257,37 @@ func (m *Manager) disconnectDaemon(timeout time.Duration) {
 	}
 }
 
-// endTask logs out, ends the task and waits until Task Scheduler no longer counts it as
-// running (with IgnoreNew a "/Run" right after "/End" is otherwise silently dropped).
+// endTask logs out, ends the task and the service, and waits until Task Scheduler no longer
+// counts it as running (with IgnoreNew a "/Run" right after "/End" is otherwise silently dropped).
 func (m *Manager) endTask() (bool, error) {
 	m.disconnectDaemon(15 * time.Second)
-	if _, err := m.Run(Cmd{Args: schtasks("/End", "/TN", winsys.TaskName), Capture: true, NoWindow: true}); err != nil {
-		return false, err
-	}
 	for range 20 {
-		if !m.IsActive() {
-			return true, nil
-		}
-		// The tray app starts a stopped service again after two missed polls (3 to 6 s), once a
-		// minute at most: ended again, it stays ended.
+		// Again while it runs: the tray app starts a stopped service again after two missed
+		// polls (3 to 6 s), once a minute at most. Ended again, it stays ended.
 		if _, err := m.Run(Cmd{Args: schtasks("/End", "/TN", winsys.TaskName), Capture: true, NoWindow: true}); err != nil {
 			return false, err
+		}
+		m.endService()
+		if !m.IsActive() {
+			return true, nil
 		}
 		m.Sleep(500 * time.Millisecond)
 	}
 	return false, nil
+}
+
+// endService ends the service the task started. The task's program is conhost.exe, which
+// starts the service, and "/End" ends only conhost: the service went on running. Every copy of
+// this program of this account but this one goes (also a restart supervisor; Repair's setup
+// is this one), openconnect with it (KillChildrenWithUs).
+func (m *Manager) endService() {
+	binary, err := m.binary()
+	if err != nil {
+		return
+	}
+	m.Run(Cmd{Args: []string{"taskkill", "/F", "/FI", "IMAGENAME eq " + filepath.Base(binary),
+		"/FI", fmt.Sprintf("PID ne %d", os.Getpid()), "/FI", "USERNAME eq " + winsys.CurrentUser()},
+		Capture: true, NoWindow: true})
 }
 
 // writeText writes like Python's Path.write_text: "\n" becomes "\r\n" on Windows.
