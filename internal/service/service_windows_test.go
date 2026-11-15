@@ -28,9 +28,12 @@ func TestTaskOwnerScriptAgainstTaskScheduler(t *testing.T) {
 	}
 	name := fmt.Sprintf("uni-vpn-test-%08x", time.Now().UnixNano()&0xffffffff)
 	owner := func(sid string) string {
-		out, err := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", taskOwnerScript(name, sid)).Output()
+		cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", taskOwnerScript(name, sid))
+		var stderr strings.Builder
+		cmd.Stderr = &stderr
+		out, err := cmd.Output()
 		if err != nil {
-			t.Fatal(string(out), err)
+			t.Fatalf("%s %v: %s", out, err, stderr.String())
 		}
 		return strings.TrimSpace(string(out))
 	}
