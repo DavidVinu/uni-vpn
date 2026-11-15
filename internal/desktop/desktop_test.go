@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -365,7 +366,7 @@ func TestRestartAppLinuxUsesTheDesktopOfTheRunningShell(t *testing.T) {
 		spawned = append(spawned, args)
 		return true
 	}
-	if !h.d.RestartApp(1081) || !h.ran("pkill", "-f", script) ||
+	if !h.d.RestartApp(1081) || !h.ran("pkill", "-f", regexp.QuoteMeta(script)) ||
 		!reflect.DeepEqual(spawned, [][]string{{"/usr/bin/python3", script, "--port", "1081", "--hidden"}}) {
 		t.Fatal(h.commands, spawned)
 	}
@@ -578,7 +579,7 @@ func TestLinuxRepair(t *testing.T) {
 			}
 			return service.Result{}
 		}
-		if !h.d.Repair(1081, func(path string) { h.created = append(h.created, path) }) || h.ran("pkill", "-f", script) {
+		if !h.d.Repair(1081, func(path string) { h.created = append(h.created, path) }) || h.ran("pkill", "-f", regexp.QuoteMeta(script)) {
 			t.Fatal(tc.name, h.commands)
 		}
 		if !slices.Contains(h.created, h.d.LoginPath()) {
