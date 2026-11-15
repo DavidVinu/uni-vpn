@@ -98,19 +98,38 @@ Get-Content "$env:LOCALAPPDATA\uni-vpn\logs\app.log" -ErrorAction SilentlyContin
 if ($icon.HasExited -or (NewWebViews).Count -eq 0) { Explain; throw "the app window did not open on a second start" }
 $lnk = Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter "Uni VPN.lnk"
 if (-not $lnk) { throw "no Start menu entry" }
-# The tray app starts a stopped service again: nobody should need a terminal.
+$problems = @()
+# The service's processes: the task runs conhost.exe, which starts uni-vpn-core.exe.
+function Daemons { @(Get-CimInstance Win32_Process -Filter "Name = 'uni-vpn-core.exe'" | Where-Object { $_.CommandLine -like "* daemon*" }) }
+function ShowService {
+  Write-Host "task: $((Get-ScheduledTask -TaskName uni-vpn).State)"
+  Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq "uni-vpn-core.exe" -or $_.Name -eq "conhost.exe") -and $_.CommandLine -like "*uni-vpn*" } |
+    Format-Table ProcessId, ParentProcessId, CreationDate, CommandLine -AutoSize -Wrap | Out-String -Width 400 | Write-Host
+}
+function Answers { try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 1 http://127.0.0.1:1081/status.json | Out-Null; return $true } catch { return $false } }
+# Ending the task ends the service (Repair, setup and uninstall rely on it), and the tray app
+# starts a stopped service again: nobody should need a terminal.
+ShowService
 $sw = [Diagnostics.Stopwatch]::StartNew()
-schtasks /End /TN uni-vpn | Out-Null
-$down = $null; $up = $null
-while ($sw.Elapsed.TotalSeconds -lt 30 -and -not $up) {
-  $answers = $true
-  try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 1 http://127.0.0.1:1081/status.json | Out-Null } catch { $answers = $false }
+$end = cmd /c "schtasks /End /TN uni-vpn 2>&1"  # stderr through PowerShell would stop the script
+Write-Host "schtasks /End: $end (exit $LASTEXITCODE)"
+$down = $null; $up = $null; $byHand = $false
+while ($sw.Elapsed.TotalSeconds -lt 40 -and -not $up) {
+  $answers = Answers
   if (-not $answers -and -not $down) { $down = $sw.Elapsed.TotalSeconds }
   if ($answers -and $down) { $up = $sw.Elapsed.TotalSeconds }
+  if (-not $down -and -not $byHand -and $sw.Elapsed.TotalSeconds -gt 5) {
+    ShowService
+    $problems += "the service still runs after its task ended"
+    $byHand = $true
+    Daemons | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  }
   Start-Sleep -Milliseconds 250
 }
-Write-Host "service ended at $down s, the tray app started it again at $up s"
-if (-not $up) { Explain; throw "the tray app did not start the stopped service again" }
+ShowService
+Write-Host "service ended at $down s (by hand: $byHand), the tray app started it again at $up s"
+if (-not $up) { Explain; $problems += "the tray app did not start the stopped service again" }
+foreach ($i in 1..30) { if (Answers) { break }; Start-Sleep 1 }
 # Installing again while it all runs (the website's installer over an installed one): the
 # installer stops everything that runs from Program Files, the tray app first, or it starts
 # the service again meanwhile, which then holds its files ("DeleteFile failed; code 5").
@@ -124,11 +143,11 @@ foreach ($i in 1..30) {
   try { $status = Invoke-RestMethod http://127.0.0.1:1081/status.json; $ok = $true; break } catch { Start-Sleep 1 }
 }
 if (-not $ok -or $status.commit -ne $env:GITHUB_SHA) { Explain; throw "the service does not run after installing again" }
-$problems = @()
 # Repair stops and starts the service while the tray app starts a stopped one again. Here at the
 # worst moment, as soon as Task Scheduler no longer counts it as running: setup ends it again,
 # else it fails ("The running service did not stop") and skips the proxy rule and the app.
 $core = "$env:ProgramFiles\uni-vpn\bin\uni-vpn-core.exe"
+$before = @(Daemons | ForEach-Object ProcessId)
 [IO.File]::WriteAllText("$PWD\empty-input.txt", "")
 $repair = Start-Process -FilePath $core -ArgumentList "setup --no-browser --repair" -RedirectStandardInput empty-input.txt `
   -RedirectStandardOutput repair.log -RedirectStandardError repair-err.log -NoNewWindow -PassThru
@@ -148,6 +167,8 @@ foreach ($i in 1..30) {
   try { $status = Invoke-RestMethod http://127.0.0.1:1081/status.json; $ok = $true; break } catch { Start-Sleep 1 }
 }
 if (-not $ok -or $status.commit -ne $env:GITHUB_SHA) { Explain; throw "the service does not run after Repair" }
+ShowService
+if (@(Daemons | Where-Object { $before -contains $_.ProcessId }).Count -gt 0) { $problems += "Repair left the old service running" }
 # Normal priority: Task Scheduler's default runs a task below normal, with low I/O and memory
 # priority, while all of the browser's traffic to the university goes through the service.
 $taskPriority = (Get-ScheduledTask -TaskName uni-vpn).Settings.Priority
