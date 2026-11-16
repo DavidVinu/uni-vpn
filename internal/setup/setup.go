@@ -188,8 +188,8 @@ func New(root string) *Setup {
 	s := &Setup{
 		GOOS: goos, Root: root, Binary: binary, Out: os.Stdout, Getenv: os.Getenv, Home: home,
 		IsTerminal: isTerminal, FindBinary: platform.FindBinary, Service: manager, Run: service.Exec, UID: os.Getuid(),
-		ProxyInstall:        func(port int) (string, error) { return sysproxy.Install(port, "") },
-		ProxyUninstall:      func() (string, error) { return sysproxy.Uninstall("") },
+		ProxyInstall:        func(port int) (string, error) { return askingSystem(goos).Install(port, "") },
+		ProxyUninstall:      func() (string, error) { return askingSystem(goos).Uninstall("") },
 		OtherAccountListens: sockowner.OtherAccountListens,
 		StorePassword:       keyring.StorePassword, StoreTOTP: keyring.StoreTotp,
 		DeletePassword: keyring.DeletePassword, DeleteTOTP: keyring.DeleteTotp,
@@ -985,6 +985,8 @@ func (s *Setup) Uninstall(a Args) (int, error) {
 		return 1, nil
 	}
 	failed := false
+	// First, so the core does not put the rule back while it is removed (reinstateRule).
+	os.Remove(filepath.Join(platform.StateDir(), sysproxy.WithdrawnName))
 	proxy, err := s.ProxyUninstall()
 	if err != nil {
 		return 1, err

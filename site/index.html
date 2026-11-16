@@ -173,7 +173,8 @@ function tip(...keys) {
   d.className = "info";
   d.innerHTML = "<summary>" + INFO + "</summary><p class='tip'></p>";
   d.querySelector("summary").setAttribute("aria-label", t("help"));
-  d.querySelector("p").textContent = keys.map(t).join(" ");
+  // Chinese runs its sentences together, without a space between them.
+  d.querySelector("p").textContent = keys.map(t).join(L.startsWith("zh") ? "" : " ");
   return d;
 }
 
@@ -193,7 +194,7 @@ async function detect() {
   // pointer is the touch screen is a tablet. Not "any-pointer: fine": Android reports that for a
   // pen a tablet can take (Samsung's, Pixel Tablet) without one; a Linux computer with a mouse or
   // touchpad has a fine main pointer.
-  if (/Linux/i.test(plat + ua) && navigator.maxTouchPoints > 0 && matchMedia("(pointer: coarse)").matches) return {kind: "android"};
+  if (/Linux/i.test(plat + ua) && navigator.maxTouchPoints > 0 && matchMedia("(pointer: coarse)").matches) return {kind: /armv[5-8]l\b|i[3-6]86/i.test(navigator.platform || "") ? "android32" : "android"};
   if (/Linux/i.test(plat + ua)) {
     let arm = /aarch64|arm/i.test(plat + ua), arm32 = /armv[5-7]/i.test(plat + ua);
     try {

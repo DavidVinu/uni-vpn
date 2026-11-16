@@ -1523,11 +1523,406 @@ real Linux app window under Xvfb, and the real setup with its own D-Bus and dcon
   do not) turns their instance check off. Quitting the window and opening it again before the
   assistant ends loses its "sign out" step.
 - Phones: the APK can lag the desktop files by one release when an android job fails after
-  main moved on (each half consistent); the update offer on mobile data is only a
-  notification (Wi-Fi installs it anyway); a stopped tunnel can say "ready" for a moment; on
+  main moved on (each half consistent); on mobile data an update comes down and goes in only
+  on a tap (corrected in the fourth re-audit: before FR-1 Wi-Fi did not install it either); a
+  stopped tunnel can say "ready" for a moment; on
   iPhone the instance file, which nothing there reads, can be overwritten in a handover.
 - Setup while nothing listens on the port, when another account's program takes it in the
   moment before the core starts: the core withdraws the rule as before, but can do so while
   setup's install still runs.
 - A web page can make the core write or remove the "restart the browser" record by asking for
   status.json as the Linux window does (a hint text, nothing else).
+
+## Fourth re-audit
+
+Scope: the whole repository at a960754 (#85 in), read by five fresh reviewers in the same five
+areas. Their tests passed on that commit: `go test` (also `-race` for the daemon, API,
+forwarder, sockowner and tunnel), `go vet` for windows, darwin, android and ios, the relay's
+tests, test_i18n, test_release_put and test_messages, go-licenses, the page in headless
+Chromium with about 25 browser identities, the real Linux window under Xvfb, TR-5 end to end
+with two staged package folders, and the real setup with its own D-Bus and dconf.
+
+| # | Bug | Severity | Status |
+|---|---|---|---|
+| FR-1 | Android (download page build): an update never goes in without a tap, and the tap offer can be invisible | Medium | fixed |
+| FR-2 | While Cisco Secure Client is connected, every listed website fails in the browser | Medium | fixed |
+| FR-3 | Setup can take this account's own new core for another account's program and leave the rule off (a regression from TR-1) | Low | fixed |
+| FR-4 | Site: a space between the joined Windows tip sentences in Chinese; the English parts of the privacy page and legal notice marked as German | Low | fixed |
+
+### FR-1 Android: updates only after a tap
+
+- Found by: the mobile reviewer. `ApkUpdate.check` downloads a new version on Wi-Fi, but only
+  `ApkUpdate.start` (Home's row, the "not running" page, the notification's tap) hands it to
+  Android's installer. The service's own comment says most users never open the app again;
+  for them the only offer is the text of the VPN's low-importance ongoing notification, which
+  Android 13 and later do not show at all when the notification prompt was declined. Such
+  phones kept their version for good, security fixes included (M1's problem for this group).
+  The third re-audit's Lows list left it as "the update offer on mobile data is only a
+  notification (Wi-Fi installs it anyway)", which was wrong: no code installed on Wi-Fi.
+- Reproduced: by reading only (no Android toolchain here): every caller of `install` traced;
+  no WorkManager, JobScheduler or alarm path.
+- Root cause: installing hung off a tap on an offer whose visibility the app does not control.
+- Fix: role model Signal's download build. On Android 12 and later, a version that came down
+  goes to Android's installer without a tap (`ApkUpdate.installUnattended`) while the VPN is
+  on, the app is not on screen (MainActivity onStart/onStop) and the core's tunnel is not in
+  use (state not connecting, connected or disconnecting), as the computers install once the
+  tunnel is idle. The app updates itself, so with `UPDATE_PACKAGES_WITHOUT_USER_ACTION` and
+  `USER_ACTION_NOT_REQUIRED` Android puts it in without asking, and BootReceiver turns the
+  VPN back on (MY_PACKAGE_REPLACED). Should Android want to ask after all, the session is
+  abandoned and nothing opens (UpdateReceiver, `EXTRA_UNATTENDED`): the offer stays, and the
+  next try for that version comes a day later. Mobile data still downloads only on a tap;
+  Android 10 and 11 always ask, so there the tap stays the way. Debug builds never update.
+  The privacy page (German and English, dated 16 November) and docs/android.md say so.
+- Verification: `ApkReleaseTest` (the rule: Android 12+, not on screen, no tunnel in use, once
+  a day per version) runs in CI's `testWebsiteDebugUnitTest`; compile and lint in CI's android
+  job. The installer's conditions were checked against AOSP's PackageInstallerSession (a
+  self-update with the permission needs no user action, at most one every 30 s); not run on a
+  device here, and the CI emulator runs a debug build.
+
+### FR-2 Cisco Secure Client connected
+
+- Found by: the core reviewer (sign-in and API). The README suggests the Cisco client for large
+  downloads, and users have it for drives or SSH. While it is connected the core is
+  `blocked`, but the rule still sends every listed website to the SOCKS port, which refused
+  them (SOCKS reply 2): Chrome showed ERR_SOCKS_CONNECTION_FAILED although Cisco carries the
+  university's network. Disconnect did not help (the next page load found Cisco again); the
+  app said only "Paused while Cisco Secure Client is connected".
+- Reproduced: a daemon test with the Cisco check on and one listed website: `Direct()` was
+  only the security page, and a SOCKS CONNECT to the website got `05 02`.
+- Root cause: `directHosts` let the listed websites through directly only while the gateway
+  cannot be reached (Offline, or Idle while away), not while Cisco is connected.
+- Fix: also while `blocked`: the core connects the listed websites itself, through Cisco's
+  routes, as it does for Offline. Once Cisco is disconnected they go through the tunnel again
+  (and the direct connections end once it is up). README and docs/e2e.md say so.
+- Verification: TestListedWebsitesGoThroughCiscoWhileItIsConnected (blocked, after
+  Disconnect and the next page load, then back through the tunnel) fails before, passes after;
+  the other Cisco and direct tests pass.
+
+### FR-3 Setup and its own new core
+
+- Found by: the core reviewer (system parts). Since TR-1 setup asks `OtherAccountListens`
+  right after it started the core. On Linux an accepted connection the program has not taken
+  yet has no owner in /proc/net/tcp, which `OtherAccount` counts as another account's (right
+  for the forwarder's clients), so a core that had bound but not yet accepted looked like
+  another account's: setup left the rule off, and the core, holding the port, never switched it
+  on until the next start or a Repair.
+- Reproduced: the real setup with a fake systemctl that returns 0.2 s after starting the real
+  daemon, under 12 busy loops on 4 cores: 8 of 15 setups said another account held the port.
+  TestAListenerOfThisAccountIsOursAlsoBeforeItAccepts (a listener that has not accepted) fails.
+- Fix: `OtherAccountListens` counts only an end whose account the system names, asking for
+  half a second; no name is "cannot tell" (false), as the function says. (Incomplete: it let
+  another account's program that does not take connections pass, see FV-1.)
+- Verification: the same run 0 of 15; the test passes; TR-1's run with a listener of `nobody`
+  still leaves the rule off (mode 'none', marker written, "Another account ... holds").
+
+### FR-4 Site texts
+
+- The TR-3 tip joins two sentences with a space; Chinese has none between sentences. The
+  English halves of privacy.html and impressum.html now carry `lang="en"`, so screen readers
+  read them as English. Checked in Chromium: zh-Hans and zh-Hant tips without the space, the
+  German one unchanged, each heading's language right.
+
+### Left as they are (Low), fourth re-audit
+
+- Linux: a package watcher look in the second while dpkg or rpm replaces the app folder can find the
+  new `.commit` with the old program (then the next regular check installs it) or copy a mix
+  of old and new files (each half works with the frozen API).
+- Mac: a second account with automatic updates off keeps its copy of the core after a newer
+  .pkg (postinstall runs setup for the console user only); unchanged from before TR-5.
+- The window's old WebKit processes after it restarts itself (left before).
+- Android: openconnect runs in its own session, so if only the core child is killed it can
+  outlive it until the app process ends (not reproduced). iOS: the TR-4 hook is not excluded,
+  but nothing there sends `shell=`.
+- Site and docs: README's paragraph on other programs using port 1080 predates FA-9; the zip
+  table in docs/go-switch.md; an Android device in desktop mode with a touchpad gets the Linux
+  files; the version scheme relies on the run number never resetting; the Linux window's TR-4
+  poll goes to whatever holds 1081 (desktop names only); Cloudflare's default NEL reporting is
+  not named on the privacy page.
+- Core: PortInUse can replace a SettingsBroken message; another program of the same account on
+  1081 shows a blank window; one NtQuerySystemInformation per connection on Windows.
+- Setup on Xfce while the port is held says "reopen the browser" where the session lines come
+  later; reinstateRule removes the marker also when ProxyInstall failed; uninstall can race a
+  reinstate.
+
+## Fifth re-audit
+
+Scope: the whole repository at c68ffe4 (#86's first push), five fresh reviewers in the same
+five areas.
+
+| # | Bug | Severity | Status |
+|---|---|---|---|
+| FV-1 | FR-3 let another account's program on the status port pass when it does not take the connection at once: the rule went on, pointing at it (FA-8 again) | High | fixed |
+| FV-2 | Android (download page build): FR-1's update without a tap never happens, as Android installs without asking only for an app allowed to install apps | Medium | fixed |
+| FV-3 | Mac: before this account is set up, the window shows and trusts another account's uni-vpn, and setup never starts | Medium | fixed |
+| FV-4 | Privacy page: says listed websites always go through the university VPN, though they go direct while it cannot be reached or Cisco is connected | Medium | fixed |
+| FV-5 | CI never starts the Android APK that goes out (minified by R8), which phones now take without a tap | Medium | fixed |
+| FV-6 | Privacy page: does not name the device name and system the VPN server is told | Low | fixed |
+
+### FV-1 Another account's program that does not take connections at once
+
+- Found by: the core reviewer (sign-in and API). Since FR-3 an end the system never names was
+  "cannot tell". A program of another account that holds the status port but takes
+  connections late or never (a deferred accept is enough) left its end without owner for the
+  whole half second, so `portHeld` neither withdrew the rule nor noted the other account, and
+  setup switched the rule on: the browsers took their rule from that program.
+- Reproduced: TestAListenerThatNeverAcceptsCountsAsAnotherAccounts (a listener that never takes
+  the connection) fails on c68ffe4; the real setup with a listener of `nobody` that never
+  accepts registered the rule.
+- Root cause: FR-3 turned "no owner" from another account's into "cannot tell" for the
+  listener's end, to spare this account's own core in the moment before it takes the
+  connection.
+- Fix: an end that stays without owner counts as another account's again, as everywhere else.
+  The moment before this account's own core takes the connection is covered twice: the check
+  asks for up to 2 s (the core takes it within milliseconds), and while the status port is the
+  core's own, a rule setup left off goes back on at the next tick (no other account can hold
+  the port then). Uninstall removes the marker first, so that the rule does not come back while
+  it is removed (this also settles the third re-audit's Low "uninstall can race a reinstate").
+- Verification: TestAListenerThatNeverAcceptsCountsAsAnotherAccounts,
+  TestARuleSetupLeftOffGoesBackOnWhileThePortIsOurs and
+  TestUninstallRemovesTheRuleLeftOffMarkerFirst fail before, pass after;
+  TestAListenerOfThisAccountIsOursOnceItAccepts passes. The real setup with a listener of
+  `nobody` that never accepts: before mode 'auto' with our address, after mode 'none', the
+  marker written, "Another account ... holds". FR-3's run (systemctl returning 0.2 s after
+  starting the core, 12 busy loops on 4 cores): still 0 of 15 setups say another account.
+
+### FV-2 Android: an update without a tap needs installs from Uni VPN allowed
+
+- Found by: the mobile reviewer. FR-1 hands a downloaded version to Android's installer with
+  `setRequireUserAction(USER_ACTION_NOT_REQUIRED)`. Android (AOSP `PackageInstallerSession`,
+  `isInstallDisabledForPackage` before the silent branch) installs without asking only when the
+  app may install apps at all ("Install unknown apps", `canRequestPackageInstalls`). A phone
+  that put the APK in from the browser gave that to the browser, not to Uni VPN, so every
+  unattended try came back "pending user action" and was dropped (UpdateReceiver), once a day,
+  for good: FR-1's group still kept its version.
+- Reproduced: by reading Android 12 to 15's `PackageInstallerSession` (the check for
+  installs from unknown sources comes before the one that skips the prompt). Not run on a
+  phone: that needs a published newer version signed with the upload key.
+- Root cause: FR-1 relied on an Android permission the app is never given without the user's
+  tap, and nothing asks for it.
+- Fix: until installs are allowed, Home shows "Let Uni VPN update itself" (Android 12 and newer,
+  website build, automatic updates on), which opens Android's switch for Uni VPN; the first tap
+  on Update allows it too. `installUnattended` does not try before (`mayInstall`, which also
+  holds in the Play build, where Android throws). The idle check now also waits for browser
+  connections, a sign-in under way and a device being added (`active_connections`, `busy`,
+  `sync.pairing`), not only the state, and without an answer from the core it waits a minute
+  after the VPN started. docs/android.md and the privacy page say so; strings in all six
+  languages.
+- Verification: ApkReleaseTest (the rule, and idle with each of the four in use) in CI's unit
+  tests; test_i18n and test_messages pass with the new keys; the CI emulator run starts the
+  release build (FV-5).
+
+### FV-3 Mac: the window before this account is set up
+
+- Found by: the desktop reviewer. The window trusts what answers on 127.0.0.1:1081 once its
+  instance file says so, and without the file (as before the file existed) always. A second
+  account on a Mac (fast user switching) that opens Uni VPN before its own setup has no file,
+  so the window showed the first account's uni-vpn: its websites and state, with buttons that
+  act on it. And since that one answered, the shell's "not running" counter never rose, so
+  `setUpIfMissing` (setup for this account) never ran.
+- Reproduced: by reading `check` and `startServiceIfDown` on c68ffe4 (no Mac here): no file
+  means `guardWindow(true, nil)`, `status` is the other core's, `misses` stays 0.
+- Root cause: "no instance file" meant "an install from before the file", which is also what a
+  fresh, not yet set up account looks like.
+- Fix: without the file the window trusts the port only once this account is set up (its
+  LaunchAgent and core exist, the same test `setUpIfMissing` uses); until then it shows nothing
+  of it and the menu says "Not running", so setup starts after two polls as on a Mac with one
+  account.
+- Verification: CI's macos jobs compile the shell (no swiftc here); the paths are the ones
+  setup writes (`internal/setup` darwin) and `setUpIfMissing` already checked.
+
+### FV-4 and FV-6 Privacy page: direct connections and the device name
+
+- Found by: the web reviewer. Since FR-2 (and before it, while the VPN server cannot be reached
+  or the user is away from the university's network), the app connects the listed websites
+  directly from the device, so those websites see the user's own address; the page said they
+  go through the university VPN. It also did not name what the Cisco client sends too: the
+  device's name and the kind of system (openconnect's `--os`, the user agent).
+- Root cause: the page was written before those paths.
+- Fix: German and English items for the VPN server now say both.
+- Verification: read in Chromium, both languages; the dates say 16 November.
+
+### FV-5 CI starts the release APK
+
+- Found by: the web/CI reviewer. The emulator test installs the debug APK. The APK that goes
+  out is minified by R8 and signed, and since FR-1 Android 12 and later put it in without a tap;
+  a release that does not start (an R8 rule missing) could not update itself out of that.
+- Fix: `packaging/android/emulator-test.sh` then installs `out/uni-vpn.apk` (signed in CI), opens
+  it, and fails unless the app and its core run and nothing crashed. A fork without the upload
+  key has no signed APK and skips it.
+- Verification: `bash -n`; CI's android job on this branch.
+
+### Left as they are (Low), fifth re-audit
+
+- The core reviewer for sign-in and the local API was stopped by Anthropic's safeguards
+  partway; FV-1 is from its part. That area gets a fresh reviewer in the sixth re-audit.
+- Android: the idle check does not see a website the core serves directly while away from the
+  university's network (it is not a tunnel); a tap on Update while an unattended try runs does
+  nothing that once; an update can go in while the user scans a code in the system scanner (the
+  app is not on screen then).
+- Site: no CI job loads `site/index.html` in a browser; README's Cisco row speaks of the
+  university's Cisco only; `msg.offline` on a campus whose gateway is not reachable from it;
+  docs/e2e.md wording.
+- Core: an ESTABLISHED end with inode 0 could count as known on Linux (the core reviewer's
+  other way to fix FV-1); not taken, as it trusts a connection nobody has taken yet.
+
+## Sixth re-audit
+
+Scope: the whole repository at 41baeba (#86's third push), five fresh reviewers in the same
+five areas; this time the reviewer for the core's connect path and local API finished.
+
+| # | Bug | Severity | Status |
+|---|---|---|---|
+| SX-1 | Another account's program on the status port can hide from the owner check by keeping its queue of connections full: the rule goes on, pointing at it (FA-8 by another way) | High | fixed |
+| SX-2 | Mac with a standard account: setup never sets the rule (macOS refuses it), and the window still says "All set" | Medium | fixed |
+
+### SX-1 Another account's program with a full queue on the status port
+
+- Found by: the core reviewer (system parts). `OtherAccountListens` told the listener's account
+  by connecting to it. A program that keeps its accept queue full (`listen(0)` and one
+  connection of its own) makes the kernel drop new connections, so the 250 ms connect failed
+  and counted as "nothing listens". Setup registered the rule, a core starting at login left
+  it on, and once that program served it handed this account's browsers its own rule. It
+  could time it: the check ran only at setup and when the core started.
+- Reproduced: TestAnotherAccountsListenerThatNeverAccepts (a listener of `nobody` with a full
+  queue) fails on 41baeba. The real setup with the reviewer's harness (own D-Bus and dconf,
+  `nobody` holding the port with a full queue for 20 s): "Proxy rule registered", mode 'auto',
+  and a fetch of the rule's address got the other program's PAC. The login path the same,
+  with Chromium fetching that PAC twice.
+- Root cause: a listener's account was read from a connection to it, which its program can
+  refuse; the system's table names the listening socket's account without one.
+- Fix: `OtherAccountListens` first reads the listener of 127.0.0.1:port (or of every address)
+  from the system's table: /proc/net/tcp and tcp6 on Linux, `net.inet.tcp.pcblist_n` on macOS,
+  `GetExtendedTcpTable` with `TCP_TABLE_OWNER_PID_LISTENER` and the sign-in sessions on
+  Windows. The connection is asked only where the table shows no listener or cannot be read.
+  This also settles FR-3 and FV-1's timing: this account's own core is named at once, whether
+  it took the connection or not. And the core now asks again at each try to take the port,
+  until the answer is another account (TestRuleGoesOffWhenAnotherAccountTakesOverTheStatusPort,
+  failed before).
+- Verification: the new tests fail before and pass after; `go test` and `-race` for sockowner
+  and the daemon. The real setup with the full queue: after the fix "Another account ...
+  holds", mode 'none', the marker and the other-account page written; the login path the
+  same, nothing fetched from the other program. FR-3's run under load (12 busy loops, systemctl
+  returning 0.2 s after starting the core): 0 of 15 setups say another account.
+
+### SX-2 Mac: a standard account never gets the rule
+
+- Found by: the desktop reviewer (by reading). Setup runs as the user (the .pkg's postinstall
+  starts it for the person signed in). On macOS it sets the rule with `networksetup`, which a
+  standard account may not use; setup then logs "Registering the proxy rule with the system
+  failed" in setup.log, which nobody reads, and the window says "All set". Repair runs the same
+  step. A Mac whose only Uni VPN user has a standard account (a family Mac, a student account
+  set up by someone else) never sent a website through the VPN, with no way out by clicks.
+- Reproduced: on the CI Mac (macOS 15, run 608 of #86, a step added for it and removed again):
+  a standard account `unistd` (not in admin) running `networksetup -setautoproxyurl` gets
+  "** Error: Command requires admin privileges." and exit status 14 at once, no dialog; the
+  runner, an administrator, sets it with exit status 0. The system rule for it is
+  `authenticate-admin-nonshared`.
+- Root cause: the rule's commands assumed an administrator's account, which every Mac's first
+  account is, but not every Uni VPN user's.
+- Fix: when networksetup refuses the account, setup, repair and uninstall (what the user
+  started) hand the remaining commands to macOS's own password dialog in one go
+  (`osascript ... do shell script ... with administrator privileges`, each word quoted), with
+  the reason in the user's language (`setup.admin_network`, six languages): "Uni VPN needs the
+  name and password of an administrator of this Mac to change its network settings." Where an
+  administrator's account set the rule up already (it is the computer's), a standard account's
+  setup keeps it instead of asking for a new address. The core's own looks at the rule (Refresh,
+  Cover, Withdraw, putting it back) never ask. README says so.
+- Verification: TestMacStandardAccountAsksForAnAdministratorsPassword (also: nobody to ask and a
+  cancelled dialog stay "failed"), TestMacStandardAccountKeepsTheRuleThatIsOursAlready,
+  TestMacStandardAccountUninstallAsksForAnAdministratorsPassword, TestAdminScriptKeepsEveryWord
+  (the script through /bin/sh with a fake networksetup: a service called "Marie's iPhone USB"
+  and one with quotes and `$HOME` arrive as they are), TestAskAdminHandsMacOSTheScriptAndTheReason,
+  TestAdminPromptInTheMacsLanguage. The dialog itself needs a Mac with someone at it: not run.
+
+### Left as they are (Low), sixth re-audit
+
+- Core: listed websites are refused while Cisco is connected and the core is in a final state
+  (password not accepted, passwords locked); its message and button lead on, and then Blocked
+  serves them. After Cisco disconnects, Blocked lasts up to 30 s. A stale Cisco pause can show
+  "Paused" for up to 30 s after a Disconnect. The back-off is not reset when the loop starts on
+  demand. The poll that names the desktop answers with the old `pac_refresh` (the next one is
+  right).
+- Android: a finished or expired code no longer holds back the update (fixed: only a code that
+  is waiting counts), and one failed status request no longer counts as a core that does not
+  answer (fixed: a minute since its last answer). The release start check in CI now also fails
+  on a core that keeps restarting. Left: it does not run the update path of the release build;
+  a crash of any process in that minute fails it; the privacy page names the device name,
+  which Android's openconnect sends as "localhost".
+- Windows: uninstall deletes the stored passwords of the account that runs it only.
+- CI: the `promote` job's comment predates the Go core.
+- Mac, standard account: when the websites change, the core cannot give the rule a new address
+  (it does not ask for a password on its own), so Safari takes the new list after the next
+  sign-in; a cancelled password dialog leaves setup's "failed" in setup.log only, as before.
+- Sockowner: on macOS and Linux another account's listener on `::` with IPv6 only also counts
+  (the core heals that rule once the port is its own); a ProxyInstall already running while
+  uninstall removes the rule can put it back (the marker exists for seconds at most).
+
+## Seventh re-audit
+
+Scope: the whole repository at fd1bf31 (#86's fourth push), five fresh reviewers in the same
+five areas (core connect path and local API, core system parts, desktop, phones, site with CI
+and texts); all five finished.
+
+| # | Bug | Severity | Status |
+|---|---|---|---|
+| SV-1 | Mac with a standard account: the core cannot switch the computer's rule off while another account's program holds the status port, so the browsers keep taking their rule from it (FA-8 again, for the accounts SX-2 gave the rule) | High | open, waits on David |
+| SV-2 | Mac with a standard account: a network service added since setup (a dock's Ethernet, an iPhone over USB) never gets the rule, also not from Repair | Medium | fixed |
+| SV-3 | Download page: a tablet in desktop mode with 32-bit Android gets the APK button instead of the 32-bit note | Low | fixed |
+
+### SV-1 Mac, standard account: the rule cannot be switched off
+
+- Found by: the desktop, core (system parts) and site reviewers, each on its own. The proxy
+  rule on a Mac is the computer's and points at 127.0.0.1:1081, a port any account may take.
+  FA-8's answer is that the core switches the rule off while another account holds that port
+  (`portHeld`, `sysproxy.Withdraw`). macOS lets only an administrator change the rule (SX-2),
+  and the core's own changes never ask for a password, so on a standard account Withdraw is
+  refused, `portHeld` stops there and the rule stays on, pointing at the other program. The
+  same cause: the core cannot put a rule back that it or setup left off (`reinstateRule`
+  removes the marker even so), and where an administrator's Uni VPN switched the rule off for
+  another account's, a standard account's Cover cannot switch it on again.
+- Reproduced: the reviewer's TestAudit8StandardAccountCannotWithdraw (SX-2's fakes: networksetup
+  answers exit 14, "Command requires admin privileges"): Withdraw returns false after
+  `-setautoproxystate Wi-Fi off` and the rule stays on with our address. Not run on a Mac.
+- Root cause: the design gives every account's browsers one computer-wide rule pointing at a
+  port that any account can hold, and expects the account at hand to be able to change that
+  rule. A standard account cannot without an administrator. This is the third finding of the
+  same class (FA-8, FV-1, SX-1 were the others), so the fix is a design choice: put to David.
+- Also by reading, every Mac install: while the Uni VPN user is signed out the rule stays on,
+  so a third account's program on 1081 gets the browsers of accounts other than its own.
+
+### SV-2 Mac, standard account: a service added since setup
+
+- Found by: the desktop reviewer. SX-2's quiet path kept the rule without asking where every
+  service with a rule on had ours, so a service with no rule at all (added since) and one whose
+  rule another account's Uni VPN switched off counted as done: setup and Repair said "ok" and
+  that service never sent a website through the VPN.
+- Reproduced: TestMacStandardAccountAsksForAServiceAddedSince (Wi-Fi with our rule, USB LAN
+  with none, and with ours switched off) fails before: "ok" with no password asked.
+- Root cause: "all ours" counted only the services that had a rule on.
+- Fix: `macAllOurs` is true only when every service Apply would set has our rule on.
+- Verification: the test passes; the reviewer's own test passes; `go test` for sysproxy and setup.
+
+### SV-3 Download page, 32-bit tablet in desktop mode
+
+- Found by: the site reviewer. The tablet branch of `detect()` skipped the 32-bit check.
+- Fix: it makes the same check as the Android branch. Verified in headless Chromium: platform
+  "Linux armv8l" with a touch screen gives android32 (android before), "Linux aarch64" android.
+
+### Left as they are (Low), seventh re-audit
+
+- Fixed with this round: docs/android.md says a tapped update goes in without a question once
+  installs are allowed (Uni VPN closes) and counts the minute from the core's last answer; the
+  Repair row in README names an administrator's password for a standard Mac account;
+  docs/macos-test.md D1 expects the second prompt there; "Let Uni VPN update itself" no longer
+  shows in debug builds.
+- Android: the unattended install checks "not on screen and idle" once, then works for
+  seconds; on Android 14 and newer the installer's screen does not open when the user left the
+  app before Android answers (the next tap works); the row "Let Uni VPN update itself" stays
+  on a phone whose policy forbids installs from unknown sources.
+- Core: the keyring messages on step 1 of the assistant say "Try again" where the button is
+  "Next"; a gateway that is down or does not resolve shows "No internet"; after Cisco
+  disconnects the reconnect can take up to 30 s.
+- Docs: docs/e2e.md and docs/macos-test.md use terminal commands (`uni-vpn log`, `doctor`,
+  `status`) that only the Python core has; README's "no root after installation" is about the
+  tunnel (a standard Mac account's setup, Repair and removal change the network settings as
+  root through macOS's dialog).

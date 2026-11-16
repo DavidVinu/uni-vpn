@@ -30,8 +30,8 @@ Cisco Secure Client is disconnected (`/opt/cisco/secureclient/bin/vpn state` sho
     by "Login failed.", exactly one openconnect run. Set the correct secret. Afterwards there is no
     `totp-*` file in the state folder (`~/.local/state/uni-vpn/`).
 9. Cisco: with the tunnel up, connect the Cisco client, wait up to 30 s: status page shows
-   "Cisco Secure Client is connected", loading a page gives a proxy error. Disconnect Cisco,
-   wait up to 30 s, reload the page: connects on its own.
+   "Cisco Secure Client is connected", a listed page opens through Cisco (the core connects it
+   directly). Disconnect Cisco, wait up to 30 s, reload the page: connects on its own.
 10. Suspend/resume: close the laptop lid for 1 minute, open it, load a page. `uni-vpn log` shows
     "Resume detected".
 

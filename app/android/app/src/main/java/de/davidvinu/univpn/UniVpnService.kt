@@ -11,6 +11,7 @@ import androidx.core.net.toUri
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
+import android.os.SystemClock
 import android.system.OsConstants
 import android.util.Log
 import androidx.core.content.edit
@@ -61,6 +62,7 @@ class UniVpnService : VpnService() {
         }
         running.value = true
         stopped = false
+        answeredAt = SystemClock.elapsedRealtime()
         want(this, true)
         Toggles.update(this)
         if (poll?.isActive == true) return
@@ -114,6 +116,7 @@ class UniVpnService : VpnService() {
         // VPN" on or off: Home's warning follows it here, not only when the VPN starts.
         if (tun != null) blocking.value = isLockdownEnabled
         val status = core.get("/status.json").json
+        if (status != null) answeredAt = SystemClock.elapsedRealtime()
         status?.let { ApkUpdate.setAutomatic(this, it.optBoolean("auto_update", true)) }
         if (status == null && core.portTaken) {
             // Our core ended and another app took its port (Core.ready): the rule would hand that
@@ -168,16 +171,28 @@ class UniVpnService : VpnService() {
 
     /** A newer version of the app is out (ApkUpdate): the notification offers it. */
     @Volatile private var updateShown = false
+    /** When the core last answered, or [start] ran since (SystemClock.elapsedRealtime). */
+    @Volatile private var answeredAt = 0L
     private var updateCheck: Job? = null
 
     /**
-     * Most users never open the app again once it is set up: the notification says when there
-     * is a new version. Beside the rule, so a download does not hold up the next website list.
+     * Most users never open the app again once it is set up: a new version goes in while the
+     * VPN is not in use (Android 12 and later), else the notification says that there is one.
+     * Beside the rule, so a download does not hold up the next website list.
      */
     private fun update() {
         if (updateCheck?.isActive == true) return
         updateCheck = scope.launch {
             ApkUpdate.check(this@UniVpnService)
+            if (ApkUpdate.offered.value != null) {
+                val status = core.get("/status.json").json
+                if (status != null) answeredAt = SystemClock.elapsedRealtime()
+                // Without an answer only once the core has not answered for a minute (a release
+                // whose core does not start on this phone), not for one request that failed.
+                if (status != null || SystemClock.elapsedRealtime() - answeredAt > 60_000) {
+                    ApkUpdate.installUnattended(this@UniVpnService, status)
+                }
+            }
             val offered = ApkUpdate.offered.value != null
             // Under the lock Stop takes before it removes the notification: never brought back
             // after that.

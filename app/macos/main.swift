@@ -48,6 +48,16 @@ struct Status {
 // account can read: its id, and the page that says another account holds the port.
 let instancePath = NSHomeDirectory() + "/Library/Logs/uni-vpn/instance"
 
+// This account's service (setup writes it) and its copy of the core.
+let agentPlist = NSHomeDirectory() + "/Library/LaunchAgents/de.davidvinu.uni-vpn.plist"
+let corePath = NSHomeDirectory() + "/Library/Application Support/uni-vpn/app/bin/uni-vpn-core"
+
+// Until uni-vpn is set up for this account, what answers on the port is not its uni-vpn (another
+// account's, with fast user switching), with or without the instance file.
+func isSetUp() -> Bool {
+    FileManager.default.fileExists(atPath: agentPlist) && FileManager.default.isExecutableFile(atPath: corePath)
+}
+
 struct Instance {
     var id: String
     var page: String
@@ -135,11 +145,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     var setupStarted = false
     var askedBackground = false
     // The window loads the status port's page only once status.json says the id in the
-    // instance file (or without the file, as before): another account may run anything on the
-    // port. shown is what the window has instead: nil (that page), "" (nothing), or the page
-    // that says another account holds the port.
+    // instance file (or without the file, as before, once this account is set up): another
+    // account may run anything on the port. shown is what the window has instead: nil (that
+    // page), "" (nothing), or the page that says another account holds the port.
     var instance = readInstance(nil)
-    lazy var allowed: Bool = instance == nil
+    lazy var allowed: Bool = instance == nil && isSetUp()
     var shown: String?
 
     func applicationDidFinishLaunching(_ note: Notification) {
@@ -314,7 +324,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     // Whether what answers on the port is this account's uni-vpn (next.reachable: it answered).
     func check(_ next: Status) {
         instance = readInstance(instance)
-        guard let file = instance else { return guardWindow(true, nil) }
+        guard let file = instance else { return guardWindow(isSetUp(), nil) }
         let ours = next.reachable && !file.id.isEmpty && next.instance == file.id
         if !file.page.isEmpty {
             guardWindow(false, file.page)
@@ -528,8 +538,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         guard misses >= 2, Date().timeIntervalSince(lastStart) > 60, Date().timeIntervalSince(repairSeen) > 60 else { return }
         lastStart = Date()
         let domain = "gui/\(getuid())"
-        let plist = NSHomeDirectory() + "/Library/LaunchAgents/de.davidvinu.uni-vpn.plist"
-        if setUpIfMissing(plist) { return }
+        let plist = agentPlist
+        if setUpIfMissing() { return }
         askBackgroundIfOff(plist)
         for args in [["bootstrap", domain, plist], ["kickstart", domain + "/de.davidvinu.uni-vpn"]] {
             let task = Process()
@@ -579,10 +589,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     // Not set up for this user: the installer only sets up whoever is signed in at the time
     // (not nobody, not another account on this Mac). The package's uni-vpn-open does it, once
     // per launch; it shows its own message if it fails.
-    func setUpIfMissing(_ plist: String) -> Bool {
+    func setUpIfMissing() -> Bool {
         let files = FileManager.default
-        let core = NSHomeDirectory() + "/Library/Application Support/uni-vpn/app/bin/uni-vpn-core"
-        guard !files.fileExists(atPath: plist) || !files.isExecutableFile(atPath: core) else { return false }
+        guard !isSetUp() else { return false }
         if setupStarted { return true }
         // The updated app next to the core has no uni-vpn-open; the installed one does.
         let opener = [Bundle.main.bundlePath, "/Applications/Uni VPN.app"]

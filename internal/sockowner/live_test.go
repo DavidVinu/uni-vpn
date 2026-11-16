@@ -5,7 +5,9 @@ package sockowner
 import (
 	"errors"
 	"net"
+	"runtime"
 	"testing"
+	"time"
 )
 
 // The system's own table, on each desktop system: this test's connection is this account's,
@@ -59,5 +61,60 @@ func TestOwnDualStackConnection(t *testing.T) {
 	defer server.Close()
 	if r, err := clientEnd(server); err != nil || !r.known || r.owner != self {
 		t.Fatal(r, err)
+	}
+}
+
+// Setup looks at the status port right after it started this account's core, which may not
+// have taken the connection yet. The system's table names the listener's account at once:
+// this account's, whether it takes connections or not.
+func TestAListenerOfThisAccountIsOursOnceItAccepts(t *testing.T) {
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			defer c.Close()
+		}
+	}()
+	for range 20 {
+		if OtherAccountListens(port) {
+			t.Fatal("this account's listener counts as another account's")
+		}
+	}
+}
+
+func TestAListenerOfThisAccountThatNeverAcceptsIsOurs(t *testing.T) {
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	if OtherAccountListens(ln.Addr().(*net.TCPAddr).Port) {
+		t.Fatal("this account's listener counts as another account's")
+	}
+}
+
+// Without the table (a system where it cannot be read), the connection's other end tells:
+// one that is never taken cannot be told from another account's, and counts as one (Linux;
+// macOS and Windows name the owner before the program takes the connection).
+func TestAConnectionNeverTakenCountsAsAnotherAccounts(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("macOS and Windows name the owner before the program takes the connection")
+	}
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	if !accepting(ln.Addr().(*net.TCPAddr).Port) {
+		t.Fatal("a connection never taken counts as this account's")
 	}
 }

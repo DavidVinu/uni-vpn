@@ -363,6 +363,102 @@ func TestMacFailedNetworksetupIsReported(t *testing.T) {
 	}
 }
 
+// A standard account of a Mac may not change the network settings: networksetup refuses it
+// at once (the macOS CI job's probe, macOS 15). Setup and uninstall, which the user started,
+// then hand the rest to Elevate, where macOS asks for an administrator's name and password.
+const adminRefusal = "** Error: Command requires admin privileges.\n"
+
+type elevated struct {
+	cmds [][]string
+	err  error
+}
+
+func (e *elevated) run(cmds [][]string) error {
+	e.cmds = append(e.cmds, cmds...)
+	return e.err
+}
+
+func standardMac(r *runner, e *elevated) *System {
+	s := mac(r)
+	if e != nil {
+		s.Elevate = e.run
+	}
+	return s
+}
+
+func standardAnswers(first ...answer) []answer {
+	return append(first,
+		answer{"networksetup -listallnetworkservices", 0, "An asterisk (*) denotes that a network service is disabled.\nWi-Fi\nUSB LAN\n"},
+		answer{"networksetup -getautoproxyurl", 0, "URL: (null)\nEnabled: No\n"},
+		answer{"networksetup -setautoproxy", 14, adminRefusal})
+}
+
+func TestMacStandardAccountAsksForAnAdministratorsPassword(t *testing.T) {
+	r := &runner{answers: standardAnswers()}
+	if got, _ := standardMac(r, nil).Install(1081, tempBackup(t, "b.json")); got != "failed" {
+		t.Fatal("without anyone to ask:", got)
+	}
+	e := &elevated{}
+	r = &runner{answers: standardAnswers()}
+	if got, _ := standardMac(r, e).Install(1081, tempBackup(t, "b.json")); got != "ok" {
+		t.Fatal(got)
+	}
+	if len(e.cmds) != 2 || e.cmds[0][2] != "Wi-Fi" || e.cmds[1][2] != "USB LAN" || !IsOurs(e.cmds[1][3], 1081) {
+		t.Fatal(e.cmds)
+	}
+	// Asked once: networksetup is not tried again for the second service.
+	if r.called("networksetup", "-setautoproxyurl", "USB LAN", e.cmds[1][3]) {
+		t.Fatal(r.calls)
+	}
+	// The user cancelled macOS's dialog.
+	e = &elevated{err: errors.New("User canceled. (-128)")}
+	r = &runner{answers: standardAnswers()}
+	if got, _ := standardMac(r, e).Install(1081, tempBackup(t, "b.json")); got != "failed" {
+		t.Fatal(got)
+	}
+}
+
+// Where an administrator's account set the rule up (it is the computer's), a standard account's
+// setup leaves it as it is instead of asking for a password for a new address.
+func TestMacStandardAccountKeepsTheRuleThatIsOursAlready(t *testing.T) {
+	e := &elevated{}
+	ours := answer{"networksetup -getautoproxyurl", 0, "URL: http://127.0.0.1:1081/proxy.pac?v=5\nEnabled: Yes\n"}
+	r := &runner{answers: standardAnswers(ours)}
+	if got, _ := standardMac(r, e).Install(1081, tempBackup(t, "b.json")); got != "ok" || len(e.cmds) != 0 {
+		t.Fatal(got, e.cmds)
+	}
+}
+
+// A service added since (a dock's Ethernet, an iPhone over USB) has no rule yet: setup and
+// Repair ask for the password for it, and for a rule another account's uni-vpn switched off.
+func TestMacStandardAccountAsksForAServiceAddedSince(t *testing.T) {
+	for _, usb := range []string{"URL: (null)\nEnabled: No\n", "URL: http://127.0.0.1:1081/proxy.pac?v=5\nEnabled: No\n"} {
+		e := &elevated{}
+		r := &runner{answers: standardAnswers(
+			answer{"networksetup -getautoproxyurl Wi-Fi", 0, "URL: http://127.0.0.1:1081/proxy.pac?v=5\nEnabled: Yes\n"},
+			answer{"networksetup -getautoproxyurl USB LAN", 0, usb})}
+		if got, _ := standardMac(r, e).Install(1081, tempBackup(t, "b.json")); got != "ok" || len(e.cmds) != 2 {
+			t.Fatal(usb, got, e.cmds)
+		}
+	}
+}
+
+func TestMacStandardAccountUninstallAsksForAnAdministratorsPassword(t *testing.T) {
+	e := &elevated{}
+	r := &runner{answers: standardAnswers()}
+	saved := &Snapshot{Mac: &Mac{Services: []Service{{Name: "Wi-Fi", URL: "http://wpad.example/proxy.pac", Enabled: true}, {Name: "USB LAN"}}}}
+	if err := standardMac(r, e).Restore(saved); err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{
+		{"networksetup", "-setautoproxyurl", "Wi-Fi", "http://wpad.example/proxy.pac"},
+		{"networksetup", "-setautoproxystate", "USB LAN", "off"},
+	}
+	if !reflect.DeepEqual(e.cmds, want) {
+		t.Fatal(e.cmds)
+	}
+}
+
 func TestMacRestoreDisablesWhenPreviouslyOff(t *testing.T) {
 	r := &runner{answers: macAnswers()}
 	mac(r).Restore(&Snapshot{Mac: &Mac{Services: []Service{{Name: "Wi-Fi"}}}})

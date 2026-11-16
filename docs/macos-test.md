@@ -47,7 +47,8 @@ D1. Download [uni-vpn.pkg](https://github.com/DavidVinu/uni-vpn/releases/latest/
     and double-click it. Until it is signed, macOS says it "cannot be opened": System Settings,
     Privacy & Security, "Open Anyway". Note every dialog.
     Expected: the usual installer pages, one password prompt, then the "Uni VPN" window with the
-    assistant. Homebrew is not needed and not installed, and neither is Python:
+    assistant. A standard account gets a second prompt at the end of the assistant, from Uni VPN,
+    for an administrator's name and password (`setup.admin_network`). Homebrew is not needed and not installed, and neither is Python:
     `~/Library/LaunchAgents/de.davidvinu.uni-vpn.plist` starts
     `~/Library/Application Support/uni-vpn/app/bin/uni-vpn-core daemon`.
 D2. Finish the assistant and open a university page in Chrome: it loads through the VPN.

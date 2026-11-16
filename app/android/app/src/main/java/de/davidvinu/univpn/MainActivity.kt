@@ -59,6 +59,15 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Android's "Install unknown apps" switch for this app (ApkUpdate.askToAllow). */
+    fun allowUpdates() {
+        try {
+            startActivity(ApkUpdate.allowIntent(this))
+        } catch (_: ActivityNotFoundException) {
+            // A phone without that page: the Update row's tap still walks through it.
+        }
+    }
+
     /** Then the notification permission, one system prompt after the other. */
     private fun started() {
         UniVpnService.start(this)
@@ -106,6 +115,17 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val ACTION_UPDATE = "de.davidvinu.univpn.UPDATE"
         const val EXTRA_KEY = "key"
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // On screen: an update waits for a tap (ApkUpdate.installUnattended).
+        ApkUpdate.shown.incrementAndGet()
+    }
+
+    override fun onStop() {
+        ApkUpdate.shown.decrementAndGet()
+        super.onStop()
     }
 
     override fun onResume() {

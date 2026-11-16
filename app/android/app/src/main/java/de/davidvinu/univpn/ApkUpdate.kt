@@ -9,8 +9,10 @@ import android.content.pm.SigningInfo
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
+import android.provider.Settings
 import android.util.Log
 import androidx.core.content.edit
+import androidx.core.net.toUri
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -25,6 +27,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicInteger
 
 /** The release's uni-vpn-apk.json: the version code, size and SHA-256 of its uni-vpn.apk. */
 class ApkRelease(val versionCode: Long, val size: Long, val sha256: String) {
@@ -48,8 +51,11 @@ class ApkRelease(val versionCode: Long, val size: Long, val sha256: String) {
  * website build). Once a day, while the VPN is on or the app is open, the release's
  * uni-vpn-apk.json says whether a newer uni-vpn.apk is out; on Wi-Fi it comes down at once and
  * is checked, on mobile data only when the user taps. Home and the VPN's notification then
- * offer it, and one tap hands it to Android's installer. Off in the Play build (the store
- * updates it) and while Automatic updates is off.
+ * offer it, and one tap hands it to Android's installer. On Android 12 and later a file that
+ * came down also goes in without a tap while the app is not on screen and the VPN is not in
+ * use ([installUnattended]), as the computers install once the tunnel is idle: most users
+ * never open the app again. Off in the Play build (the store updates it) and while Automatic
+ * updates is off.
  */
 object ApkUpdate {
     private const val RELEASE = "https://github.com/DavidVinu/uni-vpn/releases/latest/download/"
@@ -58,6 +64,13 @@ object ApkUpdate {
     /** After a check that did not get through: again in 10 minutes, not tomorrow. */
     private const val RETRY = 10 * 60 * 1000L
     internal const val MAX_APK = 200L shl 20
+    /** On the installer's answer (UpdateReceiver): no one tapped, so Android must not ask. */
+    const val EXTRA_UNATTENDED = "de.davidvinu.univpn.UNATTENDED"
+    /** The core's states (status.json state) while the tunnel is in use: an update waits. */
+    private val BUSY = setOf("connecting", "connected", "disconnecting")
+
+    /** MainActivity is on screen (started and not stopped): an update would close it under the user. */
+    val shown = AtomicInteger(0)
 
     /** A newer version is out: Home and the notification offer it. */
     private val newer = MutableStateFlow<ApkRelease?>(null)
@@ -167,6 +180,71 @@ object ApkUpdate {
             }
         }
     }
+
+    /**
+     * Android installs without asking only for an app the user allowed to install apps (Settings,
+     * "Install unknown apps"; the first tap on Update walks through it). Until then Home asks for
+     * it once ([askToAllow]), and [installUnattended] would only be refused.
+     */
+    fun mayInstall(context: Context): Boolean =
+        // Android throws without REQUEST_INSTALL_PACKAGES, which the Play build does not declare.
+        runCatching { context.packageManager.canRequestPackageInstalls() }.getOrDefault(false)
+
+    /** Home's "Let Uni VPN update itself": where an update could go in without a tap, once allowed. */
+    fun askToAllow(context: Context): Boolean =
+        BuildConfig.SELF_UPDATE && !BuildConfig.DEBUG && Build.VERSION.SDK_INT >= 31 && prefs(context).getBoolean("automatic", true) && !mayInstall(context)
+
+    /** Android's page with this app's "Install unknown apps" switch. */
+    fun allowIntent(context: Context): Intent =
+        Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, "package:${context.packageName}".toUri())
+
+    /**
+     * Android 12 and later: the version on offer, once it came down, goes to Android's installer
+     * without a tap while the app is not on screen and the core ([status], null when it does not
+     * answer) has no tunnel, connection or pairing in use (role model: Signal's download build).
+     * Android puts it in without asking (setRequireUserAction in [install]) once installs from
+     * this app are allowed ([mayInstall]), and BootReceiver turns the VPN back on; should Android
+     * want to ask after all, the offer stays as it is (UpdateReceiver). Once a day per version.
+     * Blocks: call off the main thread.
+     */
+    fun installUnattended(context: Context, status: JSONObject?) {
+        if (!BuildConfig.SELF_UPDATE || BuildConfig.DEBUG) return
+        val release = newer.value ?: return
+        val prefs = prefs(context)
+        val now = System.currentTimeMillis()
+        if (!unattended(Build.VERSION.SDK_INT, shown.get() > 0, idle(status), prefs.getString("unattended", null), release.sha256, now - prefs.getLong("unattended_at", 0))) return
+        if (!mayInstall(context)) return
+        if (!installing.compareAndSet(expect = false, update = true)) return
+        var handed = false
+        try {
+            synchronized(lock) {
+                if (!prefs.getBoolean("automatic", true) || newer.value !== release) return
+                val file = apk(context)
+                // Only a file that is here already: on mobile data nothing comes down without a tap.
+                if (file.length() != release.size) return
+                prefs.edit { putString("unattended", release.sha256); putLong("unattended_at", now) }
+                if (!sums(file, release) || !matches(context, file, release)) return
+                handed = install(context.applicationContext, file, unattended = true)
+            }
+        } finally {
+            // Else the installer answers (UpdateReceiver).
+            if (!handed) installing.value = false
+        }
+    }
+
+    /** [installUnattended]'s rule, apart from Android: [tried] is the version last tried, [sinceTried] milliseconds ago. */
+    internal fun unattended(sdk: Int, onScreen: Boolean, idle: Boolean, tried: String?, sha256: String, sinceTried: Long): Boolean =
+        sdk >= 31 && !onScreen && idle && (tried != sha256 || sinceTried !in 0 until DAY)
+
+    /**
+     * Nothing of the core's in use: no tunnel, no browser connection, no sign-in under way, no
+     * device being added (a code that is done or ran out stays in status.json until its screen
+     * closes). A core that does not answer is idle (a release whose core does not start on this
+     * phone: the update may be what helps).
+     */
+    internal fun idle(status: JSONObject?): Boolean = status == null ||
+        status.optString("state") !in BUSY && status.optInt("active_connections") == 0 &&
+        !status.optBoolean("busy") && status.optJSONObject("sync")?.optJSONObject("pairing")?.optString("state") != "waiting"
 
     /** The checked file of the version on offer, downloading it now when needed; null when it does not come. */
     private fun prepare(context: Context): File? {
@@ -292,8 +370,11 @@ object ApkUpdate {
     private fun signers(info: SigningInfo?): Set<String>? =
         info?.apkContentsSigners?.map { it.toCharsString() }?.toSet()
 
-    /** Hands the file to Android's installer, which asks the user (UpdateReceiver). Blocks: call off the main thread. */
-    fun install(context: Context, file: File): Boolean {
+    /**
+     * Hands the file to Android's installer, which asks the user (UpdateReceiver), or with
+     * [unattended] only puts it in where it need not ask. Blocks: call off the main thread.
+     */
+    fun install(context: Context, file: File, unattended: Boolean = false): Boolean {
         val installer = context.packageManager.packageInstaller
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
             setAppPackageName(context.packageName)
@@ -313,7 +394,7 @@ object ApkUpdate {
                 }
                 // Mutable: the installer adds its answer (EXTRA_STATUS) to it.
                 val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
-                val intent = Intent(context, UpdateReceiver::class.java).setPackage(context.packageName)
+                val intent = Intent(context, UpdateReceiver::class.java).setPackage(context.packageName).putExtra(EXTRA_UNATTENDED, unattended)
                 session.commit(PendingIntent.getBroadcast(context, id, intent, flags).intentSender)
             }
             true

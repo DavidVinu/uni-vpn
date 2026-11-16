@@ -153,7 +153,11 @@ fun HomeScreen(model: AppModel, vpnOn: Boolean, activity: MainActivity) {
                     }
                 }
             }
-            if (update != null) item { UpdateRow(model.t("phone.update"), model) }
+            if (update != null) {
+                item { UpdateRow(model.t("phone.update"), model) }
+            } else if (ApkUpdate.askToAllow(activity)) {
+                item { AllowUpdatesRow(model, activity) }
+            }
             item { Section(model.t("settings.through")) }
             items(domains) { host ->
                 ListItem(
@@ -178,6 +182,20 @@ fun stateColor(state: String): Color = when (state) {
     "connecting", "disconnecting", "offline", "blocked" -> Warn
     "auth_failed", "keyring", "error" -> MaterialTheme.colorScheme.error
     else -> Color.Gray
+}
+
+/**
+ * Android 12 and later put updates in without a tap once installs from this app are allowed:
+ * once, from Home, which everyone sees after setup (ApkUpdate.askToAllow).
+ */
+@Composable
+internal fun AllowUpdatesRow(model: AppModel, activity: MainActivity) {
+    ListItem(
+        headlineContent = { Text(model.t("phone.allow_updates"), color = MaterialTheme.colorScheme.primary) },
+        supportingContent = { Text(model.t("phone.allow_updates_hint")) },
+        leadingContent = { Icon(Icons.Outlined.SystemUpdate, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+        modifier = Modifier.clickable { activity.allowUpdates() },
+    )
 }
 
 /** Role model Signal's download build: a newer version, one tap to install (ApkUpdate). */

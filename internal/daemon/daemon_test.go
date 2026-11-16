@@ -1064,6 +1064,36 @@ func TestCiscoPauseClosesBrowserConnections(t *testing.T) {
 	readEOF(t, c, 3*time.Second)
 }
 
+// The README suggests the Cisco client for large downloads: while it is connected, the rule
+// still sends the listed websites here, and they open through Cisco instead of failing.
+func TestListedWebsitesGoThroughCiscoWhileItIsConnected(t *testing.T) {
+	h := newHarness(t)
+	h.cisco.Store(true)
+	if err := pac.WriteDomains(h.domainsPath, []string{"moodle.example.de"}); err != nil {
+		t.Fatal(err)
+	}
+	d := h.start(nil)
+	d.RequestConnect()
+	waitState(t, d, Blocked)
+	if hosts := d.forwarder.Direct(); !slices.Contains(hosts, "moodle.example.de") {
+		t.Fatal(hosts)
+	}
+	// Disconnect, then the next page load: Cisco is still there, and the website opens.
+	d.RequestDisconnect()
+	waitState(t, d, Idle)
+	if _, ok := d.acquire(context.Background()); ok {
+		t.Fatal("through the VPN")
+	}
+	if s, _ := d.snapshot(); s != Blocked || !slices.Contains(d.forwarder.Direct(), "moodle.example.de") {
+		t.Fatal(s, d.forwarder.Direct())
+	}
+	h.cisco.Store(false)
+	waitState(t, d, Connected)
+	if hosts := d.forwarder.Direct(); slices.Contains(hosts, "moodle.example.de") {
+		t.Fatal(hosts)
+	}
+}
+
 func TestWindowsWithoutElevationExplainsInsteadOfStarting(t *testing.T) {
 	h := newHarness(t)
 	no := false
@@ -2011,6 +2041,30 @@ func TestRuleIsOffWhileAnotherAccountHoldsTheStatusPort(t *testing.T) {
 	}
 }
 
+// The program on the status port can change while this account's uni-vpn waits for it: when
+// another account's takes it over, the rule goes off then, once.
+func TestRuleGoesOffWhenAnotherAccountTakesOverTheStatusPort(t *testing.T) {
+	h := newHarness(t)
+	blocker, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(h.cfg.HTTPPort))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocker.Close()
+	d := h.start(nil)
+	if d.HTTP() != nil || h.withdrawn.Load() != 0 {
+		t.Fatal(d.HTTP() != nil, h.withdrawn.Load())
+	}
+	h.otherListens.Store(true)
+	marker := filepath.Join(h.tokenDir, sysproxy.WithdrawnName)
+	if !waitFor(3*time.Second, func() bool { return h.withdrawn.Load() == 1 && exists(marker) }) {
+		t.Fatal(h.withdrawn.Load(), exists(marker))
+	}
+	time.Sleep(time.Duration(5 * h.cfg.RetryInterval * float64(time.Second)))
+	if h.withdrawn.Load() != 1 || h.knocked.Load() != 1 {
+		t.Fatal("withdrawn again", h.withdrawn.Load(), h.knocked.Load())
+	}
+}
+
 func TestRuleIsOnAgainOnceTheStatusPortIsFree(t *testing.T) {
 	h := newHarness(t)
 	h.otherListens.Store(true)
@@ -2029,6 +2083,26 @@ func TestRuleIsOnAgainOnceTheStatusPortIsFree(t *testing.T) {
 	}
 	if exists(filepath.Join(h.tokenDir, sysproxy.WithdrawnName)) || h.withdrawn.Load() != 1 {
 		t.Fatal("marker left or withdrawn again")
+	}
+}
+
+// Setup can take a core that does not take connections yet for another account's program, and
+// leave the rule off (sockowner.OtherAccountListens): while the port is ours, it goes back on.
+func TestARuleSetupLeftOffGoesBackOnWhileThePortIsOurs(t *testing.T) {
+	h := newHarness(t)
+	d := h.start(nil)
+	if d.HTTP() == nil {
+		t.Fatal("status port not ours")
+	}
+	if h.reinstated.Load() != 0 {
+		t.Fatal(h.reinstated.Load())
+	}
+	marker := filepath.Join(h.tokenDir, sysproxy.WithdrawnName)
+	if err := os.WriteFile(marker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !waitFor(3*time.Second, func() bool { return h.reinstated.Load() == 1 && !exists(marker) }) {
+		t.Fatal(h.reinstated.Load(), exists(marker))
 	}
 }
 

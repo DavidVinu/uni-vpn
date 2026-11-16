@@ -689,6 +689,30 @@ func TestSetupLeavesTheRuleOffWhileAnotherAccountHoldsThePort(t *testing.T) {
 	}
 }
 
+// The core puts back a rule left off while the status port is its own (reinstateRule): the
+// marker goes before the rule, so that it does not come back while Uni VPN is removed.
+func TestUninstallRemovesTheRuleLeftOffMarkerFirst(t *testing.T) {
+	h := newHarness(t)
+	h.otherListens = true
+	h.setup(Args{User: "ab123"})
+	withdrawn := filepath.Join(platform.StateDir(), sysproxy.WithdrawnName)
+	if _, err := os.Stat(withdrawn); err != nil {
+		t.Fatal(err)
+	}
+	var markerAtUninstall error
+	proxyUninstall := h.s.ProxyUninstall
+	h.s.ProxyUninstall = func() (string, error) {
+		_, markerAtUninstall = os.Stat(withdrawn)
+		return proxyUninstall()
+	}
+	if code := h.uninstall(Args{Yes: true}); code != 0 {
+		t.Fatal(code, h.out.String())
+	}
+	if !os.IsNotExist(markerAtUninstall) {
+		t.Fatal("marker still there when the rule was removed", markerAtUninstall)
+	}
+}
+
 // recordingApp stands in for desktop.Desktop where only the calls count.
 type recordingApp struct{ calls []string }
 

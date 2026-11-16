@@ -230,6 +230,7 @@ type Daemon struct {
 	removing      bool // the app was removed and this program removes itself: no update now
 	http          *httpapi.Server
 	httpWaiting   *httpapi.Server // its port was taken at the start; the ticker tries again
+	heldByOther   bool            // portHeld found another account's program on that port
 	// socksTaken: another program holds the SOCKS port, so the rule sends everything directly
 	// (whatever listens there would get the browser's connections).
 	socksTaken bool
@@ -1106,7 +1107,8 @@ func (d *Daemon) ruleLocked() (string, error) {
 // says. The core connects it itself, for browsers that ignore that. While the gateway cannot
 // be reached (also while the loop rests after that, see away), the listed websites too: some
 // universities' gateways cannot be reached from their own network (Halle, HS Flensburg), where
-// the websites open directly.
+// the websites open directly. So too while Cisco Secure Client is connected (Blocked): it
+// carries the university's network, and the rule still sends the websites here.
 func (d *Daemon) directHosts() []string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -1114,7 +1116,7 @@ func (d *Daemon) directHosts() []string {
 	if host := d.portalHostLocked(); host != "" {
 		hosts = append(hosts, host)
 	}
-	if (d.state == Offline || d.state == Idle && d.away()) && !d.needsSetup && d.configError == "" {
+	if (d.state == Offline || d.state == Blocked || d.state == Idle && d.away()) && !d.needsSetup && d.configError == "" {
 		if domains, err := pac.ReadDomains(d.opts.DomainsPath, d.cfg.DefaultDomains); err == nil {
 			hosts = append(hosts, domains...)
 		}
@@ -1506,14 +1508,24 @@ func (d *Daemon) bindHTTP() {
 	d.mu.Lock()
 	server := d.httpWaiting
 	d.mu.Unlock()
-	if server == nil || server.Start() != nil {
+	if server == nil {
+		return
+	}
+	if server.Start() != nil {
+		// Another program may have taken the port over meanwhile.
+		d.mu.Lock()
+		held := d.heldByOther
+		d.mu.Unlock()
+		if !held {
+			d.portHeld(server.Port)
+		}
 		return
 	}
 	d.logf(slog.LevelInfo, "Status port %d is free again", server.Port)
 	// The page goes before HTTP says the port is ours.
 	d.writeInstance(d.instance, "")
 	d.mu.Lock()
-	d.http, d.httpWaiting = server, nil
+	d.http, d.httpWaiting, d.heldByOther = server, nil, false
 	d.mu.Unlock()
 	d.reinstateRule(server.Port)
 }
@@ -1521,13 +1533,15 @@ func (d *Daemon) bindHTTP() {
 // portHeld: another account of this computer holds the status port (its uni-vpn started
 // first, or any program of it listens there). The app windows show the page that says so
 // instead of whatever answers there. The browsers take their rule from that port, so the rule
-// is off until this account's uni-vpn has the port.
+// is off until this account's uni-vpn has the port. Asked at the start and at each try to
+// take the port, until it says so.
 func (d *Daemon) portHeld(port int) {
 	if !d.opts.OtherAccountListens(port) {
 		return
 	}
 	d.mu.Lock()
 	language := d.cfg.Language
+	d.heldByOther = true
 	d.mu.Unlock()
 	d.writeInstance(d.instance, httpapi.OtherAccountWindow(language))
 	if !d.opts.ProxyWithdraw(port) {
@@ -2312,7 +2326,7 @@ func (d *Daemon) ticker() {
 	}
 	lastAwake, lastWall := awake(), d.wall()
 	lastCisco := d.mono()
-	lastBind, lastCover := lastCisco, lastCisco
+	lastBind, lastCover, lastMarker := lastCisco, lastCisco, lastCisco
 	d.mu.Lock()
 	tick := seconds(d.cfg.Tick)
 	d.mu.Unlock()
@@ -2338,6 +2352,13 @@ func (d *Daemon) ticker() {
 			if d.httpWaiting != nil {
 				d.unlocked(d.bindHTTP)
 			}
+		}
+		// While the status port is ours, no other account's program holds it: a rule setup left
+		// off (it took this core, not yet taking connections, for one) goes back on.
+		if d.http != nil && mono-lastMarker >= cfg.RetryInterval {
+			lastMarker = mono
+			port := d.http.Port
+			d.unlocked(func() { d.reinstateRule(port) })
 		}
 		grace := seconds(cfg.StopGrace)
 		if mono-lastCisco >= cfg.RetryInterval && (d.state == Connected || d.state == Blocked) {

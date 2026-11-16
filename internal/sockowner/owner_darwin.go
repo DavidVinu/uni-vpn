@@ -14,9 +14,18 @@ func clientEnd(c net.Conn) (row, error) {
 	if err != nil {
 		return row{}, err
 	}
-	buf, err := unix.SysctlRaw("net.inet.tcp.pcblist_n")
+	rows, err := table()
 	if err != nil {
 		return row{}, err
 	}
-	return find(parsePCBList(buf), client, server, self)
+	return find(rows, client, server, self)
+}
+
+// table is every TCP socket netstat lists, listeners included.
+func table() ([]row, error) {
+	buf, err := unix.SysctlRaw("net.inet.tcp.pcblist_n")
+	if err != nil {
+		return nil, err
+	}
+	return parsePCBList(buf), nil
 }
