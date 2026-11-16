@@ -2313,7 +2313,7 @@ func (d *Daemon) ticker() {
 	}
 	lastAwake, lastWall := awake(), d.wall()
 	lastCisco := d.mono()
-	lastBind, lastCover := lastCisco, lastCisco
+	lastBind, lastCover, lastMarker := lastCisco, lastCisco, lastCisco
 	d.mu.Lock()
 	tick := seconds(d.cfg.Tick)
 	d.mu.Unlock()
@@ -2339,6 +2339,13 @@ func (d *Daemon) ticker() {
 			if d.httpWaiting != nil {
 				d.unlocked(d.bindHTTP)
 			}
+		}
+		// While the status port is ours, no other account's program holds it: a rule setup left
+		// off (it took this core, not yet taking connections, for one) goes back on.
+		if d.http != nil && mono-lastMarker >= cfg.RetryInterval {
+			lastMarker = mono
+			port := d.http.Port
+			d.unlocked(func() { d.reinstateRule(port) })
 		}
 		grace := seconds(cfg.StopGrace)
 		if mono-lastCisco >= cfg.RetryInterval && (d.state == Connected || d.state == Blocked) {

@@ -1610,7 +1610,8 @@ with two staged package folders, and the real setup with its own D-Bus and dconf
   daemon, under 12 busy loops on 4 cores: 8 of 15 setups said another account held the port.
   TestAListenerOfThisAccountIsOursAlsoBeforeItAccepts (a listener that has not accepted) fails.
 - Fix: `OtherAccountListens` counts only an end whose account the system names, asking for
-  half a second; no name is "cannot tell" (false), as the function says.
+  half a second; no name is "cannot tell" (false), as the function says. (Incomplete: it let
+  another account's program that does not take connections pass, see FV-1.)
 - Verification: the same run 0 of 15; the test passes; TR-1's run with a listener of `nobody`
   still leaves the rule off (mode 'none', marker written, "Another account ... holds").
 
@@ -1642,4 +1643,40 @@ with two staged package folders, and the real setup with its own D-Bus and dconf
 - Setup on Xfce while the port is held says "reopen the browser" where the session lines come
   later; reinstateRule removes the marker also when ProxyInstall failed; uninstall can race a
   reinstate.
+
+## Fifth re-audit
+
+Scope: the whole repository at c68ffe4 (#86's first push), five fresh reviewers in the same
+five areas.
+
+| # | Bug | Severity | Status |
+|---|---|---|---|
+| FV-1 | FR-3 let another account's program on the status port pass when it does not take the connection at once: the rule went on, pointing at it (FA-8 again) | High | fixed |
+
+### FV-1 Another account's program that does not take connections at once
+
+- Found by: the core reviewer (sign-in and API). Since FR-3 an end the system never names was
+  "cannot tell". A program of another account that holds the status port but takes
+  connections late or never (a deferred accept is enough) left its end without owner for the
+  whole half second, so `portHeld` neither withdrew the rule nor noted the other account, and
+  setup switched the rule on: the browsers took their rule from that program.
+- Reproduced: TestAListenerThatNeverAcceptsCountsAsAnotherAccounts (a listener that never takes
+  the connection) fails on c68ffe4; the real setup with a listener of `nobody` that never
+  accepts registered the rule.
+- Root cause: FR-3 turned "no owner" from another account's into "cannot tell" for the
+  listener's end, to spare this account's own core in the moment before it takes the
+  connection.
+- Fix: an end that stays without owner counts as another account's again, as everywhere else.
+  The moment before this account's own core takes the connection is covered twice: the check
+  asks for up to 2 s (the core takes it within milliseconds), and while the status port is the
+  core's own, a rule setup left off goes back on at the next tick (no other account can hold
+  the port then). Uninstall removes the marker first, so that the rule does not come back while
+  it is removed (this also settles the third re-audit's Low "uninstall can race a reinstate").
+- Verification: TestAListenerThatNeverAcceptsCountsAsAnotherAccounts,
+  TestARuleSetupLeftOffGoesBackOnWhileThePortIsOurs and
+  TestUninstallRemovesTheRuleLeftOffMarkerFirst fail before, pass after;
+  TestAListenerOfThisAccountIsOursOnceItAccepts passes. The real setup with a listener of
+  `nobody` that never accepts: before mode 'auto' with our address, after mode 'none', the
+  marker written, "Another account ... holds". FR-3's run (systemctl returning 0.2 s after
+  starting the core, 12 busy loops on 4 cores): still 0 of 15 setups say another account.
 

@@ -89,21 +89,24 @@ func otherSession(sessions map[uint32]uint32, self, owner uint32) (bool, error) 
 // OtherAccountListens reports whether a program of another account of this computer accepts
 // connections on 127.0.0.1:port: then the port is not this account's uni-vpn, and what
 // answers there is not to be trusted. False when nothing accepts or the system cannot tell.
-// The accepting end names its account once its program has taken the connection (until then
-// Linux names no owner, which OtherAccount counts as another account's: a core setup has just
-// started may not have taken it yet), so it is asked for half a second.
+// The accepting end names its account once its program has taken the connection; until then
+// Linux names no owner. A core setup has just started takes it within milliseconds, so it is
+// asked for up to 2 s; an end that stays without owner counts as another account's, as in
+// OtherAccount (a program that does not take connections cannot be told from one).
 func OtherAccountListens(port int) bool {
 	c, err := net.DialTimeout("tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), 250*time.Millisecond)
 	if err != nil {
 		return false
 	}
 	defer c.Close()
-	for range 50 {
+	unnamed := false
+	for range 200 {
 		other, known, err := owner(c)
 		if err == nil && known {
 			return other
 		}
+		unnamed = unnamed || err == nil && other
 		time.Sleep(10 * time.Millisecond)
 	}
-	return false
+	return unnamed
 }

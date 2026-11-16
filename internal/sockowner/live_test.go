@@ -5,6 +5,7 @@ package sockowner
 import (
 	"errors"
 	"net"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -64,18 +65,16 @@ func TestOwnDualStackConnection(t *testing.T) {
 }
 
 // Setup looks at the status port right after it started this account's core, which may not
-// have taken the connection yet: until then its end has no owner (Linux), which is not
-// another account's.
-func TestAListenerOfThisAccountIsOursAlsoBeforeItAccepts(t *testing.T) {
+// have taken the connection yet: until then its end has no owner (Linux). Once it takes it,
+// the listener is this account's; one that never takes it cannot be told from another
+// account's, and counts as one.
+func TestAListenerOfThisAccountIsOursOnceItAccepts(t *testing.T) {
 	ln, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ln.Close()
 	port := ln.Addr().(*net.TCPAddr).Port
-	if OtherAccountListens(port) {
-		t.Fatal("a listener that does not accept counts as another account's")
-	}
 	go func() {
 		time.Sleep(100 * time.Millisecond)
 		for {
@@ -90,5 +89,19 @@ func TestAListenerOfThisAccountIsOursAlsoBeforeItAccepts(t *testing.T) {
 		if OtherAccountListens(port) {
 			t.Fatal("this account's listener counts as another account's")
 		}
+	}
+}
+
+func TestAListenerThatNeverAcceptsCountsAsAnotherAccounts(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("macOS and Windows name the owner before the program takes the connection")
+	}
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	if !OtherAccountListens(ln.Addr().(*net.TCPAddr).Port) {
+		t.Fatal("a listener that never takes the connection counts as this account's")
 	}
 }

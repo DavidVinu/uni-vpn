@@ -2062,6 +2062,26 @@ func TestRuleIsOnAgainOnceTheStatusPortIsFree(t *testing.T) {
 	}
 }
 
+// Setup can take a core that does not take connections yet for another account's program, and
+// leave the rule off (sockowner.OtherAccountListens): while the port is ours, it goes back on.
+func TestARuleSetupLeftOffGoesBackOnWhileThePortIsOurs(t *testing.T) {
+	h := newHarness(t)
+	d := h.start(nil)
+	if d.HTTP() == nil {
+		t.Fatal("status port not ours")
+	}
+	if h.reinstated.Load() != 0 {
+		t.Fatal(h.reinstated.Load())
+	}
+	marker := filepath.Join(h.tokenDir, sysproxy.WithdrawnName)
+	if err := os.WriteFile(marker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !waitFor(3*time.Second, func() bool { return h.reinstated.Load() == 1 && !exists(marker) }) {
+		t.Fatal(h.reinstated.Load(), exists(marker))
+	}
+}
+
 // Whatever holds the SOCKS port would get the browser's connections: the rule sends everything
 // directly until the port is uni-vpn's, and the browsers load it again each time.
 func TestRuleIsDirectWhileTheSocksPortIsTaken(t *testing.T) {

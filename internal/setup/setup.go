@@ -985,6 +985,8 @@ func (s *Setup) Uninstall(a Args) (int, error) {
 		return 1, nil
 	}
 	failed := false
+	// First, so the core does not put the rule back while it is removed (reinstateRule).
+	os.Remove(filepath.Join(platform.StateDir(), sysproxy.WithdrawnName))
 	proxy, err := s.ProxyUninstall()
 	if err != nil {
 		return 1, err
