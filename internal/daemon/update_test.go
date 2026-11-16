@@ -5,7 +5,9 @@ package daemon
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -31,6 +33,10 @@ type fakeUpdater struct {
 	panics                     bool
 	pending                    string
 	checks, applied, discarded int
+	// FromPackage: pkgCommit is the package's newer version, pkgDir and pkgVersion what it
+	// was asked with.
+	pkgCommit, pkgDir, pkgVersion string
+	fromPackage                   int
 }
 
 func (f *fakeUpdater) Installed() string { return commitA }
@@ -53,6 +59,15 @@ func (f *fakeUpdater) Check(context.Context) (string, error) {
 	}
 	f.pending = f.commit
 	return f.commit, nil
+}
+
+func (f *fakeUpdater) FromPackage(_ context.Context, dir, version string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.fromPackage++
+	f.pkgDir, f.pkgVersion = dir, version
+	f.pending = f.pkgCommit
+	return f.pkgCommit, nil
 }
 
 func (f *fakeUpdater) Apply() (string, error) {
@@ -189,6 +204,69 @@ func TestSwitchedOffChecksNothing(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 	if checks, _, _ := fake.counts(); checks != 0 {
 		t.Fatal(checks)
+	}
+}
+
+// A newer .deb or .rpm installed while automatic updates are off: the copy takes it, as the
+// installers on Mac and Windows install theirs.
+func TestANewerPackageIsInstalledWithAutomaticUpdatesOff(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the Linux packages")
+	}
+	h := newHarness(t)
+	h.cfg.AutoUpdate = false
+	copyDir, _ := installerCopy(t, true)
+	fake := &fakeUpdater{commit: commitB, pkgCommit: commitB}
+	d := h.start(func(o *Options) {
+		o.Updater = fake
+		o.PackageWatch = PackageWatch{Root: copyDir, Check: time.Hour, RemoveSelf: func() int { return 0 }}
+	}, timing(50*time.Millisecond, time.Hour, 0))
+	h.waitDone()
+	checks, applied, _ := fake.counts()
+	if checks != 0 || applied != 1 || !d.RestartRequested {
+		t.Fatal(checks, applied, d.RestartRequested)
+	}
+	if fake.pkgDir != filepath.Join(PackageDir(copyDir), "app") || fake.pkgVersion != Version {
+		t.Fatal(fake.pkgDir, fake.pkgVersion)
+	}
+}
+
+// The package is looked at again once it changes, not only every few hours.
+func TestAChangedPackageIsLookedAtAtOnce(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the Linux packages")
+	}
+	h := newHarness(t)
+	h.cfg.AutoUpdate = false
+	copyDir, _ := installerCopy(t, true)
+	fake := &fakeUpdater{pkgCommit: commitB}
+	h.start(func(o *Options) {
+		o.Updater = fake
+		o.PackageWatch = PackageWatch{Root: copyDir, Check: 50 * time.Millisecond, RemoveSelf: func() int { return 0 }}
+	}, timing(time.Hour, time.Hour, 0))
+	time.Sleep(200 * time.Millisecond)
+	if _, applied, _ := fake.counts(); applied != 0 {
+		t.Fatal("before the package changed")
+	}
+	os.WriteFile(filepath.Join(PackageDir(copyDir), "app", ".commit"), []byte(commitB+"\n"), 0o644)
+	h.waitDone()
+	if _, applied, _ := fake.counts(); applied != 1 {
+		t.Fatal(applied)
+	}
+}
+
+// With automatic updates on, the release has the newest version.
+func TestAutomaticUpdatesComeFromTheRelease(t *testing.T) {
+	h := newHarness(t)
+	copyDir, _ := installerCopy(t, true)
+	fake := &fakeUpdater{commit: commitB, pkgCommit: commitB}
+	h.start(func(o *Options) {
+		o.Updater = fake
+		o.PackageWatch = PackageWatch{Root: copyDir, Check: time.Hour, RemoveSelf: func() int { return 0 }}
+	}, timing(50*time.Millisecond, time.Hour, 0))
+	h.waitDone()
+	if checks, applied, _ := fake.counts(); checks != 1 || applied != 1 || fake.fromPackage != 0 {
+		t.Fatal(checks, applied, fake.fromPackage)
 	}
 }
 

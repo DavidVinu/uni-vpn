@@ -4,8 +4,11 @@ import (
 	"context"
 	"log/slog"
 	"math/rand/v2"
+	"path/filepath"
 	"runtime/debug"
 	"time"
+
+	"github.com/DavidVinu/uni-vpn/internal/platform"
 )
 
 // Updater is the self-updater (*updater.Updater); tests replace it.
@@ -16,6 +19,9 @@ type Updater interface {
 	Pending() string
 	// Check looks for a new version and prepares it; "" when this one is current.
 	Check(ctx context.Context) (string, error)
+	// FromPackage prepares the version in the app folder dir of the package this copy came
+	// from, when it is newer than version; "" when it is not.
+	FromPackage(ctx context.Context, dir, version string) (string, error)
 	// Apply installs the pending version.
 	Apply() (string, error)
 	// Discard forgets the pending version.
@@ -40,16 +46,31 @@ func (d *Daemon) stopping() bool {
 	}
 }
 
-// check runs Updater.Check; an update problem must never stop the service.
-func (d *Daemon) check(ctx context.Context) (commit string, err error, crashed bool) {
+// check runs Updater.Check, or with pkg Updater.FromPackage for the package's app folder pkg;
+// an update problem must never stop the service.
+func (d *Daemon) check(ctx context.Context, pkg string) (commit string, err error, crashed bool) {
 	defer func() {
 		if r := recover(); r != nil {
 			d.logf(slog.LevelError, "Update check failed\n%v\n%s", r, debug.Stack())
 			commit, err, crashed = "", nil, true
 		}
 	}()
-	commit, err = d.opts.Updater.Check(ctx)
+	if pkg != "" {
+		commit, err = d.opts.Updater.FromPackage(ctx, pkg, Version)
+	} else {
+		commit, err = d.opts.Updater.Check(ctx)
+	}
 	return commit, err, false
+}
+
+// packageApp is the app folder of the .deb or .rpm the copy at root came from, "" for none.
+// Automatic updates off, a newer version the user installed there is the only one this copy
+// gets (on Mac and Windows the installers install theirs).
+func packageApp(root string) string {
+	if platform.IsMacOS || platform.IsWindows || PackageDir(root) == "" {
+		return ""
+	}
+	return filepath.Join(PackageDir(root), "app")
 }
 
 // autoUpdate is _auto_update: it ends when the daemon stops, or after installing an update,
@@ -78,11 +99,16 @@ func (d *Daemon) autoUpdate() {
 		d.mu.Lock()
 		enabled := d.cfg.AutoUpdate
 		d.mu.Unlock()
+		root := d.opts.PackageWatch.root()
+		pkg := ""
+		if !enabled {
+			pkg = packageApp(root)
+		}
 		// An app moved to the Trash is not updated: its service removes itself (removal.go).
-		if !enabled || PackageGone(d.opts.PackageWatch.root()) {
+		if (!enabled && pkg == "") || PackageGone(root) {
 			continue
 		}
-		commit, err, crashed := d.check(ctx)
+		commit, err, crashed := d.check(ctx, pkg)
 		if d.stopping() {
 			// Stopped while checking.
 			d.opts.Updater.Discard()
@@ -99,7 +125,7 @@ func (d *Daemon) autoUpdate() {
 			continue
 		}
 		d.logf(slog.LevelInfo, "Update %s ready, installing once the tunnel is idle", short(commit))
-		if !d.installWhenIdle(commit) {
+		if !d.installWhenIdle(commit, pkg != "") {
 			if d.stopping() {
 				// Logout or shutdown while the tunnel was in use: the unpacked files must not
 				// stay next to the installation.
@@ -112,13 +138,14 @@ func (d *Daemon) autoUpdate() {
 	}
 }
 
-// installWhenIdle waits until the tunnel is idle and installs the update. The check and
-// the install happen under mu, so no connection can start in between; then the daemon stops
-// and the caller starts the new program. False if the update was not installed.
-func (d *Daemon) installWhenIdle(commit string) bool {
+// installWhenIdle waits until the tunnel is idle and installs the update, fromPackage the
+// package's. The check and the install happen under mu, so no connection can start in between;
+// then the daemon stops and the caller starts the new program. False if the update was not
+// installed.
+func (d *Daemon) installWhenIdle(commit string, fromPackage bool) bool {
 	for {
 		d.mu.Lock()
-		if !d.cfg.AutoUpdate || d.removing {
+		if (!d.cfg.AutoUpdate && !fromPackage) || d.removing {
 			d.mu.Unlock()
 			d.opts.Updater.Discard()
 			return false

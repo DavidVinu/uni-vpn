@@ -24,6 +24,7 @@ import (
 	"regexp"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -368,20 +369,25 @@ func (u *Updater) stage(data []byte, commit string) (*staged, error) {
 var syncFile = (*os.File).Sync
 
 func unpack(f *zip.File, dest string) error {
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		return err
-	}
 	r, err := f.Open()
 	if err != nil {
 		return err
 	}
 	defer r.Close()
+	// The archive's own size is checked by archive/zip while reading, like the checksum.
+	return place(io.LimitReader(r, int64(f.UncompressedSize64)+1), dest, f.Name, f.Mode())
+}
+
+// place writes the staged file dest, name below the root, from r; mode is the original's.
+func place(r io.Reader, dest, name string, mode fs.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return err
+	}
 	out, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return err
 	}
-	// The archive's own size is checked by archive/zip while reading, like the checksum.
-	_, err = io.Copy(out, io.LimitReader(r, int64(f.UncompressedSize64)+1))
+	_, err = io.Copy(out, r)
 	if err == nil {
 		// On disk before install renames it into place: after a power cut the program must
 		// not be an empty file (macOS and Windows do not order the rename after the data).
@@ -393,12 +399,121 @@ func unpack(f *zip.File, dest string) error {
 	if err != nil {
 		return err
 	}
-	mode := fs.FileMode(0o644)
-	if strings.HasPrefix(f.Name, "bin/") || f.Mode().Perm()&0o111 != 0 {
-		mode = 0o755
+	perm := fs.FileMode(0o644)
+	if strings.HasPrefix(name, "bin/") || mode.Perm()&0o111 != 0 {
+		perm = 0o755
 	}
 	// Explicitly: the service runs with umask 077.
-	return os.Chmod(dest, mode)
+	return os.Chmod(dest, perm)
+}
+
+// FromPackage prepares the version in dir, the app folder of the .deb or .rpm this copy came
+// from (packaging/uni-vpn-open), when it is newer than this one, version: with automatic
+// updates off nothing else brings a version the user installed. It returns its commit, ready
+// for Apply, or "" when the package has none newer.
+func (u *Updater) FromPackage(ctx context.Context, dir, version string) (string, error) {
+	if p := u.Pending(); p != "" {
+		return p, nil
+	}
+	if u.Disabled() != "" {
+		return "", nil
+	}
+	data, err := os.ReadFile(filepath.Join(dir, CommitFile))
+	commit := strings.TrimSpace(string(data))
+	if err != nil || !ValidCommit(commit) || commit == u.Commit {
+		return "", nil
+	}
+	vctx, cancel := context.WithTimeout(ctx, time.Minute)
+	out, err := u.Run(vctx, filepath.Join(dir, filepath.FromSlash(u.Exe)), "--version")
+	cancel()
+	// "uni-vpn 0.1.<CI run> <commit>"
+	if fields := strings.Fields(string(out)); err != nil || len(fields) < 2 || !Newer(fields[1], version) {
+		return "", nil
+	}
+	s, err := u.stageFrom(dir, commit)
+	if err != nil {
+		return "", err
+	}
+	if err := u.smokeTest(ctx, s); err != nil {
+		s.discard()
+		return "", err
+	}
+	u.mu.Lock()
+	u.pending, u.staged = commit, s
+	u.mu.Unlock()
+	return commit, nil
+}
+
+// stageFrom copies the package's folder dir into a new folder next to the root, as stage
+// unpacks a download, without its records.
+func (u *Updater) stageFrom(dir, commit string) (*staged, error) {
+	folder, err := os.MkdirTemp(filepath.Dir(u.Root), StagePrefix)
+	if err != nil {
+		return nil, errorf("copying the update failed: %s", err)
+	}
+	s := &staged{folder: folder, commit: commit}
+	var total int64
+	err = filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		name := filepath.ToSlash(rel)
+		if name == CommitFile || name == FilesList || name == platform.PackageMarker {
+			return nil
+		}
+		if err := CheckPath(name); err != nil {
+			return err
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("unexpected file in the package: %q", name)
+		}
+		if total += info.Size(); total > maxUnpacked {
+			return errors.New("the package is larger than expected")
+		}
+		in, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer in.Close()
+		if err := place(in, filepath.Join(folder, filepath.FromSlash(name)), name, info.Mode()); err != nil {
+			return err
+		}
+		s.files = append(s.files, name)
+		return nil
+	})
+	if err == nil && !slices.ContainsFunc(s.files, func(f string) bool { return fold(f) == fold(u.Exe) }) {
+		err = errors.New("the package does not look like uni-vpn")
+	}
+	if err != nil {
+		s.discard()
+		return nil, errorf("copying the update failed: %s", err)
+	}
+	return s, nil
+}
+
+// Newer reports whether version a, numbers with dots (0.1.<CI run>), is past b.
+func Newer(a, b string) bool {
+	parse := func(v string) []int {
+		var numbers []int
+		for _, part := range strings.Split(v, ".") {
+			n, err := strconv.Atoi(part)
+			if err != nil || n < 0 || part[0] == '+' {
+				return nil
+			}
+			numbers = append(numbers, n)
+		}
+		return numbers
+	}
+	x, y := parse(a), parse(b)
+	return x != nil && y != nil && slices.Compare(x, y) > 0
 }
 
 // smokeTest: the new program must start and know its commit.

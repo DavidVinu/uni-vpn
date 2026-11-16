@@ -640,3 +640,133 @@ func TestAnInstallThatStopsHalfwayIsCompletedLater(t *testing.T) {
 		t.Fatalf("core %q with openconnect %q", core, got)
 	}
 }
+
+// pkg is the app folder of an installed .deb or .rpm (packaging/uni-vpn-open copied this copy
+// from it), with version and commit.
+func (f *fixture) pkg(version, commit string, files ...file) string {
+	f.t.Helper()
+	dir := filepath.Join(f.t.TempDir(), "uni-vpn", "app")
+	for _, x := range files {
+		write(f.t, filepath.Join(dir, filepath.FromSlash(x.name)), x.body)
+		if x.mode != 0 {
+			os.Chmod(filepath.Join(dir, filepath.FromSlash(x.name)), x.mode)
+		}
+	}
+	if commit != "" {
+		write(f.t, filepath.Join(dir, CommitFile), commit+"\n")
+	}
+	f.version = "uni-vpn " + version + " " + commit + "\n"
+	return dir
+}
+
+var packageFiles = []file{{name: "bin/uni-vpn-core", body: "new core", mode: 0o755}, {name: "app/linux/uni-vpn-app.py", body: "window"}}
+
+// The user installed a newer .deb or .rpm: with automatic updates off nothing else brings it.
+func TestANewerPackageIsInstalled(t *testing.T) {
+	f := newFixture(t, nil)
+	dir := f.pkg("0.1.20", commitB, packageFiles...)
+	commit, err := f.u.FromPackage(context.Background(), dir, "0.1.9")
+	if err != nil || commit != commitB || f.u.Pending() != commitB {
+		t.Fatal(commit, err)
+	}
+	if read(t, filepath.Join(f.root, "bin", "uni-vpn-core")) != "old core" {
+		t.Fatal("must not install yet")
+	}
+	// The package's program says its version, the copy of it must start.
+	if len(f.ran) != 2 || f.ran[0] != "new core --version" || f.ran[1] != "new core --version" {
+		t.Fatal(f.ran)
+	}
+	if got, err := f.u.Apply(); err != nil || got != commitB {
+		t.Fatal(got, err)
+	}
+	if read(t, filepath.Join(f.root, "bin", "uni-vpn-core")) != "new core" ||
+		read(t, filepath.Join(f.root, "app", "linux", "uni-vpn-app.py")) != "window" {
+		t.Fatal("not installed")
+	}
+	if st, _ := os.Stat(filepath.Join(f.root, "bin", "uni-vpn-core")); runtime.GOOS != "windows" && st.Mode().Perm() != 0o755 {
+		t.Fatal(st.Mode())
+	}
+	if read(t, filepath.Join(f.root, CommitFile)) != commitB+"\n" ||
+		read(t, filepath.Join(f.root, FilesList)) != "app/linux/uni-vpn-app.py\nbin/uni-vpn-core\n" {
+		t.Fatal("records", read(t, filepath.Join(f.root, FilesList)))
+	}
+	if read(t, filepath.Join(dir, "bin", "uni-vpn-core")) != "new core" || len(f.leftovers()) != 0 {
+		t.Fatal("the package changed, or something stayed", f.leftovers())
+	}
+}
+
+// The copy updated itself past the package (automatic updates), or the package is this version.
+func TestAnOlderPackageIsNotInstalled(t *testing.T) {
+	for _, tc := range []struct{ version, commit, own string }{
+		{"0.1.9", commitB, "0.1.10"},
+		{"0.1.10", commitB, "0.1.10"},
+		{"0.1.20", commitA, "0.1.10"}, // this copy's commit
+		{"0.1.20", "", "0.1.10"},      // no .commit
+		{"", commitB, "0.1.10"},
+		{"0.1.x", commitB, "0.1.10"},
+		{"0.1.20", commitB, "0.1.0x"},
+	} {
+		f := newFixture(t, nil)
+		dir := f.pkg(tc.version, tc.commit, packageFiles...)
+		if commit, err := f.u.FromPackage(context.Background(), dir, tc.own); commit != "" || err != nil {
+			t.Fatal(tc, commit, err)
+		}
+		if f.u.Pending() != "" || len(f.leftovers()) != 0 {
+			t.Fatal(tc, "staged")
+		}
+	}
+}
+
+func TestAPackageThatIsNotUniVPNIsRefused(t *testing.T) {
+	f := newFixture(t, nil)
+	dir := f.pkg("0.1.20", commitB, file{name: "app/linux/uni-vpn-app.py", body: "window"})
+	if commit, err := f.u.FromPackage(context.Background(), dir, "0.1.9"); commit != "" || err == nil {
+		t.Fatal(commit, err) // no program in it
+	}
+	if f.u.Pending() != "" || len(f.leftovers()) != 0 {
+		t.Fatal("staged")
+	}
+	if runtime.GOOS == "windows" {
+		return
+	}
+	dir = f.pkg("0.1.20", commitB, packageFiles...)
+	if err := os.Symlink("/etc/passwd", filepath.Join(dir, "app", "link")); err != nil {
+		t.Fatal(err)
+	}
+	if commit, err := f.u.FromPackage(context.Background(), dir, "0.1.9"); commit != "" || err == nil {
+		t.Fatal(commit, err)
+	}
+	if f.u.Pending() != "" || len(f.leftovers()) != 0 {
+		t.Fatal("staged")
+	}
+	f.version = "uni-vpn 0.1.20 " + commitA + "\n"
+	os.Remove(filepath.Join(dir, "app", "link"))
+	// The copy says another commit than the package's .commit.
+	f.u.Run = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if strings.Contains(name, StagePrefix) {
+			return []byte("uni-vpn 0.1.20 " + commitA + "\n"), nil
+		}
+		return []byte("uni-vpn 0.1.20 " + commitB + "\n"), nil
+	}
+	if commit, err := f.u.FromPackage(context.Background(), dir, "0.1.9"); commit != "" || err == nil {
+		t.Fatal(commit, err)
+	}
+	if f.u.Pending() != "" || len(f.leftovers()) != 0 {
+		t.Fatal("staged")
+	}
+}
+
+func TestNewer(t *testing.T) {
+	for _, tc := range []struct {
+		a, b string
+		want bool
+	}{
+		{"0.1.10", "0.1.9", true}, {"0.1.9", "0.1.10", false}, {"0.1.10", "0.1.10", false},
+		{"0.2.0", "0.1.99", true}, {"1.0", "0.9.9", true}, {"0.1", "0.1.0", false}, {"0.1.1", "0.1", true},
+		{"", "0.1.0", false}, {"0.1.0", "", false}, {"0.1.-1", "0.1.0", false}, {"0.1.+2", "0.1.0", false},
+	} {
+		if got := Newer(tc.a, tc.b); got != tc.want {
+			t.Fatal(tc, got)
+		}
+	}
+}
