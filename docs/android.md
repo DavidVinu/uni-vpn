@@ -55,14 +55,16 @@ the Go core does the work and the app only talks to its local API.
   that next check; one signed with another key (a build of one's own) is not offered or
   downloaded again until the next release. Home shows "Update Uni VPN" and so
   does the VPN's notification; a tap hands the file to Android's installer
-  (`PackageInstaller`), which asks once to allow installs from Uni VPN and then for the update.
+  (`PackageInstaller`), which asks once to allow installs from Uni VPN and then for the update;
+  once installs are allowed, Android 12 and newer install the tapped update without a question
+  and Uni VPN closes (the VPN comes back by itself if it was on).
   On Android 12 and newer, once installs from Uni VPN are allowed ("Install unknown apps",
   `canRequestPackageInstalls`), it may install without asking
   (`UPDATE_PACKAGES_WITHOUT_USER_ACTION`), so there a version that came down also goes in
   without a tap (`ApkUpdate.installUnattended`, role model Signal), as the computers update
   themselves: while the VPN is on, the app is not on screen and nothing of the core is in use
   (state not connecting, connected or disconnecting, no browser connection, no connect loop,
-  no device being added; without an answer from the core only a minute after the VPN started),
+  no device being added; without an answer from the core only a minute after its last one),
   once a day per version. Until installs are allowed, Home shows "Let Uni VPN update itself",
   which opens Android's switch for it (everyone sees Home after setup); the first tap on Update
   allows it too. Should Android want to ask after all, nothing is shown and the offer stays.

@@ -192,7 +192,7 @@ object ApkUpdate {
 
     /** Home's "Let Uni VPN update itself": where an update could go in without a tap, once allowed. */
     fun askToAllow(context: Context): Boolean =
-        BuildConfig.SELF_UPDATE && Build.VERSION.SDK_INT >= 31 && prefs(context).getBoolean("automatic", true) && !mayInstall(context)
+        BuildConfig.SELF_UPDATE && !BuildConfig.DEBUG && Build.VERSION.SDK_INT >= 31 && prefs(context).getBoolean("automatic", true) && !mayInstall(context)
 
     /** Android's page with this app's "Install unknown apps" switch. */
     fun allowIntent(context: Context): Intent =

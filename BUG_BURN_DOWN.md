@@ -1856,3 +1856,73 @@ five areas; this time the reviewer for the core's connect path and local API fin
 - Sockowner: on macOS and Linux another account's listener on `::` with IPv6 only also counts
   (the core heals that rule once the port is its own); a ProxyInstall already running while
   uninstall removes the rule can put it back (the marker exists for seconds at most).
+
+## Seventh re-audit
+
+Scope: the whole repository at fd1bf31 (#86's fourth push), five fresh reviewers in the same
+five areas (core connect path and local API, core system parts, desktop, phones, site with CI
+and texts); all five finished.
+
+| # | Bug | Severity | Status |
+|---|---|---|---|
+| SV-1 | Mac with a standard account: the core cannot switch the computer's rule off while another account's program holds the status port, so the browsers keep taking their rule from it (FA-8 again, for the accounts SX-2 gave the rule) | High | open, waits on David |
+| SV-2 | Mac with a standard account: a network service added since setup (a dock's Ethernet, an iPhone over USB) never gets the rule, also not from Repair | Medium | fixed |
+| SV-3 | Download page: a tablet in desktop mode with 32-bit Android gets the APK button instead of the 32-bit note | Low | fixed |
+
+### SV-1 Mac, standard account: the rule cannot be switched off
+
+- Found by: the desktop, core (system parts) and site reviewers, each on its own. The proxy
+  rule on a Mac is the computer's and points at 127.0.0.1:1081, a port any account may take.
+  FA-8's answer is that the core switches the rule off while another account holds that port
+  (`portHeld`, `sysproxy.Withdraw`). macOS lets only an administrator change the rule (SX-2),
+  and the core's own changes never ask for a password, so on a standard account Withdraw is
+  refused, `portHeld` stops there and the rule stays on, pointing at the other program. The
+  same cause: the core cannot put a rule back that it or setup left off (`reinstateRule`
+  removes the marker even so), and where an administrator's Uni VPN switched the rule off for
+  another account's, a standard account's Cover cannot switch it on again.
+- Reproduced: the reviewer's TestAudit8StandardAccountCannotWithdraw (SX-2's fakes: networksetup
+  answers exit 14, "Command requires admin privileges"): Withdraw returns false after
+  `-setautoproxystate Wi-Fi off` and the rule stays on with our address. Not run on a Mac.
+- Root cause: the design gives every account's browsers one computer-wide rule pointing at a
+  port that any account can hold, and expects the account at hand to be able to change that
+  rule. A standard account cannot without an administrator. This is the third finding of the
+  same class (FA-8, FV-1, SX-1 were the others), so the fix is a design choice: put to David.
+- Also by reading, every Mac install: while the Uni VPN user is signed out the rule stays on,
+  so a third account's program on 1081 gets the browsers of accounts other than its own.
+
+### SV-2 Mac, standard account: a service added since setup
+
+- Found by: the desktop reviewer. SX-2's quiet path kept the rule without asking where every
+  service with a rule on had ours, so a service with no rule at all (added since) and one whose
+  rule another account's Uni VPN switched off counted as done: setup and Repair said "ok" and
+  that service never sent a website through the VPN.
+- Reproduced: TestMacStandardAccountAsksForAServiceAddedSince (Wi-Fi with our rule, USB LAN
+  with none, and with ours switched off) fails before: "ok" with no password asked.
+- Root cause: "all ours" counted only the services that had a rule on.
+- Fix: `macAllOurs` is true only when every service Apply would set has our rule on.
+- Verification: the test passes; the reviewer's own test passes; `go test` for sysproxy and setup.
+
+### SV-3 Download page, 32-bit tablet in desktop mode
+
+- Found by: the site reviewer. The tablet branch of `detect()` skipped the 32-bit check.
+- Fix: it makes the same check as the Android branch. Verified in headless Chromium: platform
+  "Linux armv8l" with a touch screen gives android32 (android before), "Linux aarch64" android.
+
+### Left as they are (Low), seventh re-audit
+
+- Fixed with this round: docs/android.md says a tapped update goes in without a question once
+  installs are allowed (Uni VPN closes) and counts the minute from the core's last answer; the
+  Repair row in README names an administrator's password for a standard Mac account;
+  docs/macos-test.md D1 expects the second prompt there; "Let Uni VPN update itself" no longer
+  shows in debug builds.
+- Android: the unattended install checks "not on screen and idle" once, then works for
+  seconds; on Android 14 and newer the installer's screen does not open when the user left the
+  app before Android answers (the next tap works); the row "Let Uni VPN update itself" stays
+  on a phone whose policy forbids installs from unknown sources.
+- Core: the keyring messages on step 1 of the assistant say "Try again" where the button is
+  "Next"; a gateway that is down or does not resolve shows "No internet"; after Cisco
+  disconnects the reconnect can take up to 30 s.
+- Docs: docs/e2e.md and docs/macos-test.md use terminal commands (`uni-vpn log`, `doctor`,
+  `status`) that only the Python core has; README's "no root after installation" is about the
+  tunnel (a standard Mac account's setup, Repair and removal change the network settings as
+  root through macOS's dialog).

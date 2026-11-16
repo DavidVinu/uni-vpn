@@ -95,7 +95,7 @@ them.
 | "Paused while Cisco Secure Client is connected" | Nothing: the websites open through the Cisco VPN. Once you disconnect it, Uni VPN continues by itself. |
 | "No internet" | On hotel, train or café Wi-Fi, open any website and accept the Wi-Fi's sign-in page. Uni VPN continues by itself. |
 | "Your saved passwords are locked" | Sign out of your computer and back in, then click **Try again**. |
-| "Part of Uni VPN is missing" or "missing a permission" | Click **Repair**, and click Yes or enter your computer's password if it asks. |
+| "Part of Uni VPN is missing" or "missing a permission" | Click **Repair**, and click Yes or enter your computer's password if it asks (on a Mac with a standard account, an administrator's name and password). |
 | "Another program is in the way" or "Uni VPN is not running" | Restart the computer. |
 | "Your university signs in through a web page" | Uni VPN cannot do that yet. Use the Cisco VPN for now. |
 | A university page does not load the first time after a break | Reload the page. |
