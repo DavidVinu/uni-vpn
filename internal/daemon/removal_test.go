@@ -141,10 +141,12 @@ func TestAnUpdateWaitingDuringTheRemovalIsDropped(t *testing.T) {
 	d.mu.Lock()
 	d.removing = true
 	d.mu.Unlock()
-	if d.installWhenIdle(commitB) {
-		t.Fatal("installed during the removal")
+	for _, fromPackage := range []bool{false, true} {
+		if d.installWhenIdle(commitB, fromPackage) {
+			t.Fatal("installed during the removal", fromPackage)
+		}
 	}
-	if _, applied, discarded := fake.counts(); applied != 0 || discarded != 1 {
+	if _, applied, discarded := fake.counts(); applied != 0 || discarded != 2 {
 		t.Fatal(applied, discarded)
 	}
 }

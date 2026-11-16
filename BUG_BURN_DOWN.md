@@ -1230,7 +1230,8 @@ translations and docs. The full test suite on that commit passed first: `go test
   install, also without a website list since SR-1; an install from before gets them at the
   next login without a word). Chrome there
   is not told when the rule changes (no setting to watch): an edited website list reaches it
-  when it restarts or loads the rule again on its own (the app says so since SR-2).
+  when it restarts or loads the rule again on its own (the app says so since SR-2, for installs
+  from before it since TR-4).
   A program of another account that holds the
   status port before this account signs in gives Chrome there its rule for that one session
   (the app window shows the note, and the next login has no lines until the port is ours).
@@ -1406,3 +1407,127 @@ headless Chromium with 16 browsers and platforms.
   KDE uses KWallet and "an IP address" where IPv6 counts a /48, and says computer where the
   phone's name is used.
 - CI: `promote` cannot push after a force-push to main.
+
+## Third re-audit
+
+Scope: the whole repository at 236ead1 (#84 in), read by five fresh reviewers in the same five
+areas. Their tests passed on that commit: `go test` (also `-race` for the daemon, API,
+forwarder, sockowner and tunnel), `go vet` for windows and darwin, the relay's tests and the Go
+sync client against the real worker in workerd, test_i18n, the page in headless Chromium, the
+real Linux app window under Xvfb, and the real setup with its own D-Bus and dconf.
+
+| # | Bug | Severity | Status |
+|---|---|---|---|
+| TR-1 | Setup switches the proxy rule on after the core withdrew it, while another account holds the status port (FA-8 again, for the install path) | High | fixed |
+| TR-2 | Android tablets that can take a pen (Samsung's, Pixel Tablet) are still offered the Linux packages (FA-1 incomplete) | Medium | fixed |
+| TR-3 | The Windows tip names Edge's buttons; Chrome, the largest browser on Windows, has none of them | Medium | fixed |
+| TR-4 | Xfce and LXQt installs from before SR-2 still say only "Saved" after a change of the websites | Medium | fixed |
+| TR-5 | Linux with automatic updates off: installing a newer .deb or .rpm never updates the program | Medium | fixed |
+
+### TR-1 Setup switches the rule on while another account holds the port
+
+- Found by: the system reviewer. FA-8's core withdraws the rule once, when it starts and finds
+  the status port held. Setup starts (or restarts) the core and only then installs the rule,
+  so the rule ended up on, pointing at the other account's program, until the next login. In
+  some orders the `rule-withdrawn` marker was never written either (on a first install there
+  was nothing to withdraw yet), so the rule did not come back once the port was free.
+- Reproduced: the real `uni-vpn-core setup --no-gui` in a fresh home with its own D-Bus and
+  dconf, a fake systemctl that starts the real daemon, and a listener of the account `nobody`
+  on the status port: 6 of 6 first setups ended with GNOME's mode 'auto' and our address (the
+  reviewer: 8 of 10, and Chromium then fetched the PAC from `nobody`'s listener).
+- Root cause: setup installs the rule without looking who holds the port.
+- Fix: setup asks `sockowner.OtherAccountListens` first. While another account's program holds
+  the port it leaves the rule off and writes `rule-withdrawn` (now `sysproxy.WithdrawnName`),
+  so the core switches the rule on once the port is this account's, however the two runs
+  overlap. The record for Chrome on Xfce (SR-2) is still written.
+- Verification: TestSetupLeavesTheRuleOffWhileAnotherAccountHoldsThePort fails before, passes
+  after. The same real-setup run: 8 of 8 left mode 'none', no session lines, the marker
+  written; with the listener stopped, the core took the port after 27 s and switched the rule
+  on (mode 'auto', our address, `.profile` lines), the marker gone.
+
+### TR-2 Android tablets that can take a pen
+
+- Found by: the website reviewer. FA-1 counted a "Desktop site" Linux browser with a touch
+  screen as a tablet only without `any-pointer: fine`, but Chromium on Android reports a fine
+  pointer for any device that can take a pen (Samsung's touch screens, Pixel Tablet), with no
+  pen there (ui/android TouchDevice.java).
+- Reproduced: the page in headless Chromium with a desktop Linux user agent, 10 touch points,
+  `pointer: coarse` and `any-pointer: fine`: the .deb and .rpm buttons.
+- Root cause: `any-pointer` counts what a device can take, not what it is used with.
+- Fix: a Linux browser whose main pointer is coarse and that has touch points is a tablet
+  (`pointer: coarse`). A Linux computer with a mouse or touchpad has a fine main pointer.
+- Verification: tablet with and without pen support: uni-vpn.apk; Linux touch laptop and
+  desktop: .deb and .rpm. The other 15 browsers and platforms unchanged.
+
+### TR-3 Windows tip for Chrome
+
+- Found by: the website reviewer: Chrome says "Suspicious download blocked" and offers only
+  "Delete" and "Download suspicious file"; the tip named Edge's "…", "Keep", "Show more",
+  "Keep anyway".
+- Fix: the tip follows the browser: Edge's steps in Edge, Chrome's ("Download suspicious
+  file", German „Verdächtige Datei herunterladen“) in Chrome, and "open its downloads and
+  allow the file" in Firefox, Opera and others; the blue box and Smart App Control parts stay
+  for all. README names both browsers.
+- Verification: the page in Chromium with Edge, Chrome, Firefox and Opera on Windows in all six
+  languages: the matching text each time.
+
+### TR-4 Xfce and LXQt installs from before SR-2
+
+- Found by: the desktop reviewer. Only setup recorded `rule-at-browser-start`, and an update
+  does not run setup, so every install from before SR-2 kept `pac_refresh: "auto"` ("Saved")
+  while Cover gave Chrome the rule from the session files.
+- Reproduced: the real core in a home without the record, gsettings with our address: after
+  the start `.profile` had our lines, status.json said "auto".
+- Root cause: only setup, which runs in the session, knows the desktop; the service may not.
+- Fix: the Linux app window, which runs in the session, names its desktop in its status polls
+  (XDG_CURRENT_DESKTOP, DESKTOP_SESSION, GNOME_DESKTOP_SESSION_ID, KDE_FULL_SESSION), and the
+  core writes or removes the record as setup does. A poll that names no desktop (the copy of
+  the window the Repair button starts as a service) leaves it.
+- Verification: TestTheLinuxAppNamesItsDesktop fails before, passes after. The real core with
+  the real window under Xvfb: on XFCE `pac_refresh` "manual" within a poll, on GNOME "auto"
+  again, without a desktop unchanged.
+
+### TR-5 Linux: a newer package with automatic updates off
+
+- Found by: the desktop reviewer. uni-vpn-open copies the package only on the first open, and
+  the app entry setup writes starts the user's copy directly; with automatic updates off
+  (also synced from another device) a newer .deb or .rpm never reached the program. On Mac
+  and Windows installing a newer version does update.
+- Root cause: on Linux nothing brought a package's version into the user's copy after the
+  first copy, except the automatic updates.
+- Fix: with automatic updates off, the core takes the version of its package's app folder when
+  it is newer (`updater.FromPackage`: the package's `.commit`, its program's version
+  `0.1.<run>` compared with this one's, copied next to the copy, started once as a test, then
+  installed when the tunnel is idle like an update, and restarted). The package watcher looks
+  again as soon as the package's `.commit` changes. An older package (the copy updated itself
+  past it) is never installed.
+- Verification: TestANewerPackageIsInstalled, TestAnOlderPackageIsNotInstalled,
+  TestAPackageThatIsNotUniVPNIsRefused, TestNewer, TestANewerPackageIsInstalledWithAutomaticUpdatesOff
+  and TestAChangedPackageIsLookedAtAtOnce fail before, pass after;
+  TestAutomaticUpdatesComeFromTheRelease shows the release stays the source with automatic
+  updates on. End to end: a user copy with a core 0.1.50 and automatic updates
+  off, its package folder replaced by 0.1.60 while the core ran: at the watcher's next look
+  (5 minutes) the core installed it and restarted; status.json said 0.1.60, the copy had the
+  new program, window and `.commit`.
+
+### Left as they are (Low), third re-audit
+
+- macOS: polls from another account's window bring the next Cover forward about every 30 s
+  (extra networksetup calls, nothing else).
+- An enrollment that starts while the SOCKS port is held waits for its timeout if another
+  message replaces "port in use" before the port is free.
+- Windows: two accounts' services share Program Files and can race on an update's staging;
+  each recovers by itself (as GC-12).
+- App windows: on Windows the instance file can look missing for a moment while it is
+  swapped; on Mac and Windows an XDG_STATE_HOME set by hand (the core follows it, the windows
+  do not) turns their instance check off. Quitting the window and opening it again before the
+  assistant ends loses its "sign out" step.
+- Phones: the APK can lag the desktop files by one release when an android job fails after
+  main moved on (each half consistent); the update offer on mobile data is only a
+  notification (Wi-Fi installs it anyway); a stopped tunnel can say "ready" for a moment; on
+  iPhone the instance file, which nothing there reads, can be overwritten in a handover.
+- Setup while nothing listens on the port, when another account's program takes it in the
+  moment before the core starts: the core withdraws the rule as before, but can do so while
+  setup's install still runs.
+- A web page can make the core write or remove the "restart the browser" record by asking for
+  status.json as the Linux window does (a hint text, nothing else).

@@ -126,6 +126,9 @@ type Server struct {
 	// AppPolled is told of each status request of the native app (status.json?menu=), with
 	// whether the app restarts itself after updates ("shell=1"); nil ignores them.
 	AppPolled func(restartsItself bool)
+	// AppDesktop is told of the desktop session that app runs in, as its status requests name
+	// it (the Linux app: XDG_CURRENT_DESKTOP and the like), with a getenv for it; nil ignores it.
+	AppDesktop func(getenv func(string) string)
 	// OtherAccount tells whether a connection comes from another account of this computer
 	// (fast user switching: its app and browser reach the uni-vpn that started first). Only
 	// a PAC file is served to them, one that sends everything directly: this account's VPN is
@@ -547,6 +550,9 @@ func (s *Server) route(method, path, query string, hdrs headers, body []byte) (i
 			if wanted := values.Get("menu"); wanted != "" {
 				if s.AppPolled != nil {
 					s.AppPolled(values.Get("shell") != "")
+				}
+				if s.AppDesktop != nil && values.Get("shell") != "" {
+					s.AppDesktop(values.Get)
 				}
 				language, _ := status.Get("language")
 				setting, _ := language.(string)

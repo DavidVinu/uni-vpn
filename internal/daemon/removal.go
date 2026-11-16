@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/DavidVinu/uni-vpn/internal/platform"
+	"github.com/DavidVinu/uni-vpn/internal/updater"
 )
 
 // The app was moved to the Trash or its package removed: uninstall. It mirrors
@@ -66,6 +67,12 @@ func (w PackageWatch) root() string {
 	return w.Root
 }
 
+// packageCommit is the commit of the package's app, "" for none.
+func packageCommit(root string) string {
+	data, _ := os.ReadFile(filepath.Join(PackageDir(root), "app", updater.CommitFile))
+	return strings.TrimSpace(string(data))
+}
+
 // watchPackage uninstalls once the package is gone on two checks in a row, so that installing
 // a new version over it does not count.
 func (d *Daemon) watchPackage(w PackageWatch) {
@@ -80,6 +87,7 @@ func (d *Daemon) watchPackage(w PackageWatch) {
 		return
 	}
 	missing := 0
+	version := packageCommit(w.Root)
 	for {
 		select {
 		case <-d.stop:
@@ -90,6 +98,14 @@ func (d *Daemon) watchPackage(w PackageWatch) {
 			missing++
 		} else {
 			missing = 0
+		}
+		// A new version of the package: with automatic updates off the only one this copy gets.
+		if now := packageCommit(w.Root); now != version {
+			version = now
+			select {
+			case d.updateNow <- struct{}{}:
+			default:
+			}
 		}
 		if missing >= 2 {
 			// An update must not put files back or restart the program halfway through.

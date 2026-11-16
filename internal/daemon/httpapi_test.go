@@ -16,6 +16,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -123,6 +124,42 @@ func TestAppPolls(t *testing.T) {
 	port := h.cfg.HTTPPort
 	if fmt.Sprint(got) != fmt.Sprint([]string{fmt.Sprint(port, false), fmt.Sprint(port, true)}) {
 		t.Fatal(got)
+	}
+}
+
+// The Linux app runs in the desktop session and names it in its status requests, which the
+// service may not know: where Chrome takes the rule only when it starts (Xfce, LXQt), the app
+// says to restart the browser after a change of the websites, also for an install from before
+// setup recorded it.
+func TestTheLinuxAppNamesItsDesktop(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the Linux app")
+	}
+	h := newHarness(t)
+	d := h.start(nil)
+	refresh := func() string {
+		s, _ := d.Status()
+		v, _ := s.Get("pac_refresh")
+		return v.(string)
+	}
+	for _, tc := range []struct{ query, want string }{
+		{"", "auto"},
+		{"&XDG_CURRENT_DESKTOP=XFCE&DESKTOP_SESSION=xfce", "manual"},
+		{"", "manual"}, // names no desktop (a copy of the app the service started): as it is
+		{"&XDG_CURRENT_DESKTOP=ubuntu%3AGNOME&DESKTOP_SESSION=ubuntu", "auto"},
+		{"&DESKTOP_SESSION=lxqt", "manual"},
+		{"&XDG_CURRENT_DESKTOP=KDE&KDE_FULL_SESSION=true", "auto"},
+	} {
+		if r := h.http("GET", "/status.json?menu=en&shell=1"+tc.query, nil, ""); r.status != 200 {
+			t.Fatal(tc, r.status)
+		}
+		if got := refresh(); got != tc.want {
+			t.Fatal(tc, got)
+		}
+	}
+	// Only the app's polls count.
+	if r := h.http("GET", "/status.json?XDG_CURRENT_DESKTOP=XFCE", nil, ""); r.status != 200 || refresh() != "auto" {
+		t.Fatal(r.status, refresh())
 	}
 }
 

@@ -633,6 +633,11 @@ func backupOr(backup string) string {
 	return backup
 }
 
+// WithdrawnName is the file in the state folder that says the rule is off while another
+// account of this computer holds the status port (the core withdrew it, or setup left it off):
+// the core switches it on again once the port is this account's.
+const WithdrawnName = "rule-withdrawn"
+
 // Withdraw switches the automatic proxy setting off where it uses our rule: another account of
 // this computer holds the status port, so what answers there is not this account's uni-vpn,
 // and the browsers would take their rule from it. Install puts the rule back. Reports whether

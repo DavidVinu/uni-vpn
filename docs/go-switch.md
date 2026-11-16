@@ -99,6 +99,11 @@ absolute paths, `..` and symlinks are refused), runs `<staged>/bin/uni-vpn-core 
 in use (the running .exe) is renamed to `<name>.old` first (`<name>.1.old` and so on while an
 older `.old` is still running) and removed on the next start.
 
+With `auto_update` off, a Linux copy made from a .deb or .rpm (`.package`) takes the version of
+the package's app folder instead, when the user installed a newer one (`FromPackage`: the
+package's `.commit`, its program's version `0.1.<run>` past this one's, copied and tested the
+same way). The package watcher looks again as soon as the package's `.commit` changes.
+
 The install root is the folder above `bin/` holding the running `uni-vpn-core`. The updater
 records the files it installed in `<root>/.core-files` and the commit in `<root>/.commit`. It
 only ever deletes files listed there, so the Python tree stays for the hand-over chain. A build

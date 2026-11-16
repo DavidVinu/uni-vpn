@@ -61,6 +61,14 @@ SCRIPT = os.path.abspath(__file__)
 OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
+def desktop_query():
+    """The desktop session this app runs in, for the service, which may not know it: Chrome on
+    Xfce and LXQt reads the proxy rule only when it starts (internal/sysproxy ChromeReadsSettings)."""
+    names = ("XDG_CURRENT_DESKTOP", "DESKTOP_SESSION", "GNOME_DESKTOP_SESSION_ID", "KDE_FULL_SESSION")
+    return "".join("&" + name + "=" + urllib.parse.quote(os.environ[name], safe="")
+                   for name in names if os.environ.get(name))
+
+
 def system_languages():
     """The desktop's languages, most wanted first: LANGUAGE="de:en", else LC_ALL, LC_MESSAGES, LANG."""
     for name in ("LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"):
@@ -229,7 +237,8 @@ class App(Gtk.Application):
         def fetch():
             try:
                 # shell=1: this app restarts itself after updates (restart_if_updated).
-                url = self.base + "status.json?menu=" + urllib.parse.quote(system_languages()) + "&shell=1"
+                url = (self.base + "status.json?menu=" + urllib.parse.quote(system_languages()) + "&shell=1" +
+                       desktop_query())
                 with OPENER.open(url, timeout=3) as response:
                     data = json.loads(response.read().decode("utf-8"))
                 if not isinstance(data, dict):
