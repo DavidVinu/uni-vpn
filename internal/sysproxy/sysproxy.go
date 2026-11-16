@@ -156,21 +156,18 @@ func (s *System) macSet(cmds [][]string) error {
 	return first
 }
 
-// macAllOurs: every service that has a rule on has ours.
+// macAllOurs: every service Apply would set has our rule on already (one added since, a
+// dock's or an iPhone's, has none yet).
 func macAllOurs(now *Snapshot, httpPort int) bool {
-	if now == nil || now.Mac == nil {
+	if now == nil || now.Mac == nil || len(now.Mac.Services) == 0 {
 		return false
 	}
-	enabled := 0
 	for _, svc := range now.Mac.Services {
-		if svc.Enabled {
-			if !IsOurs(svc.URL, httpPort) {
-				return false
-			}
-			enabled++
+		if !svc.Enabled || !IsOurs(svc.URL, httpPort) {
+			return false
 		}
 	}
-	return enabled > 0
+	return true
 }
 
 // set runs a command that changes the setting: an error when it fails.

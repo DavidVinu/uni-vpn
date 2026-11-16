@@ -429,6 +429,20 @@ func TestMacStandardAccountKeepsTheRuleThatIsOursAlready(t *testing.T) {
 	}
 }
 
+// A service added since (a dock's Ethernet, an iPhone over USB) has no rule yet: setup and
+// Repair ask for the password for it, and for a rule another account's uni-vpn switched off.
+func TestMacStandardAccountAsksForAServiceAddedSince(t *testing.T) {
+	for _, usb := range []string{"URL: (null)\nEnabled: No\n", "URL: http://127.0.0.1:1081/proxy.pac?v=5\nEnabled: No\n"} {
+		e := &elevated{}
+		r := &runner{answers: standardAnswers(
+			answer{"networksetup -getautoproxyurl Wi-Fi", 0, "URL: http://127.0.0.1:1081/proxy.pac?v=5\nEnabled: Yes\n"},
+			answer{"networksetup -getautoproxyurl USB LAN", 0, usb})}
+		if got, _ := standardMac(r, e).Install(1081, tempBackup(t, "b.json")); got != "ok" || len(e.cmds) != 2 {
+			t.Fatal(usb, got, e.cmds)
+		}
+	}
+}
+
 func TestMacStandardAccountUninstallAsksForAnAdministratorsPassword(t *testing.T) {
 	e := &elevated{}
 	r := &runner{answers: standardAnswers()}
