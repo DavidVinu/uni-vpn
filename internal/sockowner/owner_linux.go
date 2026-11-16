@@ -15,6 +15,15 @@ func clientEnd(c net.Conn) (row, error) {
 	if err != nil {
 		return row{}, err
 	}
+	rows, err := table()
+	if err != nil {
+		return row{}, err
+	}
+	return find(rows, client, server, self)
+}
+
+// table is every TCP socket in /proc/net/tcp and tcp6, listeners included.
+func table() ([]row, error) {
 	var rows []row
 	for _, name := range []string{"/proc/net/tcp", "/proc/net/tcp6"} {
 		data, err := os.ReadFile(name)
@@ -22,13 +31,13 @@ func clientEnd(c net.Conn) (row, error) {
 			break
 		}
 		if err != nil {
-			return row{}, err
+			return nil, err
 		}
 		more, err := parseProcNet(data, binary.NativeEndian)
 		if err != nil {
-			return row{}, err
+			return nil, err
 		}
 		rows = append(rows, more...)
 	}
-	return find(rows, client, server, self)
+	return rows, nil
 }

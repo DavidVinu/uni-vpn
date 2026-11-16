@@ -86,14 +86,48 @@ func otherSession(sessions map[uint32]uint32, self, owner uint32) (bool, error) 
 	return theirs != ours, nil
 }
 
-// OtherAccountListens reports whether a program of another account of this computer accepts
+// listenerOn picks the program that takes connections to 127.0.0.1:port from rows: one that
+// listens on that address, else on every address (an IPv6 socket on :: takes IPv4 ones too).
+// A listener has no remote end.
+func listenerOn(rows []row, port int) (row, bool) {
+	var any *row
+	for i := range rows {
+		r := &rows[i]
+		if !r.known || int(r.local.Port()) != port || r.remote.Port() != 0 || !r.remote.Addr().IsUnspecified() {
+			continue
+		}
+		switch a := r.local.Addr(); {
+		case a == netip.AddrFrom4([4]byte{127, 0, 0, 1}):
+			return *r, true
+		case a.IsUnspecified() && any == nil:
+			any = r
+		}
+	}
+	if any == nil {
+		return row{}, false
+	}
+	return *any, true
+}
+
+// OtherAccountListens reports whether a program of another account of this computer takes
 // connections on 127.0.0.1:port: then the port is not this account's uni-vpn, and what
-// answers there is not to be trusted. False when nothing accepts or the system cannot tell.
-// The accepting end names its account once its program has taken the connection; until then
-// Linux names no owner. A core setup has just started takes it within milliseconds, so it is
-// asked for up to 2 s; an end that stays without owner counts as another account's, as in
-// OtherAccount (a program that does not take connections cannot be told from one).
+// answers there is not to be trusted. The system's table names the listener's account, also
+// while its queue is full and nothing can connect. Where the table does not show it, a
+// connection asks who took it (accepting).
 func OtherAccountListens(port int) bool {
+	if other, found, err := listenerOther(port); err == nil && found {
+		return other
+	}
+	return accepting(port)
+}
+
+// accepting connects to 127.0.0.1:port and asks who owns the other end. False when nothing
+// accepts or the system cannot tell. The accepting end names its account once its program
+// has taken the connection; until then Linux names no owner. A core setup has just started
+// takes it within milliseconds, so it is asked for up to 2 s; an end that stays without owner
+// counts as another account's, as in OtherAccount (a program that does not take connections
+// cannot be told from one).
+func accepting(port int) bool {
 	c, err := net.DialTimeout("tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), 250*time.Millisecond)
 	if err != nil {
 		return false

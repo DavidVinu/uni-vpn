@@ -2041,6 +2041,30 @@ func TestRuleIsOffWhileAnotherAccountHoldsTheStatusPort(t *testing.T) {
 	}
 }
 
+// The program on the status port can change while this account's uni-vpn waits for it: when
+// another account's takes it over, the rule goes off then, once.
+func TestRuleGoesOffWhenAnotherAccountTakesOverTheStatusPort(t *testing.T) {
+	h := newHarness(t)
+	blocker, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(h.cfg.HTTPPort))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocker.Close()
+	d := h.start(nil)
+	if d.HTTP() != nil || h.withdrawn.Load() != 0 {
+		t.Fatal(d.HTTP() != nil, h.withdrawn.Load())
+	}
+	h.otherListens.Store(true)
+	marker := filepath.Join(h.tokenDir, sysproxy.WithdrawnName)
+	if !waitFor(3*time.Second, func() bool { return h.withdrawn.Load() == 1 && exists(marker) }) {
+		t.Fatal(h.withdrawn.Load(), exists(marker))
+	}
+	time.Sleep(time.Duration(5 * h.cfg.RetryInterval * float64(time.Second)))
+	if h.withdrawn.Load() != 1 || h.knocked.Load() != 1 {
+		t.Fatal("withdrawn again", h.withdrawn.Load(), h.knocked.Load())
+	}
+}
+
 func TestRuleIsOnAgainOnceTheStatusPortIsFree(t *testing.T) {
 	h := newHarness(t)
 	h.otherListens.Store(true)

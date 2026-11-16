@@ -238,12 +238,13 @@ object ApkUpdate {
 
     /**
      * Nothing of the core's in use: no tunnel, no browser connection, no sign-in under way, no
-     * device being added. A core that does not answer is idle (a release whose core does not
-     * start on this phone: the update may be what helps).
+     * device being added (a code that is done or ran out stays in status.json until its screen
+     * closes). A core that does not answer is idle (a release whose core does not start on this
+     * phone: the update may be what helps).
      */
     internal fun idle(status: JSONObject?): Boolean = status == null ||
         status.optString("state") !in BUSY && status.optInt("active_connections") == 0 &&
-        !status.optBoolean("busy") && status.optJSONObject("sync")?.optJSONObject("pairing") == null
+        !status.optBoolean("busy") && status.optJSONObject("sync")?.optJSONObject("pairing")?.optString("state") != "waiting"
 
     /** The checked file of the version on offer, downloading it now when needed; null when it does not come. */
     private fun prepare(context: Context): File? {

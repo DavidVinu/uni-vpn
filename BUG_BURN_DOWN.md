@@ -1764,3 +1764,61 @@ five areas.
   docs/e2e.md wording.
 - Core: an ESTABLISHED end with inode 0 could count as known on Linux (the core reviewer's
   other way to fix FV-1); not taken, as it trusts a connection nobody has taken yet.
+
+## Sixth re-audit
+
+Scope: the whole repository at 41baeba (#86's third push), five fresh reviewers in the same
+five areas; this time the reviewer for the core's connect path and local API finished.
+
+| # | Bug | Severity | Status |
+|---|---|---|---|
+| SX-1 | Another account's program on the status port can hide from the owner check by keeping its queue of connections full: the rule goes on, pointing at it (FA-8 by another way) | High | fixed |
+
+### SX-1 Another account's program with a full queue on the status port
+
+- Found by: the core reviewer (system parts). `OtherAccountListens` told the listener's account
+  by connecting to it. A program that keeps its accept queue full (`listen(0)` and one
+  connection of its own) makes the kernel drop new connections, so the 250 ms connect failed
+  and counted as "nothing listens". Setup registered the rule, a core starting at login left
+  it on, and once that program served it handed this account's browsers its own rule. It
+  could time it: the check ran only at setup and when the core started.
+- Reproduced: TestAnotherAccountsListenerThatNeverAccepts (a listener of `nobody` with a full
+  queue) fails on 41baeba. The real setup with the reviewer's harness (own D-Bus and dconf,
+  `nobody` holding the port with a full queue for 20 s): "Proxy rule registered", mode 'auto',
+  and a fetch of the rule's address got the other program's PAC. The login path the same,
+  with Chromium fetching that PAC twice.
+- Root cause: a listener's account was read from a connection to it, which its program can
+  refuse; the system's table names the listening socket's account without one.
+- Fix: `OtherAccountListens` first reads the listener of 127.0.0.1:port (or of every address)
+  from the system's table: /proc/net/tcp and tcp6 on Linux, `net.inet.tcp.pcblist_n` on macOS,
+  `GetExtendedTcpTable` with `TCP_TABLE_OWNER_PID_LISTENER` and the sign-in sessions on
+  Windows. The connection is asked only where the table shows no listener or cannot be read.
+  This also settles FR-3 and FV-1's timing: this account's own core is named at once, whether
+  it took the connection or not. And the core now asks again at each try to take the port,
+  until the answer is another account (TestRuleGoesOffWhenAnotherAccountTakesOverTheStatusPort,
+  failed before).
+- Verification: the new tests fail before and pass after; `go test` and `-race` for sockowner
+  and the daemon. The real setup with the full queue: after the fix "Another account ...
+  holds", mode 'none', the marker and the other-account page written; the login path the
+  same, nothing fetched from the other program. FR-3's run under load (12 busy loops, systemctl
+  returning 0.2 s after starting the core): 0 of 15 setups say another account.
+
+### Left as they are (Low), sixth re-audit
+
+- Core: listed websites are refused while Cisco is connected and the core is in a final state
+  (password not accepted, passwords locked); its message and button lead on, and then Blocked
+  serves them. After Cisco disconnects, Blocked lasts up to 30 s. A stale Cisco pause can show
+  "Paused" for up to 30 s after a Disconnect. The back-off is not reset when the loop starts on
+  demand. The poll that names the desktop answers with the old `pac_refresh` (the next one is
+  right).
+- Android: a finished or expired code no longer holds back the update (fixed: only a code that
+  is waiting counts), and one failed status request no longer counts as a core that does not
+  answer (fixed: a minute since its last answer). The release start check in CI now also fails
+  on a core that keeps restarting. Left: it does not run the update path of the release build;
+  a crash of any process in that minute fails it; the privacy page names the device name,
+  which Android's openconnect sends as "localhost".
+- Windows: uninstall deletes the stored passwords of the account that runs it only.
+- CI: the `promote` job's comment predates the Go core.
+- Sockowner: on macOS and Linux another account's listener on `::` with IPv6 only also counts
+  (the core heals that rule once the port is its own); a ProxyInstall already running while
+  uninstall removes the rule can put it back (the marker exists for seconds at most).

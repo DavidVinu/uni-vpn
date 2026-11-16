@@ -65,9 +65,8 @@ func TestOwnDualStackConnection(t *testing.T) {
 }
 
 // Setup looks at the status port right after it started this account's core, which may not
-// have taken the connection yet: until then its end has no owner (Linux). Once it takes it,
-// the listener is this account's; one that never takes it cannot be told from another
-// account's, and counts as one.
+// have taken the connection yet. The system's table names the listener's account at once:
+// this account's, whether it takes connections or not.
 func TestAListenerOfThisAccountIsOursOnceItAccepts(t *testing.T) {
 	ln, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
@@ -92,7 +91,21 @@ func TestAListenerOfThisAccountIsOursOnceItAccepts(t *testing.T) {
 	}
 }
 
-func TestAListenerThatNeverAcceptsCountsAsAnotherAccounts(t *testing.T) {
+func TestAListenerOfThisAccountThatNeverAcceptsIsOurs(t *testing.T) {
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	if OtherAccountListens(ln.Addr().(*net.TCPAddr).Port) {
+		t.Fatal("this account's listener counts as another account's")
+	}
+}
+
+// Without the table (a system where it cannot be read), the connection's other end tells:
+// one that is never taken cannot be told from another account's, and counts as one (Linux;
+// macOS and Windows name the owner before the program takes the connection).
+func TestAConnectionNeverTakenCountsAsAnotherAccounts(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("macOS and Windows name the owner before the program takes the connection")
 	}
@@ -101,7 +114,7 @@ func TestAListenerThatNeverAcceptsCountsAsAnotherAccounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ln.Close()
-	if !OtherAccountListens(ln.Addr().(*net.TCPAddr).Port) {
-		t.Fatal("a listener that never takes the connection counts as this account's")
+	if !accepting(ln.Addr().(*net.TCPAddr).Port) {
+		t.Fatal("a connection never taken counts as this account's")
 	}
 }

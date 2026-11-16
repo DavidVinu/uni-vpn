@@ -62,7 +62,7 @@ class UniVpnService : VpnService() {
         }
         running.value = true
         stopped = false
-        startedAt = SystemClock.elapsedRealtime()
+        answeredAt = SystemClock.elapsedRealtime()
         want(this, true)
         Toggles.update(this)
         if (poll?.isActive == true) return
@@ -116,6 +116,7 @@ class UniVpnService : VpnService() {
         // VPN" on or off: Home's warning follows it here, not only when the VPN starts.
         if (tun != null) blocking.value = isLockdownEnabled
         val status = core.get("/status.json").json
+        if (status != null) answeredAt = SystemClock.elapsedRealtime()
         status?.let { ApkUpdate.setAutomatic(this, it.optBoolean("auto_update", true)) }
         if (status == null && core.portTaken) {
             // Our core ended and another app took its port (Core.ready): the rule would hand that
@@ -170,8 +171,8 @@ class UniVpnService : VpnService() {
 
     /** A newer version of the app is out (ApkUpdate): the notification offers it. */
     @Volatile private var updateShown = false
-    /** When [start] last ran (SystemClock.elapsedRealtime). */
-    @Volatile private var startedAt = 0L
+    /** When the core last answered, or [start] ran since (SystemClock.elapsedRealtime). */
+    @Volatile private var answeredAt = 0L
     private var updateCheck: Job? = null
 
     /**
@@ -185,9 +186,10 @@ class UniVpnService : VpnService() {
             ApkUpdate.check(this@UniVpnService)
             if (ApkUpdate.offered.value != null) {
                 val status = core.get("/status.json").json
-                // Without an answer only once the core has not come up for a minute (a release
-                // whose core does not start on this phone), not as the VPN was just turned on.
-                if (status != null || SystemClock.elapsedRealtime() - startedAt > 60_000) {
+                if (status != null) answeredAt = SystemClock.elapsedRealtime()
+                // Without an answer only once the core has not answered for a minute (a release
+                // whose core does not start on this phone), not for one request that failed.
+                if (status != null || SystemClock.elapsedRealtime() - answeredAt > 60_000) {
                     ApkUpdate.installUnattended(this@UniVpnService, status)
                 }
             }

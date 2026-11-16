@@ -28,3 +28,14 @@ func owner(c net.Conn) (other, known bool, err error) {
 	}
 	return otherOwner(r, self), r.known, nil
 }
+
+// listenerOther: whether the program that takes connections to 127.0.0.1:port is another
+// account's, from the system's table; found is false when the table shows none.
+func listenerOther(port int) (other, found bool, err error) {
+	rows, err := table()
+	if err != nil {
+		return false, false, err
+	}
+	r, found := listenerOn(rows, port)
+	return found && r.owner != self, found, nil
+}

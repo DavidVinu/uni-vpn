@@ -14,7 +14,10 @@ import (
 
 var procGetExtendedTcpTable = windows.NewLazySystemDLL("iphlpapi.dll").NewProc("GetExtendedTcpTable")
 
-const tcpTableOwnerPIDConnections = 4 // TCP_TABLE_OWNER_PID_CONNECTIONS
+const (
+	tcpTableOwnerPIDListener    = 3 // TCP_TABLE_OWNER_PID_LISTENER
+	tcpTableOwnerPIDConnections = 4 // TCP_TABLE_OWNER_PID_CONNECTIONS
+)
 
 // self is this process; the table names processes.
 var self = uint32(os.Getpid())
@@ -57,17 +60,46 @@ func clientEnd(c net.Conn) (row, error) {
 	if err != nil {
 		return row{}, err
 	}
-	rows, err := tcpTable(windows.AF_INET, parseTCPTable)
+	rows, err := tables(tcpTableOwnerPIDConnections)
 	if err != nil {
 		return row{}, err
-	}
-	if more, err := tcpTable(windows.AF_INET6, parseTCP6Table); err == nil {
-		rows = append(rows, more...)
 	}
 	return find(rows, client, server, self)
 }
 
-func tcpTable(family uint32, parse func([]byte) ([]row, error)) ([]row, error) {
+// listenerOther: whether the program that takes connections to 127.0.0.1:port runs in
+// another account's sign-in session, from the table of listeners; found is false when the
+// table shows none.
+func listenerOther(port int) (other, found bool, err error) {
+	rows, err := tables(tcpTableOwnerPIDListener)
+	if err != nil {
+		return false, false, err
+	}
+	r, found := listenerOn(rows, port)
+	if !found {
+		return false, false, nil
+	}
+	sessions, err := sessions()
+	if err != nil {
+		return false, true, err
+	}
+	other, err = otherSession(sessions, self, r.owner)
+	return other, true, err
+}
+
+// tables: the IPv4 table, and the IPv6 one where there is one.
+func tables(class uintptr) ([]row, error) {
+	rows, err := tcpTable(windows.AF_INET, class, parseTCPTable)
+	if err != nil {
+		return nil, err
+	}
+	if more, err := tcpTable(windows.AF_INET6, class, parseTCP6Table); err == nil {
+		rows = append(rows, more...)
+	}
+	return rows, nil
+}
+
+func tcpTable(family uint32, class uintptr, parse func([]byte) ([]row, error)) ([]row, error) {
 	if err := procGetExtendedTcpTable.Find(); err != nil {
 		return nil, err
 	}
@@ -75,7 +107,7 @@ func tcpTable(family uint32, parse func([]byte) ([]row, error)) ([]row, error) {
 	for range 5 {
 		buf := make([]byte, size)
 		r, _, _ := procGetExtendedTcpTable.Call(uintptr(unsafe.Pointer(&buf[0])), uintptr(unsafe.Pointer(&size)), 0,
-			uintptr(family), tcpTableOwnerPIDConnections, 0)
+			uintptr(family), class, 0)
 		if syscall.Errno(r) == windows.ERROR_INSUFFICIENT_BUFFER {
 			size += 4 << 10 // connections may open meanwhile
 			continue

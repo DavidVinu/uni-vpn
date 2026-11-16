@@ -34,9 +34,12 @@ for _ in $(seq 30); do
     break
   fi
 done
+# A core that ends at once and is started again would show a new process id each time.
+core=$(adb shell pidof libunivpn.so || true)
 sleep 5  # a crash a moment after the start
 crash=$(adb logcat -d -s AndroidRuntime:E | grep -A 20 'FATAL EXCEPTION' || true)
-if [ -z "$up" ] || [ -n "$crash" ] || ! adb shell pidof de.davidvinu.univpn > /dev/null; then
+if [ -z "$up" ] || [ -n "$crash" ] || ! adb shell pidof de.davidvinu.univpn > /dev/null ||
+  [ "$(adb shell pidof libunivpn.so || true)" != "$core" ]; then
   echo "the release APK did not start, or its core did not come up" >&2
   echo "$crash" >&2
   adb logcat -d -s uni-vpn:* AndroidRuntime:E | tail -n 50 >&2 || true

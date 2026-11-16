@@ -9,3 +9,5 @@ import "net"
 func OtherAccount(net.Conn) (bool, error) { return false, nil }
 
 func owner(net.Conn) (other, known bool, err error) { return false, true, nil }
+
+func listenerOther(int) (other, found bool, err error) { return false, false, nil }

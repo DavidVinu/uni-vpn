@@ -79,6 +79,10 @@ class ApkReleaseTest {
         assertFalse(ApkUpdate.idle(JSONObject("""{"state": "idle", "active_connections": 2}""")))
         // Retrying a sign-in, or a device being added.
         assertFalse(ApkUpdate.idle(JSONObject("""{"state": "offline", "busy": true}""")))
-        assertFalse(ApkUpdate.idle(JSONObject("""{"state": "idle", "sync": {"pairing": {"mode": "show", "code": "x"}}}""")))
+        assertFalse(ApkUpdate.idle(JSONObject("""{"state": "idle", "sync": {"pairing": {"mode": "show", "code": "x", "state": "waiting"}}}""")))
+        // A code that is done or ran out, its screen left open behind Home.
+        for (state in listOf("done", "expired", "failed")) {
+            assertTrue(state, ApkUpdate.idle(JSONObject("""{"state": "idle", "sync": {"pairing": {"mode": "show", "state": "$state"}}}""")))
+        }
     }
 }
