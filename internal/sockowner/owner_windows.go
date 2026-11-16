@@ -26,21 +26,28 @@ var self = uint32(os.Getpid())
 // session tells the account instead, and anyone may read it: each signed-in account has its
 // own, and the scheduled task runs uni-vpn in the user's (InteractiveToken).
 func OtherAccount(c net.Conn) (bool, error) {
+	other, _, err := owner(c)
+	return other, err
+}
+
+// owner: OtherAccount, and whether the system named the end's account (see OtherAccountListens).
+func owner(c net.Conn) (other, known bool, err error) {
 	r, err := clientEnd(c)
 	if err != nil {
 		if broken(c) {
-			return true, nil
+			return true, false, nil
 		}
-		return false, err
+		return false, false, err
 	}
 	if !r.known {
-		return otherOwner(r, self), nil
+		return otherOwner(r, self), false, nil
 	}
 	sessions, err := sessions()
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
-	return otherSession(sessions, self, r.owner)
+	other, err = otherSession(sessions, self, r.owner)
+	return other, true, err
 }
 
 // clientEnd finds the client's end of c in the TCP tables; a dual-stack client (an IPv6

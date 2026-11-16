@@ -89,7 +89,7 @@ them.
 | "No setup key saved yet" | Click **Update sign-in code**. |
 | "Confirm the sign-in request on your phone in time" | Click **Try again** and confirm the request on your phone. |
 | "Waiting a few seconds for a new one-time code" | Nothing, it continues by itself. |
-| "Paused while Cisco Secure Client is connected" | Disconnect the Cisco VPN. Uni VPN continues by itself. |
+| "Paused while Cisco Secure Client is connected" | Nothing: the websites open through the Cisco VPN. Once you disconnect it, Uni VPN continues by itself. |
 | "No internet" | On hotel, train or café Wi-Fi, open any website and accept the Wi-Fi's sign-in page. Uni VPN continues by itself. |
 | "Your saved passwords are locked" | Sign out of your computer and back in, then click **Try again**. |
 | "Part of Uni VPN is missing" or "missing a permission" | Click **Repair**, and click Yes or enter your computer's password if it asks. |

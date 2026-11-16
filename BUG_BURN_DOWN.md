@@ -1523,11 +1523,123 @@ real Linux app window under Xvfb, and the real setup with its own D-Bus and dcon
   do not) turns their instance check off. Quitting the window and opening it again before the
   assistant ends loses its "sign out" step.
 - Phones: the APK can lag the desktop files by one release when an android job fails after
-  main moved on (each half consistent); the update offer on mobile data is only a
-  notification (Wi-Fi installs it anyway); a stopped tunnel can say "ready" for a moment; on
+  main moved on (each half consistent); on mobile data an update comes down and goes in only
+  on a tap (corrected in the fourth re-audit: before FR-1 Wi-Fi did not install it either); a
+  stopped tunnel can say "ready" for a moment; on
   iPhone the instance file, which nothing there reads, can be overwritten in a handover.
 - Setup while nothing listens on the port, when another account's program takes it in the
   moment before the core starts: the core withdraws the rule as before, but can do so while
   setup's install still runs.
 - A web page can make the core write or remove the "restart the browser" record by asking for
   status.json as the Linux window does (a hint text, nothing else).
+
+## Fourth re-audit
+
+Scope: the whole repository at a960754 (#85 in), read by five fresh reviewers in the same five
+areas. Their tests passed on that commit: `go test` (also `-race` for the daemon, API,
+forwarder, sockowner and tunnel), `go vet` for windows, darwin, android and ios, the relay's
+tests, test_i18n, test_release_put and test_messages, go-licenses, the page in headless
+Chromium with about 25 browser identities, the real Linux window under Xvfb, TR-5 end to end
+with two staged package folders, and the real setup with its own D-Bus and dconf.
+
+| # | Bug | Severity | Status |
+|---|---|---|---|
+| FR-1 | Android (download page build): an update never goes in without a tap, and the tap offer can be invisible | Medium | fixed |
+| FR-2 | While Cisco Secure Client is connected, every listed website fails in the browser | Medium | fixed |
+| FR-3 | Setup can take this account's own new core for another account's program and leave the rule off (a regression from TR-1) | Low | fixed |
+| FR-4 | Site: a space between the joined Windows tip sentences in Chinese; the English parts of the privacy page and legal notice marked as German | Low | fixed |
+
+### FR-1 Android: updates only after a tap
+
+- Found by: the mobile reviewer. `ApkUpdate.check` downloads a new version on Wi-Fi, but only
+  `ApkUpdate.start` (Home's row, the "not running" page, the notification's tap) hands it to
+  Android's installer. The service's own comment says most users never open the app again;
+  for them the only offer is the text of the VPN's low-importance ongoing notification, which
+  Android 13 and later do not show at all when the notification prompt was declined. Such
+  phones kept their version for good, security fixes included (M1's problem for this group).
+  The third re-audit's Lows list left it as "the update offer on mobile data is only a
+  notification (Wi-Fi installs it anyway)", which was wrong: no code installed on Wi-Fi.
+- Reproduced: by reading only (no Android toolchain here): every caller of `install` traced;
+  no WorkManager, JobScheduler or alarm path.
+- Root cause: installing hung off a tap on an offer whose visibility the app does not control.
+- Fix: role model Signal's download build. On Android 12 and later, a version that came down
+  goes to Android's installer without a tap (`ApkUpdate.installUnattended`) while the VPN is
+  on, the app is not on screen (MainActivity onStart/onStop) and the core's tunnel is not in
+  use (state not connecting, connected or disconnecting), as the computers install once the
+  tunnel is idle. The app updates itself, so with `UPDATE_PACKAGES_WITHOUT_USER_ACTION` and
+  `USER_ACTION_NOT_REQUIRED` Android puts it in without asking, and BootReceiver turns the
+  VPN back on (MY_PACKAGE_REPLACED). Should Android want to ask after all, the session is
+  abandoned and nothing opens (UpdateReceiver, `EXTRA_UNATTENDED`): the offer stays, and the
+  next try for that version comes a day later. Mobile data still downloads only on a tap;
+  Android 10 and 11 always ask, so there the tap stays the way. Debug builds never update.
+  The privacy page (German and English, dated 16 November) and docs/android.md say so.
+- Verification: `ApkReleaseTest` (the rule: Android 12+, not on screen, no tunnel in use, once
+  a day per version) runs in CI's `testWebsiteDebugUnitTest`; compile and lint in CI's android
+  job. The installer's conditions were checked against AOSP's PackageInstallerSession (a
+  self-update with the permission needs no user action, at most one every 30 s); not run on a
+  device here, and the CI emulator runs a debug build.
+
+### FR-2 Cisco Secure Client connected
+
+- Found by: the core reviewer (sign-in and API). The README suggests the Cisco client for large
+  downloads, and users have it for drives or SSH. While it is connected the core is
+  `blocked`, but the rule still sends every listed website to the SOCKS port, which refused
+  them (SOCKS reply 2): Chrome showed ERR_SOCKS_CONNECTION_FAILED although Cisco carries the
+  university's network. Disconnect did not help (the next page load found Cisco again); the
+  app said only "Paused while Cisco Secure Client is connected".
+- Reproduced: a daemon test with the Cisco check on and one listed website: `Direct()` was
+  only the security page, and a SOCKS CONNECT to the website got `05 02`.
+- Root cause: `directHosts` let the listed websites through directly only while the gateway
+  cannot be reached (Offline, or Idle while away), not while Cisco is connected.
+- Fix: also while `blocked`: the core connects the listed websites itself, through Cisco's
+  routes, as it does for Offline. Once Cisco is disconnected they go through the tunnel again
+  (and the direct connections end once it is up). README and docs/e2e.md say so.
+- Verification: TestListedWebsitesGoThroughCiscoWhileItIsConnected (blocked, after
+  Disconnect and the next page load, then back through the tunnel) fails before, passes after;
+  the other Cisco and direct tests pass.
+
+### FR-3 Setup and its own new core
+
+- Found by: the core reviewer (system parts). Since TR-1 setup asks `OtherAccountListens`
+  right after it started the core. On Linux an accepted connection the program has not taken
+  yet has no owner in /proc/net/tcp, which `OtherAccount` counts as another account's (right
+  for the forwarder's clients), so a core that had bound but not yet accepted looked like
+  another account's: setup left the rule off, and the core, holding the port, never switched it
+  on until the next start or a Repair.
+- Reproduced: the real setup with a fake systemctl that returns 0.2 s after starting the real
+  daemon, under 12 busy loops on 4 cores: 8 of 15 setups said another account held the port.
+  TestAListenerOfThisAccountIsOursAlsoBeforeItAccepts (a listener that has not accepted) fails.
+- Fix: `OtherAccountListens` counts only an end whose account the system names, asking for
+  half a second; no name is "cannot tell" (false), as the function says.
+- Verification: the same run 0 of 15; the test passes; TR-1's run with a listener of `nobody`
+  still leaves the rule off (mode 'none', marker written, "Another account ... holds").
+
+### FR-4 Site texts
+
+- The TR-3 tip joins two sentences with a space; Chinese has none between sentences. The
+  English halves of privacy.html and impressum.html now carry `lang="en"`, so screen readers
+  read them as English. Checked in Chromium: zh-Hans and zh-Hant tips without the space, the
+  German one unchanged, each heading's language right.
+
+### Left as they are (Low), fourth re-audit
+
+- Linux: a package watcher look in the second while dpkg or rpm replaces the app folder can find the
+  new `.commit` with the old program (then the next regular check installs it) or copy a mix
+  of old and new files (each half works with the frozen API).
+- Mac: a second account with automatic updates off keeps its copy of the core after a newer
+  .pkg (postinstall runs setup for the console user only); unchanged from before TR-5.
+- The window's old WebKit processes after it restarts itself (left before).
+- Android: openconnect runs in its own session, so if only the core child is killed it can
+  outlive it until the app process ends (not reproduced). iOS: the TR-4 hook is not excluded,
+  but nothing there sends `shell=`.
+- Site and docs: README's paragraph on other programs using port 1080 predates FA-9; the zip
+  table in docs/go-switch.md; an Android device in desktop mode with a touchpad gets the Linux
+  files; the version scheme relies on the run number never resetting; the Linux window's TR-4
+  poll goes to whatever holds 1081 (desktop names only); Cloudflare's default NEL reporting is
+  not named on the privacy page.
+- Core: PortInUse can replace a SettingsBroken message; another program of the same account on
+  1081 shows a blank window; one NtQuerySystemInformation per connection on Windows.
+- Setup on Xfce while the port is held says "reopen the browser" where the session lines come
+  later; reinstateRule removes the marker also when ProxyInstall failed; uninstall can race a
+  reinstate.
+

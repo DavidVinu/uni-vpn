@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"testing"
+	"time"
 )
 
 // The system's own table, on each desktop system: this test's connection is this account's,
@@ -59,5 +60,35 @@ func TestOwnDualStackConnection(t *testing.T) {
 	defer server.Close()
 	if r, err := clientEnd(server); err != nil || !r.known || r.owner != self {
 		t.Fatal(r, err)
+	}
+}
+
+// Setup looks at the status port right after it started this account's core, which may not
+// have taken the connection yet: until then its end has no owner (Linux), which is not
+// another account's.
+func TestAListenerOfThisAccountIsOursAlsoBeforeItAccepts(t *testing.T) {
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+	if OtherAccountListens(port) {
+		t.Fatal("a listener that does not accept counts as another account's")
+	}
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			defer c.Close()
+		}
+	}()
+	for range 20 {
+		if OtherAccountListens(port) {
+			t.Fatal("this account's listener counts as another account's")
+		}
 	}
 }

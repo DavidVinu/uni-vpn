@@ -1106,7 +1106,8 @@ func (d *Daemon) ruleLocked() (string, error) {
 // says. The core connects it itself, for browsers that ignore that. While the gateway cannot
 // be reached (also while the loop rests after that, see away), the listed websites too: some
 // universities' gateways cannot be reached from their own network (Halle, HS Flensburg), where
-// the websites open directly.
+// the websites open directly. So too while Cisco Secure Client is connected (Blocked): it
+// carries the university's network, and the rule still sends the websites here.
 func (d *Daemon) directHosts() []string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -1114,7 +1115,7 @@ func (d *Daemon) directHosts() []string {
 	if host := d.portalHostLocked(); host != "" {
 		hosts = append(hosts, host)
 	}
-	if (d.state == Offline || d.state == Idle && d.away()) && !d.needsSetup && d.configError == "" {
+	if (d.state == Offline || d.state == Blocked || d.state == Idle && d.away()) && !d.needsSetup && d.configError == "" {
 		if domains, err := pac.ReadDomains(d.opts.DomainsPath, d.cfg.DefaultDomains); err == nil {
 			hosts = append(hosts, domains...)
 		}

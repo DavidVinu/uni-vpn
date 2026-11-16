@@ -108,6 +108,17 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_KEY = "key"
     }
 
+    override fun onStart() {
+        super.onStart()
+        // On screen: an update waits for a tap (ApkUpdate.installUnattended).
+        ApkUpdate.shown.incrementAndGet()
+    }
+
+    override fun onStop() {
+        ApkUpdate.shown.decrementAndGet()
+        super.onStop()
+    }
+
     override fun onResume() {
         super.onResume()
         // Back from Android's VPN settings: "Block connections without VPN" may have changed.

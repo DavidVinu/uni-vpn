@@ -57,7 +57,11 @@ the Go core does the work and the app only talks to its local API.
   does the VPN's notification; a tap hands the file to Android's installer
   (`PackageInstaller`), which asks once to allow installs from Uni VPN and then for the update.
   On Android 12 and newer, after the first one, it may install without asking again
-  (`UPDATE_PACKAGES_WITHOUT_USER_ACTION`). When the core does not start (a release whose core
+  (`UPDATE_PACKAGES_WITHOUT_USER_ACTION`), so there a version that came down also goes in
+  without a tap (`ApkUpdate.installUnattended`, role model Signal), as the computers update
+  themselves: while the VPN is on, the app is not on screen and the core's tunnel is not in use
+  (state not connecting, connected or disconnecting), once a day per version. Should Android
+  want to ask after all, nothing is shown and the offer stays. When the core does not start (a release whose core
   fails on this phone), the "not running" page offers the update too, and the notification
   still does.
   BootReceiver turns the VPN back on after the update. Copies from before this (November 2026)

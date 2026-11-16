@@ -171,13 +171,17 @@ class UniVpnService : VpnService() {
     private var updateCheck: Job? = null
 
     /**
-     * Most users never open the app again once it is set up: the notification says when there
-     * is a new version. Beside the rule, so a download does not hold up the next website list.
+     * Most users never open the app again once it is set up: a new version goes in while the
+     * VPN is not in use (Android 12 and later), else the notification says that there is one.
+     * Beside the rule, so a download does not hold up the next website list.
      */
     private fun update() {
         if (updateCheck?.isActive == true) return
         updateCheck = scope.launch {
             ApkUpdate.check(this@UniVpnService)
+            if (ApkUpdate.offered.value != null) {
+                ApkUpdate.installUnattended(this@UniVpnService, core.get("/status.json").json?.optString("state"))
+            }
             val offered = ApkUpdate.offered.value != null
             // Under the lock Stop takes before it removes the notification: never brought back
             // after that.

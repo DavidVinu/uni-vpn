@@ -173,7 +173,8 @@ function tip(...keys) {
   d.className = "info";
   d.innerHTML = "<summary>" + INFO + "</summary><p class='tip'></p>";
   d.querySelector("summary").setAttribute("aria-label", t("help"));
-  d.querySelector("p").textContent = keys.map(t).join(" ");
+  // Chinese runs its sentences together, without a space between them.
+  d.querySelector("p").textContent = keys.map(t).join(L.startsWith("zh") ? "" : " ");
   return d;
 }
 

@@ -1,7 +1,9 @@
 package de.davidvinu.univpn
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
@@ -38,5 +40,32 @@ class ApkReleaseTest {
     fun digestIsSha256InLowercaseHex() {
         val file = File.createTempFile("apk", ".bin").apply { writeText("abc"); deleteOnExit() }
         assertEquals("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", ApkUpdate.sha256(file))
+    }
+
+    /** Most users never open the app again: Android 12 and later put an update in without a tap. */
+    @Test
+    fun anUpdateGoesInWithoutATapWhileNoOneUsesTheApp() {
+        val day = 24 * 60 * 60 * 1000L
+        for (state in listOf("idle", "offline", "blocked", "error", "auth_failed", "keyring", null)) {
+            assertTrue("$state", ApkUpdate.unattended(31, onScreen = false, state = state, tried = null, sha256 = sum, sinceTried = 0))
+        }
+        // Tried yesterday, or another version: again.
+        assertTrue(ApkUpdate.unattended(36, false, "idle", sum, sum, day))
+        assertTrue(ApkUpdate.unattended(36, false, "idle", "f".repeat(64), sum, 1))
+        // A clock set back counts as a day gone.
+        assertTrue(ApkUpdate.unattended(36, false, "idle", sum, sum, -1))
+    }
+
+    @Test
+    fun anUpdateWaitsWhileTheAppIsShownOrTheTunnelIsInUse() {
+        // Android 10 and 11 always ask: the tap only.
+        assertFalse(ApkUpdate.unattended(30, false, "idle", null, sum, 0))
+        // On screen, it would close under the user.
+        assertFalse(ApkUpdate.unattended(36, true, "idle", null, sum, 0))
+        for (state in listOf("connecting", "connected", "disconnecting")) {
+            assertFalse(state, ApkUpdate.unattended(36, false, state, null, sum, 0))
+        }
+        // Tried today already (Android wanted to ask): the offer stays, not tried every 30 s.
+        assertFalse(ApkUpdate.unattended(36, false, "idle", sum, sum, 60_000))
     }
 }

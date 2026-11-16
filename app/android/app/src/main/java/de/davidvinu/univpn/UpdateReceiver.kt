@@ -8,14 +8,21 @@ import android.os.Build
 import android.util.Log
 
 /**
- * Android's installer answers here (ApkUpdate.install). It asks the user first, from the app
- * the user just tapped Update in; on success Android ends the app and starts the new one
+ * Android's installer answers here (ApkUpdate.install). After a tap it asks the user first, from
+ * the app the user just tapped Update in; without one (ApkUpdate.installUnattended) it does not
+ * ask, or the update is left on offer. On success Android ends the app and starts the new one
  * (BootReceiver turns the VPN back on).
  */
 class UpdateReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
-        if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
+        if (status == PackageInstaller.STATUS_PENDING_USER_ACTION && intent.getBooleanExtra(ApkUpdate.EXTRA_UNATTENDED, false)) {
+            // Android would ask after all, with no one looking: Home and the notification still
+            // offer the update, and a tap puts it in.
+            val id = intent.getIntExtra(PackageInstaller.EXTRA_SESSION_ID, -1)
+            if (id >= 0) runCatching { context.packageManager.packageInstaller.abandonSession(id) }
+            Log.i("uni-vpn", "update left on offer: Android would ask")
+        } else if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
             val confirm = if (Build.VERSION.SDK_INT >= 33) {
                 intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
             } else {

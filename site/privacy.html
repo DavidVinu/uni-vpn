@@ -40,7 +40,7 @@ nav a{color:var(--muted)}
 <!--email_off-->
 <p><a href="#en">English version below</a></p>
 <h1 id="datenschutzerklärung">Datenschutzerklärung</h1>
-<p>Stand: 15. November 2026</p>
+<p>Stand: 16. November 2026</p>
 <h2 id="verantwortlicher">1. Verantwortlicher</h2>
 <p>David Vinu<br />
 Mühltalstraße 139a<br />
@@ -167,8 +167,9 @@ Einmal am Tag, solange das VPN an oder die App offen ist, fragt die App
 bei GitHub nach, ob es eine neue Version gibt; klappt das nicht, alle 10
 Minuten wieder, bis es klappt. Eine neue Version
 lädt sie im WLAN gleich herunter, über mobile Daten erst, wenn Sie auf
-"Uni VPN aktualisieren" tippen. Installiert wird sie erst nach diesem
-Tippen. GitHub sieht dabei Ihre IP-Adresse, die Uhrzeit und die Kennung
+"Uni VPN aktualisieren" tippen. Ab Android 12 installiert sie eine im WLAN
+geladene Version von selbst, wenn das VPN gerade nicht gebraucht wird und
+die App nicht offen ist, sonst nach dem Tippen. GitHub sieht dabei Ihre IP-Adresse, die Uhrzeit und die Kennung
 "uni-vpn". Sonst wird nichts gesendet. Ausschalten: Zahnrad,
 "Automatische Updates".</li>
 <li><strong>Abgleich zwischen Ihren Geräten</strong> (nur wenn Sie in
@@ -234,8 +235,9 @@ wohnen, oder bei der für mich zuständigen Behörde: Die Landesbeauftragte
 für den Datenschutz und die Informationsfreiheit Baden-Württemberg,
 Lautenschlagerstraße 20, 70173 Stuttgart.</p>
 <hr id="en">
+<div lang="en">
 <h1 id="privacy-policy">Privacy Policy</h1>
-<p>Last updated: 15 November 2026</p>
+<p>Last updated: 16 November 2026</p>
 <p>This is a translation for convenience. The German version
 (Datenschutzerklärung) is the authoritative one.</p>
 <h2 id="controller">1. Controller</h2>
@@ -352,7 +354,9 @@ whether there is a new version; if that fails, every 10 minutes until it
 works.
 On Wi-Fi it downloads a new
 version right away, on mobile data only when you tap "Update Uni VPN".
-It is installed only after that tap. GitHub sees your IP address, the
+On Android 12 and later it installs a version downloaded on Wi-Fi by
+itself while the VPN is not in use and the app is not open, otherwise
+after that tap. GitHub sees your IP address, the
 time and the identifier "uni-vpn". Nothing else is sent. To turn it off:
 gear icon, "Automatic updates".</li>
 <li><strong>Syncing between your devices</strong> (only if you use "Add
@@ -415,6 +419,7 @@ where you live, or with the authority responsible for me: the State
 Commissioner for Data Protection and Freedom of Information
 Baden-Württemberg (LfDI), Lautenschlagerstraße 20, 70173 Stuttgart,
 Germany.</p>
+</div>
 <!--/email_off-->
 </main>
 </body>

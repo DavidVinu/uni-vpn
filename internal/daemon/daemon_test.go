@@ -1064,6 +1064,36 @@ func TestCiscoPauseClosesBrowserConnections(t *testing.T) {
 	readEOF(t, c, 3*time.Second)
 }
 
+// The README suggests the Cisco client for large downloads: while it is connected, the rule
+// still sends the listed websites here, and they open through Cisco instead of failing.
+func TestListedWebsitesGoThroughCiscoWhileItIsConnected(t *testing.T) {
+	h := newHarness(t)
+	h.cisco.Store(true)
+	if err := pac.WriteDomains(h.domainsPath, []string{"moodle.example.de"}); err != nil {
+		t.Fatal(err)
+	}
+	d := h.start(nil)
+	d.RequestConnect()
+	waitState(t, d, Blocked)
+	if hosts := d.forwarder.Direct(); !slices.Contains(hosts, "moodle.example.de") {
+		t.Fatal(hosts)
+	}
+	// Disconnect, then the next page load: Cisco is still there, and the website opens.
+	d.RequestDisconnect()
+	waitState(t, d, Idle)
+	if _, ok := d.acquire(context.Background()); ok {
+		t.Fatal("through the VPN")
+	}
+	if s, _ := d.snapshot(); s != Blocked || !slices.Contains(d.forwarder.Direct(), "moodle.example.de") {
+		t.Fatal(s, d.forwarder.Direct())
+	}
+	h.cisco.Store(false)
+	waitState(t, d, Connected)
+	if hosts := d.forwarder.Direct(); slices.Contains(hosts, "moodle.example.de") {
+		t.Fatal(hosts)
+	}
+}
+
 func TestWindowsWithoutElevationExplainsInsteadOfStarting(t *testing.T) {
 	h := newHarness(t)
 	no := false
