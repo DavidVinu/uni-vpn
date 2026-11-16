@@ -1517,10 +1517,6 @@ func (d *Daemon) bindHTTP() {
 	d.reinstateRule(server.Port)
 }
 
-// withdrawnName: portHeld switched the rule off, reinstateRule puts it back, also after a
-// restart.
-const withdrawnName = "rule-withdrawn"
-
 // portHeld: another account of this computer holds the status port (its uni-vpn started
 // first, or any program of it listens there). The app windows show the page that says so
 // instead of whatever answers there. The browsers take their rule from that port, so the rule
@@ -1536,8 +1532,8 @@ func (d *Daemon) portHeld(port int) {
 	if !d.opts.ProxyWithdraw(port) {
 		return
 	}
-	if err := os.WriteFile(filepath.Join(d.opts.TokenDir, withdrawnName), nil, 0o600); err != nil {
-		d.logf(slog.LevelError, "Could not write %s: %s", withdrawnName, err)
+	if err := os.WriteFile(filepath.Join(d.opts.TokenDir, sysproxy.WithdrawnName), nil, 0o600); err != nil {
+		d.logf(slog.LevelError, "Could not write %s: %s", sysproxy.WithdrawnName, err)
 	}
 	d.logf(slog.LevelWarn, "Another account of this computer holds the status port %d: the rule for the websites is off until it is free", port)
 	// On macOS the setting is the computer's: the uni-vpn that holds the port switches it on
@@ -1600,9 +1596,10 @@ func knock(port int) {
 	}
 }
 
-// reinstateRule puts back the rule that portHeld switched off, once the status port is ours.
+// reinstateRule puts back the rule that portHeld switched off, or setup left off, once the
+// status port is ours (sysproxy.WithdrawnName).
 func (d *Daemon) reinstateRule(port int) {
-	marker := filepath.Join(d.opts.TokenDir, withdrawnName)
+	marker := filepath.Join(d.opts.TokenDir, sysproxy.WithdrawnName)
 	if _, err := os.Stat(marker); err != nil {
 		return
 	}

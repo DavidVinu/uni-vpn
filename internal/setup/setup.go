@@ -29,6 +29,7 @@ import (
 	"github.com/DavidVinu/uni-vpn/internal/messages"
 	"github.com/DavidVinu/uni-vpn/internal/platform"
 	"github.com/DavidVinu/uni-vpn/internal/service"
+	"github.com/DavidVinu/uni-vpn/internal/sockowner"
 	"github.com/DavidVinu/uni-vpn/internal/sysproxy"
 	"github.com/DavidVinu/uni-vpn/internal/totp"
 	unis "github.com/DavidVinu/uni-vpn/internal/universities"
@@ -101,10 +102,13 @@ type Setup struct {
 
 	ProxyInstall   func(httpPort int) (string, error)
 	ProxyUninstall func() (string, error)
-	StorePassword  func(user, password string) error
-	StoreTOTP      func(user, token string) error
-	DeletePassword func(user string) (bool, error)
-	DeleteTOTP     func(user string) (bool, error)
+	// OtherAccountListens: a program of another account of this computer accepts on
+	// 127.0.0.1:port (sockowner.OtherAccountListens).
+	OtherAccountListens func(port int) bool
+	StorePassword       func(user, password string) error
+	StoreTOTP           func(user, token string) error
+	DeletePassword      func(user string) (bool, error)
+	DeleteTOTP          func(user string) (bool, error)
 	// DeleteSync removes this device's sync keys (internal/devsync); nil skips it.
 	DeleteSync func() (bool, error)
 	// KeyringState is "present", "missing", "locked" or "error:<text>".
@@ -184,9 +188,10 @@ func New(root string) *Setup {
 	s := &Setup{
 		GOOS: goos, Root: root, Binary: binary, Out: os.Stdout, Getenv: os.Getenv, Home: home,
 		IsTerminal: isTerminal, FindBinary: platform.FindBinary, Service: manager, Run: service.Exec, UID: os.Getuid(),
-		ProxyInstall:   func(port int) (string, error) { return sysproxy.Install(port, "") },
-		ProxyUninstall: func() (string, error) { return sysproxy.Uninstall("") },
-		StorePassword:  keyring.StorePassword, StoreTOTP: keyring.StoreTotp,
+		ProxyInstall:        func(port int) (string, error) { return sysproxy.Install(port, "") },
+		ProxyUninstall:      func() (string, error) { return sysproxy.Uninstall("") },
+		OtherAccountListens: sockowner.OtherAccountListens,
+		StorePassword:       keyring.StorePassword, StoreTOTP: keyring.StoreTotp,
 		DeletePassword: keyring.DeletePassword, DeleteTOTP: keyring.DeleteTotp,
 		DeleteSync: func() (bool, error) {
 			return keyring.DeleteSecret(credentials.SyncUser, credentials.KindSync)
@@ -766,11 +771,18 @@ func (s *Setup) setup(a Args, created func(string)) (int, error) {
 	if dry {
 		s.say("would register the proxy rule %s with the system (the previous setting is backed up)", pac)
 	} else {
-		result, err := s.ProxyInstall(cfg.HTTPPort)
-		if err != nil {
+		result := "held"
+		if s.OtherAccountListens(cfg.HTTPPort) {
+			// The browsers would take their rule from that program. The core just started may
+			// not have seen it yet (internal/daemon portHeld): it switches the rule on once the
+			// port is free.
+			s.leaveRuleOff()
+		} else if result, err = s.ProxyInstall(cfg.HTTPPort); err != nil {
 			return 1, err
 		}
 		switch result {
+		case "held":
+			s.say("Another account of this computer holds the status port %d: the proxy rule is registered once it is free", cfg.HTTPPort)
 		case "unavailable":
 			s.printf(manualProxyHint, pac)
 		case "failed":
@@ -781,7 +793,7 @@ func (s *Setup) setup(a Args, created func(string)) (int, error) {
 			s.say("Proxy rule registered with the system (Chrome, Edge and Firefox read it on their own)")
 		}
 		signOut = (result == "ok" || result == "replaced") && s.sessionOnly(cfg.HTTPPort)
-		if (result == "ok" || result == "replaced") && !s.macOS() && !s.windows() && sysproxy.NamesDesktop(s.Getenv) {
+		if (result == "ok" || result == "replaced" || result == "held") && !s.macOS() && !s.windows() && sysproxy.NamesDesktop(s.Getenv) {
 			s.recordRuleAtStart(!sysproxy.ChromeReadsSettings(s.Getenv))
 		}
 	}
@@ -875,6 +887,14 @@ func (s *Setup) setup(a Args, created func(string)) (int, error) {
 func (s *Setup) sessionOnly(port int) bool {
 	return !s.macOS() && !s.windows() && !sysproxy.ChromeReadsSettings(s.Getenv) &&
 		s.Getenv("auto_proxy") != sysproxy.PacURL(port)
+}
+
+// leaveRuleOff writes sysproxy.WithdrawnName: the core switches the rule on once the status
+// port is this account's.
+func (s *Setup) leaveRuleOff() {
+	path := filepath.Join(platform.StateDir(), sysproxy.WithdrawnName)
+	_ = os.MkdirAll(filepath.Dir(path), 0o700)
+	_ = os.WriteFile(path, nil, 0o600)
 }
 
 // recordRuleAtStart writes or removes sysproxy.RuleAtStartName: after a change of the websites

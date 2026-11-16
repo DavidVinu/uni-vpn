@@ -1987,7 +1987,7 @@ func TestRuleIsOffWhileAnotherAccountHoldsTheStatusPort(t *testing.T) {
 				t.Fatal(err)
 			}
 			d := h.start(nil)
-			marker := filepath.Join(h.tokenDir, withdrawnName)
+			marker := filepath.Join(h.tokenDir, sysproxy.WithdrawnName)
 			if d.HTTP() != nil || (h.withdrawn.Load() == 1) != other || exists(marker) != other || h.reinstated.Load() != 0 ||
 				(h.knocked.Load() == 1) != other {
 				blocker.Close()
@@ -2027,7 +2027,7 @@ func TestRuleIsOnAgainOnceTheStatusPortIsFree(t *testing.T) {
 	if !waitFor(3*time.Second, func() bool { return d.HTTP() != nil && h.reinstated.Load() == 1 }) {
 		t.Fatal(d.HTTP() != nil, h.reinstated.Load())
 	}
-	if exists(filepath.Join(h.tokenDir, withdrawnName)) || h.withdrawn.Load() != 1 {
+	if exists(filepath.Join(h.tokenDir, sysproxy.WithdrawnName)) || h.withdrawn.Load() != 1 {
 		t.Fatal("marker left or withdrawn again")
 	}
 }

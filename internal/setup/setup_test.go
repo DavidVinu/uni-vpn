@@ -69,13 +69,15 @@ type harness struct {
 	keyring     map[credentials.Kind]string
 	proxyCalls  []int
 	proxyResult string
-	prompts     []string
-	asked       []string            // secret prompts
-	answers     map[string][]string // prompt start -> answers, used in order
-	secrets     func(prompt string) string
-	urls        []string
-	opened      bool
-	commands    [][]string
+	// otherListens: a program of another account holds the status port.
+	otherListens bool
+	prompts      []string
+	asked        []string            // secret prompts
+	answers      map[string][]string // prompt start -> answers, used in order
+	secrets      func(prompt string) string
+	urls         []string
+	opened       bool
+	commands     [][]string
 }
 
 func newHarness(t *testing.T) *harness {
@@ -136,7 +138,8 @@ func newHarness(t *testing.T) *harness {
 			h.proxyCalls = append(h.proxyCalls, port)
 			return h.proxyResult, nil
 		},
-		ProxyUninstall: func() (string, error) { return "restored", nil },
+		ProxyUninstall:      func() (string, error) { return "restored", nil },
+		OtherAccountListens: func(int) bool { return h.otherListens },
 		StorePassword: func(user, pw string) error {
 			h.stored = append(h.stored, [2]string{user, pw})
 			return nil
@@ -649,6 +652,40 @@ func TestSetupRecordsThatChromeTakesTheRuleAtItsStart(t *testing.T) {
 		if _, err := os.Stat(record); (err == nil) != tc.want {
 			t.Fatal(tc, err)
 		}
+	}
+}
+
+// Another account of this computer holds the status port: the browsers would take their rule
+// from its program. Setup leaves the rule off, whenever the core it just started looked at the
+// port, and says so in the state folder: the core switches it on once the port is free.
+func TestSetupLeavesTheRuleOffWhileAnotherAccountHoldsThePort(t *testing.T) {
+	h := newHarness(t)
+	withdrawn := filepath.Join(platform.StateDir(), sysproxy.WithdrawnName)
+	record := filepath.Join(platform.StateDir(), sysproxy.RuleAtStartName)
+	t.Setenv("XDG_CURRENT_DESKTOP", "XFCE")
+	h.otherListens = true
+	if code := h.setup(Args{User: "ab123"}); code != 0 {
+		t.Fatal(code, h.out.String())
+	}
+	if len(h.proxyCalls) != 0 {
+		t.Fatal("rule switched on:", h.proxyCalls)
+	}
+	if _, err := os.Stat(withdrawn); err != nil {
+		t.Fatal(err)
+	}
+	// The core's Install then gives Chrome on Xfce the rule from the session files.
+	if _, err := os.Stat(record); err != nil {
+		t.Fatal(err)
+	}
+	h.wantOut(t, "Another account of this computer holds the status port")
+	h.notOut(t, "Proxy rule registered")
+
+	h.otherListens = false
+	if code := h.setup(Args{User: "ab123"}); code != 0 {
+		t.Fatal(code, h.out.String())
+	}
+	if len(h.proxyCalls) != 1 || h.proxyCalls[0] != 1081 {
+		t.Fatal(h.proxyCalls)
 	}
 }
 
