@@ -1349,6 +1349,7 @@ func (d *Daemon) Run() {
 	server := httpapi.New(d, "127.0.0.1", httpPort, d.log)
 	server.Token = d.opts.APIToken
 	server.OtherAccountSeen = d.otherAccountSeen
+	server.AppDesktop = d.appDesktop
 	if d.opts.AppPolled != nil {
 		server.AppPolled = func(restartsItself bool) { d.opts.AppPolled(httpPort, restartsItself) }
 	}
@@ -1548,6 +1549,27 @@ func (d *Daemon) pacRefresh() string {
 		return "manual"
 	}
 	return "auto"
+}
+
+// appDesktop: the Linux app runs in the desktop session, which the service may not know, and
+// names it. Where Chrome there takes the rule only when it starts, pacRefresh then says so: for
+// an install from before setup recorded it (sysproxy.RuleAtStartName), and after a change of
+// desktop.
+func (d *Daemon) appDesktop(getenv func(string) string) {
+	if platform.IsMacOS || platform.IsWindows || platform.IsAndroid || !sysproxy.NamesDesktop(getenv) {
+		return
+	}
+	path := filepath.Join(d.opts.TokenDir, sysproxy.RuleAtStartName)
+	_, err := os.Stat(path)
+	switch atStart := !sysproxy.ChromeReadsSettings(getenv); {
+	case atStart == (err == nil):
+	case atStart:
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			d.logf(slog.LevelError, "Could not write %s: %s", path, err)
+		}
+	default:
+		os.Remove(path)
+	}
 }
 
 // instanceName: the instance file, see writeInstance.
