@@ -143,8 +143,13 @@ aufnimmt</h3>
 <ol type="1">
 <li><strong>VPN-Server Ihrer Universität.</strong> Beim Anmelden sendet
 die App Ihren Benutzernamen, Ihr Passwort und gegebenenfalls einen
-Einmalcode an den VPN-Server Ihrer Universität. Der Datenverkehr zu den
-eingetragenen Websites läuft dann über die Universität. Richten Sie den
+Einmalcode an den VPN-Server Ihrer Universität, außerdem wie der
+Cisco-Client den Namen Ihres Geräts und die Art des Betriebssystems. Der
+Datenverkehr zu den eingetragenen Websites läuft dann über die
+Universität. Ist der VPN-Server nicht erreichbar (etwa im Netz mancher
+Universitäten) oder ist Cisco Secure Client verbunden, verbindet die App
+die eingetragenen Websites direkt von Ihrem Gerät aus; sie sehen dann
+Ihre Adresse wie ohne VPN. Richten Sie den
 zweiten Faktor in der App mit einem Code ein, meldet sich die App
 außerdem mit denselben Daten im MFA-Portal Ihrer Universität an und legt
 dort einen Code-Generator mit dem Namen Ihres Computers an. Dafür ist
@@ -167,9 +172,11 @@ Einmal am Tag, solange das VPN an oder die App offen ist, fragt die App
 bei GitHub nach, ob es eine neue Version gibt; klappt das nicht, alle 10
 Minuten wieder, bis es klappt. Eine neue Version
 lädt sie im WLAN gleich herunter, über mobile Daten erst, wenn Sie auf
-"Uni VPN aktualisieren" tippen. Ab Android 12 installiert sie eine im WLAN
-geladene Version von selbst, wenn das VPN gerade nicht gebraucht wird und
-die App nicht offen ist, sonst nach dem Tippen. GitHub sieht dabei Ihre IP-Adresse, die Uhrzeit und die Kennung
+"Uni VPN aktualisieren" tippen. Ab Android 12 installiert sie eine
+heruntergeladene Version von selbst, wenn Sie das einmal erlaubt haben
+("Uni VPN sich selbst aktualisieren lassen"), das VPN an ist, aber gerade
+nicht gebraucht wird, und die App nicht offen ist; sonst nach dem
+Tippen. GitHub sieht dabei Ihre IP-Adresse, die Uhrzeit und die Kennung
 "uni-vpn". Sonst wird nichts gesendet. Ausschalten: Zahnrad,
 "Automatische Updates".</li>
 <li><strong>Abgleich zwischen Ihren Geräten</strong> (nur wenn Sie in
@@ -331,8 +338,13 @@ and log files. On Android, uninstalling deletes all of the app's data.</p>
 <ol type="1">
 <li><strong>Your university's VPN server.</strong> When signing in, the
 app sends your user name, your password and, if needed, a one-time code
-to your university's VPN server. Traffic to the listed websites then
-goes through the university. If you set up the second factor in the app
+to your university's VPN server and, as the Cisco client does, your
+device's name and the kind of operating system. Traffic to the listed
+websites then goes through the university. While the VPN server cannot
+be reached (for example on some universities' own networks) or Cisco
+Secure Client is connected, the app connects the listed websites
+directly from your device; they then see your address as without the
+VPN. If you set up the second factor in the app
 with a code, the app also signs in to your university's MFA portal with
 the same details and adds a code generator there named after your
 computer. Your university is responsible for this, and its privacy
@@ -354,9 +366,9 @@ whether there is a new version; if that fails, every 10 minutes until it
 works.
 On Wi-Fi it downloads a new
 version right away, on mobile data only when you tap "Update Uni VPN".
-On Android 12 and later it installs a version downloaded on Wi-Fi by
-itself while the VPN is not in use and the app is not open, otherwise
-after that tap. GitHub sees your IP address, the
+On Android 12 and later it installs a downloaded version by itself once
+you allowed that ("Let Uni VPN update itself"), while the VPN is on but
+not in use and the app is not open; otherwise after that tap. GitHub sees your IP address, the
 time and the identifier "uni-vpn". Nothing else is sent. To turn it off:
 gear icon, "Automatic updates".</li>
 <li><strong>Syncing between your devices</strong> (only if you use "Add

@@ -1652,6 +1652,11 @@ five areas.
 | # | Bug | Severity | Status |
 |---|---|---|---|
 | FV-1 | FR-3 let another account's program on the status port pass when it does not take the connection at once: the rule went on, pointing at it (FA-8 again) | High | fixed |
+| FV-2 | Android (download page build): FR-1's update without a tap never happens, as Android installs without asking only for an app allowed to install apps | Medium | fixed |
+| FV-3 | Mac: before this account is set up, the window shows and trusts another account's uni-vpn, and setup never starts | Medium | fixed |
+| FV-4 | Privacy page: says listed websites always go through the university VPN, though they go direct while it cannot be reached or Cisco is connected | Medium | fixed |
+| FV-5 | CI never starts the Android APK that goes out (minified by R8), which phones now take without a tap | Medium | fixed |
+| FV-6 | Privacy page: does not name the device name and system the VPN server is told | Low | fixed |
 
 ### FV-1 Another account's program that does not take connections at once
 
@@ -1680,3 +1685,82 @@ five areas.
   marker written, "Another account ... holds". FR-3's run (systemctl returning 0.2 s after
   starting the core, 12 busy loops on 4 cores): still 0 of 15 setups say another account.
 
+### FV-2 Android: an update without a tap needs installs from Uni VPN allowed
+
+- Found by: the mobile reviewer. FR-1 hands a downloaded version to Android's installer with
+  `setRequireUserAction(USER_ACTION_NOT_REQUIRED)`. Android (AOSP `PackageInstallerSession`,
+  `isInstallDisabledForPackage` before the silent branch) installs without asking only when the
+  app may install apps at all ("Install unknown apps", `canRequestPackageInstalls`). A phone
+  that put the APK in from the browser gave that to the browser, not to Uni VPN, so every
+  unattended try came back "pending user action" and was dropped (UpdateReceiver), once a day,
+  for good: FR-1's group still kept its version.
+- Reproduced: by reading Android 12 to 15's `PackageInstallerSession` (the check for
+  installs from unknown sources comes before the one that skips the prompt). Not run on a
+  phone: that needs a published newer version signed with the upload key.
+- Root cause: FR-1 relied on an Android permission the app is never given without the user's
+  tap, and nothing asks for it.
+- Fix: until installs are allowed, Home shows "Let Uni VPN update itself" (Android 12 and newer,
+  website build, automatic updates on), which opens Android's switch for Uni VPN; the first tap
+  on Update allows it too. `installUnattended` does not try before (`mayInstall`, which also
+  holds in the Play build, where Android throws). The idle check now also waits for browser
+  connections, a sign-in under way and a device being added (`active_connections`, `busy`,
+  `sync.pairing`), not only the state, and without an answer from the core it waits a minute
+  after the VPN started. docs/android.md and the privacy page say so; strings in all six
+  languages.
+- Verification: ApkReleaseTest (the rule, and idle with each of the four in use) in CI's unit
+  tests; test_i18n and test_messages pass with the new keys; the CI emulator run starts the
+  release build (FV-5).
+
+### FV-3 Mac: the window before this account is set up
+
+- Found by: the desktop reviewer. The window trusts what answers on 127.0.0.1:1081 once its
+  instance file says so, and without the file (as before the file existed) always. A second
+  account on a Mac (fast user switching) that opens Uni VPN before its own setup has no file,
+  so the window showed the first account's uni-vpn: its websites and state, with buttons that
+  act on it. And since that one answered, the shell's "not running" counter never rose, so
+  `setUpIfMissing` (setup for this account) never ran.
+- Reproduced: by reading `check` and `startServiceIfDown` on c68ffe4 (no Mac here): no file
+  means `guardWindow(true, nil)`, `status` is the other core's, `misses` stays 0.
+- Root cause: "no instance file" meant "an install from before the file", which is also what a
+  fresh, not yet set up account looks like.
+- Fix: without the file the window trusts the port only once this account is set up (its
+  LaunchAgent and core exist, the same test `setUpIfMissing` uses); until then it shows nothing
+  of it and the menu says "Not running", so setup starts after two polls as on a Mac with one
+  account.
+- Verification: CI's macos jobs compile the shell (no swiftc here); the paths are the ones
+  setup writes (`internal/setup` darwin) and `setUpIfMissing` already checked.
+
+### FV-4 and FV-6 Privacy page: direct connections and the device name
+
+- Found by: the web reviewer. Since FR-2 (and before it, while the VPN server cannot be reached
+  or the user is away from the university's network), the app connects the listed websites
+  directly from the device, so those websites see the user's own address; the page said they
+  go through the university VPN. It also did not name what the Cisco client sends too: the
+  device's name and the kind of system (openconnect's `--os`, the user agent).
+- Root cause: the page was written before those paths.
+- Fix: German and English items for the VPN server now say both.
+- Verification: read in Chromium, both languages; the dates say 16 November.
+
+### FV-5 CI starts the release APK
+
+- Found by: the web/CI reviewer. The emulator test installs the debug APK. The APK that goes
+  out is minified by R8 and signed, and since FR-1 Android 12 and later put it in without a tap;
+  a release that does not start (an R8 rule missing) could not update itself out of that.
+- Fix: `packaging/android/emulator-test.sh` then installs `out/uni-vpn.apk` (signed in CI), opens
+  it, and fails unless the app and its core run and nothing crashed. A fork without the upload
+  key has no signed APK and skips it.
+- Verification: `bash -n`; CI's android job on this branch.
+
+### Left as they are (Low), fifth re-audit
+
+- The core reviewer for sign-in and the local API was stopped by Anthropic's safeguards
+  partway; FV-1 is from its part. That area gets a fresh reviewer in the sixth re-audit.
+- Android: the idle check does not see a website the core serves directly while away from the
+  university's network (it is not a tunnel); a tap on Update while an unattended try runs does
+  nothing that once; an update can go in while the user scans a code in the system scanner (the
+  app is not on screen then).
+- Site: no CI job loads `site/index.html` in a browser; README's Cisco row speaks of the
+  university's Cisco only; `msg.offline` on a campus whose gateway is not reachable from it;
+  docs/e2e.md wording.
+- Core: an ESTABLISHED end with inode 0 could count as known on Linux (the core reviewer's
+  other way to fix FV-1); not taken, as it trusts a connection nobody has taken yet.

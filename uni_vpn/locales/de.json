@@ -256,6 +256,8 @@
   "phone.vpn_refused": "Android hat Uni VPN nicht einschalten lassen. Wenn eine andere VPN-App immer an sein soll, schalte das in den VPN-Einstellungen aus.",
   "phone.vpn_settings": "VPN-Einstellungen",
   "phone.update": "Uni VPN aktualisieren",
+  "phone.allow_updates": "Uni VPN sich selbst aktualisieren lassen",
+  "phone.allow_updates_hint": "Tippe hier und schalte dann den Schalter ein.",
   "phone.lockdown": "Android blockiert Verbindungen ohne VPN, deshalb kommen Apps nicht ins Internet. Schalte das in den VPN-Einstellungen aus.",
   "phone.scan_failed": "Der Scanner ging nicht auf. Versuche es gleich noch einmal oder tippe es ein.",
   "phone.vpn_not_allowed": "Das iPhone hat Uni VPN nicht einschalten lassen. Tippe auf den Schalter, dann fragt es noch einmal.",

@@ -9,8 +9,10 @@ import android.content.pm.SigningInfo
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
+import android.provider.Settings
 import android.util.Log
 import androidx.core.content.edit
+import androidx.core.net.toUri
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -180,19 +182,38 @@ object ApkUpdate {
     }
 
     /**
+     * Android installs without asking only for an app the user allowed to install apps (Settings,
+     * "Install unknown apps"; the first tap on Update walks through it). Until then Home asks for
+     * it once ([askToAllow]), and [installUnattended] would only be refused.
+     */
+    fun mayInstall(context: Context): Boolean =
+        // Android throws without REQUEST_INSTALL_PACKAGES, which the Play build does not declare.
+        runCatching { context.packageManager.canRequestPackageInstalls() }.getOrDefault(false)
+
+    /** Home's "Let Uni VPN update itself": where an update could go in without a tap, once allowed. */
+    fun askToAllow(context: Context): Boolean =
+        BuildConfig.SELF_UPDATE && Build.VERSION.SDK_INT >= 31 && prefs(context).getBoolean("automatic", true) && !mayInstall(context)
+
+    /** Android's page with this app's "Install unknown apps" switch. */
+    fun allowIntent(context: Context): Intent =
+        Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, "package:${context.packageName}".toUri())
+
+    /**
      * Android 12 and later: the version on offer, once it came down, goes to Android's installer
-     * without a tap while the app is not on screen and the core's [state] is not a tunnel in use
-     * (role model: Signal's download build). Android puts it in without asking
-     * (setRequireUserAction in [install]) and BootReceiver turns the VPN back on; should Android
+     * without a tap while the app is not on screen and the core ([status], null when it does not
+     * answer) has no tunnel, connection or pairing in use (role model: Signal's download build).
+     * Android puts it in without asking (setRequireUserAction in [install]) once installs from
+     * this app are allowed ([mayInstall]), and BootReceiver turns the VPN back on; should Android
      * want to ask after all, the offer stays as it is (UpdateReceiver). Once a day per version.
      * Blocks: call off the main thread.
      */
-    fun installUnattended(context: Context, state: String?) {
+    fun installUnattended(context: Context, status: JSONObject?) {
         if (!BuildConfig.SELF_UPDATE || BuildConfig.DEBUG) return
         val release = newer.value ?: return
         val prefs = prefs(context)
         val now = System.currentTimeMillis()
-        if (!unattended(Build.VERSION.SDK_INT, shown.get() > 0, state, prefs.getString("unattended", null), release.sha256, now - prefs.getLong("unattended_at", 0))) return
+        if (!unattended(Build.VERSION.SDK_INT, shown.get() > 0, idle(status), prefs.getString("unattended", null), release.sha256, now - prefs.getLong("unattended_at", 0))) return
+        if (!mayInstall(context)) return
         if (!installing.compareAndSet(expect = false, update = true)) return
         var handed = false
         try {
@@ -212,8 +233,17 @@ object ApkUpdate {
     }
 
     /** [installUnattended]'s rule, apart from Android: [tried] is the version last tried, [sinceTried] milliseconds ago. */
-    internal fun unattended(sdk: Int, onScreen: Boolean, state: String?, tried: String?, sha256: String, sinceTried: Long): Boolean =
-        sdk >= 31 && !onScreen && state !in BUSY && (tried != sha256 || sinceTried !in 0 until DAY)
+    internal fun unattended(sdk: Int, onScreen: Boolean, idle: Boolean, tried: String?, sha256: String, sinceTried: Long): Boolean =
+        sdk >= 31 && !onScreen && idle && (tried != sha256 || sinceTried !in 0 until DAY)
+
+    /**
+     * Nothing of the core's in use: no tunnel, no browser connection, no sign-in under way, no
+     * device being added. A core that does not answer is idle (a release whose core does not
+     * start on this phone: the update may be what helps).
+     */
+    internal fun idle(status: JSONObject?): Boolean = status == null ||
+        status.optString("state") !in BUSY && status.optInt("active_connections") == 0 &&
+        !status.optBoolean("busy") && status.optJSONObject("sync")?.optJSONObject("pairing") == null
 
     /** The checked file of the version on offer, downloading it now when needed; null when it does not come. */
     private fun prepare(context: Context): File? {

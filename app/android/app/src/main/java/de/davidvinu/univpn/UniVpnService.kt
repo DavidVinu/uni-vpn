@@ -11,6 +11,7 @@ import androidx.core.net.toUri
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
+import android.os.SystemClock
 import android.system.OsConstants
 import android.util.Log
 import androidx.core.content.edit
@@ -61,6 +62,7 @@ class UniVpnService : VpnService() {
         }
         running.value = true
         stopped = false
+        startedAt = SystemClock.elapsedRealtime()
         want(this, true)
         Toggles.update(this)
         if (poll?.isActive == true) return
@@ -168,6 +170,8 @@ class UniVpnService : VpnService() {
 
     /** A newer version of the app is out (ApkUpdate): the notification offers it. */
     @Volatile private var updateShown = false
+    /** When [start] last ran (SystemClock.elapsedRealtime). */
+    @Volatile private var startedAt = 0L
     private var updateCheck: Job? = null
 
     /**
@@ -180,7 +184,12 @@ class UniVpnService : VpnService() {
         updateCheck = scope.launch {
             ApkUpdate.check(this@UniVpnService)
             if (ApkUpdate.offered.value != null) {
-                ApkUpdate.installUnattended(this@UniVpnService, core.get("/status.json").json?.optString("state"))
+                val status = core.get("/status.json").json
+                // Without an answer only once the core has not come up for a minute (a release
+                // whose core does not start on this phone), not as the VPN was just turned on.
+                if (status != null || SystemClock.elapsedRealtime() - startedAt > 60_000) {
+                    ApkUpdate.installUnattended(this@UniVpnService, status)
+                }
             }
             val offered = ApkUpdate.offered.value != null
             // Under the lock Stop takes before it removes the notification: never brought back

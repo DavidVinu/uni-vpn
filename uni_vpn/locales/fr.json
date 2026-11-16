@@ -256,6 +256,8 @@
   "phone.vpn_refused": "Android n’a pas laissé Uni VPN s’activer. Si une autre application VPN est réglée pour rester toujours active, désactivez cela dans les réglages VPN.",
   "phone.vpn_settings": "Réglages VPN",
   "phone.update": "Mettre à jour Uni VPN",
+  "phone.allow_updates": "Laisser Uni VPN se mettre à jour",
+  "phone.allow_updates_hint": "Touchez ici, puis activez l’interrupteur.",
   "phone.lockdown": "Android bloque les connexions sans VPN, les applications n’ont donc pas accès à Internet. Désactivez cela dans les réglages VPN.",
   "phone.scan_failed": "Le scanner ne s’est pas ouvert. Réessayez dans un instant ou saisissez-le.",
   "phone.vpn_not_allowed": "L’iPhone n’a pas laissé Uni VPN s’activer. Touchez l’interrupteur pour qu’il vous le redemande.",
