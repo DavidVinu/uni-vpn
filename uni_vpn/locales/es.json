@@ -264,6 +264,7 @@
   "setup.token_secret": "Clave de configuración",
   "setup.show_secret": "Mostrar clave",
   "setup.totp_help": "¿No hay una línea que empiece por otpauth://? Copia en su lugar la clave secreta (las letras tras «secret=»). Los códigos de tu móvil siguen funcionando.",
+  "setup.admin_network": "Uni VPN necesita el nombre y la contraseña de un administrador de este Mac para cambiar sus ajustes de red.",
   "phone.setup.generic_step.3": "Pégala abajo. Si la página pide un código, escribe el código de prueba que aparece aquí.",
   "phone.uni.heidelberg.mfa.2": "Toca «Einrichten» bajo «Soft-Token (zeitbasiert)».",
   "phone.uni.heidelberg.mfa.3": "Escribe un nombre, por ejemplo Móvil, y toca «Weiter».",

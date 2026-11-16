@@ -90,6 +90,10 @@ type System struct {
 	WinGet     func() (string, error)   // AutoConfigURL
 	WinSet     func(url string) error
 	Now        func() time.Time
+	// Elevate runs setting commands with an administrator's name and password, which macOS
+	// asks for: a standard account may not change the network settings. Nil where nobody
+	// asked for the change (the core's own looks at the rule).
+	Elevate func(cmds [][]string) error
 }
 
 // Default acts on this machine.
@@ -123,6 +127,51 @@ func IsOurs(url string, httpPort int) bool {
 func BackupPath() string { return filepath.Join(platform.ConfigDir(), "proxy-backup.json") }
 
 func (s *System) run(args ...string) (Result, error) { return s.Run(args, Timeout) }
+
+// adminNeeded: networksetup refused a standard account ("** Error: Command requires admin
+// privileges.", exit status 14).
+func adminNeeded(err error) bool {
+	var ce *CommandError
+	return errors.As(err, &ce) && (ce.Result.Code == 14 ||
+		strings.Contains(ce.Result.Stdout+ce.Result.Stderr, "requires admin privileges"))
+}
+
+// macSet runs networksetup commands in order, past one that fails; the error is the first.
+// Once networksetup refuses a standard account, the rest go to Elevate at once (one password),
+// where it is set.
+func (s *System) macSet(cmds [][]string) error {
+	var first error
+	for i, c := range cmds {
+		err := s.set(c...)
+		if err != nil && adminNeeded(err) && s.Elevate != nil {
+			if err := s.Elevate(cmds[i:]); err != nil && first == nil {
+				first = err
+			}
+			return first
+		}
+		if first == nil {
+			first = err
+		}
+	}
+	return first
+}
+
+// macAllOurs: every service that has a rule on has ours.
+func macAllOurs(now *Snapshot, httpPort int) bool {
+	if now == nil || now.Mac == nil {
+		return false
+	}
+	enabled := 0
+	for _, svc := range now.Mac.Services {
+		if svc.Enabled {
+			if !IsOurs(svc.URL, httpPort) {
+				return false
+			}
+			enabled++
+		}
+	}
+	return enabled > 0
+}
 
 // set runs a command that changes the setting: an error when it fails.
 func (s *System) set(args ...string) error {
@@ -294,12 +343,11 @@ func (s *System) Apply(url string) error {
 		if err != nil {
 			return err
 		}
+		var cmds [][]string
 		for _, name := range names {
-			if err := s.set("networksetup", "-setautoproxyurl", name, url); err != nil {
-				return err
-			}
+			cmds = append(cmds, []string{"networksetup", "-setautoproxyurl", name, url})
 		}
-		return nil
+		return s.macSet(cmds)
 	}
 	if _, ok := s.gsettingsGet("mode"); ok {
 		if err := s.set("gsettings", "set", Schema, "autoconfig-url", url); err != nil {
@@ -329,29 +377,21 @@ func (s *System) Restore(saved *Snapshot) error {
 		// None of them keeps the rule on the others: uninstalling would fail at it every time.
 		names, err := s.listServices(true)
 		known := err == nil && len(names) > 0 // else each is tried
-		var first error
+		var cmds [][]string
 		for _, e := range saved.Mac.Services {
 			if known && !slices.Contains(names, e.Name) {
 				continue
 			}
-			var err error
-			if e.Enabled && e.URL != "" {
-				err = s.set("networksetup", "-setautoproxyurl", e.Name, e.URL)
-			} else {
-				if e.URL != "" {
-					// Its own address, switched off, which Install wrote ours over. Setting
-					// an address also switches the rule on.
-					err = s.set("networksetup", "-setautoproxyurl", e.Name, e.URL)
-				}
-				if off := s.set("networksetup", "-setautoproxystate", e.Name, "off"); err == nil {
-					err = off
-				}
+			if e.URL != "" {
+				cmds = append(cmds, []string{"networksetup", "-setautoproxyurl", e.Name, e.URL})
 			}
-			if first == nil {
-				first = err
+			if !e.Enabled || e.URL == "" {
+				// Off, or its own address switched off, which Install wrote ours over (setting
+				// an address also switches the rule on).
+				cmds = append(cmds, []string{"networksetup", "-setautoproxystate", e.Name, "off"})
 			}
 		}
-		return first
+		return s.macSet(cmds)
 	}
 	if g := saved.GNOME; g != nil {
 		mode := g.Mode
@@ -613,7 +653,16 @@ func (s *System) Install(httpPort int, backup string) (string, error) {
 			version = past(version, url)
 		}
 	}
-	if err := s.Apply(PacURLVersion(httpPort, version)); err != nil {
+	apply := s
+	if s.macOS() && s.Elevate != nil && macAllOurs(before, httpPort) {
+		// A standard account where the rule is ours already (an administrator's account set it
+		// up): a new address helps only Safari in a session that loaded the old rule, which is
+		// not worth an administrator's password.
+		quiet := *s
+		quiet.Elevate = nil
+		apply = &quiet
+	}
+	if err := apply.Apply(PacURLVersion(httpPort, version)); err != nil && (apply == s || !adminNeeded(err)) {
 		return "failed", nil
 	}
 	if s.linux() {

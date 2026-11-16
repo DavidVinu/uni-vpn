@@ -246,6 +246,7 @@
   "setup.token_secret": "Setup key",
   "setup.show_secret": "Show key",
   "setup.totp_help": "No line starting with otpauth://? Copy the secret key instead (the letters after \"secret=\"). Codes on your phone keep working.",
+  "setup.admin_network": "Uni VPN needs the name and password of an administrator of this Mac to change its network settings.",
   "phone.setup.generic_step.3": "Paste it below. If the page asks for a code, type the test code shown here.",
   "phone.uni.heidelberg.mfa.2": "Tap \"Einrichten\" under \"Soft-Token (zeitbasiert)\".",
   "phone.uni.heidelberg.mfa.3": "Type a name, for example Phone, and tap \"Weiter\".",

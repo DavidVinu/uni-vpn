@@ -264,6 +264,7 @@
   "setup.token_secret": "設定密鑰",
   "setup.show_secret": "顯示密鑰",
   "setup.totp_help": "沒有以 otpauth:// 開頭的一行？請改為複製密鑰（「secret=」後面的字母）。手機上的驗證碼仍可繼續使用。",
+  "setup.admin_network": "Uni VPN 需要這台 Mac 的管理員使用者名稱和密碼，才能變更它的網路設定。",
   "phone.setup.generic_step.3": "貼到下方。如果頁面要求輸入驗證碼，請輸入這裡顯示的測試碼。",
   "phone.uni.heidelberg.mfa.2": "在「Soft-Token (zeitbasiert)」下點按「Einrichten」。",
   "phone.uni.heidelberg.mfa.3": "輸入一個名稱（例如「手機」），然後點按「Weiter」。",

@@ -395,25 +395,6 @@ jobs:
           # next update.
           sleep 5
           pgrep -x "Uni VPN" >/dev/null || { echo "::error::the menu bar app is not running"; exit 1; }
-      # TEMPORARY probe (round 6, desktop F1): what networksetup does for a standard account.
-      - name: Probe networksetup as a standard account
-        continue-on-error: true
-        run: |
-          svc=$(networksetup -listallnetworkservices | sed 1d | grep -v '^\*' | head -n 1)
-          echo "service: $svc"
-          networksetup -getautoproxyurl "$svc"
-          url=$(networksetup -getautoproxyurl "$svc" | sed -n 's/^URL: //p')
-          id -Gn; dseditgroup -o checkmember -m "$(id -un)" admin || true
-          sudo sysadminctl -addUser unistd -password 'Probe-1234' 2>&1 | tail -n 2
-          id unistd; dseditgroup -o checkmember -m unistd admin || true
-          set +e
-          sudo -u unistd -H networksetup -setautoproxyurl "$svc" "${url:-http://127.0.0.1:1081/proxy.pac}"; echo "exit as unistd: $?"
-          sudo -u unistd -H networksetup -setautoproxystate "$svc" on; echo "exit state as unistd: $?"
-          networksetup -getautoproxyurl "$svc"
-          networksetup -setautoproxyurl "$svc" "${url:-http://127.0.0.1:1081/proxy.pac}"; echo "exit as $(id -un): $?"
-          security authorizationdb read system.services.systemconfiguration.network 2>/dev/null | head -n 40
-          security authorizationdb read system.preferences.network 2>/dev/null | head -n 40
-          sudo sysadminctl -deleteUser unistd 2>&1 | tail -n 1
       # Every university website goes through the service: launchd must not run it throttled like
       # a background job (lowest CPU priority, sockets marked background).
       - name: The service runs at normal priority

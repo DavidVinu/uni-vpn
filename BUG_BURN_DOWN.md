@@ -1773,6 +1773,7 @@ five areas; this time the reviewer for the core's connect path and local API fin
 | # | Bug | Severity | Status |
 |---|---|---|---|
 | SX-1 | Another account's program on the status port can hide from the owner check by keeping its queue of connections full: the rule goes on, pointing at it (FA-8 by another way) | High | fixed |
+| SX-2 | Mac with a standard account: setup never sets the rule (macOS refuses it), and the window still says "All set" | Medium | fixed |
 
 ### SX-1 Another account's program with a full queue on the status port
 
@@ -1803,6 +1804,36 @@ five areas; this time the reviewer for the core's connect path and local API fin
   same, nothing fetched from the other program. FR-3's run under load (12 busy loops, systemctl
   returning 0.2 s after starting the core): 0 of 15 setups say another account.
 
+### SX-2 Mac: a standard account never gets the rule
+
+- Found by: the desktop reviewer (by reading). Setup runs as the user (the .pkg's postinstall
+  starts it for the person signed in). On macOS it sets the rule with `networksetup`, which a
+  standard account may not use; setup then logs "Registering the proxy rule with the system
+  failed" in setup.log, which nobody reads, and the window says "All set". Repair runs the same
+  step. A Mac whose only Uni VPN user has a standard account (a family Mac, a student account
+  set up by someone else) never sent a website through the VPN, with no way out by clicks.
+- Reproduced: on the CI Mac (macOS 15, run 608 of #86, a step added for it and removed again):
+  a standard account `unistd` (not in admin) running `networksetup -setautoproxyurl` gets
+  "** Error: Command requires admin privileges." and exit status 14 at once, no dialog; the
+  runner, an administrator, sets it with exit status 0. The system rule for it is
+  `authenticate-admin-nonshared`.
+- Root cause: the rule's commands assumed an administrator's account, which every Mac's first
+  account is, but not every Uni VPN user's.
+- Fix: when networksetup refuses the account, setup, repair and uninstall (what the user
+  started) hand the remaining commands to macOS's own password dialog in one go
+  (`osascript ... do shell script ... with administrator privileges`, each word quoted), with
+  the reason in the user's language (`setup.admin_network`, six languages): "Uni VPN needs the
+  name and password of an administrator of this Mac to change its network settings." Where an
+  administrator's account set the rule up already (it is the computer's), a standard account's
+  setup keeps it instead of asking for a new address. The core's own looks at the rule (Refresh,
+  Cover, Withdraw, putting it back) never ask. README says so.
+- Verification: TestMacStandardAccountAsksForAnAdministratorsPassword (also: nobody to ask and a
+  cancelled dialog stay "failed"), TestMacStandardAccountKeepsTheRuleThatIsOursAlready,
+  TestMacStandardAccountUninstallAsksForAnAdministratorsPassword, TestAdminScriptKeepsEveryWord
+  (the script through /bin/sh with a fake networksetup: a service called "Marie's iPhone USB"
+  and one with quotes and `$HOME` arrive as they are), TestAskAdminHandsMacOSTheScriptAndTheReason,
+  TestAdminPromptInTheMacsLanguage. The dialog itself needs a Mac with someone at it: not run.
+
 ### Left as they are (Low), sixth re-audit
 
 - Core: listed websites are refused while Cisco is connected and the core is in a final state
@@ -1819,6 +1850,9 @@ five areas; this time the reviewer for the core's connect path and local API fin
   which Android's openconnect sends as "localhost".
 - Windows: uninstall deletes the stored passwords of the account that runs it only.
 - CI: the `promote` job's comment predates the Go core.
+- Mac, standard account: when the websites change, the core cannot give the rule a new address
+  (it does not ask for a password on its own), so Safari takes the new list after the next
+  sign-in; a cancelled password dialog leaves setup's "failed" in setup.log only, as before.
 - Sockowner: on macOS and Linux another account's listener on `::` with IPv6 only also counts
   (the core heals that rule once the port is its own); a ProxyInstall already running while
   uninstall removes the rule can put it back (the marker exists for seconds at most).

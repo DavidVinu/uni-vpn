@@ -25,7 +25,10 @@ is done. On Android, if it asks: allow your browser to install apps. Chromebooks
 supported yet.
 
 A window opens and asks for your university, your user name and your password. When it says
-"All set", close and reopen your browser once. That's it.
+"All set", close and reopen your browser once. That's it. On a Mac with a standard (not
+administrator) account, the Mac also asks for an administrator's name and password while Uni
+VPN sets itself up (and when it is repaired or removed): only administrators may change the
+network settings.
 
 ## Use
 

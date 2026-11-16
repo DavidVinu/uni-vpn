@@ -188,8 +188,8 @@ func New(root string) *Setup {
 	s := &Setup{
 		GOOS: goos, Root: root, Binary: binary, Out: os.Stdout, Getenv: os.Getenv, Home: home,
 		IsTerminal: isTerminal, FindBinary: platform.FindBinary, Service: manager, Run: service.Exec, UID: os.Getuid(),
-		ProxyInstall:        func(port int) (string, error) { return sysproxy.Install(port, "") },
-		ProxyUninstall:      func() (string, error) { return sysproxy.Uninstall("") },
+		ProxyInstall:        func(port int) (string, error) { return askingSystem(goos).Install(port, "") },
+		ProxyUninstall:      func() (string, error) { return askingSystem(goos).Uninstall("") },
 		OtherAccountListens: sockowner.OtherAccountListens,
 		StorePassword:       keyring.StorePassword, StoreTOTP: keyring.StoreTotp,
 		DeletePassword: keyring.DeletePassword, DeleteTOTP: keyring.DeleteTotp,
