@@ -331,7 +331,8 @@ func echo(t *testing.T, c net.Conn, data string) {
 	if _, err := c.Write([]byte(data)); err != nil {
 		t.Fatal(err)
 	}
-	c.SetReadDeadline(time.Now().Add(4 * time.Second))
+	// Longer than a test's ClientWait: a slow sign-in is not a lost echo.
+	c.SetReadDeadline(time.Now().Add(20 * time.Second))
 	buf := make([]byte, len(data))
 	if _, err := io.ReadFull(c, buf); err != nil || string(buf) != data {
 		t.Fatalf("%q %v", buf, err)

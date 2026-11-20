@@ -63,7 +63,7 @@ func TestLostStateBusyRoundDoesNotBringBackTheOldAccount(t *testing.T) {
 	store := &memStore{}
 	statePath := filepath.Join(t.TempDir(), "sync.json")
 	de := New(Options{Relay: url, StatePath: statePath, Store: store, Local: dl,
-		Name: "Desktop", Platform: "linux", Now: c.now, PollEvery: 20 * time.Millisecond, CodeLifetime: 5 * time.Second})
+		Name: "Desktop", Platform: "linux", Now: c.now, PollEvery: 20 * time.Millisecond, CodeLifetime: codeLifetime})
 	t.Cleanup(de.bg.Wait)
 	dl.e = de
 	desktop := device{de, dl.fakeLocal, store}
