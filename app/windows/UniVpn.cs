@@ -1,7 +1,9 @@
 // Uni VPN for Windows: notification area icon plus the app window around the daemon's page.
 // Role models: Cisco Secure Client and Mullvad VPN (left click on the icon opens the small
 // fixed window, right click shows the menu, closing the window keeps the icon), Tailscale
-// (menu with the state on top and Exit at the bottom).
+// (menu with the state on top and Exit at the bottom), eduVPN and the icons of Windows itself
+// (Windows Security, Bluetooth): the system's own menu, rounded on Windows 11, light or dark
+// like the taskbar.
 // Built by "uni-vpn setup" with the csc.exe of the .NET Framework (C# 5) against the WebView2 SDK.
 // Arguments: --port N, --hidden (sign-in: icon only), --page P ("#settings", "&user=ab123"),
 // --after PID (the copy this one replaces after an update, which quits first).
@@ -141,11 +143,7 @@ class TrayApp : ApplicationContext
     readonly string baseUrl;
     readonly int port;
     readonly NotifyIcon icon = new NotifyIcon();
-    readonly ToolStripMenuItem stateItem = new ToolStripMenuItem();
-    readonly ToolStripMenuItem toggleItem = new ToolStripMenuItem();
-    readonly ToolStripMenuItem openItem = new ToolStripMenuItem();
-    readonly ToolStripMenuItem settingsItem = new ToolStripMenuItem();
-    readonly ToolStripMenuItem exitItem = new ToolStripMenuItem();
+    readonly TrayMenu menu = new TrayMenu();
     // English until the service answers with the menu in the user's language (status.json?menu=).
     static readonly Dictionary<string, string> texts = new Dictionary<string, string> {
         {"look.connected", "Connected"}, {"look.connecting", "Connecting"}, {"look.disconnecting", "Disconnecting"},
@@ -181,28 +179,13 @@ class TrayApp : ApplicationContext
         if (!int.TryParse(Options.Value(args, "--port") ?? "", out port)) port = 1081;
         baseUrl = "http://127.0.0.1:" + port + "/";
         allowed = instance == null;
-        // Not SynchronizationContext.Current: the menu items above made it a plain context
-        // (ToolStrip subscribes to SystemEvents), which runs Post on a thread pool thread, where
-        // the window's WebView2 cannot start (RPC_E_CHANGED_MODE). This one posts to this thread.
+        // Not SynchronizationContext.Current: before a form exists it can be a plain context,
+        // which runs Post on a thread pool thread, where the window's WebView2 cannot start
+        // (RPC_E_CHANGED_MODE). This one posts to this thread.
         ui = new WindowsFormsSynchronizationContext();
 
-        ContextMenuStrip menu = new ContextMenuStrip();
-        stateItem.Enabled = false;
-        toggleItem.Click += delegate { Toggle(); };
-        menu.Items.Add(stateItem);
-        menu.Items.Add(toggleItem);
-        menu.Items.Add(new ToolStripSeparator());
-        openItem.Font = new Font(openItem.Font, FontStyle.Bold);  // the default action, as on a double click
-        openItem.Click += delegate { Show("#main"); };
-        menu.Items.Add(openItem);
-        settingsItem.Click += delegate { Show("#settings"); };
-        menu.Items.Add(settingsItem);
-        menu.Items.Add(new ToolStripSeparator());
-        exitItem.Click += delegate { Exit(); };
-        menu.Items.Add(exitItem);
-        menu.Opening += delegate { Poll(); };
-        icon.ContextMenuStrip = menu;
         icon.MouseClick += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) Show(""); };
+        icon.MouseUp += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Right) ShowMenu(); };
         icon.Visible = true;
         Render();
 
@@ -299,9 +282,30 @@ class TrayApp : ApplicationContext
         if (window != null && !window.IsDisposed) window.Guard(allowed, instead);
     }
 
+    void ShowMenu()
+    {
+        Poll();
+        string label = Label(state, reachable);
+        bool canToggle = reachable && state != "disconnecting";
+        int chosen = menu.Show(new TrayMenu.Item[] {
+            new TrayMenu.Item(0, label, false),
+            new TrayMenu.Item(1, T(On ? "menu.disconnect" : "menu.connect"), canToggle),
+            null,
+            new TrayMenu.Item(2, T("menu.open"), true),
+            new TrayMenu.Item(3, T("menu.settings"), true),
+            null,
+            new TrayMenu.Item(4, T("menu.exit"), true),
+        });
+        if (chosen == 1) Toggle();
+        else if (chosen == 2) Show("#main");
+        else if (chosen == 3) Show("#settings");
+        else if (chosen == 4) Exit();
+    }
+
     void Exit()
     {
         icon.Visible = false;
+        menu.Dispose();
         if (window != null) window.Quit();
         ExitThread();
     }
@@ -436,16 +440,101 @@ class TrayApp : ApplicationContext
     void Render()
     {
         string label = Label(state, reachable);
-        stateItem.Text = label;
-        toggleItem.Text = T(On ? "menu.disconnect" : "menu.connect");
-        openItem.Text = T("menu.open");
-        settingsItem.Text = T("menu.settings");
-        exitItem.Text = T("menu.exit");
-        toggleItem.Enabled = reachable && state != "disconnecting";
         icon.Text = "Uni VPN: " + label;
         Icon old = icon.Icon;
         icon.Icon = TrayIcon.Draw(state == "connected", reachable);
         if (old != null) TrayIcon.Destroy(old);
+    }
+}
+
+// The system's own popup menu instead of a WinForms ContextMenuStrip: Windows draws it like
+// the menus of its own notification area icons (rounded with Segoe UI Variable on Windows 11),
+// light or dark like the taskbar, as the tray icon is.
+class TrayMenu : NativeWindow, IDisposable
+{
+    public class Item
+    {
+        public readonly int Id;
+        public readonly string Text;
+        public readonly bool Enabled;
+        public Item(int id, string text, bool enabled) { Id = id; Text = text; Enabled = enabled; }
+    }
+
+    const uint MF_STRING = 0x0, MF_GRAYED = 0x1, MF_SEPARATOR = 0x800;
+    const uint TPM_RIGHTALIGN = 0x8, TPM_BOTTOMALIGN = 0x20, TPM_NONOTIFY = 0x80, TPM_RETURNCMD = 0x100, TPM_RIGHTBUTTON = 0x2;
+    const int SM_MENUDROPALIGNMENT = 40;
+    const int ForceDark = 2, ForceLight = 3;
+    const int Offset = 100;  // TrackPopupMenuEx answers 0 for nothing chosen
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern IntPtr CreatePopupMenu();
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    static extern bool AppendMenu(IntPtr menu, uint flags, UIntPtr id, string text);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern int TrackPopupMenuEx(IntPtr menu, uint flags, int x, int y, IntPtr window, IntPtr rect);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool DestroyMenu(IntPtr menu);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool SetForegroundWindow(IntPtr window);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern int GetSystemMetrics(int index);
+    // Not in the SDK, but what Explorer, Notepad and the Windows Terminal use for dark menus:
+    // SetPreferredAppMode and FlushMenuThemes, since Windows 10 1903 (build 18362).
+    [System.Runtime.InteropServices.DllImport("uxtheme.dll", EntryPoint = "#135")]
+    static extern int SetPreferredAppMode(int mode);
+    [System.Runtime.InteropServices.DllImport("uxtheme.dll", EntryPoint = "#136")]
+    static extern void FlushMenuThemes();
+
+    public TrayMenu()
+    {
+        CreateHandle(new CreateParams());
+    }
+
+    static void FollowTaskbar()
+    {
+        if (Environment.OSVersion.Version.Major < 10 || Environment.OSVersion.Version.Build < 18362) return;
+        if (SystemInformation.HighContrast) return;  // a contrast theme draws its own colors
+        try
+        {
+            SetPreferredAppMode(TrayIcon.LightTaskbar() ? ForceLight : ForceDark);
+            FlushMenuThemes();
+        }
+        catch (Exception) { }
+    }
+
+    // The chosen item's id, or -1.
+    public int Show(Item[] items)
+    {
+        FollowTaskbar();
+        IntPtr menu = CreatePopupMenu();
+        if (menu == IntPtr.Zero) return -1;
+        try
+        {
+            foreach (Item item in items)
+            {
+                if (item == null) AppendMenu(menu, MF_SEPARATOR, UIntPtr.Zero, null);
+                else AppendMenu(menu, MF_STRING | (item.Enabled ? 0 : MF_GRAYED), (UIntPtr)(uint)(item.Id + Offset), item.Text.Replace("&", "&&"));  // no access keys
+            }
+            // Without it the menu stays open after a click elsewhere (KB135788).
+            SetForegroundWindow(Handle);
+            Point at = Cursor.Position;
+            uint flags = TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN;
+            if (GetSystemMetrics(SM_MENUDROPALIGNMENT) != 0) flags |= TPM_RIGHTALIGN;
+            int chosen = TrackPopupMenuEx(menu, flags, at.X, at.Y, Handle, IntPtr.Zero);
+            PostMessage(Handle, 0, IntPtr.Zero, IntPtr.Zero);  // WM_NULL, same article
+            return chosen >= Offset ? chosen - Offset : -1;
+        }
+        finally
+        {
+            DestroyMenu(menu);
+        }
+    }
+
+    public void Dispose()
+    {
+        DestroyHandle();
     }
 }
 
@@ -456,7 +545,7 @@ static class TrayIcon
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     static extern bool DestroyIcon(IntPtr handle);
 
-    static bool LightTaskbar()
+    public static bool LightTaskbar()
     {
         using (RegistryKey key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"))
         {
