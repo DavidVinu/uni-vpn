@@ -25,6 +25,10 @@ import (
 
 func init() { scryptN = 1 << 10 } // fast pairing in tests
 
+// codeLifetime is a shown code's lifetime in tests: longer than a busy macOS runner can stall
+// a test for (more than 5 s seen), so that only the tests that shorten it see a code expire.
+const codeLifetime = 30 * time.Second
+
 // startRelay is the in-memory relay, or relay/worker.js when UNI_VPN_TEST_RELAY names a running
 // one (node relay/serve.mjs); groups is nil then.
 func startRelay(t *testing.T) (groups func() int, url string) {
@@ -169,7 +173,7 @@ type device struct {
 func newDevice(t *testing.T, url, name string, local *fakeLocal, c *clock) device {
 	store := &memStore{}
 	e := New(Options{Relay: url, StatePath: filepath.Join(t.TempDir(), "sync.json"), Store: store, Local: local,
-		Name: name, Platform: "linux", Now: c.now, PollEvery: 20 * time.Millisecond, CodeLifetime: 5 * time.Second})
+		Name: name, Platform: "linux", Now: c.now, PollEvery: 20 * time.Millisecond, CodeLifetime: codeLifetime})
 	t.Cleanup(e.bg.Wait) // before the folder goes: the sync after a device joined writes sync.json
 	return device{e, local, store}
 }
@@ -183,7 +187,7 @@ func setUpLaptop() *fakeLocal {
 
 func waitState(t *testing.T, e *Engine, want string) Pairing {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(codeLifetime + 5*time.Second)
 	for time.Now().Before(deadline) {
 		if p := e.Status().Pairing; p != nil && p.State != "waiting" {
 			if p.State != want {

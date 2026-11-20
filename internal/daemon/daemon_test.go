@@ -92,6 +92,9 @@ func TestClientWaitExceededThenConnected(t *testing.T) {
 
 func TestDisconnectRequestThenReconnect(t *testing.T) {
 	h := newHarness(t)
+	// The page waits for the second sign-in, which a busy macOS runner can stall for seconds
+	// (the fake openconnect frozen after starting): with the harness's 2 s it is dropped.
+	h.cfg.ClientWait, h.cfg.ReadyTimeout = 15, 15
 	d := h.start(nil)
 	c := h.client()
 	echo(t, c, "x")
