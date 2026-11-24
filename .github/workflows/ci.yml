@@ -396,15 +396,25 @@ jobs:
           sleep 5
           pgrep -x "Uni VPN" >/dev/null || { echo "::error::the menu bar app is not running"; exit 1; }
       # docs/mac-guard.md (SV-1): the rule is on only while the program on the status port belongs
-      # to the account at the screen. The runner's core stops (so it cannot switch the rule off
-      # itself) and a program of another account, nobody, takes the port.
+      # to the account at the screen. The runner's core stops: the rule goes off at once (the
+      # guard switches it, whoever the account is), and stays off while a program of another
+      # account, nobody, holds the port; the guard tells this account "held".
       - name: The guard switches the rule off for another account's program
         run: |
           rule() { scutil --proxy | awk '/ProxyAutoConfigEnable/ { print $3 }'; }
           wait_rule() { for i in $(seq 30); do [ "$(rule)" = "$1" ] && return 0; sleep 1; done; return 1; }
+          stays_off() { for i in $(seq 8); do [ "$(rule)" = 0 ] || return 1; sleep 1; done; }
+          ask() {
+            python3 -c 'import socket, sys
+          s = socket.socket(socket.AF_UNIX); s.settimeout(30)
+          s.connect("/var/run/de.davidvinu.uni-vpn.guard.sock")
+          s.sendall(sys.argv[1].encode() + b"\n"); print(s.recv(64).decode().strip())' "$1"
+          }
+          listens() { sudo lsof -nP -iTCP:1081 -sTCP:LISTEN; }
           fail() {
             echo "::error::$1"
             scutil --proxy
+            listens || true
             sudo cat /Library/Logs/uni-vpn-guard.log || true
             exit 1
           }
@@ -413,24 +423,32 @@ jobs:
           echo "at the screen: $(stat -f%Su /dev/console), running as $USER"
           wait_rule 1 || fail "the rule is not on after the install"
           scutil --proxy | grep -q "127.0.0.1:1081/proxy.pac" || fail "the rule is not ours"
-          # The menu bar app starts a stopped service again.
+          case "$(ask state)" in "on "*) ;; *) fail "the guard does not say on: $(ask state)" ;; esac
+          # The menu bar app starts a stopped service again: it goes first.
           osascript -e 'quit app "Uni VPN"' || true
+          for i in $(seq 20); do pgrep -x "Uni VPN" >/dev/null || break; sleep 0.5; done
           launchctl bootout "gui/$(id -u)/de.davidvinu.uni-vpn"
-          for i in $(seq 20); do curl -fsS http://127.0.0.1:1081/status.json >/dev/null 2>&1 || break; sleep 1; done
+          for i in $(seq 40); do listens >/dev/null || break; sleep 0.5; done
+          if listens; then fail "the core still holds 1081"; fi
+          wait_rule 0 || fail "the rule stays on without this account's core"
+          [ "$(ask state)" = off ] || fail "the guard does not say off: $(ask state)"
+          echo "off without this account's core"
           cd /tmp
           sudo -u nobody python3 -c 'import socket, time
           s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
           s.bind(("127.0.0.1", 1081)); s.listen(5); time.sleep(90)' &
           other=$!
-          for i in $(seq 20); do sudo lsof -nP -iTCP:1081 -sTCP:LISTEN | grep -q nobody && break; sleep 0.5; done
-          sudo lsof -nP -iTCP:1081 -sTCP:LISTEN | grep nobody || fail "nobody's program does not listen on 1081"
-          wait_rule 0 || fail "the rule stays on while another account's program holds the port"
-          echo "off with another account's program on the port"
+          for i in $(seq 20); do listens | grep -q nobody && break; sleep 0.5; done
+          listens | grep nobody || fail "nobody's program does not listen on 1081"
+          [ "$(ask state)" = held ] || fail "the guard does not see another account's program: $(ask state)"
+          stays_off || fail "the rule came on for another account's program"
+          echo "off and held while another account's program holds the port"
           sudo pkill -u nobody -f "time.sleep\(90\)" || true
           wait $other || true
           launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/de.davidvinu.uni-vpn.plist"
           for i in $(seq 30); do curl -fsS http://127.0.0.1:1081/status.json >/dev/null 2>&1 && break; sleep 1; done
           wait_rule 1 || fail "the rule does not come back with this account's core"
+          case "$(ask state)" in "on "*) ;; *) fail "the guard does not say on again: $(ask state)" ;; esac
           echo "on again with this account's core"
           sudo cat /Library/Logs/uni-vpn-guard.log
           open -g -a "/Applications/Uni VPN.app" --args --hidden
