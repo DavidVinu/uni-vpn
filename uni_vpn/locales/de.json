@@ -203,6 +203,7 @@
   "msg.program_missing": "Ein Teil von Uni VPN fehlt. Klicke auf Reparieren.",
   "msg.start_failed": "Uni VPN konnte die Verbindung nicht starten. Klicke auf Reparieren.",
   "msg.not_elevated": "Uni VPN fehlt eine nötige Berechtigung. Klicke auf Reparieren.",
+  "msg.guard_missing": "Uni VPN braucht noch einmal einen Administrator dieses Mac, damit andere Benutzer deine Websites nicht umleiten können. Klicke auf Reparieren.",
   "msg.settings_broken": "Deine Einstellungen konnten nicht gelesen werden. Richte Uni VPN neu ein.",
   "msg.repairing": "Wird repariert. Erlaube es, wenn dein Computer fragt.",
   "msg.repair_failed": "Die Reparatur ist nicht fertig geworden. Klicke erneut auf Reparieren oder starte den Computer neu.",

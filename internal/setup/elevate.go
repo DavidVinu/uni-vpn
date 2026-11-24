@@ -25,6 +25,21 @@ func askingSystem(goos string) *sysproxy.System {
 	return s
 }
 
+// ensureGuard is Setup.EnsureGuard: on a Mac where the guard does not answer, binary (this
+// core) puts itself in place as the guard, as root, once macOS has an administrator's name and
+// password.
+func ensureGuard(goos, binary string) func() (bool, error) {
+	if goos != "darwin" {
+		return nil
+	}
+	return func() (bool, error) {
+		if _, err := sysproxy.AskGuard("state"); err == nil {
+			return false, nil
+		}
+		return true, askAdmin(sysproxy.Exec, [][]string{{binary, "guard", "install"}}, adminPrompt(macLanguages()))
+	}
+}
+
 // askAdmin runs the commands as root once macOS has an administrator's name and password, in
 // its own dialog with prompt as the reason. Cancelled: an error.
 func askAdmin(run sysproxy.Runner, cmds [][]string, prompt string) error {

@@ -203,6 +203,7 @@
   "msg.program_missing": "Une partie d’Uni VPN manque. Cliquez sur Réparer.",
   "msg.start_failed": "Uni VPN n’a pas pu lancer la connexion. Cliquez sur Réparer.",
   "msg.not_elevated": "Il manque à Uni VPN une autorisation nécessaire. Cliquez sur Réparer.",
+  "msg.guard_missing": "Uni VPN a besoin encore une fois d’un administrateur de ce Mac, pour que d’autres comptes ne puissent pas détourner vos sites web. Cliquez sur Réparer.",
   "msg.settings_broken": "Vos réglages n’ont pas pu être lus. Configurez à nouveau Uni VPN.",
   "msg.repairing": "Réparation en cours. Autorisez-la si votre ordinateur le demande.",
   "msg.repair_failed": "La réparation n’a pas abouti. Cliquez à nouveau sur Réparer, ou redémarrez l’ordinateur.",

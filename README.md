@@ -25,9 +25,9 @@ is done. On Android, if it asks: allow your browser to install apps. Chromebooks
 supported yet.
 
 A window opens and asks for your university, your user name and your password. When it says
-"All set", close and reopen your browser once. That's it. On a Mac with a standard (not
-administrator) account, the Mac also asks for an administrator's name and password while Uni
-VPN sets itself up (and when it is repaired or removed): only administrators may change the
+"All set", close and reopen your browser once. That's it. On a Mac set up with an older
+version, a standard (not administrator) account asks you once to click **Repair**: the Mac then
+asks for an administrator's name and password, because only administrators may change the
 network settings.
 
 ## Use
@@ -299,9 +299,15 @@ no WebKitGTK on Linux) the entry opens `http://127.0.0.1:1081/` in the browser i
 - The system's automatic proxy configuration points at the service. Programs that honour it
   (browsers, some mail clients) send only the listed domains through the university;
   everything else goes direct as before. Command line tools ignore the setting.
-- Linux and macOS: no routes, no DNS, no root after installation. The tunnel runs entirely
-  in user context and manages roughly 0.5 MB/s per connection (ocproxy, fixed 64 KB
-  window). Enough for mail and Moodle; for large downloads the Cisco client is faster.
+- Linux and macOS: no routes, no DNS. The tunnel runs entirely in user context and manages
+  roughly 0.5 MB/s per connection (ocproxy, fixed 64 KB window). Enough for mail and Moodle;
+  for large downloads the Cisco client is faster.
+- macOS: the proxy setting is the computer's, and only administrators may change it. A small
+  helper of root (`/Library/PrivilegedHelperTools/de.davidvinu.uni-vpn.guard`, a copy of the
+  core started by launchd) switches the rule on only for the account at the screen, while that
+  account's uni-vpn holds the status port, and off otherwise ([docs/mac-guard.md](docs/mac-guard.md)).
+  It takes requests only from this Mac, never sets an address it is given, and removes itself
+  10 minutes after the app went to the Trash.
 - Windows: while connected, a network adapter "uni-vpn" exists, with an address but no
   gateway and no DNS. The service runs elevated as the signed-in user (Task Scheduler,
   "uni-vpn"), because Wintun needs administrator rights. For the same reason the program sits in

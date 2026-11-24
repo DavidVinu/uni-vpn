@@ -203,6 +203,7 @@
   "msg.program_missing": "Uni VPN 缺少一部分。请点击“修复”。",
   "msg.start_failed": "Uni VPN 无法开始连接。请点击“修复”。",
   "msg.not_elevated": "Uni VPN 缺少所需的权限。请点击“修复”。",
+  "msg.guard_missing": "Uni VPN 还需要这台 Mac 的管理员帮一次忙，以免其他账户把你打开的网站转到别处。请点击“修复”。",
   "msg.settings_broken": "无法读取你的设置。请重新设置 Uni VPN。",
   "msg.repairing": "正在修复。如果电脑询问，请允许。",
   "msg.repair_failed": "修复未完成。请再次点击“修复”，或重启电脑。",

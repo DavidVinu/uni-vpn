@@ -39,3 +39,15 @@ func listenerOther(port int) (other, found bool, err error) {
 	r, found := listenerOn(rows, port)
 	return found && r.owner != self, found, nil
 }
+
+// ListenerOwner is the account (uid) of the program that takes connections to 127.0.0.1:port,
+// from the system's table (the Mac's guard of the proxy rule, internal/guard); found is false
+// when nothing listens there.
+func ListenerOwner(port int) (uid uint32, found bool, err error) {
+	rows, err := table()
+	if err != nil {
+		return 0, false, err
+	}
+	r, found := listenerOn(rows, port)
+	return r.owner, found, nil
+}

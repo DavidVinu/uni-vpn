@@ -1,0 +1,102 @@
+# Mac: the guard of the proxy rule
+
+Chosen by David on 2026-11-24 ("Add an admin helper on Macs"), for SV-1 in BUG_BURN_DOWN.md.
+
+## Why
+
+On a Mac the proxy rule (the automatic proxy setting of each network service) is the
+computer's, not the account's, and it points at `http://127.0.0.1:1081/proxy.pac`, a port any
+account may take. Every account's browsers take their rule from whatever answers there. So far
+the account at hand changed the rule itself with `networksetup`: on, off while another account
+holds the port (FA-8), a new address when the websites change. macOS lets only an
+administrator do that, so on a standard account the core cannot switch the rule off while
+another account's program holds the port (SV-1), cannot cover a service added since, and
+setup, Repair and removal need an administrator's password (SX-2). While the Uni VPN user is
+signed out, the rule stays on for the other accounts too. FA-8, FV-1, SX-1 and SV-1 were all
+this one design gap.
+
+## What
+
+A small part of the core, `uni-vpn-core guard`, runs as root (a LaunchDaemon) and is the only
+one that switches our rule on and off. Accounts tell it that they want the rule; it decides
+from what it sees, not from what it is told.
+
+**The rule is on** for port P and version V exactly when the account at the screen (the owner
+of `/dev/console`, not root) asked for the rule with port P and the program that listens on
+127.0.0.1:P belongs to that account (the system's table of sockets, as in SX-1). Otherwise our
+rule is off.
+
+- On: every enabled service whose rule is ours (any version) or unset gets
+  `http://127.0.0.1:P/proxy.pac?v=V`.
+- Off: every service with our rule on gets it switched off (the address stays, as Withdraw
+  left it).
+- A setting that is not ours is never touched by the guard. Replacing one stays the user's
+  step (setup, with an administrator's password where macOS asks), and uninstall puts it back.
+
+So another account's program on the port never gets the browsers of the account at the screen,
+whether that account is an administrator or not, and while nobody with Uni VPN is at the screen
+the rule is off.
+
+## Talking to it
+
+A Unix socket, `/var/run/de.davidvinu.uni-vpn.guard.sock`, mode 0666, one request line per
+connection; the guard names the account by the socket's credentials (`LOCAL_PEERCRED`), never
+by what the request says.
+
+| Request | Meaning | Answer |
+|---|---|---|
+| `want P` | this account wants the rule at port P (1024 to 65535) | `on V`, `off` or `held` |
+| `refresh` | a new address for this account's rule (the websites changed) | as `want` |
+| `unwant` | this account no longer wants it (uninstall) | `off` |
+| `state` | what it does for this account | as `want` |
+
+Each account has one entry, kept in `/Library/Application Support/Uni VPN/guard.json` (root,
+0600) so the rule is right from boot. A request is at most 64 bytes, read within 2 s, at most
+8 connections at once; `refresh` takes effect at most once a second. Answers are for the
+asking account only.
+
+## When it looks
+
+Every 2 s it reads the owner of `/dev/console` and the listener of each wanted port (no
+programs run). `networksetup` runs only when the rule should change, at a request, and once a
+minute (a service added since, a change by someone else).
+
+## Who uses it
+
+- Setup and Repair (`sysproxy.Install`): back up the current setting as before, replace a
+  setting that is not ours as before (directly, or with an administrator's password), then
+  `want`.
+- Uninstall (`sysproxy.Uninstall`): `unwant`, then put back only the settings that were not
+  ours; the guard switches ours off.
+- The core: `want` when it starts, `refresh` when the websites change. Cover, Withdraw and
+  putting the rule back are the guard's; the core does nothing there.
+- Without a guard (it is not installed, or does not answer), everything works as before.
+
+## Installing and removing it
+
+- The .pkg's postinstall (root) copies the core to
+  `/Library/PrivilegedHelperTools/de.davidvinu.uni-vpn.guard`, writes
+  `/Library/LaunchDaemons/de.davidvinu.uni-vpn.guard.plist` and starts it, before it sets up the
+  user. The installer already asks for an administrator, so a new install never asks again.
+- A Mac set up before: Repair installs it, with one administrator's password (the same macOS
+  dialog as SX-2): `uni-vpn-core guard install` of the account's own copy, as root. There a
+  standard account, which cannot switch the rule off itself, connects only after that Repair:
+  the app says so (`msg.guard_missing`) and offers the button. An administrator's account keeps
+  working as before (it can switch the rule off) until its next Repair or .pkg.
+- When the app has gone to the Trash for 10 minutes, the guard switches our rule off and
+  removes itself; each account's core removes itself as before.
+
+## Limits
+
+- While another account is at the screen, the browsers left open in the background of a
+  switched-away account follow the rule of the account at the screen.
+- The guard is updated with the .pkg or by Repair, not by the automatic updates.
+
+## Tests
+
+- Unit (any system, fakes): the policy table (console, wanted, listener), the commands for on
+  and off, foreign settings untouched, the protocol (credentials, limits, bad lines), the file.
+- `sysproxy` with a fake guard: Install, Uninstall, Refresh, Cover and Withdraw.
+- CI on the Mac (macos-pkg): after the install the guard runs and the rule is on; with the core
+  stopped and a program of `nobody` on 127.0.0.1:1081 the rule goes off within seconds; with
+  the core back it is on again; after the Trash, the guard and its files are gone.

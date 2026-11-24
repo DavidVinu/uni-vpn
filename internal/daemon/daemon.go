@@ -154,6 +154,10 @@ type Options struct {
 	RepairStart  func() (Process, error)
 	// Elevated is is_admin() on Windows, nil elsewhere (status "elevated": null).
 	Elevated func() *bool
+	// Unguarded: a standard account of a Mac where the guard of the proxy rule does not run
+	// (set up before it came, docs/mac-guard.md): this account cannot switch the rule off while
+	// another account's program holds the status port, so it connects only after Repair.
+	Unguarded func() bool
 	// Updater is the self-updater; nil means updater.New(Commit).
 	Updater Updater
 	// PackageWatch: uninstall once the installer's folder is gone (removal.go).
@@ -416,6 +420,15 @@ func New(cfg *config.Config, log *slog.Logger, opts Options) *Daemon {
 			}
 			admin := winsys.IsAdmin()
 			return &admin
+		}
+	}
+	if opts.Unguarded == nil {
+		opts.Unguarded = func() bool {
+			if !platform.IsMacOS {
+				return false
+			}
+			_, err := sysproxy.AskGuard("state")
+			return err != nil && standardMacAccount()
 		}
 	}
 	if opts.SyncRelay == "" {
@@ -1911,6 +1924,16 @@ func (d *Daemon) connectLoop(ctx context.Context) {
 			// A typed code cannot sign in either: the one-code setup ends now, with Repair.
 			d.onceCode = ""
 			d.final(Error, messages.NotElevated)
+			return
+		}
+		var unguarded bool
+		d.unlocked(func() { unguarded = d.opts.Unguarded() })
+		if ctx.Err() != nil {
+			return
+		}
+		if unguarded {
+			d.onceCode = ""
+			d.final(Error, messages.GuardMissing)
 			return
 		}
 		if cfg.MFA == "saml" {

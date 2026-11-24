@@ -20,6 +20,7 @@ import (
 	"github.com/DavidVinu/uni-vpn/internal/credentials"
 	"github.com/DavidVinu/uni-vpn/internal/daemon"
 	"github.com/DavidVinu/uni-vpn/internal/desktop"
+	"github.com/DavidVinu/uni-vpn/internal/guard"
 	"github.com/DavidVinu/uni-vpn/internal/platform"
 	"github.com/DavidVinu/uni-vpn/internal/service"
 	"github.com/DavidVinu/uni-vpn/internal/wintunnel"
@@ -75,6 +76,9 @@ func run(argv []string) int {
 			command = a
 			if run, ok := installCommands[command]; ok { // setup.go
 				return run(configPath, args[i+1:])
+			}
+			if command == "guard" { // the Mac's guard of the proxy rule, as root
+				return guard.Run(args[i+1:])
 			}
 		default:
 			fmt.Fprintf(os.Stderr, "%s\nuni-vpn: error: unrecognized arguments: %s\n", usage, a)

@@ -1108,6 +1108,24 @@ func TestWindowsWithoutElevationExplainsInsteadOfStarting(t *testing.T) {
 	}
 }
 
+// SV-1: a standard account of a Mac without the guard of the proxy rule cannot switch the rule
+// off while another account's program holds the port. It connects only after Repair, which sets
+// the guard up with an administrator's password.
+func TestUnguardedStandardMacAccountAsksForRepairInsteadOfStarting(t *testing.T) {
+	h := newHarness(t)
+	var unguarded atomic.Bool
+	unguarded.Store(true)
+	d := h.start(func(o *Options) { o.Unguarded = unguarded.Load })
+	d.RequestConnect()
+	waitState(t, d, Error)
+	if _, m := d.snapshot(); m != messages.GuardMissing || m.Action != "repair" || h.pwLines() != nil {
+		t.Fatal(m, h.pwLines())
+	}
+	unguarded.Store(false)
+	d.RequestConnect()
+	waitState(t, d, Connected)
+}
+
 func TestCiscoBlockedThenReleased(t *testing.T) {
 	h := newHarness(t)
 	h.cisco.Store(true)

@@ -101,6 +101,8 @@ var (
 	ProgramMissing = m("program_missing", "repair")
 	StartFailed    = m("start_failed", "repair")
 	NotElevated    = m("not_elevated", "repair")
+	// A standard account of a Mac without the guard of the proxy rule (docs/mac-guard.md).
+	GuardMissing   = m("guard_missing", "repair")
 	SettingsBroken = m("settings_broken", "setup")
 	Repairing      = m("repairing")
 	RepairFailed   = m("repair_failed", "repair")

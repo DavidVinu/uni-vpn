@@ -94,11 +94,14 @@ type System struct {
 	// asks for: a standard account may not change the network settings. Nil where nobody
 	// asked for the change (the core's own looks at the rule).
 	Elevate func(cmds [][]string) error
+	// Guard is the Mac's guard of the proxy rule where it runs (guard.go): it switches our
+	// rule on and off, Install, Uninstall, Refresh, Cover and Withdraw only tell it.
+	Guard GuardClient
 }
 
 // Default acts on this machine.
 func Default() *System {
-	return &System{
+	s := &System{
 		GOOS:       runtime.GOOS,
 		Run:        Exec,
 		Getenv:     os.Getenv,
@@ -107,6 +110,10 @@ func Default() *System {
 		WinSet:     winsys.ProxySet,
 		Now:        time.Now,
 	}
+	if s.macOS() {
+		s.Guard = guardOnMac()
+	}
+	return s
 }
 
 func (s *System) macOS() bool   { return s.GOOS == "darwin" }
@@ -425,6 +432,11 @@ func (s *System) Refresh(httpPort int) {
 		}
 		return
 	}
+	if s.guarded() {
+		if _, err := s.Guard("refresh"); err == nil {
+			return
+		}
+	}
 	if s.macOS() {
 		if snap := s.Current(); snap != nil && snap.Mac != nil {
 			for _, svc := range snap.Mac.Services {
@@ -465,6 +477,12 @@ func (s *System) Cover(httpPort int, backup string) {
 	}
 	if !s.macOS() {
 		return
+	}
+	if s.guarded() {
+		// The guard covers new services itself; this tells it again that the rule is wanted.
+		if _, err := s.Guard("want " + strconv.Itoa(httpPort)); err == nil {
+			return
+		}
 	}
 	now := s.Current()
 	if now == nil || now.Mac == nil {
@@ -642,6 +660,11 @@ func (s *System) Install(httpPort int, backup string) (string, error) {
 		// Repair, or the installer again: macOS services added since are backed up too.
 		backUpNew(backup, before, httpPort, func(Service) bool { return true })
 	}
+	if s.guarded() && before.Mac != nil {
+		if result, ok := s.installGuarded(httpPort, before); ok {
+			return result, nil
+		}
+	}
 	// A new address: macOS keeps the rule it loaded per address until the user signs out, and
 	// the core answering now is the one setup just restarted.
 	version := s.Now().Unix()
@@ -691,6 +714,12 @@ const WithdrawnName = "rule-withdrawn"
 // the computer's: the address stays there, switched off, and the uni-vpn that holds the port
 // switches it on again (Cover). Errors are ignored.
 func (s *System) Withdraw(httpPort int) bool {
+	if s.guarded() {
+		// It has switched our rule off already, or does at its next look (2 s).
+		if _, err := s.Guard("state"); err == nil {
+			return true
+		}
+	}
 	now := s.Current()
 	if now == nil {
 		return false
@@ -750,7 +779,16 @@ func (s *System) Uninstall(backup string) (string, error) {
 	if err := saved.UnmarshalJSON(data); err != nil {
 		return "unset", nil
 	}
-	if err := s.Restore(&saved); err != nil {
+	restore := s.Restore
+	if s.guarded() {
+		restore = func(saved *Snapshot) error {
+			if err, ok := s.uninstallGuarded(saved); ok {
+				return err
+			}
+			return s.Restore(saved)
+		}
+	}
+	if err := restore(&saved); err != nil {
 		return "failed", nil
 	}
 	if err := os.Remove(backup); err != nil && !errors.Is(err, os.ErrNotExist) {

@@ -203,6 +203,7 @@
   "msg.program_missing": "Part of Uni VPN is missing. Click Repair.",
   "msg.start_failed": "Uni VPN could not start the connection. Click Repair.",
   "msg.not_elevated": "Uni VPN is missing a permission it needs. Click Repair.",
+  "msg.guard_missing": "Uni VPN needs an administrator of this Mac once more, so that other accounts cannot redirect your websites. Click Repair.",
   "msg.settings_broken": "Your settings could not be read. Set up Uni VPN again.",
   "msg.repairing": "Repairing. Allow it if your computer asks.",
   "msg.repair_failed": "The repair did not finish. Click Repair to try again, or restart the computer.",
