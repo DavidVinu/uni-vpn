@@ -1907,7 +1907,8 @@ and texts); all five finished.
   and daemon tests. On a real Mac (CI macos-pkg, run 624 onwards): after the .pkg the guard
   runs as root with `--app` and the rule is on with `?v=`; with the runner's core stopped the
   guard switched the rule off within 2 s (guard log "is=off account=501", then
-  `-setautoproxystate Ethernet off`). The full CI result is under the eighth re-audit.
+  `-setautoproxystate Ethernet off`). The full CI result is under EA-5 in the eighth
+  re-audit.
 
 ### SV-2 Mac, standard account: a service added since setup
 
@@ -2024,6 +2025,13 @@ or its CI step.
 - Fix: the step waits until nothing listens on 1081, nobody's program retries its bind for up
   to 90 s, and the guard must say `off` without the core, `held` with nobody's program, the
   rule must stay off for 8 s, and `on` again with the core.
+- Verification: CI runs 631 and 632 (c705532), macos-pkg on a real Mac: the guard runs as root
+  with `--app`, the rule is on after the .pkg; with the runner's core stopped the guard set
+  `-setautoproxystate Ethernet off` 2.3 s later and said `off`; nobody's program bound 1081
+  after 27 s, the guard said `held` and the rule stayed off for 8 s; with the core back it was
+  on again 0.15 s after nobody's program ended. Uninstall left the rule off. macos-trash: the
+  guard's plist, program and log were gone 10 minutes after the app went to the Trash, and
+  `launchctl print` no longer found it.
 
 ### EA-6 The guard switched off under Login Items
 
@@ -2070,3 +2078,81 @@ or its CI step.
 - Repair runs the account's own core as root for `guard install`: any program of that account
   could show the same macOS dialog itself.
 
+## Ninth re-audit
+
+Scope: the whole repository at c705532 (the eighth round's fixes on top of the guard), five
+fresh reviewers in the same five areas. The core's connect path and local API, the phones,
+the site with CI and texts: no Critical, High or Medium. Both Mediums are in the guard's
+install and in what a removal puts back after the guard has gone.
+
+| # | Bug | Severity | Status |
+|---|---|---|---|
+| NA-1 | Mac: a removal after the guard has gone puts our own rule back from the backup (on again with nothing to switch it off; a standard account gets a password dialog nobody asked for) | Medium | fixed |
+| NA-2 | Mac: `guard install` over a running guard (every .pkg over one with the guard, Repair replacing an older one) bootstraps once right after bootout, with no retry | Medium | fixed |
+
+### NA-1 Our own rule in the backup
+
+- Found by: the desktop reviewer. A Mac's rule is the computer's. The core just started says
+  `want` (its start-up Cover), so the guard has switched our rule on before setup takes the
+  first backup; a second account's setup finds the first account's rule. Either way the
+  backup held `http://127.0.0.1:1081/proxy.pac?v=...`. Only the guarded uninstall skipped
+  such entries. Once the guard has gone (the app in the Trash for 10 minutes while this
+  account was signed out, or a restart with the guard first), the account's core removes
+  itself with the plain Restore, which set our old address again: on an administrator's
+  account our rule was on with no Uni VPN left (any program on 1081 then serves every
+  account's browsers), on a standard account macOS asked for an administrator's password
+  minutes after login for it.
+- Reproduced: TestARemovalAfterTheGuardWentPutsBackNoneOfOurRules,
+  TestAFirstInstallUnderTheGuardBacksUpNoRule and TestRestoreNeverPutsBackOneOfOurRules
+  (from the reviewer's tests) fail before. CI run 632's guard log shows the order on a real
+  Mac: the rule went on at 12:43:56, before setup registered it.
+- Root cause: the first backup recorded our own rule as if it were the user's setting.
+- Fix: the first backup records every one of our rules (ours, any account's with `?v=`, the
+  plain one at 1081) as unset, as backUpNew did for services added since; macOS Restore
+  treats one of ours in an older backup as unset too, so it only switches it off.
+- Verification: the three tests pass; `go test ./...`; the Python suite.
+
+### NA-2 Replacing a running guard
+
+- Found by: the desktop and core (system parts) reviewers, each on its own, by reading. The
+  service's own install retries for exactly this ("Bootstrap failed: 5" right after bootout,
+  internal/service), the guard's did not: the old guard was gone and the new one not started
+  until the next restart. After the .pkg the user's setup then asked for an administrator's
+  password a second time; after Repair, the password was given for nothing and a standard
+  account kept "Click Repair".
+- Fix: `guard install` tries the bootstrap up to five times, a second apart, like the service.
+- Verification: macos-pkg now runs `guard install` over the running guard and checks it runs
+  again with a new process, says `on` and the rule is on (CI on this commit).
+
+### Fixed with this round (Low)
+
+- A busy guard (a look's networksetup holds its lock for more than 2 s) reset a request that
+  came in time, and the limit of 4 per account waited on the same lock, so one account's
+  connections could take every slot. A standard account's "version" could then fail while
+  "state" worked, and it was told to Repair a current guard. Connections are counted under
+  their own lock and the line is read before the request waits
+  (TestABusyGuardAnswersARequestSentInTime, TestABusyGuardKeepsEachAccountsLimit, from the
+  reviewer's tests; both fail before).
+- The Login Items hint named "Uni VPN", which macOS lists for the menu bar app (on). It now
+  names the guard's item as macOS lists an unsigned program, de.davidvinu.uni-vpn.guard, and
+  uni-vpn-core, in all six languages and in README's table.
+- macos-trash also checks that the guard's folder with its list of accounts is gone.
+
+### Left as they are (Low), ninth re-audit
+
+- A guard that hangs (networksetup stuck) delays a Disconnect as well as a connect, by up to
+  its 60 s answer time.
+- Any account's `want P` makes `http://127.0.0.1:P/proxy.pac` count as ours, so another local
+  tool's rule at exactly that address and port would be switched with ours.
+- Uninstall says `unwant` before it stops the service: a Cover in between makes a new entry,
+  and a guard set up without the app (get.sh) then never removes itself.
+- An adopted core older than the guard: its own Refresh is undone within a minute (Safari
+  keeps the old websites until sign-out); an old administrator's core in the background can
+  switch its rule on for up to a minute while another account is at the screen. Adoption
+  reads only a regular config.toml (1081 otherwise).
+- Android: a tapped update and the unattended one can both start while the user is in
+  Android's Settings (the update goes in either way); docs/android.md's building notes do not
+  name the release start check.
+- CI: main's run of #88 was red on a timed-out inprocess test (passed 15 of 15 here, the
+  release went out); macos-pkg cannot test two accounts that both want the rule (unit tests
+  do); docs/mac-guard.md says "then want" where installGuarded asks before and after.

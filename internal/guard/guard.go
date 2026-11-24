@@ -94,8 +94,10 @@ type Guard struct {
 	unread bool
 	// abandoned: the last account that wanted the rule no longer does (Abandoned).
 	abandoned bool
-	// conns: each account's connections now (Serve).
-	conns map[uint32]int
+	// conns: each account's connections now (Serve), under connMu: counted and read while a
+	// look holds mu for networksetup.
+	connMu sync.Mutex
+	conns  map[uint32]int
 }
 
 // New starts from data (StatePath), nil or broken for none.
@@ -402,6 +404,8 @@ func (g *Guard) Serve(l net.Listener, peer func(net.Conn) (uint32, error)) error
 
 func (g *Guard) serve(c net.Conn, peer func(net.Conn) (uint32, error)) {
 	defer c.Close()
+	// The line is read before Handle waits for a look's networksetup, so the deadline is for
+	// the asking program alone.
 	_ = c.SetReadDeadline(time.Now().Add(readWithin))
 	uid, err := peer(c)
 	if err != nil || !g.enter(uid) {
@@ -419,8 +423,8 @@ func (g *Guard) serve(c net.Conn, peer func(net.Conn) (uint32, error)) {
 
 // enter counts a connection of uid; false when it has maxPerAccount already.
 func (g *Guard) enter(uid uint32) bool {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+	g.connMu.Lock()
+	defer g.connMu.Unlock()
 	if g.conns == nil {
 		g.conns = map[uint32]int{}
 	}
@@ -432,8 +436,8 @@ func (g *Guard) enter(uid uint32) bool {
 }
 
 func (g *Guard) leave(uid uint32) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+	g.connMu.Lock()
+	defer g.connMu.Unlock()
 	if g.conns[uid]--; g.conns[uid] <= 0 {
 		delete(g.conns, uid)
 	}

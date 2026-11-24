@@ -589,3 +589,108 @@ func TestOneAccountCannotTakeEveryConnection(t *testing.T) {
 		t.Fatalf("%q", line)
 	}
 }
+
+// While the guard runs networksetup for longer than readWithin (a slow look, many services,
+// the settings' lock held by System Settings), a request sent at once still gets its answer.
+func TestABusyGuardAnswersARequestSentInTime(t *testing.T) {
+	m := newMac("Wi-Fi", "")
+	m.console, m.listeners[1081] = student, student
+	w := m.world()
+	slow := make(chan struct{})
+	run := w.Run
+	w.Run = func(args []string, d time.Duration) (sysproxy.Result, error) {
+		if args[1] == "-listallnetworkservices" {
+			select {
+			case <-slow:
+			default:
+				time.Sleep(3 * time.Second) // one slow read
+				close(slow)
+			}
+		}
+		return run(args, d)
+	}
+	g := New(w, nil)
+	path := filepath.Join(t.TempDir(), "guard.sock")
+	l, err := net.Listen("unix", path)
+	if err != nil {
+		t.Skip(err)
+	}
+	defer l.Close()
+	go func() { _ = g.Serve(l, func(net.Conn) (uint32, error) { return sibling, nil }) }()
+	go g.Look() // the first look reads the settings: 3 s
+	time.Sleep(100 * time.Millisecond)
+	c, err := net.Dial("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(10 * time.Second))
+	start := time.Now()
+	_, _ = c.Write([]byte("version\n"))
+	line, err := bufio.NewReader(c).ReadString('\n')
+	t.Logf("answer %q err %v after %s", line, err, time.Since(start).Round(time.Millisecond))
+	if line != strconv.Itoa(sysproxy.GuardVersion)+"\n" {
+		t.Errorf("a request sent at once got no answer from a busy guard: %q %v", line, err)
+	}
+}
+
+// While the guard is busy, one account's connections still cannot take every slot.
+func TestABusyGuardKeepsEachAccountsLimit(t *testing.T) {
+	m := newMac("Wi-Fi", "")
+	m.console, m.listeners[1081] = student, student
+	w := m.world()
+	slow := make(chan struct{})
+	run := w.Run
+	w.Run = func(args []string, d time.Duration) (sysproxy.Result, error) {
+		if args[1] == "-listallnetworkservices" {
+			select {
+			case <-slow:
+			default:
+				time.Sleep(1500 * time.Millisecond)
+				close(slow)
+			}
+		}
+		return run(args, d)
+	}
+	g := New(w, nil)
+	path := filepath.Join(t.TempDir(), "guard.sock")
+	l, err := net.Listen("unix", path)
+	if err != nil {
+		t.Skip(err)
+	}
+	defer l.Close()
+	n := make(chan struct{}, 100)
+	go func() {
+		_ = g.Serve(l, func(net.Conn) (uint32, error) {
+			n <- struct{}{}
+			if len(n) <= maxConns {
+				return sibling, nil
+			}
+			return student, nil
+		})
+	}()
+	go g.Look()
+	time.Sleep(100 * time.Millisecond)
+	for range maxConns {
+		c, err := net.Dial("unix", path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer c.Close()
+	}
+	for len(n) < maxConns {
+		time.Sleep(5 * time.Millisecond)
+	}
+	c, err := net.Dial("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+	_, _ = c.Write([]byte("state\n"))
+	line, err := bufio.NewReader(c).ReadString('\n')
+	t.Logf("student's answer %q err %v; connections seen %d", line, err, len(n))
+	if line == "" {
+		t.Errorf("one account's %d connections shut the other account out", maxConns)
+	}
+}

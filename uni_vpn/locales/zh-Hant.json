@@ -172,7 +172,7 @@
   "menu.background_open": "打開設定",
   "menu.not_now": "以後",
   "menu.guard_off": "Uni VPN 不能在背景執行",
-  "menu.guard_hint": "需要這台 Mac 的管理員在「允許在背景執行」中重新開啟 Uni VPN。然後按「修復」。",
+  "menu.guard_hint": "需要這台 Mac 的管理員在「允許在背景執行」中重新開啟 de.davidvinu.uni-vpn.guard 和 uni-vpn-core。然後按「修復」。",
   "msg.not_connected": "未連線",
   "msg.disconnected": "已中斷連線",
   "msg.connecting": "正在連線",

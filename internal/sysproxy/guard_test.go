@@ -228,3 +228,78 @@ func TestGuardState(t *testing.T) {
 		t.Error("nil:", running, cur)
 	}
 }
+
+// The second account of a Mac sets up while the first account's rule is there (switched off
+// for this account by the guard). Its core removes itself after the guard went (it was signed
+// out when the app went to the Trash): nothing of ours is put back, and no password is asked.
+func TestARemovalAfterTheGuardWentPutsBackNoneOfOurRules(t *testing.T) {
+	backup := tempBackup(t, "b.json")
+	e, g := &elevated{}, &fakeGuard{answer: "off"}
+	r := &runner{answers: standardAnswers(
+		answer{"networksetup -getautoproxyurl Wi-Fi", 0, "URL: http://127.0.0.1:1081/proxy.pac?v=100\nEnabled: No\n"})}
+	if got, err := guardedMac(r, e, g).Install(1081, backup); err != nil || got != "ok" {
+		t.Fatal(got, err)
+	}
+	if b := readBackup(t, backup); strings.Contains(b, "proxy.pac") {
+		t.Errorf("our own rule is in the backup: %s", b)
+	}
+	e = &elevated{}
+	r = &runner{answers: standardAnswers(
+		answer{"networksetup -getautoproxyurl Wi-Fi", 0, "URL: http://127.0.0.1:1081/proxy.pac?v=200\nEnabled: No\n"})}
+	if got, err := standardMac(r, e).Uninstall(backup); err != nil || got != "restored" {
+		t.Fatal(got, err)
+	}
+	if len(e.cmds) != 0 || len(changes(r)) != 0 {
+		t.Errorf("our own rule is put back: %v %v", e.cmds, changes(r))
+	}
+}
+
+// A first install with the guard: the core just started said "want", so our rule is on before
+// setup backs up the setting. After the guard went, the removal leaves our rule off.
+func TestAFirstInstallUnderTheGuardBacksUpNoRule(t *testing.T) {
+	backup := tempBackup(t, "b.json")
+	g := &fakeGuard{answer: "on 300"}
+	r := &runner{answers: []answer{
+		{"networksetup -listallnetworkservices", 0, "An asterisk (*) denotes that a network service is disabled.\nWi-Fi\n"},
+		{"networksetup -getautoproxyurl Wi-Fi", 0, "URL: http://127.0.0.1:1081/proxy.pac?v=300\nEnabled: Yes\n"},
+	}}
+	s := mac(r)
+	s.Guard = g.ask
+	if got, err := s.Install(1081, backup); err != nil || got != "ok" {
+		t.Fatal(got, err)
+	}
+	if b := readBackup(t, backup); strings.Contains(b, "proxy.pac") {
+		t.Errorf("our own rule is in the backup: %s", b)
+	}
+	r = &runner{answers: []answer{
+		{"networksetup -listallnetworkservices", 0, "An asterisk (*) denotes that a network service is disabled.\nWi-Fi\n"},
+		{"networksetup -getautoproxyurl Wi-Fi", 0, "URL: http://127.0.0.1:1081/proxy.pac?v=400\nEnabled: No\n"},
+	}}
+	if got, err := mac(r).Uninstall(backup); err != nil || got != "restored" {
+		t.Fatal(got, err)
+	}
+	if len(changes(r)) != 0 {
+		t.Errorf("our own rule comes back on after the removal: %v", changes(r))
+	}
+}
+
+// A backup written before this, with our own rule in it (another account's at 1082, ours at
+// 1081 switched on): Restore switches ours off and never puts one of ours back.
+func TestRestoreNeverPutsBackOneOfOurRules(t *testing.T) {
+	saved := &Snapshot{Mac: &Mac{Services: []Service{
+		{Name: "Wi-Fi", URL: "http://127.0.0.1:1081/proxy.pac?v=100", Enabled: true},
+		{Name: "Ethernet", URL: "http://127.0.0.1:1082/proxy.pac?v=7", Enabled: false},
+	}}}
+	r := &runner{answers: []answer{
+		{"networksetup -listallnetworkservices", 0, "An asterisk (*) denotes that a network service is disabled.\nWi-Fi\nEthernet\n"},
+		{"networksetup -getautoproxyurl Wi-Fi", 0, "URL: http://127.0.0.1:1081/proxy.pac?v=200\nEnabled: Yes\n"},
+		{"networksetup -getautoproxyurl Ethernet", 0, "URL: http://127.0.0.1:1082/proxy.pac?v=9\nEnabled: No\n"},
+	}}
+	if err := mac(r).Restore(saved); err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{{"networksetup", "-setautoproxystate", "Wi-Fi", "off"}}
+	if got := changes(r); !reflect.DeepEqual(got, want) {
+		t.Errorf("changes %v, want %v", got, want)
+	}
+}

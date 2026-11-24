@@ -457,6 +457,17 @@ jobs:
           wait_rule 1 || fail "the rule does not come back with this account's core"
           case "$(ask state)" in "on "*) ;; *) fail "the guard does not say on again: $(ask state)" ;; esac
           echo "on again with this account's core"
+          # A .pkg over this one, or Repair replacing an older guard: it is replaced while it runs.
+          gpid() { sudo launchctl print system/de.davidvinu.uni-vpn.guard | awk '$1 == "pid" { print $3; exit }'; }
+          old=$(gpid)
+          sudo "/Applications/Uni VPN.app/Contents/Resources/app/bin/uni-vpn-core" guard install || fail "the guard could not be replaced while it runs"
+          new=$(gpid)
+          { [ -n "$new" ] && [ "$new" != "$old" ]; } || fail "the guard was not started again (before $old, now $new)"
+          on=""
+          for i in $(seq 20); do case "$(ask state)" in "on "*) on=1; break ;; esac; sleep 0.5; done
+          [ -n "$on" ] || fail "the replaced guard does not say on: $(ask state)"
+          wait_rule 1 || fail "the rule is not on after the guard was replaced"
+          echo "replaced while it runs (pid $old, now $new)"
           sudo cat /Library/Logs/uni-vpn-guard.log
           open -g -a "/Applications/Uni VPN.app" --args --hidden
       # Every university website goes through the service: launchd must not run it throttled like
@@ -608,6 +619,7 @@ jobs:
           test ! -e /Library/PrivilegedHelperTools/de.davidvinu.uni-vpn.guard || fail "the guard's program is still there"
           test ! -e /Library/Logs/uni-vpn-guard.log || fail "the guard's log is still there"
           sleep 3
+          test ! -e "/Library/Application Support/Uni VPN" || fail "the guard's list of accounts is still there"
           if sudo launchctl print system/de.davidvinu.uni-vpn.guard >/dev/null 2>&1; then fail "the guard still runs"; fi
 
   linux-packages:

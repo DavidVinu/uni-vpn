@@ -96,7 +96,7 @@ them.
 | "No internet" | On hotel, train or café Wi-Fi, open any website and accept the Wi-Fi's sign-in page. Uni VPN continues by itself. |
 | "Your saved passwords are locked" | Sign out of your computer and back in, then click **Try again**. |
 | "Part of Uni VPN is missing" or "missing a permission" | Click **Repair**, and click Yes or enter your computer's password if it asks (on a Mac with a standard account, an administrator's name and password). |
-| Mac: "Uni VPN needs an administrator of this Mac once more" | Click **Repair**, and let an administrator enter their name and password. If the Mac says Uni VPN may not run in the background, an administrator switches it on again in System Settings, General, Login Items, then click **Repair**. |
+| Mac: "Uni VPN needs an administrator of this Mac once more" | Click **Repair**, and let an administrator enter their name and password. If the Mac says Uni VPN may not run in the background, an administrator switches de.davidvinu.uni-vpn.guard and uni-vpn-core on again in System Settings, General, Login Items, then click **Repair**. |
 | "Another program is in the way" or "Uni VPN is not running" | Restart the computer. |
 | "Your university signs in through a web page" | Uni VPN cannot do that yet. Use the Cisco VPN for now. |
 | A university page does not load the first time after a break | Reload the page. |

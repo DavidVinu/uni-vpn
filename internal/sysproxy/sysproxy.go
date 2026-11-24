@@ -395,6 +395,10 @@ func (s *System) Restore(saved *Snapshot) error {
 			if known && !slices.Contains(names, e.Name) {
 				continue
 			}
+			if LooksOurs(e.URL) {
+				// A backup from before withoutOurs: ours is never put back, only switched off.
+				e = Service{Name: e.Name}
+			}
 			if svc, ok := now[e.Name]; ok && ((e.URL == "" && !svc.Enabled) || (e.URL != "" && svc.URL == e.URL && svc.Enabled == e.Enabled)) {
 				continue
 			}
@@ -550,7 +554,7 @@ func backUpNew(backup string, now *Snapshot, httpPort int, keep func(Service) bo
 		if known[svc.Name] || !keep(svc) {
 			continue
 		}
-		if IsOurs(svc.URL, httpPort) {
+		if IsOurs(svc.URL, httpPort) || LooksOurs(svc.URL) {
 			svc = Service{Name: svc.Name}
 		}
 		saved.Mac.Services = append(saved.Mac.Services, svc)
@@ -564,6 +568,25 @@ func backUpNew(backup string, now *Snapshot, httpPort int, keep func(Service) bo
 		return nil
 	}
 	return added
+}
+
+// withoutOurs: snap for the first backup, a macOS service with one of our rules as unset. A
+// Mac's rule is the computer's, so it can be another account's, or ours already (the core just
+// started said "want" and the guard switched it on); put back once the guard is gone (the app
+// went to the Trash), it would stay on with nobody to switch it off.
+func (snap *Snapshot) withoutOurs(httpPort int) *Snapshot {
+	if snap.Mac == nil {
+		return snap
+	}
+	c := *snap
+	c.Mac = &Mac{Services: make([]Service, 0, len(snap.Mac.Services))}
+	for _, svc := range snap.Mac.Services {
+		if IsOurs(svc.URL, httpPort) || LooksOurs(svc.URL) {
+			svc = Service{Name: svc.Name}
+		}
+		c.Mac.Services = append(c.Mac.Services, svc)
+	}
+	return &c
 }
 
 // past: version, or past the version in url when that is as new or newer.
@@ -661,7 +684,7 @@ func (s *System) Install(httpPort int, backup string) (string, error) {
 		if err := mkdirLast(filepath.Dir(backup), 0o700); err != nil {
 			return "", err
 		}
-		data, err := before.MarshalJSON()
+		data, err := before.withoutOurs(httpPort).MarshalJSON()
 		if err != nil {
 			return "", err
 		}

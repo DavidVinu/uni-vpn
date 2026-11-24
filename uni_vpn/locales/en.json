@@ -172,7 +172,7 @@
   "menu.background_open": "Open Settings",
   "menu.not_now": "Not Now",
   "menu.guard_off": "Uni VPN may not run in the background",
-  "menu.guard_hint": "An administrator of this Mac has to switch Uni VPN on again under Allow in the Background. Then click Repair.",
+  "menu.guard_hint": "An administrator of this Mac has to switch de.davidvinu.uni-vpn.guard and uni-vpn-core on again under Allow in the Background. Then click Repair.",
   "msg.not_connected": "Not connected",
   "msg.disconnected": "Disconnected",
   "msg.connecting": "Connecting",

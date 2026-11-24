@@ -52,8 +52,9 @@ by what the request says.
 | `version` | the guard's version (`sysproxy.GuardVersion`) | a number |
 
 Each account has one entry, kept in `/Library/Application Support/Uni VPN/guard.json` (root,
-0600) so the rule is right from boot. A request is at most 64 bytes, read within 2 s, at most
-32 connections at once and 4 of one account. Answers are for the asking account only.
+0600) so the rule is right from boot. A request is at most 64 bytes, read within 2 s (before
+it waits for the guard's networksetup), at most 32 connections at once and 4 of one account
+(also while the guard is busy). Answers are for the asking account only.
 
 Our rule is an address `http://127.0.0.1:P/proxy.pac` (with or without `?v=`) at 1081, at the
 port of any account's entry, or at one of the last 16 ports an entry had. The last list may
@@ -73,7 +74,9 @@ Settings it could not read are read again at the next look.
   setting that is not ours as before (directly, or with an administrator's password), then
   `want`.
 - Uninstall (`sysproxy.Uninstall`): `unwant`, then put back only the settings that were not
-  ours; the guard switches ours off.
+  ours; the guard switches ours off. The backup never holds one of our rules (any account's,
+  or ours that the guard switched on for the core just started): it records them as unset, so
+  a removal after the guard has gone switches ours off and never puts it back.
 - The core: `want` when it starts, `refresh` when the websites change. Cover, Withdraw and
   putting the rule back are the guard's; the core does nothing there.
 - Without a guard (it is not installed, or does not answer), everything works as before.
@@ -84,6 +87,9 @@ Settings it could not read are read again at the next look.
   `/Library/PrivilegedHelperTools/de.davidvinu.uni-vpn.guard`, writes
   `/Library/LaunchDaemons/de.davidvinu.uni-vpn.guard.plist` and starts it, before it sets up the
   user. The installer already asks for an administrator, so a new install never asks again.
+- Over a running guard (a .pkg over this one, Repair replacing an older guard), `guard
+  install` boots the old one out and starts the new one, again up to five times while the old
+  one is still going away.
 - Each install also adopts the accounts set up before it: every home folder in `/Users` with
   its own `~/Library/LaunchAgents/de.davidvinu.uni-vpn.plist` gets an entry for the port in
   its `~/.config/uni-vpn/config.toml` (1081 without one), unless it has one. Their cores may be

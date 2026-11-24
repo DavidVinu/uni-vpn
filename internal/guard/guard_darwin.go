@@ -187,8 +187,17 @@ func install() error {
 	// Accounts set up before the guard: their cores may never ask for the rule.
 	data, _ := os.ReadFile(StatePath)
 	New(world(slog.New(slog.NewTextHandler(io.Discard, nil))), data).Adopt(servicesIn("/Users"))
-	if out, err := exec.Command("/bin/launchctl", "bootstrap", "system", PlistPath).CombinedOutput(); err != nil {
-		return fmt.Errorf("launchctl bootstrap: %v: %s", err, out)
+	// Right after bootout the old guard may still be going away ("Bootstrap failed: 5"), as for
+	// the service (internal/service): a .pkg over this one, or Repair replacing an older guard.
+	for attempt := 0; ; attempt++ {
+		out, err := exec.Command("/bin/launchctl", "bootstrap", "system", PlistPath).CombinedOutput()
+		if err == nil {
+			break
+		}
+		if attempt == 4 {
+			return fmt.Errorf("launchctl bootstrap: %v: %s", err, out)
+		}
+		time.Sleep(time.Second)
 	}
 	for range 50 {
 		if _, err := sysproxy.AskGuard("state"); err == nil {
