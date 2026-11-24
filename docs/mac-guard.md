@@ -84,7 +84,9 @@ minute (a service added since, a change by someone else).
   the app says so (`msg.guard_missing`) and offers the button. An administrator's account keeps
   working as before (it can switch the rule off) until its next Repair or .pkg.
 - When the app has gone to the Trash for 10 minutes, the guard switches our rule off and
-  removes itself; each account's core removes itself as before.
+  removes itself; each account's core removes itself as before. A guard set up without the app
+  (`get.sh`, a clone) has no Trash to watch: it removes itself once the last account that wanted
+  the rule said `unwant`.
 
 ## Limits
 

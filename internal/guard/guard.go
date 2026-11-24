@@ -9,6 +9,7 @@ package guard
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -79,6 +80,8 @@ type Guard struct {
 	ports    []int  // every port our rule had, newest last
 	applied  string // what it set last ("on P V" or "off"), "" before the first look
 	lastRead time.Time
+	// abandoned: the last account that wanted the rule no longer does (Abandoned).
+	abandoned bool
 }
 
 // New starts from data (StatePath), nil or broken for none.
@@ -248,6 +251,7 @@ func (g *Guard) Handle(uid uint32, request string) string {
 		if err != nil || !validPort(port) || uid == 0 {
 			return "error"
 		}
+		g.abandoned = false
 		if !known || e.Port != port {
 			g.accounts[uid] = entry{Port: port, Version: max(now, e.Version+1)}
 			g.addPort(port) // ours from now on, also after this account's port changes again
@@ -264,6 +268,7 @@ func (g *Guard) Handle(uid uint32, request string) string {
 	case fields[0] == "unwant" && len(fields) == 1:
 		if known {
 			delete(g.accounts, uid)
+			g.abandoned = len(g.accounts) == 0
 			g.saveLocked()
 		}
 	case fields[0] == "state" && len(fields) == 1:
@@ -284,14 +289,28 @@ func (g *Guard) Handle(uid uint32, request string) string {
 	return "off"
 }
 
+// Abandoned: the last account that wanted the rule said "unwant" and none asked since. A guard
+// set up without the app ends then, since no Trash will tell it.
+func (g *Guard) Abandoned() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.abandoned
+}
+
 // Serve answers each connection of l with one request; peer names the account that connected.
-// At most maxConns at once, each within readWithin.
+// At most maxConns at once, each within readWithin. Only a closed l ends it: after another
+// failed accept (too many open files) it waits a moment and goes on.
 func (g *Guard) Serve(l net.Listener, peer func(net.Conn) (uint32, error)) error {
 	slots := make(chan struct{}, maxConns)
 	for {
 		c, err := l.Accept()
-		if err != nil {
+		if errors.Is(err, net.ErrClosed) {
 			return err
+		}
+		if err != nil {
+			g.w.Log.Error("Could not accept", "err", err)
+			time.Sleep(100 * time.Millisecond)
+			continue
 		}
 		select {
 		case slots <- struct{}{}:
@@ -321,8 +340,13 @@ func (g *Guard) serve(c net.Conn, peer func(net.Conn) (uint32, error)) {
 	_, _ = c.Write([]byte(answer + "\n"))
 }
 
-// Plist is the LaunchDaemon that runs the guard as root from boot.
-func Plist() string {
+// Plist is the LaunchDaemon that runs the guard as root from boot; app: it was set up from the
+// app (PackageCore) and removes itself once the app has gone to the Trash.
+func Plist(app bool) string {
+	arg := ""
+	if app {
+		arg = "\n    <string>--app</string>"
+	}
 	return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -332,7 +356,7 @@ func Plist() string {
   <key>ProgramArguments</key>
   <array>
     <string>` + Helper + `</string>
-    <string>guard</string>
+    <string>guard</string>` + arg + `
   </array>
   <key>RunAtLoad</key>
   <true/>

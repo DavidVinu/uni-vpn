@@ -22,9 +22,10 @@ import (
 	"github.com/DavidVinu/uni-vpn/internal/sysproxy"
 )
 
-// Run is the command "uni-vpn-core guard": no argument runs the guard (the LaunchDaemon),
-// "install" puts this program in place as the guard and starts it, "remove" switches our rule
-// off and removes the guard. All of them as root.
+// Run is the command "uni-vpn-core guard": no argument runs the guard (the LaunchDaemon), and
+// "--app" one that removes itself once the app has gone to the Trash; "install" puts this
+// program in place as the guard and starts it, "remove" switches our rule off and removes the
+// guard. All of them as root.
 func Run(args []string) int {
 	if os.Geteuid() != 0 {
 		fmt.Fprintln(os.Stderr, "uni-vpn guard: needs root")
@@ -33,7 +34,9 @@ func Run(args []string) int {
 	var err error
 	switch {
 	case len(args) == 0:
-		err = serve()
+		err = serve(false)
+	case len(args) == 1 && args[0] == "--app":
+		err = serve(true)
 	case len(args) == 1 && args[0] == "install":
 		err = install()
 	case len(args) == 1 && args[0] == "remove":
@@ -105,7 +108,9 @@ func isFile(path string) bool {
 	return err == nil && st.Mode().IsRegular()
 }
 
-func serve() error {
+// serve runs the guard; app: it came with the app, and ends once the app is in the Trash. One
+// set up without the app (get.sh, a clone) ends once no account wants the rule any more.
+func serve(app bool) error {
 	if st, err := os.Stat(LogPath); err == nil && st.Size() > 1<<20 {
 		_ = os.Truncate(LogPath, 0)
 	}
@@ -139,6 +144,13 @@ func serve() error {
 		g.Look()
 		// Dragged to the Trash: each account's core removes itself, and so does the guard.
 		switch {
+		case !app:
+			if g.Abandoned() {
+				log.Info("No account wants the rule: removing the guard")
+				l.Close()
+				g.Off()
+				return remove(true)
+			}
 		case isFile(PackageCore):
 			missing = time.Time{}
 		case missing.IsZero():
@@ -167,7 +179,7 @@ func install() error {
 	if err := copyFile(exe, Helper, 0o755); err != nil {
 		return err
 	}
-	if err := writeFile(PlistPath, []byte(Plist()), 0o644); err != nil {
+	if err := writeFile(PlistPath, []byte(Plist(isFile(PackageCore))), 0o644); err != nil {
 		return err
 	}
 	_ = exec.Command("/bin/launchctl", "bootout", "system/"+Label).Run()

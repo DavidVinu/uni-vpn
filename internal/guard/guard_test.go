@@ -312,11 +312,90 @@ func TestServeAnswersOneLinePerConnection(t *testing.T) {
 	}
 }
 
+// A failed accept (too many open files) does not leave the guard running without answers;
+// only a closed socket ends Serve.
+func TestServeKeepsAnsweringAfterAFailedAccept(t *testing.T) {
+	m := newMac("Wi-Fi", "")
+	m.console, m.listeners[1081] = student, student
+	g := New(m.world(), nil)
+	l := &flakyListener{conns: make(chan net.Conn), fails: 3}
+	done := make(chan error, 1)
+	go func() { done <- g.Serve(l, func(net.Conn) (uint32, error) { return student, nil }) }()
+	mine, theirs := net.Pipe()
+	defer mine.Close()
+	l.conns <- theirs
+	_ = mine.SetDeadline(time.Now().Add(5 * time.Second))
+	_, _ = mine.Write([]byte("want 1081\n"))
+	if line, _ := bufio.NewReader(mine).ReadString('\n'); line != "on 1800000000\n" {
+		t.Fatalf("%q", line)
+	}
+	close(l.conns)
+	select {
+	case err := <-done:
+		if !errors.Is(err, net.ErrClosed) {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Serve did not end with the socket")
+	}
+}
+
+type flakyListener struct {
+	conns chan net.Conn
+	fails int
+}
+
+func (l *flakyListener) Accept() (net.Conn, error) {
+	if l.fails > 0 {
+		l.fails--
+		return nil, errors.New("accept: too many open files")
+	}
+	c, ok := <-l.conns
+	if !ok {
+		return nil, net.ErrClosed
+	}
+	return c, nil
+}
+func (l *flakyListener) Close() error   { return nil }
+func (l *flakyListener) Addr() net.Addr { return &net.UnixAddr{Name: "fake", Net: "unix"} }
+
+// Set up without the app (get.sh, a clone): nothing goes to the Trash, so the guard ends once
+// the last account that wanted the rule no longer does.
+func TestTheLastUnwantEndsAGuardWithoutTheApp(t *testing.T) {
+	m := newMac("Wi-Fi", "")
+	m.console, m.listeners[1081] = student, student
+	g := New(m.world(), nil)
+	if g.Abandoned() {
+		t.Fatal("abandoned before anyone asked")
+	}
+	g.Handle(student, "want 1081")
+	g.Handle(sibling, "want 2081")
+	g.Handle(student, "unwant")
+	if g.Abandoned() {
+		t.Fatal("abandoned while another account wants it")
+	}
+	g.Handle(sibling, "unwant")
+	if !g.Abandoned() || m.state("Wi-Fi") == ours {
+		t.Fatal(g.Abandoned(), m.services["Wi-Fi"])
+	}
+	// Wanted again before it went: not abandoned.
+	g.Handle(student, "want 1081")
+	if g.Abandoned() {
+		t.Fatal("abandoned after a new want")
+	}
+}
+
 func TestPlistRunsTheHelperAsTheGuard(t *testing.T) {
-	p := Plist()
-	for _, want := range []string{"<string>" + Label + "</string>", "<string>" + Helper + "</string>", "<string>guard</string>", "<key>KeepAlive</key>"} {
-		if !strings.Contains(p, want) {
-			t.Error(want)
+	for _, app := range []bool{false, true} {
+		p := Plist(app)
+		for _, want := range []string{"<string>" + Label + "</string>", "<string>" + Helper + "</string>", "<string>guard</string>", "<key>KeepAlive</key>"} {
+			if !strings.Contains(p, want) {
+				t.Error(app, want)
+			}
+		}
+		// Only a guard set up from the app watches for it in the Trash.
+		if strings.Contains(p, "<string>--app</string>") != app {
+			t.Error(app, p)
 		}
 	}
 }
