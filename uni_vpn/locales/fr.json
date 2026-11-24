@@ -171,6 +171,8 @@
   "menu.background_hint": "Pour qu’il démarre tout seul, autorisez Uni VPN et uni-vpn-core en arrière-plan.",
   "menu.background_open": "Ouvrir les réglages",
   "menu.not_now": "Plus tard",
+  "menu.guard_off": "Uni VPN ne peut pas s’exécuter en arrière-plan",
+  "menu.guard_hint": "Un administrateur de ce Mac doit réactiver Uni VPN dans « Autoriser en arrière-plan ». Cliquez ensuite sur Réparer.",
   "msg.not_connected": "Non connecté",
   "msg.disconnected": "Déconnecté",
   "msg.connecting": "Connexion…",

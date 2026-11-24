@@ -17,8 +17,28 @@ import (
 // screen, and only while that account's program holds the status port.
 const GuardSocket = "/var/run/de.davidvinu.uni-vpn.guard.sock"
 
+// GuardVersion is what the guard does: raise it with every change to internal/guard, so that
+// setup and Repair put the newer guard in place (it comes only with the .pkg or an
+// administrator's password, never with the automatic updates) and a standard account asks for
+// Repair until then (daemon Unguarded).
+const GuardVersion = 1
+
 // GuardClient sends one request to the guard and returns its answer ("on V", "off", "held").
 type GuardClient func(request string) (string, error)
+
+// GuardState: running, the guard answers; current, it is at least GuardVersion. One that does
+// not know "version" is older.
+func GuardState(ask GuardClient) (running, current bool) {
+	if ask == nil {
+		return false, false
+	}
+	if v, err := ask("version"); err == nil {
+		n, err := strconv.Atoi(v)
+		return true, err == nil && n >= GuardVersion
+	}
+	_, err := ask("state")
+	return err == nil, false
+}
 
 // AskGuard is the GuardClient of this Mac.
 func AskGuard(request string) (string, error) {
@@ -64,10 +84,15 @@ func guardVersion(answer string) int64 {
 	return 0
 }
 
-var reOurs = regexp.MustCompile(`^http://127\.0\.0\.1:[0-9]+/proxy\.pac(\?v=[0-9]+)?$`)
+var reOurs = regexp.MustCompile(`^http://127\.0\.0\.1:[0-9]+/proxy\.pac\?v=[0-9]+$`)
 
-// LooksOurs: url is the address of a uni-vpn rule, at any port.
-func LooksOurs(url string) bool { return reOurs.MatchString(url) }
+// defaultHTTPPort is the status port of a config.toml without http_port.
+const defaultHTTPPort = 1081
+
+// LooksOurs: url is the address of a uni-vpn rule: one with a version (only uni-vpn writes
+// ?v=) at any port, or the plain one at 1081. Another local tool's rule
+// (http://127.0.0.1:1089/proxy.pac of a proxy app) is not.
+func LooksOurs(url string) bool { return reOurs.MatchString(url) || url == PacURL(defaultHTTPPort) }
 
 // installGuarded is Install where the guard runs: it switches our rule on and off itself, so
 // only a setting that is not ours is replaced here (as Apply did, with an administrator's

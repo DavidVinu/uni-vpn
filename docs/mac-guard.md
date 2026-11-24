@@ -49,17 +49,23 @@ by what the request says.
 | `refresh` | a new address for this account's rule (the websites changed) | as `want` |
 | `unwant` | this account no longer wants it (uninstall) | `off` |
 | `state` | what it does for this account | as `want` |
+| `version` | the guard's version (`sysproxy.GuardVersion`) | a number |
 
 Each account has one entry, kept in `/Library/Application Support/Uni VPN/guard.json` (root,
 0600) so the rule is right from boot. A request is at most 64 bytes, read within 2 s, at most
-8 connections at once; `refresh` takes effect at most once a second. Answers are for the
-asking account only.
+32 connections at once and 4 of one account. Answers are for the asking account only.
+
+Our rule is an address `http://127.0.0.1:P/proxy.pac` (with or without `?v=`) at 1081, at the
+port of any account's entry, or at one of the last 16 ports an entry had. The last list may
+forget a port (any account can name many); 1081 and the entries' ports are never forgotten.
 
 ## When it looks
 
-Every 2 s it reads the owner of `/dev/console` and the listener of each wanted port (no
-programs run). `networksetup` runs only when the rule should change, at a request, and once a
-minute (a service added since, a change by someone else).
+Every 2 s it reads the owner of `/dev/console` and the listener of that account's port (no
+programs run). `networksetup` runs when the rule should change (also a new address from
+`refresh`), at a `want` (setup may just have put our address over another setting), at most
+once a second for that, and once a minute (a service added since, a change by someone else).
+Settings it could not read are read again at the next look.
 
 ## Who uses it
 
@@ -78,13 +84,25 @@ minute (a service added since, a change by someone else).
   `/Library/PrivilegedHelperTools/de.davidvinu.uni-vpn.guard`, writes
   `/Library/LaunchDaemons/de.davidvinu.uni-vpn.guard.plist` and starts it, before it sets up the
   user. The installer already asks for an administrator, so a new install never asks again.
-- A Mac set up before: Repair installs it, with one administrator's password (the same macOS
-  dialog as SX-2): `uni-vpn-core guard install` of the account's own copy, as root. There a
-  standard account, which cannot switch the rule off itself, connects only after that Repair:
-  the app says so (`msg.guard_missing`) and offers the button. An administrator's account keeps
-  working as before (it can switch the rule off) until its next Repair or .pkg.
+- Each install also adopts the accounts set up before it: every home folder in `/Users` with
+  its own `~/Library/LaunchAgents/de.davidvinu.uni-vpn.plist` gets an entry for the port in
+  its `~/.config/uni-vpn/config.toml` (1081 without one), unless it has one. Their cores may be
+  older than the guard and never say `want` (with automatic updates off they stay so); without
+  an entry the guard would keep their rule off.
+- A Mac set up before, or with a guard older than the core's (`version` below
+  `sysproxy.GuardVersion`, which is raised with every change to the guard that must reach every
+  Mac): setup and Repair install it before the service starts, with one administrator's
+  password (the same macOS dialog as SX-2): `uni-vpn-core guard install` of the account's own
+  copy, as root. There a standard account, which cannot switch the rule off itself, connects
+  only after that Repair: the app says so (`msg.guard_missing`) and offers the button. An
+  administrator's account keeps working as before (it can switch the rule off) until its next
+  Repair or .pkg.
+- Switched off under System Settings, General, Login Items ("Allow in the Background"), the
+  guard cannot start, and Repair cannot help: the Mac app says so (`menu.guard_off`) and opens
+  that page for an administrator.
 - When the app has gone to the Trash for 10 minutes, the guard switches our rule off and
-  removes itself; each account's core removes itself as before. A guard set up without the app
+  removes itself and its log; each account's core removes itself as before, and puts back only
+  what differs from its backup (so a standard account is asked for no password there). A guard set up without the app
   (`get.sh`, a clone) has no Trash to watch: it removes itself once the last account that wanted
   the rule said `unwant`.
 
@@ -92,7 +110,9 @@ minute (a service added since, a change by someone else).
 
 - While another account is at the screen, the browsers left open in the background of a
   switched-away account follow the rule of the account at the screen.
-- The guard is updated with the .pkg or by Repair, not by the automatic updates.
+- The guard is updated with the .pkg or by Repair, not by the automatic updates: it runs as
+  root, and the account's own copy of the core, which the automatic updates replace, is the
+  account's to change. A newer `GuardVersion` makes a standard account ask for Repair.
 
 ## Tests
 

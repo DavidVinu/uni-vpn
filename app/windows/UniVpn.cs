@@ -492,9 +492,25 @@ class TrayMenu : NativeWindow, IDisposable
         CreateHandle(new CreateParams());
     }
 
+    // Windows' build number. Environment.OSVersion says 6.2.9200 on Windows 10 and 11 to a
+    // program without a manifest that names them (this one).
+    static int Build()
+    {
+        try
+        {
+            using (RegistryKey key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion"))
+            {
+                int build;
+                object value = key == null ? null : key.GetValue("CurrentBuildNumber");
+                return value != null && int.TryParse(value.ToString(), out build) ? build : 0;
+            }
+        }
+        catch (Exception) { return 0; }
+    }
+
     static void FollowTaskbar()
     {
-        if (Environment.OSVersion.Version.Major < 10 || Environment.OSVersion.Version.Build < 18362) return;
+        if (Build() < 18362) return;  // the dark menus came with Windows 10 1903
         if (SystemInformation.HighContrast) return;  // a contrast theme draws its own colors
         try
         {

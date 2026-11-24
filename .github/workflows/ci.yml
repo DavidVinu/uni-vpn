@@ -434,11 +434,18 @@ jobs:
           [ "$(ask state)" = off ] || fail "the guard does not say off: $(ask state)"
           echo "off without this account's core"
           cd /tmp
+          # macOS keeps the runner's closed connections on 1081 for about 30 s and lets no other
+          # account bind the port meanwhile: nobody tries for up to 90 s.
           sudo -u nobody python3 -c 'import socket, time
           s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-          s.bind(("127.0.0.1", 1081)); s.listen(5); time.sleep(90)' &
+          for i in range(180):
+              try:
+                  s.bind(("127.0.0.1", 1081)); break
+              except OSError:
+                  time.sleep(0.5)
+          s.listen(5); time.sleep(90)' &
           other=$!
-          for i in $(seq 20); do listens | grep -q nobody && break; sleep 0.5; done
+          for i in $(seq 200); do listens | grep -q nobody && break; sleep 0.5; done
           listens | grep nobody || fail "nobody's program does not listen on 1081"
           [ "$(ask state)" = held ] || fail "the guard does not see another account's program: $(ask state)"
           stays_off || fail "the rule came on for another account's program"
@@ -599,6 +606,7 @@ jobs:
           done
           test ! -e /Library/LaunchDaemons/de.davidvinu.uni-vpn.guard.plist || fail "the guard is still there"
           test ! -e /Library/PrivilegedHelperTools/de.davidvinu.uni-vpn.guard || fail "the guard's program is still there"
+          test ! -e /Library/Logs/uni-vpn-guard.log || fail "the guard's log is still there"
           sleep 3
           if sudo launchctl print system/de.davidvinu.uni-vpn.guard >/dev/null 2>&1; then fail "the guard still runs"; fi
 

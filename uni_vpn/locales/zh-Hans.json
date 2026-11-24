@@ -171,6 +171,8 @@
   "menu.background_hint": "要让它自动启动，请允许 Uni VPN 和 uni-vpn-core 在后台运行。",
   "menu.background_open": "打开设置",
   "menu.not_now": "以后",
+  "menu.guard_off": "Uni VPN 不能在后台运行",
+  "menu.guard_hint": "需要这台 Mac 的管理员在“允许在后台”中重新打开 Uni VPN。然后点击“修复”。",
   "msg.not_connected": "未连接",
   "msg.disconnected": "已断开",
   "msg.connecting": "正在连接",

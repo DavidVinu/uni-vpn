@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -143,10 +144,14 @@ func TestGuardedRefreshCoverAndWithdrawTellTheGuard(t *testing.T) {
 	}
 }
 
+// Another local tool's rule (a proxy app's PAC at 127.0.0.1:1089/proxy.pac) is not ours: only
+// uni-vpn writes ?v=, and the plain address only at 1081.
 func TestLooksOurs(t *testing.T) {
 	for url, want := range map[string]bool{
 		"http://127.0.0.1:1081/proxy.pac":        true,
 		"http://127.0.0.1:2081/proxy.pac?v=17":   true,
+		"http://127.0.0.1:1089/proxy.pac":        false,
+		"http://127.0.0.1:10810/proxy.pac":       false,
 		"http://127.0.0.1:1081/proxy.pac?v=x":    false,
 		"http://localhost:1081/proxy.pac":        false,
 		"http://127.0.0.1:1081/other.pac":        false,
@@ -155,5 +160,71 @@ func TestLooksOurs(t *testing.T) {
 		if LooksOurs(url) != want {
 			t.Error(url)
 		}
+	}
+}
+
+// Audit 9 (core): setup replaced another tool's local rule; uninstall puts it back.
+func TestGuardedUninstallPutsBackAnotherToolsLocalRule(t *testing.T) {
+	backup := tempBackup(t, "b.json")
+	if err := os.WriteFile(backup, []byte(`{"services": {"Wi-Fi": {"url": "http://127.0.0.1:1089/proxy.pac", "enabled": true}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e, g := &elevated{}, &fakeGuard{answer: "off"}
+	r := &runner{answers: standardAnswers(
+		answer{"networksetup -getautoproxyurl Wi-Fi", 0, "URL: http://127.0.0.1:1081/proxy.pac?v=7\nEnabled: No\n"})}
+	got, err := guardedMac(r, e, g).Uninstall(backup)
+	want := [][]string{{"networksetup", "-setautoproxyurl", "Wi-Fi", "http://127.0.0.1:1089/proxy.pac"}}
+	if err != nil || got != "restored" || !reflect.DeepEqual(e.cmds, want) {
+		t.Fatal(got, err, e.cmds)
+	}
+}
+
+// Without a backup (or a broken one) the guard still hears that this account no longer wants the
+// rule.
+func TestGuardedUninstallWithoutABackupStillUnwants(t *testing.T) {
+	for _, data := range []string{"", "{broken"} {
+		backup := tempBackup(t, "b.json")
+		if data != "" {
+			if err := os.WriteFile(backup, []byte(data), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		g := &fakeGuard{answer: "off"}
+		got, _ := guardedMac(&runner{answers: standardAnswers()}, &elevated{}, g).Uninstall(backup)
+		if got != "unset" || !reflect.DeepEqual(g.got, []string{"unwant"}) {
+			t.Fatal(data, got, g.got)
+		}
+	}
+}
+
+// The guard's version: current, older (it does not know "version", or names a smaller one) or
+// not running.
+func TestGuardState(t *testing.T) {
+	ask := func(answers map[string]string) GuardClient {
+		return func(request string) (string, error) {
+			if a, ok := answers[request]; ok {
+				return a, nil
+			}
+			return "", errors.New("the guard refused " + request)
+		}
+	}
+	current := strconv.Itoa(GuardVersion)
+	older := strconv.Itoa(GuardVersion - 1)
+	for _, c := range []struct {
+		answers          map[string]string
+		running, current bool
+	}{
+		{map[string]string{"version": current, "state": "off"}, true, true},
+		{map[string]string{"version": strconv.Itoa(GuardVersion + 1), "state": "off"}, true, true},
+		{map[string]string{"version": older, "state": "off"}, true, false},
+		{map[string]string{"state": "on 7"}, true, false},
+		{map[string]string{}, false, false},
+	} {
+		if running, cur := GuardState(ask(c.answers)); running != c.running || cur != c.current {
+			t.Error(c.answers, running, cur)
+		}
+	}
+	if running, cur := GuardState(nil); running || cur {
+		t.Error("nil:", running, cur)
 	}
 }

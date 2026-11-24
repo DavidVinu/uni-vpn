@@ -171,6 +171,8 @@
   "menu.background_hint": "Damit es von selbst startet, erlaube Uni VPN und uni-vpn-core im Hintergrund.",
   "menu.background_open": "Einstellungen öffnen",
   "menu.not_now": "Nicht jetzt",
+  "menu.guard_off": "Uni VPN darf nicht im Hintergrund laufen",
+  "menu.guard_hint": "Ein Administrator dieses Mac muss Uni VPN unter „Im Hintergrund erlauben“ wieder einschalten. Klicke dann auf Reparieren.",
   "msg.not_connected": "Nicht verbunden",
   "msg.disconnected": "Getrennt",
   "msg.connecting": "Wird verbunden",

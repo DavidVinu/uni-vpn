@@ -40,6 +40,7 @@ struct Status {
     var reachable = false
     var repairing = false
     var instance = ""
+    var messageId = ""
     var menu: [String: String] = [:]
     var on: Bool { state == "connected" || (busy && state != "disconnecting") }
 }
@@ -144,6 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     var restarting = false
     var setupStarted = false
     var askedBackground = false
+    var askedGuard = false
     // The window loads the status port's page only once status.json says the id in the
     // instance file (or without the file, as before, once this account is set up): another
     // account may run anything on the port. shown is what the window has instead: nil (that
@@ -492,6 +494,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
                 next.repairing = json["repairing"] as? Bool ?? false
                 next.menu = json["menu"] as? [String: String] ?? [:]
                 next.instance = json["instance"] as? String ?? ""
+                next.messageId = json["message_id"] as? String ?? ""
                 next.reachable = true
             }
             DispatchQueue.main.async {
@@ -501,6 +504,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
                 if latest.repairing { self.repairSeen = Date() }
                 self.status = latest
                 self.render()
+                if latest.reachable && latest.messageId == "guard_missing" { self.askGuardIfOff() }
                 self.startServiceIfDown()
                 self.restartIfUpdated()
             }
@@ -567,11 +571,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         askedBackground = true
         // In the user's language: the service, which sends the texts, is not running.
         let say = { (key: String) in backgroundTexts()[key] ?? t(key) }
+        askLoginItems(say("menu.background_off"), say("menu.background_hint"),
+                      say("menu.background_open"), say("menu.not_now"))
+    }
+
+    // A standard account whose guard of the proxy rule does not run (msg.guard_missing,
+    // docs/mac-guard.md): when "Allow in the Background" is off for the guard (an administrator
+    // switched it off in Login Items), launchd refuses to start it and Repair cannot help. Say
+    // so and open that page, once per launch. The service runs, so it sent the texts.
+    func askGuardIfOff() {
+        guard #available(macOS 13, *), !askedGuard else { return }
+        let plist = URL(fileURLWithPath: "/Library/LaunchDaemons/de.davidvinu.uni-vpn.guard.plist")
+        guard SMAppService.statusForLegacyPlist(at: plist) == .requiresApproval else { return }
+        askedGuard = true
+        askLoginItems(t("menu.guard_off"), t("menu.guard_hint"), t("menu.background_open"), t("menu.not_now"))
+    }
+
+    // An alert whose first button opens System Settings > General > Login Items.
+    @available(macOS 13, *)
+    func askLoginItems(_ title: String, _ hint: String, _ open: String, _ later: String) {
         let alert = NSAlert()
-        alert.messageText = say("menu.background_off")
-        alert.informativeText = say("menu.background_hint")
-        alert.addButton(withTitle: say("menu.background_open"))
-        alert.addButton(withTitle: say("menu.not_now"))
+        alert.messageText = title
+        alert.informativeText = hint
+        alert.addButton(withTitle: open)
+        alert.addButton(withTitle: later)
         let answer: (NSApplication.ModalResponse) -> Void = { response in
             if response == .alertFirstButtonReturn { SMAppService.openSystemSettingsLoginItems() }
         }

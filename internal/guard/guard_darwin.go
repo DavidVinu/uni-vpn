@@ -164,7 +164,8 @@ func serve(app bool) error {
 	}
 }
 
-// install copies this program to Helper, writes the LaunchDaemon and starts it.
+// install copies this program to Helper, writes the LaunchDaemon, adopts the accounts set up
+// before it and starts it.
 func install() error {
 	exe, err := os.Executable()
 	if err != nil {
@@ -183,6 +184,9 @@ func install() error {
 		return err
 	}
 	_ = exec.Command("/bin/launchctl", "bootout", "system/"+Label).Run()
+	// Accounts set up before the guard: their cores may never ask for the rule.
+	data, _ := os.ReadFile(StatePath)
+	New(world(slog.New(slog.NewTextHandler(io.Discard, nil))), data).Adopt(servicesIn("/Users"))
 	if out, err := exec.Command("/bin/launchctl", "bootstrap", "system", PlistPath).CombinedOutput(); err != nil {
 		return fmt.Errorf("launchctl bootstrap: %v: %s", err, out)
 	}
@@ -195,15 +199,15 @@ func install() error {
 	return errors.New("the guard does not answer")
 }
 
-// remove switches our rule off and removes the guard's files; running is true for the guard
-// itself, which launchctl then ends.
+// remove switches our rule off and removes the guard's files and its log; running is true for
+// the guard itself, which launchctl then ends.
 func remove(running bool) error {
 	if !running {
 		_ = exec.Command("/bin/launchctl", "bootout", "system/"+Label).Run()
 		data, _ := os.ReadFile(StatePath)
 		New(world(slog.New(slog.NewTextHandler(io.Discard, nil))), data).Off()
 	}
-	for _, path := range []string{StatePath, sysproxy.GuardSocket, PlistPath, Helper} {
+	for _, path := range []string{StatePath, sysproxy.GuardSocket, PlistPath, Helper, LogPath} {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}

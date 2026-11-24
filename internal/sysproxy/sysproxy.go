@@ -381,9 +381,21 @@ func (s *System) Restore(saved *Snapshot) error {
 		// None of them keeps the rule on the others: uninstalling would fail at it every time.
 		names, err := s.listServices(true)
 		known := err == nil && len(names) > 0 // else each is tried
+		// What is as the backup has it already is not set again: on a standard account each
+		// change needs an administrator's password (after the app went to the Trash, the guard
+		// switched ours off before this account's core removes itself).
+		now := map[string]Service{}
+		if snap := s.Current(); snap != nil && snap.Mac != nil {
+			for _, svc := range snap.Mac.Services {
+				now[svc.Name] = svc
+			}
+		}
 		var cmds [][]string
 		for _, e := range saved.Mac.Services {
 			if known && !slices.Contains(names, e.Name) {
+				continue
+			}
+			if svc, ok := now[e.Name]; ok && ((e.URL == "" && !svc.Enabled) || (e.URL != "" && svc.URL == e.URL && svc.Enabled == e.Enabled)) {
 				continue
 			}
 			if e.URL != "" {
@@ -771,13 +783,20 @@ func (s *System) Uninstall(backup string) (string, error) {
 	if s.linux() {
 		s.clearSession()
 	}
+	unset := func() (string, error) {
+		if s.guarded() {
+			// Nothing to put back, but the guard switches ours off once nobody wants it.
+			_, _ = s.Guard("unwant")
+		}
+		return "unset", nil
+	}
 	data, err := os.ReadFile(backup)
 	if err != nil {
-		return "unset", nil
+		return unset()
 	}
 	var saved Snapshot
 	if err := saved.UnmarshalJSON(data); err != nil {
-		return "unset", nil
+		return unset()
 	}
 	restore := s.Restore
 	if s.guarded() {

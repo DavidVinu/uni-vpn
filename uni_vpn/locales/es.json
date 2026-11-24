@@ -171,6 +171,8 @@
   "menu.background_hint": "Para que se inicie solo, permite Uni VPN y uni-vpn-core en segundo plano.",
   "menu.background_open": "Abrir Ajustes",
   "menu.not_now": "Ahora no",
+  "menu.guard_off": "Uni VPN no puede ejecutarse en segundo plano",
+  "menu.guard_hint": "Un administrador de este Mac tiene que volver a activar Uni VPN en «Permitir en segundo plano». Después pulsa Reparar.",
   "msg.not_connected": "No conectado",
   "msg.disconnected": "Desconectado",
   "msg.connecting": "Conectando",

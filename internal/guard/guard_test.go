@@ -7,8 +7,10 @@ import (
 	"log/slog"
 	"net"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -32,6 +34,8 @@ type mac struct {
 	changes   [][]string
 	now       time.Time
 	saved     []byte
+	failList  bool // -listallnetworkservices fails
+	listed    int  // how many times the services were listed
 }
 
 func newMac(services ...string) *mac {
@@ -55,6 +59,10 @@ func (m *mac) run(args []string, _ time.Duration) (sysproxy.Result, error) {
 	}
 	switch args[1] {
 	case "-listallnetworkservices":
+		m.listed++
+		if m.failList {
+			return sysproxy.Result{Code: 1, Stdout: "busy"}, nil
+		}
 		return sysproxy.Result{Stdout: "An asterisk (*) denotes that a network service is disabled.\n" + strings.Join(m.names, "\n") + "\n"}, nil
 	case "-getautoproxyurl":
 		s := m.services[args[2]]
@@ -99,6 +107,13 @@ func (m *mac) state(name string) string {
 		return "off:" + s.url
 	}
 	return s.url
+}
+
+// reads is how many times the guard read the settings since the last call.
+func (m *mac) reads() int {
+	n := m.listed
+	m.listed = 0
+	return n
 }
 
 func (m *mac) took() int {
@@ -397,5 +412,180 @@ func TestPlistRunsTheHelperAsTheGuard(t *testing.T) {
 		if strings.Contains(p, "<string>--app</string>") != app {
 			t.Error(app, p)
 		}
+	}
+}
+
+// F1 of the eighth re-audit: an account set up before the guard runs a core that never asks
+// for the rule (older than the guard, and with automatic updates off it stays so). guard
+// install adopts it, so the rule is on for it while its own program holds its port.
+func TestAnAccountSetUpBeforeTheGuardIsAdopted(t *testing.T) {
+	m := newMac("Wi-Fi", "")
+	g := New(m.world(), nil)
+	g.Handle(sibling, "want 1081")
+	if n := g.Adopt(map[uint32]int{student: 2081, sibling: 3081, 0: 1081}); n != 1 {
+		t.Fatal("adopted", n)
+	}
+	// The sibling's own entry stays; root is never adopted.
+	again := New(m.world(), m.saved)
+	if again.accounts[sibling].Port != 1081 || again.accounts[student].Port != 2081 || len(again.accounts) != 2 {
+		t.Fatal(again.accounts)
+	}
+	m.console, m.listeners[2081] = student, student
+	if got := g.Handle(student, "state"); got != "on 1800000000" || m.state("Wi-Fi") != "http://127.0.0.1:2081/proxy.pac?v=1800000000" {
+		t.Fatal(got, m.services["Wi-Fi"])
+	}
+	// Nothing new: nothing saved.
+	m.saved = nil
+	if n := g.Adopt(map[uint32]int{student: 1081}); n != 0 || m.saved != nil {
+		t.Fatal("adopted again", n)
+	}
+}
+
+func TestPortOfConfig(t *testing.T) {
+	for text, want := range map[string]int{
+		"user = \"ab123\"\nhttp_port = 2081\n":           2081,
+		"user = \"ab123\"\n":                             DefaultPort,
+		"http_port = 80\n":                               DefaultPort,
+		"http_port = \"2081\"\n":                         DefaultPort,
+		"not toml at all [":                              DefaultPort,
+		"[timing]\nhttp_port = 2081\n":                   DefaultPort,
+		"http_port = 2081\n[timing]\nhttp_port = 3081\n": 2081,
+	} {
+		if got := PortOf([]byte(text)); got != want {
+			t.Errorf("%q: %d, want %d", text, got, want)
+		}
+	}
+}
+
+// Audit 9 (core): another account's many ports never make a port an account wants foreign. The
+// list of old ports may forget, the ports of the accounts' entries and 1081 never.
+func TestOtherAccountsPortsNeverMakeAWantedPortForeign(t *testing.T) {
+	m := newMac("Wi-Fi", "", "Dock", "")
+	m.console, m.listeners[1081], m.listeners[2081] = student, student, sibling
+	g := New(m.world(), nil)
+	g.Handle(student, "want 1081")
+	g.Handle(sibling, "want 2081")
+	for p := 20000; p < 20000+2*maxPorts; p++ {
+		g.Handle(0xfffffffe, "want "+strconv.Itoa(p)) // nobody
+	}
+	g.Handle(sibling, "want 2081")
+	// The sibling's program takes 1081: off, also after a restart from the saved file.
+	m.listeners[1081] = sibling
+	g.Look()
+	if m.state("Wi-Fi") != "off:"+ours {
+		t.Fatal(m.services["Wi-Fi"])
+	}
+	m.listeners[1081] = student
+	g = New(m.world(), m.saved)
+	g.Look()
+	*m.services["Dock"] = service{url: "http://127.0.0.1:2081/proxy.pac?v=3", enabled: true}
+	m.listeners[1081] = sibling
+	g.Look()
+	if m.state("Wi-Fi") != "off:"+ours {
+		t.Fatal("after a restart:", m.services["Wi-Fi"])
+	}
+	// The sibling's own port too.
+	if m.state("Dock") != "off:http://127.0.0.1:2081/proxy.pac?v=3" {
+		t.Fatal(m.services["Dock"])
+	}
+}
+
+// Setup replaced a setting that is not ours while the rule is off for this account (another
+// account's program holds its port) and says want again: the guard reads the settings again at
+// once, or at its next look when it read them less than a second ago.
+func TestWantReadsTheSettingsAgain(t *testing.T) {
+	m := newMac("Wi-Fi", "")
+	m.console, m.listeners[1081] = student, sibling
+	g := New(m.world(), nil)
+	if got := g.Handle(student, "want 1081"); got != "held" {
+		t.Fatal(got)
+	}
+	*m.services["Wi-Fi"] = service{url: ours, enabled: true}
+	g.Handle(student, "want 1081")
+	m.now = m.now.Add(Tick)
+	g.Look()
+	if m.state("Wi-Fi") != "off:"+ours {
+		t.Fatal(m.services["Wi-Fi"])
+	}
+	*m.services["Wi-Fi"] = service{url: ours, enabled: true}
+	m.now = m.now.Add(time.Second)
+	g.Handle(student, "want 1081")
+	if m.state("Wi-Fi") != "off:"+ours {
+		t.Fatal("a second later:", m.services["Wi-Fi"])
+	}
+	// Nothing new: one read a second at most, the rest at the minute.
+	m.reads()
+	for range 10 {
+		g.Handle(student, "want 1081")
+		g.Look()
+	}
+	if n := m.reads(); n > 2 {
+		t.Fatal("read", n, "times")
+	}
+}
+
+// The settings could not be read: the next look tries again.
+func TestUnreadableSettingsAreTriedAgain(t *testing.T) {
+	m := newMac("Wi-Fi", "")
+	m.console, m.listeners[1081] = student, student
+	m.failList = true
+	g := New(m.world(), nil)
+	g.Handle(student, "want 1081")
+	m.failList = false
+	m.now = m.now.Add(Tick)
+	g.Look()
+	if m.state("Wi-Fi") != ours {
+		t.Fatal(m.services["Wi-Fi"])
+	}
+}
+
+// "version": the guard's version, so that setup and Repair replace an older one.
+func TestVersionNamesTheGuardsVersion(t *testing.T) {
+	m := newMac("Wi-Fi", "")
+	g := New(m.world(), nil)
+	if got := g.Handle(student, "version"); got != strconv.Itoa(sysproxy.GuardVersion) || m.reads() != 0 {
+		t.Fatal(got)
+	}
+}
+
+// One account's silent connections do not shut the others out.
+func TestOneAccountCannotTakeEveryConnection(t *testing.T) {
+	m := newMac("Wi-Fi", "")
+	m.console, m.listeners[1081] = student, student
+	g := New(m.world(), nil)
+	path := filepath.Join(t.TempDir(), "guard.sock")
+	l, err := net.Listen("unix", path)
+	if err != nil {
+		t.Skip("no Unix sockets here:", err)
+	}
+	defer l.Close()
+	var n atomic.Int32
+	go func() {
+		_ = g.Serve(l, func(net.Conn) (uint32, error) {
+			if n.Add(1) <= maxConns {
+				return sibling, nil
+			}
+			return student, nil
+		})
+	}()
+	for range maxConns {
+		c, err := net.Dial("unix", path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer c.Close()
+	}
+	for n.Load() < maxConns {
+		time.Sleep(10 * time.Millisecond)
+	}
+	c, err := net.Dial("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+	_, _ = c.Write([]byte("want 1081\n"))
+	if line, _ := bufio.NewReader(c).ReadString('\n'); line != "on 1800000000\n" {
+		t.Fatalf("%q", line)
 	}
 }

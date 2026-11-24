@@ -748,6 +748,16 @@ func (s *Setup) setup(a Args, created func(string)) (int, error) {
 		}
 	}
 
+	if s.EnsureGuard != nil && !dry {
+		// A Mac set up before the guard came, or with an older one: Repair puts it in place (the
+		// .pkg does for a new one). Before the service starts, so that the core finds it.
+		if installed, err := s.EnsureGuard(); err != nil {
+			s.say("The guard of the proxy rule is not set up: %s", err)
+		} else if installed {
+			s.say("Guard of the proxy rule set up")
+		}
+	}
+
 	files, err := s.Service.Install(dry)
 	var se *service.Error
 	if errors.As(err, &se) {
@@ -770,14 +780,6 @@ func (s *Setup) setup(a Args, created func(string)) (int, error) {
 		s.say("Service set up and started")
 	}
 
-	if s.EnsureGuard != nil && !dry {
-		// A Mac set up before the guard came: Repair sets it up (the .pkg does for a new one).
-		if installed, err := s.EnsureGuard(); err != nil {
-			s.say("The guard of the proxy rule is not set up: %s", err)
-		} else if installed {
-			s.say("Guard of the proxy rule set up")
-		}
-	}
 	pac := sysproxy.PacURL(cfg.HTTPPort)
 	signOut := false // see sessionOnly
 	if dry {

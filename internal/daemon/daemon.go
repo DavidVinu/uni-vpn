@@ -154,9 +154,10 @@ type Options struct {
 	RepairStart  func() (Process, error)
 	// Elevated is is_admin() on Windows, nil elsewhere (status "elevated": null).
 	Elevated func() *bool
-	// Unguarded: a standard account of a Mac where the guard of the proxy rule does not run
-	// (set up before it came, docs/mac-guard.md): this account cannot switch the rule off while
-	// another account's program holds the status port, so it connects only after Repair.
+	// Unguarded: a standard account of a Mac where the guard of the proxy rule does not run, or
+	// is older than sysproxy.GuardVersion (set up before it came, docs/mac-guard.md): this
+	// account cannot switch the rule off while another account's program holds the status port,
+	// so it connects only after Repair.
 	Unguarded func() bool
 	// Updater is the self-updater; nil means updater.New(Commit).
 	Updater Updater
@@ -427,8 +428,8 @@ func New(cfg *config.Config, log *slog.Logger, opts Options) *Daemon {
 			if !platform.IsMacOS {
 				return false
 			}
-			_, err := sysproxy.AskGuard("state")
-			return err != nil && standardMacAccount()
+			_, current := sysproxy.GuardState(sysproxy.AskGuard)
+			return !current && standardMacAccount()
 		}
 	}
 	if opts.SyncRelay == "" {
