@@ -2420,8 +2420,10 @@ func (d *Daemon) ticker() {
 					d.closeAll()
 					tun.Stop(grace)
 				})
-			} else if d.state == Offline {
-				// Look for the network now, not at the end of the loop's sleep.
+			} else if d.state == Offline || d.state == Error {
+				// Look for the network, or try again, now: not at the end of the loop's sleep or
+				// back-off, which the sleep did not shorten (the failures were on the old network).
+				d.failures = 0
 				d.wakeUp()
 			}
 		}

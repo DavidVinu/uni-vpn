@@ -932,7 +932,8 @@ desktop.
   too, before it started the new service.
 - Fix: in that case the job ends nothing with the service until setup is done
   (winsys.ChildrenEndWithUs); if the service still runs then, its job kills its children
-  again. Repair disconnects first, so openconnect is not running meanwhile.
+  again. Repair is offered only where no tunnel runs (a missing program, a failed start), so
+  openconnect is not running meanwhile as a rule (corrected in the tenth re-audit).
 - Verification: Windows Go test with a real job: a child stays in the job and ends with its
   parent, and outlives it with the limit lifted. CI (windows-installer, windows-arm-install)
   now presses Repair through the local API as the app does: the new service of this commit
@@ -2122,7 +2123,8 @@ install and in what a removal puts back after the guard has gone.
   account kept "Click Repair".
 - Fix: `guard install` tries the bootstrap up to five times, a second apart, like the service.
 - Verification: macos-pkg now runs `guard install` over the running guard and checks it runs
-  again with a new process, says `on` and the rule is on (CI on this commit).
+  again with a new process, says `on` and the rule is on: CI run 633 on bf8c9a9 ("replaced
+  while it runs (pid 2680, now 4101)"). The tenth re-audit widened the retries to 25 s.
 
 ### Fixed with this round (Low)
 
@@ -2156,3 +2158,59 @@ install and in what a removal puts back after the guard has gone.
 - CI: main's run of #88 was red on a timed-out inprocess test (passed 15 of 15 here, the
   release went out); macos-pkg cannot test two accounts that both want the rule (unit tests
   do); docs/mac-guard.md says "then want" where installGuarded asks before and after.
+
+## Tenth re-audit
+
+Scope: the whole repository at bf8c9a9 (the ninth round's fixes), five fresh reviewers in the
+same five areas: the core's connect path and local API; the core's system parts with the Mac
+guard; the desktop apps, page and installers; the phones; the site with CI, release scripts,
+texts and docs. **No Critical, High or Medium** in any area. Nothing was run on a real Mac by
+the reviewers (no Mac here); the guard's darwin code was cross-compiled and read, and CI run
+633 on bf8c9a9 ran it on macOS (macos-pkg, macos-trash: green).
+
+### Fixed with this round (Low)
+
+- Mac: the plain Restore (a removal after the guard has gone) switched off any automatic proxy
+  on a service the backup had as unset, such as another account's own PAC put back by that
+  account's removal; a standard account was asked for an administrator's password for it. An
+  unset entry now switches off only one of our rules
+  (TestRestoreLeavesAnotherToolsRuleOnAServiceBackedUpAsUnset fails before).
+- A resume during the back-off after a failed connection waited out the rest of it (up to
+  about 6 minutes, the clock of the wait stops during sleep), with the listed websites failing
+  meanwhile. The resume now starts the next attempt at once, as it did for Offline, with the
+  back-off from its first step (TestResumeDuringABackOffTriesAgainNow fails before).
+- `guard install` over a guard in the middle of a slow networksetup: the old one ends only
+  after it (launchd waits up to 20 s), and five tries a second apart could give up. It now
+  tries for 25 s.
+- docs/mac-guard.md: the core says `want` again with every Cover (every few minutes and after
+  a network change), not only at its start. The comment in repair_windows.go and D15 said
+  "Repair disconnects first": it does not; Repair is offered only where no tunnel runs.
+
+### Left as they are (Low), tenth re-audit
+
+- Mac guard:
+  - When it removes itself, a request accepted just before its socket closed can still switch
+    our rule on or write its list of accounts again (a window of milliseconds; the account's
+    own removal follows).
+  - A guarded uninstall and the guard's Off() see only active network services: one made
+    inactive with our rule keeps our address, off or on, until it is used again. Services the
+    guard covered are in no backup, so a removal without the guard (switched off under Login
+    Items) leaves them.
+  - Another account naming 16 ports can push an account's old port (after a hand-edited
+    http_port) out of the list, so its old address counts as not ours. Two accounts on
+    different ports can bring an administrator's dialog the guard did not need. An http_port
+    below 1024 is refused by the guard, and that account works unguarded as before.
+  - During a `guard install` (a few seconds) a standard account in the background can be told
+    to Repair once; Repair then asks nothing. The same for a single failed `version`.
+  - Its log in /Library/Logs is readable by every account (when each account was at the
+    screen) and the privacy page does not name it; removed with the app.
+  - Whether macOS lists the update zip's core as "uni-vpn-core" in Login Items (its signature
+    has no identifier of ours) is not checked on a Mac.
+- Core: before setup, a browser's connection shows the missing-password state instead of
+  setup (the page still leads to setup). On Linux, putting the rule back after another account
+  held the port can replace a proxy setting the user changed meanwhile.
+- Android: an update can install without a tap after the screen went off with Uni VPN in front;
+  any tap on the "Update Uni VPN" notification starts the update; the tile's
+  requestListeningState does nothing (it is redrawn whenever the panel opens).
+- Site and CI: a 32-bit Android tablet in desktop mode is told "this phone" (the download is
+  right); macos-trash's worst-case waits leave little room before its 30-minute limit.

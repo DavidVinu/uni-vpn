@@ -23,8 +23,9 @@ func startRepair(newCmd func() *exec.Cmd, own bool) (*exec.Cmd, func(), error) {
 	}
 	// An outer job (Task Scheduler) without breakaway: the installer stays in this daemon's
 	// kill-on-close job, and this program's setup ends this daemon. Until the installer is
-	// done the job ends nothing with us (Repair disconnects first, so openconnect is not
-	// running). The elevated part that install.ps1 starts through UAC is not ours anyway.
+	// done the job ends nothing with us (Repair is offered only where no tunnel runs, such as a
+	// missing program or a failed start, so openconnect is not running as a rule). The elevated
+	// part that install.ps1 starts through UAC is not ours anyway.
 	kept := winsys.ChildrenEndWithUs(false)
 	done := func() {
 		if kept {

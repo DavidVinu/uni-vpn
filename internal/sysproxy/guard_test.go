@@ -303,3 +303,18 @@ func TestRestoreNeverPutsBackOneOfOurRules(t *testing.T) {
 		t.Errorf("changes %v, want %v", got, want)
 	}
 }
+
+// A service the backup has as unset whose rule is another tool's now (an account's own PAC put
+// back by that account's removal): Restore leaves it, so nobody is asked for a password.
+func TestRestoreLeavesAnotherToolsRuleOnAServiceBackedUpAsUnset(t *testing.T) {
+	saved := &Snapshot{Mac: &Mac{Services: []Service{{Name: "Wi-Fi"}}}}
+	e := &elevated{}
+	r := &runner{answers: standardAnswers(
+		answer{"networksetup -getautoproxyurl Wi-Fi", 0, "URL: http://wpad.example.edu/proxy.pac\nEnabled: Yes\n"})}
+	if err := standardMac(r, e).Restore(saved); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.cmds) != 0 || len(changes(r)) != 0 {
+		t.Errorf("another tool's rule is switched off: %v %v", e.cmds, changes(r))
+	}
+}

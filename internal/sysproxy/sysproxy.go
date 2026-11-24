@@ -399,7 +399,9 @@ func (s *System) Restore(saved *Snapshot) error {
 				// A backup from before withoutOurs: ours is never put back, only switched off.
 				e = Service{Name: e.Name}
 			}
-			if svc, ok := now[e.Name]; ok && ((e.URL == "" && !svc.Enabled) || (e.URL != "" && svc.URL == e.URL && svc.Enabled == e.Enabled)) {
+			// Unset in the backup: only one of our rules is switched off, not one that another
+			// tool or account set since (that account's removal put its own PAC back).
+			if svc, ok := now[e.Name]; ok && ((e.URL == "" && !(svc.Enabled && LooksOurs(svc.URL))) || (e.URL != "" && svc.URL == e.URL && svc.Enabled == e.Enabled)) {
 				continue
 			}
 			if e.URL != "" {

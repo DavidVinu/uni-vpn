@@ -1326,6 +1326,25 @@ func TestOfflineResumeLooksForTheNetworkAgain(t *testing.T) {
 	waitState(t, d, Connected, 3*time.Second)
 }
 
+func TestResumeDuringABackOffTriesAgainNow(t *testing.T) {
+	// The gateway failed before the laptop slept: after the resume (another network, maybe) the
+	// next attempt is made now, not at the end of the back-off, which the sleep did not shorten.
+	h := newHarness(t)
+	h.cfg.Backoff = []float64{120}
+	t.Setenv("FAKE_MODE", "gateway_503")
+	d := h.start(nil)
+	d.RequestConnect()
+	if !waitFor(4*time.Second, func() bool { s, _ := d.snapshot(); return s == Error && len(h.pwLines()) == 1 }) {
+		s, m := d.snapshot()
+		t.Fatal(s, m, h.pwLines())
+	}
+	h.wallOffset.Store(120) // the laptop slept for two minutes
+	if !waitFor(4*time.Second, func() bool { return len(h.pwLines()) >= 2 }) {
+		s, m := d.snapshot()
+		t.Fatal(s, m, h.pwLines())
+	}
+}
+
 func TestNonSocksConnectionDoesNotSignIn(t *testing.T) {
 	// A web page's <img src="http://127.0.0.1:1080/pixel.gif">.
 	h := newHarness(t)

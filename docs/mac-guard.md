@@ -77,7 +77,8 @@ Settings it could not read are read again at the next look.
   ours; the guard switches ours off. The backup never holds one of our rules (any account's,
   or ours that the guard switched on for the core just started): it records them as unset, so
   a removal after the guard has gone switches ours off and never puts it back.
-- The core: `want` when it starts, `refresh` when the websites change. Cover, Withdraw and
+- The core: `want` when it starts and again now and then (Cover: every few minutes and after a
+  network change), `refresh` when the websites change. Covering new services, Withdraw and
   putting the rule back are the guard's; the core does nothing there.
 - Without a guard (it is not installed, or does not answer), everything works as before.
 
@@ -88,8 +89,8 @@ Settings it could not read are read again at the next look.
   `/Library/LaunchDaemons/de.davidvinu.uni-vpn.guard.plist` and starts it, before it sets up the
   user. The installer already asks for an administrator, so a new install never asks again.
 - Over a running guard (a .pkg over this one, Repair replacing an older guard), `guard
-  install` boots the old one out and starts the new one, again up to five times while the old
-  one is still going away.
+  install` boots the old one out and starts the new one, again for up to 25 s while the old
+  one is still going away (one busy with networksetup ends only after it).
 - Each install also adopts the accounts set up before it: every home folder in `/Users` with
   its own `~/Library/LaunchAgents/de.davidvinu.uni-vpn.plist` gets an entry for the port in
   its `~/.config/uni-vpn/config.toml` (1081 without one), unless it has one. Their cores may be

@@ -189,12 +189,13 @@ func install() error {
 	New(world(slog.New(slog.NewTextHandler(io.Discard, nil))), data).Adopt(servicesIn("/Users"))
 	// Right after bootout the old guard may still be going away ("Bootstrap failed: 5"), as for
 	// the service (internal/service): a .pkg over this one, or Repair replacing an older guard.
+	// One in the middle of a slow networksetup ends only after it, at most launchd's 20 s.
 	for attempt := 0; ; attempt++ {
 		out, err := exec.Command("/bin/launchctl", "bootstrap", "system", PlistPath).CombinedOutput()
 		if err == nil {
 			break
 		}
-		if attempt == 4 {
+		if attempt == 24 {
 			return fmt.Errorf("launchctl bootstrap: %v: %s", err, out)
 		}
 		time.Sleep(time.Second)
