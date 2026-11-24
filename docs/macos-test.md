@@ -47,15 +47,18 @@ D1. Download [uni-vpn.pkg](https://github.com/DavidVinu/uni-vpn/releases/latest/
     and double-click it. Until it is signed, macOS says it "cannot be opened": System Settings,
     Privacy & Security, "Open Anyway". Note every dialog.
     Expected: the usual installer pages, one password prompt, then the "Uni VPN" window with the
-    assistant. A standard account gets a second prompt at the end of the assistant, from Uni VPN,
-    for an administrator's name and password (`setup.admin_network`). Homebrew is not needed and not installed, and neither is Python:
+    assistant. No second prompt, also on a standard account: the package's guard of the proxy
+    rule (docs/mac-guard.md) switches the rule on. Only another proxy setting (a company's, for
+    example) brings a second prompt from Uni VPN, for an administrator's name and password, to
+    replace it (`setup.admin_network`). Homebrew is not needed and not installed, and neither is Python:
     `~/Library/LaunchAgents/de.davidvinu.uni-vpn.plist` starts
     `~/Library/Application Support/uni-vpn/app/bin/uni-vpn-core daemon`.
 D2. Finish the assistant and open a university page in Chrome: it loads through the VPN.
 D3. Log out and in: the shield is back in the menu bar.
 D4. Drag "Uni VPN" from Applications to the Trash. Within about 10 minutes the shield is gone,
     the proxy setting is off (System Settings, Network, Details, Proxies) and
-    `~/Library/LaunchAgents/de.davidvinu.uni-vpn.plist` no longer exists.
+    `~/Library/LaunchAgents/de.davidvinu.uni-vpn.plist` no longer exists. About 10 minutes after
+    the Trash, `/Library/LaunchDaemons/de.davidvinu.uni-vpn.guard.plist` is gone too.
 
 Report the result as an issue or pull request with the table filled in:
 

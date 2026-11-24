@@ -1161,3 +1161,28 @@ func posixOnly(t *testing.T) {
 		t.Skip("POSIX only")
 	}
 }
+
+// A Mac set up before the guard came: setup (Repair) sets it up before the service and the rule,
+// so that both find it; one that fails (a cancelled password dialog) does not stop the setup.
+func TestSetupSetsUpTheMacsGuardBeforeTheRule(t *testing.T) {
+	h := newHarness(t)
+	var order []string
+	h.s.EnsureGuard = func() (bool, error) { order = append(order, "guard"); return true, nil }
+	install := h.s.ProxyInstall
+	h.s.ProxyInstall = func(port int) (string, error) { order = append(order, "rule"); return install(port) }
+	if code := h.setup(Args{User: "ab123"}); code != 0 || strings.Join(order, " ") != "guard rule" {
+		t.Fatal(code, order, h.out.String())
+	}
+	h.wantOut(t, "Guard of the proxy rule set up")
+	// Before the service starts: the core it starts finds the guard (no "Repair" message).
+	if out := h.out.String(); strings.Index(out, "Guard of the proxy rule set up") > strings.Index(out, "Service set up and started") {
+		t.Fatal(out)
+	}
+	h.s.EnsureGuard = func() (bool, error) { return true, errors.New("cancelled") }
+	h.out.Reset()
+	if code := h.setup(Args{User: "ab123", Repair: true}); code != 0 {
+		t.Fatal(code, h.out.String())
+	}
+	h.wantOut(t, "The guard of the proxy rule is not set up: cancelled")
+	h.wantOut(t, "Proxy rule registered")
+}

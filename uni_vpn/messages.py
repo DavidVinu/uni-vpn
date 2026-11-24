@@ -85,6 +85,7 @@ PORT_IN_USE = _m("port_in_use")
 PROGRAM_MISSING = _m("program_missing", "repair")
 START_FAILED = _m("start_failed", "repair")
 NOT_ELEVATED = _m("not_elevated", "repair")
+GUARD_MISSING = _m("guard_missing", "repair")  # Mac, standard account: docs/mac-guard.md
 SETTINGS_BROKEN = _m("settings_broken", "setup")
 REPAIRING = _m("repairing")
 REPAIR_FAILED = _m("repair_failed", "repair")

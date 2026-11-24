@@ -200,6 +200,7 @@ func (h *harness) start(edit func(*Options), before ...func(*Daemon)) *Daemon {
 		Knock:               func(int) { h.knocked.Add(1) },
 		RepairStart:         func() (Process, error) { panic("no repair in tests") },
 		Elevated:            func() *bool { return nil },
+		Unguarded:           func() bool { return false },
 	}
 	if edit != nil {
 		edit(&opts)

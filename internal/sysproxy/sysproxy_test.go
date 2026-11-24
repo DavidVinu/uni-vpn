@@ -445,7 +445,7 @@ func TestMacStandardAccountAsksForAServiceAddedSince(t *testing.T) {
 
 func TestMacStandardAccountUninstallAsksForAnAdministratorsPassword(t *testing.T) {
 	e := &elevated{}
-	r := &runner{answers: standardAnswers()}
+	r := &runner{answers: standardAnswers(answer{"networksetup -getautoproxyurl", 0, "URL: http://127.0.0.1:1081/proxy.pac?v=7\nEnabled: Yes\n"})}
 	saved := &Snapshot{Mac: &Mac{Services: []Service{{Name: "Wi-Fi", URL: "http://wpad.example/proxy.pac", Enabled: true}, {Name: "USB LAN"}}}}
 	if err := standardMac(r, e).Restore(saved); err != nil {
 		t.Fatal(err)
@@ -460,7 +460,7 @@ func TestMacStandardAccountUninstallAsksForAnAdministratorsPassword(t *testing.T
 }
 
 func TestMacRestoreDisablesWhenPreviouslyOff(t *testing.T) {
-	r := &runner{answers: macAnswers()}
+	r := &runner{answers: append([]answer{{"networksetup -getautoproxyurl Wi-Fi", 0, "URL: http://127.0.0.1:1081/proxy.pac?v=7\nEnabled: Yes\n"}}, macAnswers()...)}
 	mac(r).Restore(&Snapshot{Mac: &Mac{Services: []Service{{Name: "Wi-Fi"}}}})
 	if !r.called("networksetup", "-setautoproxystate", "Wi-Fi", "off") {
 		t.Fatal(r.calls)
@@ -479,11 +479,14 @@ func TestMacUninstallKeepsAnAddressThatWasOff(t *testing.T) {
 		t.Fatal(got, err)
 	}
 	r.calls = nil
+	r.answers[1].out = "URL: http://127.0.0.1:1081/proxy.pac?v=7\nEnabled: Yes\n" // ours now
 	if got, err := mac(r).Uninstall(backup); got != "restored" || err != nil {
 		t.Fatal(got, err)
 	}
 	want := [][]string{
 		{"networksetup", "-listallnetworkservices"},
+		{"networksetup", "-listallnetworkservices"},
+		{"networksetup", "-getautoproxyurl", "Wi-Fi"},
 		{"networksetup", "-setautoproxyurl", "Wi-Fi", "http://wpad.example/proxy.pac"},
 		{"networksetup", "-setautoproxystate", "Wi-Fi", "off"},
 	}
@@ -505,6 +508,7 @@ func TestMacRestorePutsOldURLBack(t *testing.T) {
 func TestMacRestoreSkipsServicesThatAreGone(t *testing.T) {
 	r := &runner{answers: []answer{
 		{"networksetup -listallnetworkservices", 0, "An asterisk (*) denotes that a network service is disabled.\nWi-Fi\n*Ethernet\n"},
+		{"networksetup -getautoproxyurl", 0, "URL: http://127.0.0.1:1081/proxy.pac?v=7\nEnabled: Yes\n"},
 		{"networksetup -setautoproxystate Old VPN", 4, "Old VPN is not a recognized network service.\n** Error: The parameters were not valid.\n"},
 	}}
 	err := mac(r).Restore(&Snapshot{Mac: &Mac{Services: []Service{{Name: "Old VPN"}, {Name: "Wi-Fi"}, {Name: "Ethernet"}}}})
@@ -528,6 +532,7 @@ func TestMacRestoreTriesEachWithoutAList(t *testing.T) {
 func TestMacRestoreGoesOnAfterAFailure(t *testing.T) {
 	r := &runner{answers: []answer{
 		{"networksetup -listallnetworkservices", 0, "An asterisk (*) denotes that a network service is disabled.\nUSB LAN\nWi-Fi\n"},
+		{"networksetup -getautoproxyurl", 0, "URL: http://127.0.0.1:1081/proxy.pac?v=7\nEnabled: Yes\n"},
 		{"networksetup -setautoproxystate USB LAN", 1, ""},
 	}}
 	err := mac(r).Restore(&Snapshot{Mac: &Mac{Services: []Service{{Name: "USB LAN"}, {Name: "Wi-Fi"}}}})
@@ -1017,5 +1022,18 @@ func TestMacCoverSwitchesOnWhatAnotherAccountSwitchedOff(t *testing.T) {
 		if len(c) > 1 && c[1] == "-setautoproxyurl" {
 			t.Fatal("switched on without this account's install:", r.calls)
 		}
+	}
+}
+
+// After the app went to the Trash the guard switched ours off before this account's core
+// removes itself: nothing is set again, so a standard account is asked for no password.
+func TestMacRestoreLeavesWhatIsAsTheBackupHasIt(t *testing.T) {
+	e := &elevated{}
+	r := &runner{answers: standardAnswers(
+		answer{"networksetup -getautoproxyurl Wi-Fi", 0, "URL: http://127.0.0.1:1081/proxy.pac?v=7\nEnabled: No\n"},
+		answer{"networksetup -getautoproxyurl USB LAN", 0, "URL: http://wpad.example/proxy.pac\nEnabled: No\n"})}
+	saved := &Snapshot{Mac: &Mac{Services: []Service{{Name: "Wi-Fi"}, {Name: "USB LAN", URL: "http://wpad.example/proxy.pac"}}}}
+	if err := standardMac(r, e).Restore(saved); err != nil || len(e.cmds) != 0 || len(changes(r)) != 0 {
+		t.Fatal(err, e.cmds, changes(r))
 	}
 }

@@ -1108,6 +1108,24 @@ func TestWindowsWithoutElevationExplainsInsteadOfStarting(t *testing.T) {
 	}
 }
 
+// SV-1: a standard account of a Mac without the guard of the proxy rule cannot switch the rule
+// off while another account's program holds the port. It connects only after Repair, which sets
+// the guard up with an administrator's password.
+func TestUnguardedStandardMacAccountAsksForRepairInsteadOfStarting(t *testing.T) {
+	h := newHarness(t)
+	var unguarded atomic.Bool
+	unguarded.Store(true)
+	d := h.start(func(o *Options) { o.Unguarded = unguarded.Load })
+	d.RequestConnect()
+	waitState(t, d, Error)
+	if _, m := d.snapshot(); m != messages.GuardMissing || m.Action != "repair" || h.pwLines() != nil {
+		t.Fatal(m, h.pwLines())
+	}
+	unguarded.Store(false)
+	d.RequestConnect()
+	waitState(t, d, Connected)
+}
+
 func TestCiscoBlockedThenReleased(t *testing.T) {
 	h := newHarness(t)
 	h.cisco.Store(true)
@@ -1306,6 +1324,25 @@ func TestOfflineResumeLooksForTheNetworkAgain(t *testing.T) {
 	h.probeResult.Store(true)
 	h.wallOffset.Store(120) // the laptop slept for two minutes
 	waitState(t, d, Connected, 3*time.Second)
+}
+
+func TestResumeDuringABackOffTriesAgainNow(t *testing.T) {
+	// The gateway failed before the laptop slept: after the resume (another network, maybe) the
+	// next attempt is made now, not at the end of the back-off, which the sleep did not shorten.
+	h := newHarness(t)
+	h.cfg.Backoff = []float64{120}
+	t.Setenv("FAKE_MODE", "gateway_503")
+	d := h.start(nil)
+	d.RequestConnect()
+	if !waitFor(4*time.Second, func() bool { s, _ := d.snapshot(); return s == Error && len(h.pwLines()) == 1 }) {
+		s, m := d.snapshot()
+		t.Fatal(s, m, h.pwLines())
+	}
+	h.wallOffset.Store(120) // the laptop slept for two minutes
+	if !waitFor(4*time.Second, func() bool { return len(h.pwLines()) >= 2 }) {
+		s, m := d.snapshot()
+		t.Fatal(s, m, h.pwLines())
+	}
 }
 
 func TestNonSocksConnectionDoesNotSignIn(t *testing.T) {

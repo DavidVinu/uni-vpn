@@ -105,10 +105,14 @@ type Setup struct {
 	// OtherAccountListens: a program of another account of this computer accepts on
 	// 127.0.0.1:port (sockowner.OtherAccountListens).
 	OtherAccountListens func(port int) bool
-	StorePassword       func(user, password string) error
-	StoreTOTP           func(user, token string) error
-	DeletePassword      func(user string) (bool, error)
-	DeleteTOTP          func(user string) (bool, error)
+	// EnsureGuard sets up the Mac's guard of the proxy rule where it does not run yet
+	// (internal/guard, docs/mac-guard.md), with an administrator's password; installed is false
+	// when it ran already. Nil elsewhere.
+	EnsureGuard    func() (installed bool, err error)
+	StorePassword  func(user, password string) error
+	StoreTOTP      func(user, token string) error
+	DeletePassword func(user string) (bool, error)
+	DeleteTOTP     func(user string) (bool, error)
 	// DeleteSync removes this device's sync keys (internal/devsync); nil skips it.
 	DeleteSync func() (bool, error)
 	// KeyringState is "present", "missing", "locked" or "error:<text>".
@@ -190,8 +194,8 @@ func New(root string) *Setup {
 		IsTerminal: isTerminal, FindBinary: platform.FindBinary, Service: manager, Run: service.Exec, UID: os.Getuid(),
 		ProxyInstall:        func(port int) (string, error) { return askingSystem(goos).Install(port, "") },
 		ProxyUninstall:      func() (string, error) { return askingSystem(goos).Uninstall("") },
-		OtherAccountListens: sockowner.OtherAccountListens,
-		StorePassword:       keyring.StorePassword, StoreTOTP: keyring.StoreTotp,
+		OtherAccountListens: sockowner.OtherAccountListens, EnsureGuard: ensureGuard(goos, binary),
+		StorePassword: keyring.StorePassword, StoreTOTP: keyring.StoreTotp,
 		DeletePassword: keyring.DeletePassword, DeleteTOTP: keyring.DeleteTotp,
 		DeleteSync: func() (bool, error) {
 			return keyring.DeleteSecret(credentials.SyncUser, credentials.KindSync)
@@ -741,6 +745,16 @@ func (s *Setup) setup(a Args, created func(string)) (int, error) {
 		}
 		if !dry {
 			s.say("Crash reports for openconnect disabled (~/.apport-ignore.xml)")
+		}
+	}
+
+	if s.EnsureGuard != nil && !dry {
+		// A Mac set up before the guard came, or with an older one: Repair puts it in place (the
+		// .pkg does for a new one). Before the service starts, so that the core finds it.
+		if installed, err := s.EnsureGuard(); err != nil {
+			s.say("The guard of the proxy rule is not set up: %s", err)
+		} else if installed {
+			s.say("Guard of the proxy rule set up")
 		}
 	}
 

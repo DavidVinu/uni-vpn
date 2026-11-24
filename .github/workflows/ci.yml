@@ -395,6 +395,81 @@ jobs:
           # next update.
           sleep 5
           pgrep -x "Uni VPN" >/dev/null || { echo "::error::the menu bar app is not running"; exit 1; }
+      # docs/mac-guard.md (SV-1): the rule is on only while the program on the status port belongs
+      # to the account at the screen. The runner's core stops: the rule goes off at once (the
+      # guard switches it, whoever the account is), and stays off while a program of another
+      # account, nobody, holds the port; the guard tells this account "held".
+      - name: The guard switches the rule off for another account's program
+        run: |
+          rule() { scutil --proxy | awk '/ProxyAutoConfigEnable/ { print $3 }'; }
+          wait_rule() { for i in $(seq 30); do [ "$(rule)" = "$1" ] && return 0; sleep 1; done; return 1; }
+          stays_off() { for i in $(seq 8); do [ "$(rule)" = 0 ] || return 1; sleep 1; done; }
+          ask() {
+            python3 -c 'import socket, sys
+          s = socket.socket(socket.AF_UNIX); s.settimeout(30)
+          s.connect("/var/run/de.davidvinu.uni-vpn.guard.sock")
+          s.sendall(sys.argv[1].encode() + b"\n"); print(s.recv(64).decode().strip())' "$1"
+          }
+          listens() { sudo lsof -nP -iTCP:1081 -sTCP:LISTEN; }
+          fail() {
+            echo "::error::$1"
+            scutil --proxy
+            listens || true
+            sudo cat /Library/Logs/uni-vpn-guard.log || true
+            exit 1
+          }
+          sudo launchctl print system/de.davidvinu.uni-vpn.guard | head -n 12
+          ls -l /var/run/de.davidvinu.uni-vpn.guard.sock /Library/PrivilegedHelperTools/de.davidvinu.uni-vpn.guard
+          echo "at the screen: $(stat -f%Su /dev/console), running as $USER"
+          wait_rule 1 || fail "the rule is not on after the install"
+          scutil --proxy | grep -q "127.0.0.1:1081/proxy.pac" || fail "the rule is not ours"
+          case "$(ask state)" in "on "*) ;; *) fail "the guard does not say on: $(ask state)" ;; esac
+          # The menu bar app starts a stopped service again: it goes first.
+          osascript -e 'quit app "Uni VPN"' || true
+          for i in $(seq 20); do pgrep -x "Uni VPN" >/dev/null || break; sleep 0.5; done
+          launchctl bootout "gui/$(id -u)/de.davidvinu.uni-vpn"
+          for i in $(seq 40); do listens >/dev/null || break; sleep 0.5; done
+          if listens; then fail "the core still holds 1081"; fi
+          wait_rule 0 || fail "the rule stays on without this account's core"
+          [ "$(ask state)" = off ] || fail "the guard does not say off: $(ask state)"
+          echo "off without this account's core"
+          cd /tmp
+          # macOS keeps the runner's closed connections on 1081 for about 30 s and lets no other
+          # account bind the port meanwhile: nobody tries for up to 90 s.
+          sudo -u nobody python3 -c 'import socket, time
+          s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+          for i in range(180):
+              try:
+                  s.bind(("127.0.0.1", 1081)); break
+              except OSError:
+                  time.sleep(0.5)
+          s.listen(5); time.sleep(90)' &
+          other=$!
+          for i in $(seq 200); do listens | grep -q nobody && break; sleep 0.5; done
+          listens | grep nobody || fail "nobody's program does not listen on 1081"
+          [ "$(ask state)" = held ] || fail "the guard does not see another account's program: $(ask state)"
+          stays_off || fail "the rule came on for another account's program"
+          echo "off and held while another account's program holds the port"
+          sudo pkill -u nobody -f "time.sleep\(90\)" || true
+          wait $other || true
+          launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/de.davidvinu.uni-vpn.plist"
+          for i in $(seq 30); do curl -fsS http://127.0.0.1:1081/status.json >/dev/null 2>&1 && break; sleep 1; done
+          wait_rule 1 || fail "the rule does not come back with this account's core"
+          case "$(ask state)" in "on "*) ;; *) fail "the guard does not say on again: $(ask state)" ;; esac
+          echo "on again with this account's core"
+          # A .pkg over this one, or Repair replacing an older guard: it is replaced while it runs.
+          gpid() { sudo launchctl print system/de.davidvinu.uni-vpn.guard | awk '$1 == "pid" { print $3; exit }'; }
+          old=$(gpid)
+          sudo "/Applications/Uni VPN.app/Contents/Resources/app/bin/uni-vpn-core" guard install || fail "the guard could not be replaced while it runs"
+          new=$(gpid)
+          { [ -n "$new" ] && [ "$new" != "$old" ]; } || fail "the guard was not started again (before $old, now $new)"
+          on=""
+          for i in $(seq 20); do case "$(ask state)" in "on "*) on=1; break ;; esac; sleep 0.5; done
+          [ -n "$on" ] || fail "the replaced guard does not say on: $(ask state)"
+          wait_rule 1 || fail "the rule is not on after the guard was replaced"
+          echo "replaced while it runs (pid $old, now $new)"
+          sudo cat /Library/Logs/uni-vpn-guard.log
+          open -g -a "/Applications/Uni VPN.app" --args --hidden
       # Every university website goes through the service: launchd must not run it throttled like
       # a background job (lowest CPU priority, sockets marked background).
       - name: The service runs at normal priority
@@ -454,6 +529,10 @@ jobs:
           test ! -e "$HOME/Library/LaunchAgents/de.davidvinu.uni-vpn.app.plist"
           # Stays after a failure (for example the proxy setting), so that uninstall can run again.
           if [ -e "$app" ]; then echo "note: $app is still there"; fi
+          # The guard switched our rule off: nobody here wants it any more.
+          if [ "$(scutil --proxy | awk '/ProxyAutoConfigEnable/ { print $3 }')" = 1 ]; then
+            scutil --proxy; echo "::error::the rule is still on after the uninstall"; exit 1
+          fi
           for i in $(seq 10); do curl -fsS http://127.0.0.1:1081/status.json >/dev/null 2>&1 || exit 0; sleep 1; done
           echo "the service still answers"; exit 1
       - uses: actions/upload-artifact@v4
@@ -531,6 +610,17 @@ jobs:
           test ! -e "$app" || fail "$app is still there"
           if scutil --proxy | grep -q "127.0.0.1:1081"; then fail "the proxy setting still points to uni-vpn"; fi
           if pgrep -x "Uni VPN" >/dev/null; then fail "the shield is still in the menu bar"; fi
+          # The guard removes itself 10 minutes after the app went (docs/mac-guard.md).
+          for i in $(seq 720); do
+            test -e /Library/LaunchDaemons/de.davidvinu.uni-vpn.guard.plist || break
+            sleep 1
+          done
+          test ! -e /Library/LaunchDaemons/de.davidvinu.uni-vpn.guard.plist || fail "the guard is still there"
+          test ! -e /Library/PrivilegedHelperTools/de.davidvinu.uni-vpn.guard || fail "the guard's program is still there"
+          test ! -e /Library/Logs/uni-vpn-guard.log || fail "the guard's log is still there"
+          sleep 3
+          test ! -e "/Library/Application Support/Uni VPN" || fail "the guard's list of accounts is still there"
+          if sudo launchctl print system/de.davidvinu.uni-vpn.guard >/dev/null 2>&1; then fail "the guard still runs"; fi
 
   linux-packages:
     runs-on: ubuntu-latest

@@ -25,9 +25,9 @@ is done. On Android, if it asks: allow your browser to install apps. Chromebooks
 supported yet.
 
 A window opens and asks for your university, your user name and your password. When it says
-"All set", close and reopen your browser once. That's it. On a Mac with a standard (not
-administrator) account, the Mac also asks for an administrator's name and password while Uni
-VPN sets itself up (and when it is repaired or removed): only administrators may change the
+"All set", close and reopen your browser once. That's it. On a Mac set up with an older
+version, a standard (not administrator) account asks you once to click **Repair**: the Mac then
+asks for an administrator's name and password, because only administrators may change the
 network settings.
 
 ## Use
@@ -96,6 +96,7 @@ them.
 | "No internet" | On hotel, train or café Wi-Fi, open any website and accept the Wi-Fi's sign-in page. Uni VPN continues by itself. |
 | "Your saved passwords are locked" | Sign out of your computer and back in, then click **Try again**. |
 | "Part of Uni VPN is missing" or "missing a permission" | Click **Repair**, and click Yes or enter your computer's password if it asks (on a Mac with a standard account, an administrator's name and password). |
+| Mac: "Uni VPN needs an administrator of this Mac once more" | Click **Repair**, and let an administrator enter their name and password. If the Mac says Uni VPN may not run in the background, an administrator switches de.davidvinu.uni-vpn.guard and uni-vpn-core on again in System Settings, General, Login Items, then click **Repair**. |
 | "Another program is in the way" or "Uni VPN is not running" | Restart the computer. |
 | "Your university signs in through a web page" | Uni VPN cannot do that yet. Use the Cisco VPN for now. |
 | A university page does not load the first time after a break | Reload the page. |
@@ -132,6 +133,7 @@ commands when `uni-vpn` is not on the `PATH`.
 | A university page loads without the VPN | the browser has not read the proxy rule | restart the browser; the system's proxy settings should name `http://127.0.0.1:1081/proxy.pac` as automatic configuration |
 | Sign-in fails with the right password | the gateway asks for something openconnect cannot answer non-interactively | check the log, open an issue |
 | Windows: "missing a permission" | the service runs without elevation, Wintun needs it | Repair in the app registers the account's scheduled task ("uni-vpn-" and the account's SID) again, with highest privileges |
+| Mac, standard account: "needs an administrator of this Mac once more" (`msg.guard_missing`) | the guard of the proxy rule (docs/mac-guard.md) is not running or is older than this core's | Repair puts it in place with an administrator's password; switched off under Login Items, an administrator switches it on first |
 | The page is there but the tab keeps loading for minutes | the page embeds something from another university host that is not on the list | in the browser's developer tools, under Network, find the host with `ERR_CONNECTION_TIMED_OUT` and add it under Settings, Websites |
 | Firefox: a university page loads without the VPN shortly after a hiccup | after a failed proxy attempt Firefox sends requests directly for 10 s | reload the page after a few seconds |
 | Firefox: "server not found" for a university host that works in Chrome | Firefox resolves names locally, ahead of the proxy; the host exists only in the university DNS | in `about:config`, set `network.proxy.socks_remote_dns` to `true` |
@@ -284,7 +286,8 @@ downloads bring it ready-built; the terminal installer builds it on the machine 
 no WebKitGTK on Linux) the entry opens `http://127.0.0.1:1081/` in the browser instead.
 
 - Linux and macOS: `openconnect --script-tun` with `ocproxy`, so the VPN never becomes a
-  network interface. No root, no routes, no DNS changes.
+  network interface. The tunnel needs no root, no routes and no DNS changes (on a Mac only the
+  guard of the proxy rule runs as root, see below).
 - Windows: openconnect has no `--script-tun` there, so it uses a Wintun adapter (needs
   administrator rights). The adapter gets an address but no gateway and no DNS, and its
   default route has metric 9000, so Windows itself never picks it. Only the daemon's own
@@ -299,9 +302,15 @@ no WebKitGTK on Linux) the entry opens `http://127.0.0.1:1081/` in the browser i
 - The system's automatic proxy configuration points at the service. Programs that honour it
   (browsers, some mail clients) send only the listed domains through the university;
   everything else goes direct as before. Command line tools ignore the setting.
-- Linux and macOS: no routes, no DNS, no root after installation. The tunnel runs entirely
-  in user context and manages roughly 0.5 MB/s per connection (ocproxy, fixed 64 KB
-  window). Enough for mail and Moodle; for large downloads the Cisco client is faster.
+- Linux and macOS: no routes, no DNS. The tunnel runs entirely in user context and manages
+  roughly 0.5 MB/s per connection (ocproxy, fixed 64 KB window). Enough for mail and Moodle;
+  for large downloads the Cisco client is faster.
+- macOS: the proxy setting is the computer's, and only administrators may change it. A small
+  helper of root (`/Library/PrivilegedHelperTools/de.davidvinu.uni-vpn.guard`, a copy of the
+  core started by launchd) switches the rule on only for the account at the screen, while that
+  account's uni-vpn holds the status port, and off otherwise ([docs/mac-guard.md](docs/mac-guard.md)).
+  It takes requests only from this Mac, never sets an address it is given, and removes itself
+  10 minutes after the app went to the Trash.
 - Windows: while connected, a network adapter "uni-vpn" exists, with an address but no
   gateway and no DNS. The service runs elevated as the signed-in user (Task Scheduler,
   "uni-vpn"), because Wintun needs administrator rights. For the same reason the program sits in

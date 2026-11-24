@@ -2,6 +2,9 @@
 # Sets uni-vpn up for whoever is signed in, as that user: own copy of the program, the
 # background service, the proxy rule, then the setup assistant opens. Without anyone signed
 # in, opening "Uni VPN" does the same later.
+# The guard of the proxy rule, as root, for every account of this Mac (docs/mac-guard.md).
+"/Applications/Uni VPN.app/Contents/Resources/app/bin/uni-vpn-core" guard install ||
+  echo "uni-vpn: the guard of the proxy rule could not be set up" >&2
 user=$(stat -f%Su /dev/console)
 case "$user" in ""|root|loginwindow) exit 0 ;; esac
 uid=$(id -u "$user") || exit 0

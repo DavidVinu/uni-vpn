@@ -94,11 +94,14 @@ type System struct {
 	// asks for: a standard account may not change the network settings. Nil where nobody
 	// asked for the change (the core's own looks at the rule).
 	Elevate func(cmds [][]string) error
+	// Guard is the Mac's guard of the proxy rule where it runs (guard.go): it switches our
+	// rule on and off, Install, Uninstall, Refresh, Cover and Withdraw only tell it.
+	Guard GuardClient
 }
 
 // Default acts on this machine.
 func Default() *System {
-	return &System{
+	s := &System{
 		GOOS:       runtime.GOOS,
 		Run:        Exec,
 		Getenv:     os.Getenv,
@@ -107,6 +110,10 @@ func Default() *System {
 		WinSet:     winsys.ProxySet,
 		Now:        time.Now,
 	}
+	if s.macOS() {
+		s.Guard = guardOnMac()
+	}
+	return s
 }
 
 func (s *System) macOS() bool   { return s.GOOS == "darwin" }
@@ -374,9 +381,27 @@ func (s *System) Restore(saved *Snapshot) error {
 		// None of them keeps the rule on the others: uninstalling would fail at it every time.
 		names, err := s.listServices(true)
 		known := err == nil && len(names) > 0 // else each is tried
+		// What is as the backup has it already is not set again: on a standard account each
+		// change needs an administrator's password (after the app went to the Trash, the guard
+		// switched ours off before this account's core removes itself).
+		now := map[string]Service{}
+		if snap := s.Current(); snap != nil && snap.Mac != nil {
+			for _, svc := range snap.Mac.Services {
+				now[svc.Name] = svc
+			}
+		}
 		var cmds [][]string
 		for _, e := range saved.Mac.Services {
 			if known && !slices.Contains(names, e.Name) {
+				continue
+			}
+			if LooksOurs(e.URL) {
+				// A backup from before withoutOurs: ours is never put back, only switched off.
+				e = Service{Name: e.Name}
+			}
+			// Unset in the backup: only one of our rules is switched off, not one that another
+			// tool or account set since (that account's removal put its own PAC back).
+			if svc, ok := now[e.Name]; ok && ((e.URL == "" && !(svc.Enabled && LooksOurs(svc.URL))) || (e.URL != "" && svc.URL == e.URL && svc.Enabled == e.Enabled)) {
 				continue
 			}
 			if e.URL != "" {
@@ -425,6 +450,11 @@ func (s *System) Refresh(httpPort int) {
 		}
 		return
 	}
+	if s.guarded() {
+		if _, err := s.Guard("refresh"); err == nil {
+			return
+		}
+	}
 	if s.macOS() {
 		if snap := s.Current(); snap != nil && snap.Mac != nil {
 			for _, svc := range snap.Mac.Services {
@@ -465,6 +495,12 @@ func (s *System) Cover(httpPort int, backup string) {
 	}
 	if !s.macOS() {
 		return
+	}
+	if s.guarded() {
+		// The guard covers new services itself; this tells it again that the rule is wanted.
+		if _, err := s.Guard("want " + strconv.Itoa(httpPort)); err == nil {
+			return
+		}
 	}
 	now := s.Current()
 	if now == nil || now.Mac == nil {
@@ -520,7 +556,7 @@ func backUpNew(backup string, now *Snapshot, httpPort int, keep func(Service) bo
 		if known[svc.Name] || !keep(svc) {
 			continue
 		}
-		if IsOurs(svc.URL, httpPort) {
+		if IsOurs(svc.URL, httpPort) || LooksOurs(svc.URL) {
 			svc = Service{Name: svc.Name}
 		}
 		saved.Mac.Services = append(saved.Mac.Services, svc)
@@ -534,6 +570,25 @@ func backUpNew(backup string, now *Snapshot, httpPort int, keep func(Service) bo
 		return nil
 	}
 	return added
+}
+
+// withoutOurs: snap for the first backup, a macOS service with one of our rules as unset. A
+// Mac's rule is the computer's, so it can be another account's, or ours already (the core just
+// started said "want" and the guard switched it on); put back once the guard is gone (the app
+// went to the Trash), it would stay on with nobody to switch it off.
+func (snap *Snapshot) withoutOurs(httpPort int) *Snapshot {
+	if snap.Mac == nil {
+		return snap
+	}
+	c := *snap
+	c.Mac = &Mac{Services: make([]Service, 0, len(snap.Mac.Services))}
+	for _, svc := range snap.Mac.Services {
+		if IsOurs(svc.URL, httpPort) || LooksOurs(svc.URL) {
+			svc = Service{Name: svc.Name}
+		}
+		c.Mac.Services = append(c.Mac.Services, svc)
+	}
+	return &c
 }
 
 // past: version, or past the version in url when that is as new or newer.
@@ -631,7 +686,7 @@ func (s *System) Install(httpPort int, backup string) (string, error) {
 		if err := mkdirLast(filepath.Dir(backup), 0o700); err != nil {
 			return "", err
 		}
-		data, err := before.MarshalJSON()
+		data, err := before.withoutOurs(httpPort).MarshalJSON()
 		if err != nil {
 			return "", err
 		}
@@ -641,6 +696,11 @@ func (s *System) Install(httpPort int, backup string) (string, error) {
 	} else {
 		// Repair, or the installer again: macOS services added since are backed up too.
 		backUpNew(backup, before, httpPort, func(Service) bool { return true })
+	}
+	if s.guarded() && before.Mac != nil {
+		if result, ok := s.installGuarded(httpPort, before); ok {
+			return result, nil
+		}
 	}
 	// A new address: macOS keeps the rule it loaded per address until the user signs out, and
 	// the core answering now is the one setup just restarted.
@@ -691,6 +751,12 @@ const WithdrawnName = "rule-withdrawn"
 // the computer's: the address stays there, switched off, and the uni-vpn that holds the port
 // switches it on again (Cover). Errors are ignored.
 func (s *System) Withdraw(httpPort int) bool {
+	if s.guarded() {
+		// It has switched our rule off already, or does at its next look (2 s).
+		if _, err := s.Guard("state"); err == nil {
+			return true
+		}
+	}
 	now := s.Current()
 	if now == nil {
 		return false
@@ -742,15 +808,31 @@ func (s *System) Uninstall(backup string) (string, error) {
 	if s.linux() {
 		s.clearSession()
 	}
+	unset := func() (string, error) {
+		if s.guarded() {
+			// Nothing to put back, but the guard switches ours off once nobody wants it.
+			_, _ = s.Guard("unwant")
+		}
+		return "unset", nil
+	}
 	data, err := os.ReadFile(backup)
 	if err != nil {
-		return "unset", nil
+		return unset()
 	}
 	var saved Snapshot
 	if err := saved.UnmarshalJSON(data); err != nil {
-		return "unset", nil
+		return unset()
 	}
-	if err := s.Restore(&saved); err != nil {
+	restore := s.Restore
+	if s.guarded() {
+		restore = func(saved *Snapshot) error {
+			if err, ok := s.uninstallGuarded(saved); ok {
+				return err
+			}
+			return s.Restore(saved)
+		}
+	}
+	if err := restore(&saved); err != nil {
 		return "failed", nil
 	}
 	if err := os.Remove(backup); err != nil && !errors.Is(err, os.ErrNotExist) {

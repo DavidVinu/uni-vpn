@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -98,5 +99,38 @@ func TestOnlyAMacAsksForAnAdministrator(t *testing.T) {
 	}
 	if sysproxy.Default().Elevate != nil {
 		t.Fatal("the core's own looks at the rule would ask")
+	}
+}
+
+// Setup and Repair put the guard in place where it does not run or is older than this core's;
+// a current one is left as it is, with no password asked.
+func TestEnsureGuardReplacesAMissingOrOlderGuard(t *testing.T) {
+	for _, c := range []struct {
+		answers map[string]string
+		install bool
+	}{
+		{map[string]string{"version": strconv.Itoa(sysproxy.GuardVersion), "state": "off"}, false},
+		{map[string]string{"version": strconv.Itoa(sysproxy.GuardVersion - 1), "state": "off"}, true},
+		{map[string]string{"state": "on 7"}, true},
+		{map[string]string{}, true},
+	} {
+		ask := func(request string) (string, error) {
+			if a, ok := c.answers[request]; ok {
+				return a, nil
+			}
+			return "", errors.New("no guard")
+		}
+		var ran [][]string
+		run := func(args []string, _ time.Duration) (sysproxy.Result, error) {
+			ran = append(ran, args)
+			return sysproxy.Result{}, nil
+		}
+		installed, err := ensureGuardWith(ask, run, "/Users/ann/Library/Application Support/uni-vpn/app/bin/uni-vpn-core")
+		if err != nil || installed != c.install || (len(ran) == 1) != c.install {
+			t.Error(c.answers, installed, err, ran)
+		}
+		if c.install && !strings.Contains(strings.Join(ran[0], " "), "'/Users/ann/Library/Application Support/uni-vpn/app/bin/uni-vpn-core' 'guard' 'install'") {
+			t.Error(ran[0])
+		}
 	}
 }
