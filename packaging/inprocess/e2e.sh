@@ -100,7 +100,8 @@ core=("$work/uni-vpn")
 if [ -n "${1:-}" ]; then
   wine=$(command -v wine64 || command -v wine || echo /usr/lib/wine/wine64)
   export WINEPREFIX="$work/wine" WINEDEBUG=-all
-  "$wine" wineboot --init > /dev/null 2>&1
+  # wineserver and Wine's services start here and outlive it: their own session too (see below).
+  setsid "$wine" wineboot --init > /dev/null 2>&1
   core=("$wine" "$(realpath "$1")")
 else
   CGO_ENABLED=1 go build -tags libopenconnect -o "$work/uni-vpn" ./cmd/uni-vpn
@@ -114,8 +115,8 @@ done
 # Secrets go to the contract tests' stand-in for secret-tool; no desktop proxy settings.
 mkdir -p "$work/bin" "$work/keyring"
 cp tests/contract/secret-tool "$work/bin/secret-tool"
-# Its own session: Wine ends a stopped program's whole process group, which would take this
-# script and the runner's shell with it.
+# Its own session: Wine signals whole process groups when its programs end, which would take
+# this script and the runner's shell with it (exit code 143 after the test passed).
 setsid env -u DISPLAY -u WAYLAND_DISPLAY -u DBUS_SESSION_BUS_ADDRESS -u XDG_CURRENT_DESKTOP \
   UNI_VPN_INPROCESS=1 XDG_CONFIG_HOME="$work/config" XDG_STATE_HOME="$work/state" \
   XDG_DATA_HOME="$work/data" FAKE_KEYRING_DIR="$work/keyring" PATH="$work/bin:$PATH" \
