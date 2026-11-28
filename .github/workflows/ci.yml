@@ -939,9 +939,9 @@ jobs:
           cache: false
       - name: The Windows core with libopenconnect inside
         run: |
-          mkdir core-inprocess
+          packaging/windows/build-core-inprocess.sh core-inprocess
           cp openconnect-win64/*.dll core-inprocess/
-          packaging/windows/build-core-inprocess.sh core-inprocess/uni-vpn-core.exe
+          cp openconnect-win64/licenses/* core-inprocess/licenses/
       - uses: actions/upload-artifact@v4
         with:
           name: core-windows-inprocess
@@ -1107,6 +1107,42 @@ jobs:
             out/uni-vpn-setup.exe
             out/uni-vpn-openconnect-win64.zip
           retention-days: 7
+
+  # uni-vpn.msix for the Microsoft Store (packaging/windows/build-msix.ps1), installed and
+  # checked like the Store would install it. Unsigned: the Store signs it on submission.
+  windows-msix:
+    needs: [windows-installer, windows-openconnect]
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-windows
+          path: app
+      - uses: actions/download-artifact@v4
+        with:
+          name: core-windows-inprocess
+          path: core-inprocess
+      - name: Support files
+        shell: bash
+        run: packaging/stage-app.sh --support support
+      - name: Build uni-vpn.msix
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File packaging\windows\build-msix.ps1 -Desktop app\windows\desktop -Core core-inprocess -Support support -Version $env:UNI_VPN_VERSION -Out out\uni-vpn.msix
+          exit $LASTEXITCODE
+      - name: Install it like the Store would
+        shell: powershell
+        run: |
+          Copy-Item out\uni-vpn.msix $env:RUNNER_TEMP\test.msix
+          powershell -NoProfile -ExecutionPolicy Bypass -File packaging\windows\test-msix.ps1 -Msix $env:RUNNER_TEMP\test.msix
+          exit $LASTEXITCODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uni-vpn-msix
+          path: out/uni-vpn.msix
+          retention-days: 30
 
   # The same uni-vpn-setup.exe on a Windows 11 computer with an ARM processor: the ARM core,
   # and OpenConnect and the app window as emulated x64 programs.

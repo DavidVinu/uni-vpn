@@ -75,7 +75,19 @@ func packageApp(root string) string {
 
 // autoUpdate is _auto_update: it ends when the daemon stops, or after installing an update,
 // with RestartRequested set.
+// autoUpdateShown is the status' "auto_update": null in the Windows package, which the Store
+// updates (the app then shows no switch).
+func autoUpdateShown(enabled bool) any {
+	if platform.Packaged {
+		return nil
+	}
+	return enabled
+}
+
 func (d *Daemon) autoUpdate() {
+	if platform.Packaged {
+		return
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() {

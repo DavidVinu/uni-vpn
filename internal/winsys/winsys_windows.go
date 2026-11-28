@@ -4,9 +4,11 @@ package winsys
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -60,22 +62,54 @@ func ProxyGet() (string, error) {
 
 // ProxySet writes AutoConfigURL ("" removes it) and tells WinINet users to re-read it.
 func ProxySet(url string) error {
-	key, err := registry.OpenKey(registry.CURRENT_USER, InternetSettings, registry.SET_VALUE)
-	if err != nil {
-		return err
+	write := proxyWrite
+	if platform.Packaged {
+		write = proxyWriteOutside
 	}
-	if url != "" {
-		err = key.SetStringValue("AutoConfigURL", url)
-	} else if err = key.DeleteValue("AutoConfigURL"); errors.Is(err, registry.ErrNotExist) {
-		err = nil
-	}
-	key.Close()
-	if err != nil {
+	if err := write(url); err != nil {
 		return err
 	}
 	// Tell WinINet users (Edge, Chrome, Firefox with system settings) to re-read the settings.
 	procInternetSetOptionW.Call(0, internetOptionSettingsChanged, 0, 0)
 	procInternetSetOptionW.Call(0, internetOptionRefresh, 0, 0)
+	return nil
+}
+
+func proxyWrite(url string) error {
+	key, err := registry.OpenKey(registry.CURRENT_USER, InternetSettings, registry.SET_VALUE)
+	if err != nil {
+		return err
+	}
+	defer key.Close()
+	if url != "" {
+		return key.SetStringValue("AutoConfigURL", url)
+	}
+	if err = key.DeleteValue("AutoConfigURL"); errors.Is(err, registry.ErrNotExist) {
+		return nil
+	}
+	return err
+}
+
+// proxyWriteOutside is proxyWrite for the MSIX package, whose own writes to HKCU land in a
+// private copy no browser reads. reg.exe, Windows' own program, writes the real one.
+func proxyWriteOutside(url string) error {
+	system, err := windows.GetSystemDirectory()
+	if err != nil {
+		return err
+	}
+	key := `HKCU\` + InternetSettings
+	args := []string{"add", key, "/v", "AutoConfigURL", "/t", "REG_SZ", "/d", url, "/f"}
+	if url == "" {
+		if current, _ := ProxyGet(); current == "" {
+			return nil
+		}
+		args = []string{"delete", key, "/v", "AutoConfigURL", "/f"}
+	}
+	cmd := exec.Command(system+`\reg.exe`, args...)
+	platform.HideWindow(cmd)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("reg.exe: %v: %s", err, strings.TrimSpace(string(out)))
+	}
 	return nil
 }
 

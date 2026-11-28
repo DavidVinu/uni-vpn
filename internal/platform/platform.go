@@ -25,9 +25,15 @@ var (
 // libopenconnect; the Linux end to end test uses it.
 const InProcessEnv = "UNI_VPN_INPROCESS"
 
+// Packaged: the core runs from the Microsoft Store's MSIX package (packaging/windows/msix). The
+// Store installs and updates it, Windows starts it at login, and it has no administrator
+// rights, so no Wintun: its tunnel runs inside the core.
+var Packaged = IsWindows && packaged()
+
 // InProcessOpenConnect: the core drives libopenconnect itself instead of running the
-// openconnect program and ocproxy. Always on iOS, which runs no child processes.
-var InProcessOpenConnect = IsIOS || (withLibOpenConnect && os.Getenv(InProcessEnv) == "1")
+// openconnect program and ocproxy. Always on iOS, which runs no child processes, and in the
+// Windows package.
+var InProcessOpenConnect = IsIOS || (withLibOpenConnect && (Packaged || os.Getenv(InProcessEnv) == "1"))
 
 // NativeDirEnv names the variable with the Android app's native library folder. Android only
 // lets an app run programs from there, so the app ships openconnect and ocproxy as

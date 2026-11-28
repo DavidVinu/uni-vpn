@@ -300,7 +300,7 @@ input.switch:focus-visible{box-shadow:0 0 0 2px var(--accent)}
     <p class="group" data-t="settings.about"></p>
     <div class="list">
       <details><summary><span data-t="settings.log"></span></summary><div class="body"><pre id="log"></pre></div></details>
-      <label class="item"><span data-t="settings.auto_update"></span><input type="checkbox" class="switch" id="auto-update" role="switch"></label>
+      <label class="item" id="row-auto-update"><span data-t="settings.auto_update"></span><input type="checkbox" class="switch" id="auto-update" role="switch"></label>
       <div class="item"><span data-t="settings.version"></span><span class="small" id="v-ver"></span></div>
     </div>
   </section>
@@ -496,6 +496,8 @@ function render() {
   $("v-ver").textContent = S.version;
   $("v-ver").title = S.commit ? S.commit.slice(0, 7) : "";
   if (!autoUpdateSaving) $("auto-update").checked = S.auto_update !== false;
+  // The Microsoft Store updates its copy itself.
+  $("row-auto-update").hidden = S.auto_update === null;
   $("v-dom").textContent = plural("settings.domain_count", (S.domains || []).length);
   // Only on change, so a selection in the log survives the next poll.
   const log = (S.log_tail || []).join("\n");

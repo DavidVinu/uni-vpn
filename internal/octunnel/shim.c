@@ -4,9 +4,6 @@
  * --user, --authgroup, --passwd-on-stdin and --non-inter: the same answers to the login forms
  * and the same output lines. */
 
-#ifdef _WIN32
-#include <winsock2.h> /* before openconnect.h pulls in windows.h */
-#endif
 #include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>

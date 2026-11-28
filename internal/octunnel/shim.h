@@ -3,6 +3,9 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#ifdef _WIN32
+#include <winsock2.h> /* openconnect.h uses SOCKET */
+#endif
 #include <openconnect.h>
 
 /* One libopenconnect session and what the openconnect program would have read from its
