@@ -66,7 +66,7 @@ EOF
 cat > "$work/server.tmpl" << 'EOF'
 cn = "127.0.0.1"
 ip_address = "127.0.0.1"
-dns_name = "localhost"
+dns_name = "gateway.uni-vpn.test"
 tls_www_server
 signing_key
 encryption_key
@@ -145,7 +145,10 @@ done
 
 # Wine's certificate check matches names, not addresses.
 gateway=127.0.0.1
-[ -n "${1:-}" ] && gateway=localhost
+if [ -n "${1:-}" ]; then
+  gateway=gateway.uni-vpn.test
+  grep -q " $gateway" /etc/hosts || echo "127.0.0.1 $gateway" | $sudo tee -a /etc/hosts > /dev/null
+fi
 profile='"university": "other", "profile": {"host": "'$gateway'", "mfa": "none"}'
 api /api/setup "{\"user\": \"test\", \"password\": \"secret\", $profile}"
 api /api/connect '{}'
