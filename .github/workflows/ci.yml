@@ -965,14 +965,7 @@ jobs:
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq wine64 > /dev/null
       - name: End to end against ocserv
-        # In a session of its own, so a signal Wine sends to a process group cannot reach this
-        # step's shell; the script's own status decides.
-        run: |
-          set +e
-          setsid --wait packaging/inprocess/e2e.sh core-inprocess/uni-vpn-core.exe
-          status=$?
-          echo "e2e exited with $status"
-          exit $status
+        run: packaging/inprocess/e2e.sh core-inprocess/uni-vpn-core.exe
 
   windows-inprocess:
     needs: windows-openconnect
