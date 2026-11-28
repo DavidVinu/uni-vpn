@@ -40,6 +40,9 @@ logs() {
 }
 
 cleanup() {
+  local status=$?
+  # Stopping Wine's processes can signal this script too; the result is already decided.
+  trap '' TERM
   [ -n "$core_pid" ] && kill "$core_pid" 2> /dev/null && wait "$core_pid" 2> /dev/null
   [ -n "$http_pid" ] && kill "$http_pid" 2> /dev/null
   [ -n "$dns_pid" ] && $sudo kill "$dns_pid" 2> /dev/null
@@ -51,6 +54,7 @@ cleanup() {
     $sudo update-ca-certificates --fresh > /dev/null 2>&1 || true
   fi
   rm -rf "$work"
+  exit "$status"
 }
 trap cleanup EXIT
 trap 'logs' ERR
