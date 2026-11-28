@@ -971,7 +971,7 @@ jobs:
         run: |
           mkdir /tmp/wt && cp packaging/inprocess/tlsprobe.go.txt /tmp/wt/main.go
           (cd /tmp/wt && printf 'module wt\ngo 1.26\n' > go.mod && GOOS=windows go build -o wt.exe .)
-          export WINEPREFIX=/tmp/wtp WINEDEBUG=-all
+          export WINEPREFIX=$HOME/.wtp WINEDEBUG=-all
           wine wineboot --init > /dev/null 2>&1 || true
           wine /tmp/wt/wt.exe github.com || true
       - name: End to end against ocserv
@@ -1134,7 +1134,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: app-windows
-          path: app
+          path: app-built
       - uses: actions/download-artifact@v4
         with:
           name: core-windows-inprocess
@@ -1145,7 +1145,7 @@ jobs:
       - name: Build uni-vpn.msix
         shell: powershell
         run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File packaging\windows\build-msix.ps1 -Desktop app\windows\desktop -Core core-inprocess -Support support -Version $env:UNI_VPN_VERSION -Out out\uni-vpn.msix -Name $env:MSIX_NAME -Publisher $env:MSIX_PUBLISHER -PublisherName $env:MSIX_PUBLISHER_NAME
+          powershell -NoProfile -ExecutionPolicy Bypass -File packaging\windows\build-msix.ps1 -Desktop app-built\windows\desktop -Core core-inprocess -Support support -Version $env:UNI_VPN_VERSION -Out out\uni-vpn.msix -Name $env:MSIX_NAME -Publisher $env:MSIX_PUBLISHER -PublisherName $env:MSIX_PUBLISHER_NAME
           exit $LASTEXITCODE
       - name: Install it like the Store would
         shell: powershell
