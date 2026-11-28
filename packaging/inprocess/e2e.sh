@@ -41,8 +41,6 @@ logs() {
 
 cleanup() {
   local status=$?
-  # Stopping Wine's processes can signal this script too; the result is already decided.
-  trap '' TERM
   [ -n "$core_pid" ] && kill "$core_pid" 2> /dev/null && wait "$core_pid" 2> /dev/null
   [ -n "$http_pid" ] && kill "$http_pid" 2> /dev/null
   [ -n "$dns_pid" ] && $sudo kill "$dns_pid" 2> /dev/null
@@ -116,7 +114,9 @@ done
 # Secrets go to the contract tests' stand-in for secret-tool; no desktop proxy settings.
 mkdir -p "$work/bin" "$work/keyring"
 cp tests/contract/secret-tool "$work/bin/secret-tool"
-env -u DISPLAY -u WAYLAND_DISPLAY -u DBUS_SESSION_BUS_ADDRESS -u XDG_CURRENT_DESKTOP \
+# Its own session: Wine ends a stopped program's whole process group, which would take this
+# script and the runner's shell with it.
+setsid env -u DISPLAY -u WAYLAND_DISPLAY -u DBUS_SESSION_BUS_ADDRESS -u XDG_CURRENT_DESKTOP \
   UNI_VPN_INPROCESS=1 XDG_CONFIG_HOME="$work/config" XDG_STATE_HOME="$work/state" \
   XDG_DATA_HOME="$work/data" FAKE_KEYRING_DIR="$work/keyring" PATH="$work/bin:$PATH" \
   "${core[@]}" daemon > "$work/core.out" 2>&1 &
