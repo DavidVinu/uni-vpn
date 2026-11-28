@@ -60,6 +60,24 @@ foreach ($i in 1..4) {
   Windows
   Shot "open-$i"
 }
+"--- Downloading it in the browsers (a fresh profile each)"
+$browsers = @{ edge = "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"; chrome = "$env:ProgramFiles\Google\Chrome\Application\chrome.exe" }
+foreach ($name in $browsers.Keys) {
+  $exe = $browsers[$name]
+  if (-not (Test-Path $exe)) { "$name not installed"; continue }
+  $profile = "$env:TEMP\profile-$name"
+  $p = Start-Process $exe -PassThru -ArgumentList "--user-data-dir=$profile", "--no-first-run", "--no-default-browser-check", "--start-maximized", "https://vpn.davidvinu.de/"
+  Start-Sleep -Seconds 8
+  Shot "$name-site"
+  Start-Process $exe -ArgumentList "--user-data-dir=$profile", $link
+  Start-Sleep -Seconds 40
+  Shot "$name-download"
+  Start-Process $exe -ArgumentList "--user-data-dir=$profile", $(if ($name -eq "edge") { "edge://downloads" } else { "chrome://downloads" })
+  Start-Sleep -Seconds 5
+  Shot "$name-downloads-page"
+  Get-ChildItem "$env:USERPROFILE\Downloads" | ForEach-Object { "  downloads folder: $($_.Name) $($_.Length)" }
+  Get-Process | Where-Object { $_.Path -eq $exe } | Stop-Process -Force -ErrorAction SilentlyContinue
+}
 "--- SmartScreen event log"
 Get-WinEvent -LogName "Microsoft-Windows-SmartScreen/Debug" -MaxEvents 20 -ErrorAction SilentlyContinue | Format-List TimeCreated, Id, Message
 Get-Process | Where-Object { $_.ProcessName -match "uni-vpn-setup" } | Stop-Process -Force -ErrorAction SilentlyContinue
