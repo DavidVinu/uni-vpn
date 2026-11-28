@@ -844,11 +844,45 @@ func (d *Desktop) UseUpdatedApp() {
 	}
 	want := LoginPlist(filepath.Join(app, "Contents", "MacOS", AppName))
 	if data, err := os.ReadFile(login); err == nil && string(data) == want {
+		d.refreshIcon(app)
 		return
 	}
 	if os.WriteFile(login, []byte(want), 0o644) == nil {
+		touchNow(app)
 		d.quiet(lsregister, "-f", app)
 	}
+}
+
+// refreshIcon registers app again when an update changed it. The updates replace files inside
+// the app, never the app's own folder, and macOS and the Dock keep the icon they read for a
+// folder that is no newer than before: the dark look of the icon never showed.
+func (d *Desktop) refreshIcon(app string) {
+	if !iconStale(app) {
+		return
+	}
+	touchNow(app)
+	d.quiet(lsregister, "-f", app)
+}
+
+// iconStale: something inside app (the folders the updates rename files into) is newer than
+// the app's folder.
+func iconStale(app string) bool {
+	info, err := os.Stat(app)
+	if err != nil {
+		return false
+	}
+	for _, rel := range []string{"Contents", "Contents/Resources", "Contents/MacOS", "Contents/Info.plist",
+		"Contents/Resources/Assets.car", "Contents/Resources/AppIcon.icns"} {
+		if inner, err := os.Stat(filepath.Join(app, filepath.FromSlash(rel))); err == nil && inner.ModTime().After(info.ModTime()) {
+			return true
+		}
+	}
+	return false
+}
+
+func touchNow(path string) {
+	now := time.Now()
+	os.Chtimes(path, now, now)
 }
 
 // restartLinux starts the shell again in the desktop session of the running one: the service

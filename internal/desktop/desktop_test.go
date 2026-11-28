@@ -296,6 +296,36 @@ func TestMacOSLoginItemMovesToTheUpdatedApp(t *testing.T) {
 	}
 }
 
+// An update replaces files inside the app (the dark icon of 2026-11-12): the app is registered
+// again, once, so that the Dock shows the new icon.
+func TestUpdatedMacAppRegisteredAgainAfterAnUpdate(t *testing.T) {
+	h := newHarness(t, "darwin")
+	program := filepath.Join(h.d.Root, filepath.FromSlash(UpdatedAppFile("darwin")))
+	app := filepath.Join(h.d.Root, "desktop", AppName+".app")
+	touch(t, program, "")
+	touch(t, filepath.Join(h.d.Root, ".core-files"), UpdatedAppFile("darwin")+"\n")
+	touch(t, h.d.LoginPath(), LoginPlist(program))
+	old := time.Now().Add(-time.Hour)
+	for _, dir := range []string{app, filepath.Join(app, "Contents"), filepath.Join(app, "Contents", "MacOS")} {
+		os.Chtimes(dir, old, old)
+	}
+	os.Chtimes(program, old, old)
+	h.d.UseUpdatedApp()
+	if h.ran(lsregister, "-f", app) {
+		t.Fatal("registered again without an update", h.commands)
+	}
+	touch(t, filepath.Join(app, "Contents", "Resources", "Assets.car"), "dark")
+	h.d.UseUpdatedApp()
+	if !h.ran(lsregister, "-f", app) {
+		t.Fatal("not registered again", h.commands)
+	}
+	h.commands = nil
+	h.d.UseUpdatedApp()
+	if h.ran(lsregister, "-f", app) {
+		t.Fatal("registered again twice", h.commands)
+	}
+}
+
 func TestRestartAppNeedsAnUpdatedApp(t *testing.T) {
 	for _, goos := range []string{"darwin", "windows", "linux"} {
 		h := newHarness(t, goos)
