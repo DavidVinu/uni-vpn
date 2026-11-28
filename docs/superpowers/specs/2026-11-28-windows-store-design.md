@@ -51,19 +51,31 @@ No adapter, no driver, no administrator.
 - Tests: Linux CI runs the Windows core under Wine against a local ocserv (the inprocess e2e);
   the Windows runners check that it loads and reaches the Heidelberg gateway.
 
-### 2. Core as the signed-in user
+### 2. The package: no task, no setup, no self-update
 
-With no adapter the service needs no elevation: the scheduled task runs with normal rights,
-the program lives per user. Setup and updates no longer ask for an administrator. Existing
-elevated installs move over through the normal self-update.
+The core detects its package identity (`platform.Packaged`) and then:
+
+- runs the tunnel in-process; status `elevated` is null (no Wintun, no administrator needed);
+- registers no scheduled task: the manifest's startup task starts the window at login
+  (`--hidden`), and the window starts the core from the package (`bin\uni-vpn-core.exe daemon`);
+- does not update itself: status `auto_update` is null and Settings hides the switch;
+- switches the rule for the websites on at start, since no setup runs. MSIX redirects a
+  package's own writes to HKCU into a private copy browsers never read, so the rule goes in
+  through `reg.exe`, Windows' own program. Removing the app from Windows leaves the rule: a
+  browser that cannot reach `proxy.pac` goes direct.
+
+The installer from the site stays as it is (Wintun, elevated task) until it is replaced.
 
 ### 3. MSIX for the Store
 
-- One package: core, libopenconnect and its DLLs, the app window. Capability `runFullTrust` only.
-- The core starts at login through the package's `windows.startupTask`.
-- The Store build turns off self-update (the Store updates it), like Android's play flavor.
-- CI builds `uni-vpn.msix` on every run and installs it on the runner with a throwaway test
-  certificate, like the installer test. Microsoft re-signs it on submission.
+- `packaging/windows/msix/AppxManifest.xml`: core (built without console window), libopenconnect
+  and its DLLs, the app window, licences. Capability `runFullTrust` only.
+- `packaging/windows/build-msix.ps1` builds it, unsigned; Microsoft signs it on submission.
+- CI (`windows-msix`) installs it on the runner signed with a throwaway certificate and checks:
+  the core runs from the package, not elevated, no self-update, the rule reaches the real
+  registry, Heidelberg's gateway answers the login, and no network adapter exists.
+- The package identity (name, publisher) comes from Partner Center; until then CI uses
+  placeholders.
 
 ### 4. Site
 
@@ -73,6 +85,9 @@ Once the Store listing is live, the Windows button links to it.
 
 1. Create a free individual developer account in Partner Center (Microsoft account, ID, selfie).
 2. Reserve the app name "Uni VPN".
-3. Upload the `uni-vpn.msix` CI built, fill in the listing (screenshots exist) and submit.
-   Later submissions can go through the Microsoft Store submission API from CI with an Entra
-   app's credentials as secrets.
+3. Under "Product identity", copy `Package/Identity/Name`, `Package/Identity/Publisher` and
+   `Package/Properties/PublisherDisplayName` into the repository variables `MSIX_NAME`,
+   `MSIX_PUBLISHER` and `MSIX_PUBLISHER_NAME` (Settings, Secrets and variables, Actions,
+   Variables). The next green CI run builds `uni-vpn.msix` with them (artifact `uni-vpn-msix`).
+4. Upload that file, fill in the listing and submit. Later submissions can go through the
+   Microsoft Store submission API from CI with an Entra app's credentials as secrets.

@@ -1114,6 +1114,11 @@ jobs:
     needs: [windows-installer, windows-openconnect]
     runs-on: windows-latest
     timeout-minutes: 20
+    # The package identity from Partner Center, "Product identity" (repository variables).
+    env:
+      MSIX_NAME: ${{ vars.MSIX_NAME || 'UniVPN.CI' }}
+      MSIX_PUBLISHER: ${{ vars.MSIX_PUBLISHER || 'CN=uni-vpn CI' }}
+      MSIX_PUBLISHER_NAME: ${{ vars.MSIX_PUBLISHER_NAME || 'uni-vpn' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -1130,13 +1135,13 @@ jobs:
       - name: Build uni-vpn.msix
         shell: powershell
         run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File packaging\windows\build-msix.ps1 -Desktop app\windows\desktop -Core core-inprocess -Support support -Version $env:UNI_VPN_VERSION -Out out\uni-vpn.msix
+          powershell -NoProfile -ExecutionPolicy Bypass -File packaging\windows\build-msix.ps1 -Desktop app\windows\desktop -Core core-inprocess -Support support -Version $env:UNI_VPN_VERSION -Out out\uni-vpn.msix -Name $env:MSIX_NAME -Publisher $env:MSIX_PUBLISHER -PublisherName $env:MSIX_PUBLISHER_NAME
           exit $LASTEXITCODE
       - name: Install it like the Store would
         shell: powershell
         run: |
           Copy-Item out\uni-vpn.msix $env:RUNNER_TEMP\test.msix
-          powershell -NoProfile -ExecutionPolicy Bypass -File packaging\windows\test-msix.ps1 -Msix $env:RUNNER_TEMP\test.msix
+          powershell -NoProfile -ExecutionPolicy Bypass -File packaging\windows\test-msix.ps1 -Msix $env:RUNNER_TEMP\test.msix -Name $env:MSIX_NAME -Publisher $env:MSIX_PUBLISHER
           exit $LASTEXITCODE
       - uses: actions/upload-artifact@v4
         with:
