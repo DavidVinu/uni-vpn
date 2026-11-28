@@ -930,6 +930,58 @@ jobs:
           name: openconnect-win64
           path: openconnect-win64
           retention-days: 3
+      # The core with libopenconnect inside: no Wintun, no administrator (docs/superpowers/specs/
+      # 2026-11-28-windows-store-design.md). Not in the installer yet.
+      - run: dnf install -y -q tar gzip > /dev/null
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: The Windows core with libopenconnect inside
+        run: |
+          mkdir core-inprocess
+          cp openconnect-win64/*.dll core-inprocess/
+          packaging/windows/build-core-inprocess.sh core-inprocess/uni-vpn-core.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: core-windows-inprocess
+          path: core-inprocess
+          retention-days: 3
+
+  # That core's tunnel under Wine against a local ocserv (no gateway of our own runs on
+  # Windows), and on real Windows as far as Heidelberg's login.
+  windows-inprocess-wine:
+    needs: windows-openconnect
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: core-windows-inprocess
+          path: core-inprocess
+      - name: Wine
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq wine64 > /dev/null
+      - name: End to end against ocserv
+        run: packaging/inprocess/e2e.sh core-inprocess/uni-vpn-core.exe
+
+  windows-inprocess:
+    needs: windows-openconnect
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: core-windows-inprocess
+          path: core-inprocess
+      - name: Heidelberg's gateway with a made-up account
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File packaging\windows\test-inprocess.ps1 core-inprocess
+          exit $LASTEXITCODE
 
   windows-installer:
     needs: windows-openconnect

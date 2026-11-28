@@ -4,6 +4,8 @@ package octunnel
 
 /*
 #cgo linux pkg-config: openconnect
+#cgo windows pkg-config: openconnect
+#cgo windows LDFLAGS: -lws2_32
 #cgo ios LDFLAGS: -framework Security -framework CoreFoundation
 #cgo ios CFLAGS: -DUNI_VPN_SET_LOGIN
 #include <errno.h>
@@ -289,14 +291,14 @@ func (s *Session) IPInfo() (addr netip.Addr, dns []netip.Addr, mtu int) {
 	return addr, dns, int(m)
 }
 
-// Run passes packets between the CSTP connection and tunFD (a packet socket that stays the
-// caller's to close) until cancelled or the connection is dead, reconnecting on the way like
-// the program. It returns the program's exit code: 0 after Cancel.
+// Run passes packets between the CSTP connection and tunFD (a packet socket, on Windows the
+// handle of a message-mode pipe; it stays the caller's to close) until cancelled or the
+// connection is dead, reconnecting on the way like the program. It returns the program's exit code: 0 after Cancel.
 func (s *Session) Run(tunFD int) int {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	vpn := s.u.vpninfo
-	if C.openconnect_setup_tun_fd(vpn, C.int(tunFD)) != 0 {
+	if C.uni_vpn_setup_tun(vpn, C.intptr_t(tunFD)) != 0 {
 		s.line("Set up tun device failed")
 		return 1
 	}

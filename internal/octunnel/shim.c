@@ -4,6 +4,9 @@
  * --user, --authgroup, --passwd-on-stdin and --non-inter: the same answers to the login forms
  * and the same output lines. */
 
+#ifdef _WIN32
+#include <winsock2.h> /* before openconnect.h pulls in windows.h */
+#endif
 #include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -390,5 +393,16 @@ int uni_vpn_ip_info(struct uni_vpn *u, char *addr, int addrlen, char *dns, int d
 
 int uni_vpn_write_cmd(int fd, char cmd)
 {
+#ifdef _WIN32
+	/* The library's command pipe is a socket there. */
+	return send((SOCKET)fd, &cmd, 1, 0) == 1 ? 0 : -EIO;
+#else
 	return write(fd, &cmd, 1) == 1 ? 0 : -errno;
+#endif
+}
+
+int uni_vpn_setup_tun(struct openconnect_info *vpninfo, intptr_t tun)
+{
+	/* A file descriptor, or on Windows the HANDLE of a message-mode pipe. */
+	return openconnect_setup_tun_fd(vpninfo, tun);
 }

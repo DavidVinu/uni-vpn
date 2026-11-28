@@ -4,7 +4,10 @@
 # gateway's side of the tunnel, and a wrong password ends in auth_failed.
 # Needs root or passwordless sudo (ocserv, the CA store) and ports 443, 1080, 1081 and 8080;
 # made for GitHub Actions ubuntu-latest.
-# Usage: packaging/inprocess/e2e.sh
+# Usage: packaging/inprocess/e2e.sh [CORE.EXE]
+# With CORE.EXE (the Windows core, build-core-inprocess.sh, next to its DLLs) Wine runs that
+# instead: its named pipe to libopenconnect (internal/libtunnel/pair_windows.go) against the
+# same gateway.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
@@ -25,10 +28,13 @@ work=$(mktemp -d)
 ca_store=/usr/local/share/ca-certificates/uni-vpn-e2e.crt
 core_pid="" http_pid="" dns_pid=""
 
+# Linux: $XDG_STATE_HOME/uni-vpn; Windows: in the Wine prefix.
+daemon_log() { find "$work" -name daemon.log 2> /dev/null | head -n 1; }
+
 logs() {
   echo "--- core"
   cat "$work/core.out" 2> /dev/null || true
-  tail -n 80 "$work/state/uni-vpn/daemon.log" 2> /dev/null || true
+  tail -n 80 "$(daemon_log)" 2> /dev/null || true
   echo "--- ocserv"
   tail -n 40 "$work/ocserv.log" 2> /dev/null || true
 }
@@ -87,7 +93,15 @@ echo "$page" > "$work/www/hello.txt"
 python3 -m http.server 8080 --bind 0.0.0.0 --directory "$work/www" > "$work/http.log" 2>&1 &
 http_pid=$!
 
-CGO_ENABLED=1 go build -tags libopenconnect -o "$work/uni-vpn" ./cmd/uni-vpn
+core=("$work/uni-vpn")
+if [ -n "${1:-}" ]; then
+  wine=$(command -v wine64 || command -v wine || echo /usr/lib/wine/wine64)
+  export WINEPREFIX="$work/wine" WINEDEBUG=-all
+  "$wine" wineboot --init > /dev/null 2>&1
+  core=("$wine" "$(realpath "$1")")
+else
+  CGO_ENABLED=1 go build -tags libopenconnect -o "$work/uni-vpn" ./cmd/uni-vpn
+fi
 
 for _ in $(seq 1 20); do
   (exec 3<> /dev/tcp/127.0.0.1/443) 2> /dev/null && break
@@ -100,7 +114,7 @@ cp tests/contract/secret-tool "$work/bin/secret-tool"
 env -u DISPLAY -u WAYLAND_DISPLAY -u DBUS_SESSION_BUS_ADDRESS -u XDG_CURRENT_DESKTOP \
   UNI_VPN_INPROCESS=1 XDG_CONFIG_HOME="$work/config" XDG_STATE_HOME="$work/state" \
   XDG_DATA_HOME="$work/data" FAKE_KEYRING_DIR="$work/keyring" PATH="$work/bin:$PATH" \
-  "$work/uni-vpn" daemon > "$work/core.out" 2>&1 &
+  "${core[@]}" daemon > "$work/core.out" 2>&1 &
 core_pid=$!
 
 api() {
@@ -138,7 +152,7 @@ if [ "$got" != "$page" ]; then
   false
 fi
 echo "page through the tunnel: $got"
-grep -q "openconnect: CSTP connected" "$work/state/uni-vpn/daemon.log"
+grep -q "openconnect: CSTP connected" "$(daemon_log)"
 
 # Names go to the VPN's DNS server (ocserv's dns = 10.77.0.1) over UDP through the tunnel.
 cat > "$work/dns.py" << 'EOF'
