@@ -930,6 +930,58 @@ jobs:
           name: openconnect-win64
           path: openconnect-win64
           retention-days: 3
+      # The core with libopenconnect inside: no Wintun, no administrator (docs/superpowers/specs/
+      # 2026-11-28-windows-store-design.md). Not in the installer yet.
+      - run: dnf install -y -q tar gzip > /dev/null
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: The Windows core with libopenconnect inside
+        run: |
+          packaging/windows/build-core-inprocess.sh core-inprocess
+          cp openconnect-win64/*.dll core-inprocess/
+          cp openconnect-win64/licenses/* core-inprocess/licenses/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: core-windows-inprocess
+          path: core-inprocess
+          retention-days: 3
+
+  # That core's tunnel under Wine against a local ocserv (no gateway of our own runs on
+  # Windows), and on real Windows as far as Heidelberg's login.
+  windows-inprocess-wine:
+    needs: windows-openconnect
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: core-windows-inprocess
+          path: core-inprocess
+      - name: Wine
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq wine64 > /dev/null
+      - name: End to end against ocserv
+        run: packaging/inprocess/e2e.sh core-inprocess/uni-vpn-core.exe
+
+  windows-inprocess:
+    needs: windows-openconnect
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: core-windows-inprocess
+          path: core-inprocess
+      - name: Heidelberg's gateway with a made-up account
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File packaging\windows\test-inprocess.ps1 core-inprocess
+          exit $LASTEXITCODE
 
   windows-installer:
     needs: windows-openconnect
@@ -1055,6 +1107,47 @@ jobs:
             out/uni-vpn-setup.exe
             out/uni-vpn-openconnect-win64.zip
           retention-days: 7
+
+  # uni-vpn.msix for the Microsoft Store (packaging/windows/build-msix.ps1), installed and
+  # checked like the Store would install it. Unsigned: the Store signs it on submission.
+  windows-msix:
+    needs: [windows-installer, windows-openconnect]
+    runs-on: windows-latest
+    timeout-minutes: 20
+    # The package identity from Partner Center, "Product identity" (repository variables).
+    env:
+      MSIX_NAME: ${{ vars.MSIX_NAME || 'UniVPN.CI' }}
+      MSIX_PUBLISHER: ${{ vars.MSIX_PUBLISHER || 'CN=uni-vpn CI' }}
+      MSIX_PUBLISHER_NAME: ${{ vars.MSIX_PUBLISHER_NAME || 'uni-vpn' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-windows
+          path: app-built
+      - uses: actions/download-artifact@v4
+        with:
+          name: core-windows-inprocess
+          path: core-inprocess
+      - name: Support files
+        shell: bash
+        run: packaging/stage-app.sh --support support
+      - name: Build uni-vpn.msix
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File packaging\windows\build-msix.ps1 -Desktop app-built\windows\desktop -Core core-inprocess -Support support -Version $env:UNI_VPN_VERSION -Out out\uni-vpn.msix -Name $env:MSIX_NAME -Publisher $env:MSIX_PUBLISHER -PublisherName $env:MSIX_PUBLISHER_NAME
+          exit $LASTEXITCODE
+      - name: Install it like the Store would
+        shell: powershell
+        run: |
+          Copy-Item out\uni-vpn.msix $env:RUNNER_TEMP\test.msix
+          powershell -NoProfile -ExecutionPolicy Bypass -File packaging\windows\test-msix.ps1 -Msix $env:RUNNER_TEMP\test.msix -Name $env:MSIX_NAME -Publisher $env:MSIX_PUBLISHER
+          exit $LASTEXITCODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uni-vpn-msix
+          path: out/uni-vpn.msix
+          retention-days: 30
 
   # The same uni-vpn-setup.exe on a Windows 11 computer with an ARM processor: the ARM core,
   # and OpenConnect and the app window as emulated x64 programs.

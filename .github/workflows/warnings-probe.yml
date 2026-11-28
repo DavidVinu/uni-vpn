@@ -1,0 +1,21 @@
+# What Windows, Edge and Chrome say about uni-vpn-setup.exe as the site serves it (SmartScreen,
+# Mark of the Web, Defender). Screenshots in the artifact. Run by hand from the Actions tab.
+name: warnings probe
+on: workflow_dispatch
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, windows-11-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File packaging\windows\warnings-probe.ps1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: probe-${{ matrix.os }}
+          path: probe

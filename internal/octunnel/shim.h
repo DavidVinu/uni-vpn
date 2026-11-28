@@ -3,6 +3,9 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#ifdef _WIN32
+#include <winsock2.h> /* openconnect.h uses SOCKET */
+#endif
 #include <openconnect.h>
 
 /* One libopenconnect session and what the openconnect program would have read from its
@@ -27,7 +30,9 @@ struct uni_vpn *uni_vpn_new(uintptr_t handle, const char *useragent, const char 
 			    int no_external_auth);
 void uni_vpn_free(struct uni_vpn *u);
 int uni_vpn_ip_info(struct uni_vpn *u, char *addr, int addrlen, char *dns, int dnslen, int *mtu);
-int uni_vpn_write_cmd(int fd, char cmd);
+int uni_vpn_write_cmd(intptr_t fd, char cmd);
+intptr_t uni_vpn_setup_cmd_pipe(struct openconnect_info *vpninfo);
+int uni_vpn_setup_tun(struct openconnect_info *vpninfo, intptr_t tun);
 
 /* Tests on Linux: a trust store that accepts (1) or refuses (2) every server. */
 void uni_vpn_test_trust(struct uni_vpn *u, int accept);

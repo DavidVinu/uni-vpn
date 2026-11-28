@@ -51,6 +51,10 @@ details.info summary::-webkit-details-marker{display:none}
 details.info summary:hover{background:var(--line)}
 details.info[open] p{display:block}
 .tip{margin:6px 0 0;font-size:13px;color:var(--muted);text-align:left;background:var(--bg);border-radius:10px;padding:10px 12px}
+.alt{font-size:14px;color:var(--accent);margin:4px 0 0}
+.guide{margin:10px 0 0;font-size:13px;color:var(--muted);text-align:left;background:var(--bg);border-radius:10px;padding:12px 14px}
+.guide p{margin:0 0 6px;color:var(--text)}
+.guide ol{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px}
 .others{width:100%}
 .others h2{font-size:13px;font-weight:500;color:var(--muted);margin:0 0 8px 4px}
 .list{background:var(--card);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}
@@ -103,37 +107,41 @@ footer a{color:inherit}
 </footer>
 <script>
 const BASE = "https://github.com/DavidVinu/uni-vpn/releases/latest/download/";
+// The Microsoft Store listing (packaging/windows/msix), empty until it is live. With it, Windows
+// gets the Store as the main button and the setup ("full version": its own network adapter, so
+// also apps outside the browser) as a link below.
+const STORE = "";
 const T = {
   en: {tagline: "Your university's websites from home, as if you were on campus.", download: "Download for {os}",
     others: "Other devices", source: "Source code", imprint: "Imprint", privacy: "Privacy", phone: "Not on iPhone and iPad yet. Open this page on your computer or Android phone.", cros: "Not on Chromebooks yet. Open this page on another computer or on an Android phone.", android: "If Android asks: allow your browser to install apps.",
     mac: "If your Mac says the file cannot be opened: open System Settings, Privacy & Security, and click \"Open Anyway\".",
     linux: "When the installation is done, open Uni VPN from your apps.", macos: "macOS 14 or newer", droid: "Android 10 or newer (64-bit)", droid32: "Uni VPN does not work on this phone yet: it needs 64-bit Android, and this phone has 32-bit Android.",
-    win_edge: "If Edge says the file isn't commonly downloaded: click \"…\" next to the file, then \"Keep\", \"Show more\" and \"Keep anyway\".", win_chrome: "If the browser blocks the file as suspicious: click it in the downloads, then \"Download suspicious file\".", win_dl: "If the browser blocks the file: open its downloads and allow the file.", win: "If a blue box appears: click \"More info\", then \"Run anyway\". If Windows says Smart App Control blocked it, Uni VPN cannot run on this computer yet.", arm: "ARM processor", help: "More help"},
+    win_edge: "If Edge says the file isn't commonly downloaded: click \"…\" next to the file, then \"Keep\", \"Show more\" and \"Keep anyway\".", win_chrome: "If the browser blocks the file as suspicious: click it in the downloads, then \"Download suspicious file\".", win_dl: "If the browser blocks the file: open its downloads and allow the file.", win: "If a blue box appears: click \"More info\", then \"Run anyway\".", win_sac: "If Windows says Smart App Control blocked it, Uni VPN cannot run on this computer yet.", win_sac_store: "If Windows says Smart App Control blocked it: get Uni VPN from the Microsoft Store instead.", win_why: "Windows and your browser warn because the file has no paid certificate, not because of a virus.", store: "Get it from Microsoft Store", full: "Full version, also for apps outside the browser", store_list: "Microsoft Store", arm: "ARM processor", help: "More help"},
   de: {tagline: "Die Webseiten deiner Uni von zu Hause, als wärst du auf dem Campus.", download: "Für {os} herunterladen",
     others: "Andere Geräte", source: "Quellcode", imprint: "Impressum", privacy: "Datenschutz", phone: "Noch nicht für iPhone und iPad. Öffne diese Seite auf deinem Computer oder Android-Handy.", cros: "Noch nicht für Chromebooks. Öffne diese Seite auf einem anderen Computer oder einem Android-Handy.", android: "Wenn Android fragt: Erlaube deinem Browser, Apps zu installieren.",
     mac: "Wenn dein Mac sagt, dass die Datei nicht geöffnet werden kann: Öffne die Systemeinstellungen, Datenschutz & Sicherheit, und klicke auf „Dennoch öffnen“.",
     linux: "Wenn die Installation fertig ist, öffne Uni VPN in deinen Apps.", macos: "macOS 14 oder neuer", droid: "Android 10 oder neuer (64 Bit)", droid32: "Uni VPN läuft auf diesem Handy noch nicht: Es braucht 64-Bit-Android, und dieses Handy hat 32-Bit-Android.",
-    win_edge: "Wenn Edge meldet, dass die Datei selten heruntergeladen wird: Klicke neben der Datei auf „…“, dann auf „Beibehalten“, „Mehr anzeigen“ und „Trotzdem beibehalten“.", win_chrome: "Wenn der Browser die Datei als verdächtig blockiert: Klicke in den Downloads darauf, dann auf „Verdächtige Datei herunterladen“.", win_dl: "Wenn der Browser die Datei blockiert: Öffne seine Downloads und erlaube die Datei.", win: "Wenn ein blaues Fenster erscheint: Klicke auf „Weitere Informationen“, dann auf „Trotzdem ausführen“. Wenn Windows meldet, dass die intelligente App-Steuerung die Datei blockiert hat, läuft Uni VPN auf diesem Computer noch nicht.", arm: "ARM-Prozessor", help: "Weitere Hilfe"},
+    win_edge: "Wenn Edge meldet, dass die Datei selten heruntergeladen wird: Klicke neben der Datei auf „…“, dann auf „Beibehalten“, „Mehr anzeigen“ und „Trotzdem beibehalten“.", win_chrome: "Wenn der Browser die Datei als verdächtig blockiert: Klicke in den Downloads darauf, dann auf „Verdächtige Datei herunterladen“.", win_dl: "Wenn der Browser die Datei blockiert: Öffne seine Downloads und erlaube die Datei.", win: "Wenn ein blaues Fenster erscheint: Klicke auf „Weitere Informationen“, dann auf „Trotzdem ausführen“.", win_sac: "Wenn Windows meldet, dass die intelligente App-Steuerung die Datei blockiert hat, läuft Uni VPN auf diesem Computer noch nicht.", win_sac_store: "Wenn Windows meldet, dass die intelligente App-Steuerung die Datei blockiert hat: Hol dir Uni VPN stattdessen aus dem Microsoft Store.", win_why: "Windows und dein Browser warnen, weil die Datei kein gekauftes Zertifikat hat, nicht wegen eines Virus.", store: "Aus dem Microsoft Store laden", full: "Vollversion, auch für Apps außerhalb des Browsers", store_list: "Microsoft Store", arm: "ARM-Prozessor", help: "Weitere Hilfe"},
   fr: {tagline: "Les sites de votre université depuis chez vous, comme sur le campus.", download: "Télécharger pour {os}",
     others: "Autres appareils", source: "Code source", imprint: "Mentions légales", privacy: "Confidentialité", phone: "Pas encore sur iPhone et iPad. Ouvrez cette page sur votre ordinateur ou votre téléphone Android.", cros: "Pas encore sur Chromebook. Ouvrez cette page sur un autre ordinateur ou sur un téléphone Android.", android: "Si Android le demande\u00a0: autorisez votre navigateur à installer des applications.",
     mac: "Si votre Mac indique que le fichier ne peut pas être ouvert\u00a0: ouvrez Réglages Système, Confidentialité et sécurité, puis cliquez sur «\u00a0Ouvrir quand même\u00a0».",
     linux: "Une fois l’installation terminée, ouvrez Uni VPN depuis vos applications.", macos: "macOS 14 ou plus récent", droid: "Android 10 ou plus récent (64\u00a0bits)", droid32: "Uni VPN ne fonctionne pas encore sur ce téléphone\u00a0: il faut Android 64\u00a0bits, et ce téléphone a Android 32\u00a0bits.",
-    win_edge: "Si Edge indique que le fichier n’est pas couramment téléchargé\u00a0: cliquez sur «\u00a0…\u00a0» à côté du fichier, choisissez de le conserver, puis «\u00a0Afficher plus\u00a0» et conservez-le quand même.", win_chrome: "Si le navigateur bloque le fichier comme suspect\u00a0: cliquez dessus dans les téléchargements, puis choisissez de télécharger quand même le fichier suspect.", win_dl: "Si le navigateur bloque le fichier\u00a0: ouvrez ses téléchargements et autorisez le fichier.", win: "Si une fenêtre bleue apparaît\u00a0: cliquez sur «\u00a0Informations complémentaires\u00a0», puis sur «\u00a0Exécuter quand même\u00a0». Si Windows indique que le Contrôle intelligent des applications a bloqué le fichier, Uni VPN ne fonctionne pas encore sur cet ordinateur.", arm: "processeur ARM", help: "Plus d’aide"},
+    win_edge: "Si Edge indique que le fichier n’est pas couramment téléchargé\u00a0: cliquez sur «\u00a0…\u00a0» à côté du fichier, choisissez de le conserver, puis «\u00a0Afficher plus\u00a0» et conservez-le quand même.", win_chrome: "Si le navigateur bloque le fichier comme suspect\u00a0: cliquez dessus dans les téléchargements, puis choisissez de télécharger quand même le fichier suspect.", win_dl: "Si le navigateur bloque le fichier\u00a0: ouvrez ses téléchargements et autorisez le fichier.", win: "Si une fenêtre bleue apparaît\u00a0: cliquez sur «\u00a0Informations complémentaires\u00a0», puis sur «\u00a0Exécuter quand même\u00a0».", win_sac: "Si Windows indique que le Contrôle intelligent des applications a bloqué le fichier, Uni VPN ne fonctionne pas encore sur cet ordinateur.", win_sac_store: "Si Windows indique que le Contrôle intelligent des applications a bloqué le fichier\u00a0: installez plutôt Uni VPN depuis le Microsoft Store.", win_why: "Windows et votre navigateur vous avertissent parce que le fichier n’a pas de certificat payant, pas à cause d’un virus.", store: "Obtenir dans le Microsoft Store", full: "Version complète, aussi pour les applications hors du navigateur", store_list: "Microsoft Store", arm: "processeur ARM", help: "Plus d’aide"},
   es: {tagline: "Las webs de tu universidad desde casa, como si estuvieras en el campus.", download: "Descargar para {os}",
     others: "Otros dispositivos", source: "Código fuente", imprint: "Aviso legal", privacy: "Privacidad", phone: "Aún no disponible para iPhone y iPad. Abre esta página en tu ordenador o móvil Android.", cros: "Aún no disponible para Chromebook. Abre esta página en otro ordenador o en un móvil Android.", android: "Si Android lo pide: permite que tu navegador instale aplicaciones.",
     mac: "Si tu Mac dice que el archivo no se puede abrir: abre Ajustes del Sistema, Privacidad y seguridad, y haz clic en «Abrir igualmente».",
     linux: "Cuando termine la instalación, abre Uni VPN desde tus aplicaciones.", macos: "macOS 14 o posterior", droid: "Android 10 o posterior (64 bits)", droid32: "Uni VPN aún no funciona en este móvil: necesita Android de 64 bits y este móvil tiene Android de 32 bits.",
-    win_edge: "Si Edge dice que el archivo no se descarga con frecuencia: haz clic en «…» junto al archivo, elige conservarlo, luego «Mostrar más» y consérvalo de todas formas.", win_chrome: "Si el navegador bloquea el archivo por sospechoso: haz clic en él en las descargas y elige descargar el archivo sospechoso de todas formas.", win_dl: "Si el navegador bloquea el archivo: abre sus descargas y permite el archivo.", win: "Si aparece un recuadro azul: haz clic en «Más información» y luego en «Ejecutar de todas formas». Si Windows dice que Control inteligente de aplicaciones bloqueó el archivo, Uni VPN aún no funciona en este ordenador.", arm: "procesador ARM", help: "Más ayuda"},
+    win_edge: "Si Edge dice que el archivo no se descarga con frecuencia: haz clic en «…» junto al archivo, elige conservarlo, luego «Mostrar más» y consérvalo de todas formas.", win_chrome: "Si el navegador bloquea el archivo por sospechoso: haz clic en él en las descargas y elige descargar el archivo sospechoso de todas formas.", win_dl: "Si el navegador bloquea el archivo: abre sus descargas y permite el archivo.", win: "Si aparece un recuadro azul: haz clic en «Más información» y luego en «Ejecutar de todas formas».", win_sac: "Si Windows dice que Control inteligente de aplicaciones bloqueó el archivo, Uni VPN aún no funciona en este ordenador.", win_sac_store: "Si Windows dice que Control inteligente de aplicaciones bloqueó el archivo: instala Uni VPN desde Microsoft Store.", win_why: "Windows y tu navegador avisan porque el archivo no tiene un certificado de pago, no por un virus.", store: "Obtener en Microsoft Store", full: "Versión completa, también para apps fuera del navegador", store_list: "Microsoft Store", arm: "procesador ARM", help: "Más ayuda"},
   "zh-Hans": {tagline: "在家访问学校网站，就像在校园里一样。", download: "下载 {os} 版",
     others: "其他设备", source: "源代码", imprint: "网站信息", privacy: "隐私", phone: "暂不支持 iPhone 和 iPad。请在电脑或 Android 手机上打开此页面。", cros: "暂不支持 Chromebook。请在其他电脑或 Android 手机上打开此页面。", android: "如果 Android 询问：允许浏览器安装应用。",
     mac: "如果 Mac 提示无法打开该文件：打开“系统设置”>“隐私与安全性”，然后点击“仍要打开”。",
     linux: "安装完成后，从应用列表中打开 Uni VPN。", macos: "需要 macOS 14 或更高版本", droid: "需要 Android 10 或更高版本（64 位）", droid32: "Uni VPN 暂不支持此手机：需要 64 位 Android，而此手机是 32 位 Android。",
-    win_edge: "如果 Edge 提示该文件不常被下载：点击文件旁的“…”，选择保留，然后点击“显示更多”，再选择仍然保留。", win_chrome: "如果浏览器将该文件作为可疑文件拦截：在下载内容中点击它，然后选择仍然下载这个可疑文件。", win_dl: "如果浏览器拦截了该文件：打开浏览器的下载内容，允许该文件。", win: "如果出现蓝色窗口：点击“更多信息”，然后点击“仍要运行”。如果 Windows 提示“智能应用控制”已阻止该文件，则 Uni VPN 暂时无法在这台电脑上运行。", arm: "ARM 处理器", help: "更多帮助"},
+    win_edge: "如果 Edge 提示该文件不常被下载：点击文件旁的“…”，选择保留，然后点击“显示更多”，再选择仍然保留。", win_chrome: "如果浏览器将该文件作为可疑文件拦截：在下载内容中点击它，然后选择仍然下载这个可疑文件。", win_dl: "如果浏览器拦截了该文件：打开浏览器的下载内容，允许该文件。", win: "如果出现蓝色窗口：点击“更多信息”，然后点击“仍要运行”。", win_sac: "如果 Windows 提示“智能应用控制”已阻止该文件，则 Uni VPN 暂时无法在这台电脑上运行。", win_sac_store: "如果 Windows 提示“智能应用控制”已阻止该文件：请改从 Microsoft Store 获取 Uni VPN。", win_why: "Windows 和浏览器发出警告，是因为该文件没有付费证书，而不是因为病毒。", store: "从 Microsoft Store 获取", full: "完整版，也适用于浏览器以外的应用", store_list: "Microsoft Store", arm: "ARM 处理器", help: "更多帮助"},
   "zh-Hant": {tagline: "在家存取學校網站，就像在校園裡一樣。", download: "下載 {os} 版",
     others: "其他裝置", source: "原始碼", imprint: "網站資訊", privacy: "隱私權", phone: "尚不支援 iPhone 和 iPad。請在電腦或 Android 手機上開啟此頁面。", cros: "尚不支援 Chromebook。請在其他電腦或 Android 手機上開啟此頁面。", android: "如果 Android 詢問：允許瀏覽器安裝應用程式。",
     mac: "如果 Mac 提示無法打開該檔案：打開「系統設定」>「隱私權與安全性」，然後按一下「強制打開」。",
     linux: "安裝完成後，從應用程式清單中開啟 Uni VPN。", macos: "需要 macOS 14 或更新版本", droid: "需要 Android 10 或更新版本（64 位元）", droid32: "Uni VPN 尚不支援此手機：需要 64 位元 Android，而此手機是 32 位元 Android。",
-    win_edge: "如果 Edge 提示該檔案不常被下載：按一下檔案旁的「…」，選擇保留，然後按一下「顯示更多」，再選擇仍要保留。", win_chrome: "如果瀏覽器將該檔案視為可疑檔案而封鎖：在下載內容中按一下它，然後選擇仍要下載這個可疑檔案。", win_dl: "如果瀏覽器封鎖了該檔案：開啟瀏覽器的下載內容，允許該檔案。", win: "如果出現藍色視窗：按一下「其他資訊」，然後按一下「仍要執行」。如果 Windows 顯示「智慧型應用程式控制」已封鎖該檔案，Uni VPN 目前還無法在這台電腦上執行。", arm: "ARM 處理器", help: "更多說明"},
+    win_edge: "如果 Edge 提示該檔案不常被下載：按一下檔案旁的「…」，選擇保留，然後按一下「顯示更多」，再選擇仍要保留。", win_chrome: "如果瀏覽器將該檔案視為可疑檔案而封鎖：在下載內容中按一下它，然後選擇仍要下載這個可疑檔案。", win_dl: "如果瀏覽器封鎖了該檔案：開啟瀏覽器的下載內容，允許該檔案。", win: "如果出現藍色視窗：按一下「其他資訊」，然後按一下「仍要執行」。", win_sac: "如果 Windows 顯示「智慧型應用程式控制」已封鎖該檔案，Uni VPN 目前還無法在這台電腦上執行。", win_sac_store: "如果 Windows 顯示「智慧型應用程式控制」已封鎖該檔案：請改從 Microsoft Store 取得 Uni VPN。", win_why: "Windows 和瀏覽器發出警告，是因為該檔案沒有付費憑證，而不是因為病毒。", store: "從 Microsoft Store 取得", full: "完整版，也適用於瀏覽器以外的應用程式", store_list: "Microsoft Store", arm: "ARM 處理器", help: "更多說明"},
 };
 function lang() {
   for (const l of navigator.languages || [navigator.language || "en"]) {
@@ -159,6 +167,17 @@ const ALL = [...FILES.mac, ...FILES.windows, ...FILES.deb, ...FILES.rpm, ...FILE
 const ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/></svg>';
 const INFO = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5m0-8h.01" stroke-linecap="round"/></svg>';
 
+// guide: the few steps the unsigned setup needs, shown once its download has started.
+function guide(ua) {
+  const g = document.createElement("div");
+  g.className = "guide";
+  g.innerHTML = "<p></p><ol><li></li><li></li></ol>";
+  g.querySelector("p").textContent = t("win_why");
+  const li = g.querySelectorAll("li");
+  li[0].textContent = t(/Edg\//.test(ua) ? "win_edge" : /Chrome\//.test(ua) && !/OPR\//.test(ua) ? "win_chrome" : "win_dl");
+  li[1].textContent = t("win") + (L.startsWith("zh") ? "" : " ") + t(STORE ? "win_sac_store" : "win_sac");
+  return g;
+}
 function label(f) { return f.arm ? f.os + ", " + t("arm") : f.os; }
 function button(f) {
   const a = document.createElement("a");
@@ -216,7 +235,17 @@ detect().then(d => {
     const pick = list => list.filter(f => !!f.arm === d.arm);
     shown = d.fedora ? [...pick(FILES.rpm), ...pick(FILES.deb)] : [...pick(FILES.deb), ...pick(FILES.rpm)];
   }
-  shown.forEach(f => main.appendChild(button(f)));
+  if (d.kind === "windows" && STORE) {
+    const a = button({os: ""});
+    a.href = STORE;
+    a.lastChild.textContent = t("store");
+    main.appendChild(a);
+    const full = document.createElement("a");
+    full.className = "alt"; full.href = BASE + FILES.windows[0].file;
+    full.textContent = t("full");
+    main.appendChild(full);
+    shown = FILES.windows;
+  } else shown.forEach(f => main.appendChild(button(f)));
   // The oldest system each file installs on (distribution.xml, minSdk): older ones only say it
   // cannot be installed, and browsers do not tell the version.
   const need = {mac: "macos", android: "droid"}[d.kind];
@@ -230,13 +259,23 @@ detect().then(d => {
   // The browser holds the unsigned installer back first: Edge, Chrome (and Brave) and the others
   // each in their own way.
   const ua = navigator.userAgent;
-  if (d.kind === "windows") note.appendChild(tip(/Edg\//.test(ua) ? "win_edge" : /Chrome\//.test(ua) && !/OPR\//.test(ua) ? "win_chrome" : "win_dl", "win"));
+  if (d.kind === "windows") main.querySelectorAll("a[href$='.exe']").forEach(a => a.addEventListener("click", () => {
+    if (!document.querySelector(".guide")) note.before(guide(ua));
+  }));
   if (d.kind === "linux") note.appendChild(tip("linux"));
   if (d.kind === "android") note.appendChild(tip("android"));
   const none = {phone: "phone", android32: "droid32", cros: "cros"}[d.kind];
   if (none) note.textContent = t(none);
   if (!shown.length && !none) document.querySelector(".others h2").hidden = true;
   const list = document.getElementById("list");
+  if (STORE && d.kind !== "windows") {
+    const a = document.createElement("a");
+    a.href = STORE;
+    a.innerHTML = "<span></span><span class='file'></span>";
+    a.firstChild.textContent = "Windows";
+    a.lastChild.textContent = t("store_list");
+    list.appendChild(a);
+  }
   ALL.filter(f => !shown.includes(f)).forEach(f => {
     const a = document.createElement("a");
     a.href = BASE + f.file;

@@ -32,6 +32,23 @@ static class Program
     // Taken at the start: an update moves the running file aside and puts the new one here.
     public static readonly string ExePath = Application.ExecutablePath;
 
+    // The Microsoft Store's MSIX package (packaging/windows/msix): no scheduled task there, this
+    // window starts the core itself, and the Store updates both.
+    public static readonly bool Packaged = HasPackage();
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    static extern int GetCurrentPackageFullName(ref int length, System.Text.StringBuilder name);
+
+    static bool HasPackage()
+    {
+        try
+        {
+            int length = 0;
+            return GetCurrentPackageFullName(ref length, null) == 122;  // ERROR_INSUFFICIENT_BUFFER
+        }
+        catch (Exception) { return false; }  // before Windows 8
+    }
+
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     static extern bool SetProcessDPIAware();
 
@@ -397,8 +414,22 @@ class TrayApp : ApplicationContext
     void StartServiceIfDown()
     {
         misses = reachable ? 0 : misses + 1;
-        if (misses < 2 || (DateTime.Now - lastStart).TotalSeconds < 60 || (DateTime.Now - repairing).TotalSeconds < 60) return;
+        if (misses < (Program.Packaged ? 1 : 2) || (DateTime.Now - lastStart).TotalSeconds < 60 || (DateTime.Now - repairing).TotalSeconds < 60) return;
         lastStart = DateTime.Now;
+        if (Program.Packaged)
+        {
+            // Inside the package: the core next to this window's folder, with the package's identity.
+            try
+            {
+                string core = Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(Program.ExePath)), "bin", "uni-vpn-core.exe");
+                ProcessStartInfo own = new ProcessStartInfo(core, "daemon");
+                own.CreateNoWindow = true;
+                own.UseShellExecute = false;
+                Process.Start(own).Dispose();
+            }
+            catch (Exception) { }
+            return;
+        }
         try
         {
             // This account's own task (task names hold for the whole computer), or the one of an

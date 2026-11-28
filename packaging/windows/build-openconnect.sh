@@ -7,22 +7,28 @@
 # Usage: packaging/windows/build-openconnect.sh OUT-DIR
 set -euo pipefail
 out=$(realpath -m "$1")
+repo=$(cd "$(dirname "$0")/../.." && pwd)
 version=9.21
 # The release, signed by David Woodhouse (BE07D9FD54809AB2C4B0FF5F63762CDA67E2F359).
 sha256=5b32369467db6e5f317aa1ed12cfcbb81ed00bdbc765450b6bfcbdc300944a58
 root=/usr/x86_64-w64-mingw32/sys-root/mingw
-dnf install -y -q make gcc pkgconf-pkg-config gettext unzip mingw64-gcc mingw64-binutils \
+dnf install -y -q make gcc patch pkgconf-pkg-config gettext unzip mingw64-gcc mingw64-binutils \
   mingw64-gnutls mingw64-libxml2 mingw64-zlib mingw64-gettext >/dev/null
 work=$(mktemp -d)
 curl -fsSL --retry 5 --retry-all-errors --retry-delay 15 -o "$work/src.tar.gz" "https://www.infradead.org/openconnect/download/openconnect-$version.tar.gz"
 echo "$sha256  $work/src.tar.gz" | sha256sum -c -
 tar -xzf "$work/src.tar.gz" -C "$work"
 cd "$work/openconnect-$version"
+# A message-mode pipe as tun handle, for the core's in-process tunnel (internal/libtunnel).
+patch -p1 < "$repo/packaging/windows/openconnect-pipe-tun.patch"
 # uni-vpn passes its own script; this default is never used.
 mingw64-configure --disable-nls --without-libpskc --without-stoken --without-libproxy \
   --with-vpnc-script=vpnc-script-win.js >/dev/null
 touch vpnc-script-win.js  # else make downloads the latest one
 make -s -j"$(nproc)" >/dev/null
+# Headers, import library and pkg-config file into the MinGW root, for a core built with cgo
+# (build-core-inprocess.sh).
+make -s install >/dev/null
 mkdir -p "$out/licenses"
 cp .libs/openconnect.exe .libs/libopenconnect-5.dll "$out/"
 cp COPYING.LGPL "$out/licenses/openconnect-COPYING.LGPL"

@@ -1,0 +1,24 @@
+--- a/tun-win32.c
++++ b/tun-win32.c
+@@ -974,7 +974,9 @@
+ 		return;
+ 	}
+ 
+-	CloseHandle(vpninfo->tun_fh);
++	/* A pipe stays its caller's, like a tun fd on other systems. */
++	if (GetFileType(vpninfo->tun_fh) != FILE_TYPE_PIPE)
++		CloseHandle(vpninfo->tun_fh);
+ 	vpninfo->tun_fh = NULL;
+ 	CloseHandle(vpninfo->tun_rd_overlap.hEvent);
+ 	vpninfo->tun_rd_overlap.hEvent = NULL;
+@@ -991,7 +993,9 @@
+ 	/* Toggle media status so that network location awareness picks up all the configuration
+ 	   that occurred and properly assigns the network so the user can adjust firewall
+ 	   settings. */
+-	for (data = 0; data <= 1; data++) {
++	/* A message-mode pipe carries the packets of a tunnel in the caller's own process: it has
++	   no media status. */
++	for (data = GetFileType((HANDLE)tun_fd) == FILE_TYPE_PIPE ? 2 : 0; data <= 1; data++) {
+ 		if (!DeviceIoControl((HANDLE)tun_fd, TAP_IOCTL_SET_MEDIA_STATUS,
+ 					&data, sizeof(data), &data, sizeof(data), &len, NULL)) {
+ 			char *errstr = openconnect__win32_strerror(GetLastError());

@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Microsoft Store package (docs/superpowers/specs/2026-11-28-windows-store-design.md).
+     build-msix.ps1 fills in @NAME@, @PUBLISHER@, @PUBLISHER_NAME@ (from Partner Center) and @VERSION@.
+     Full trust only, no other restricted capability: the core needs no administrator. -->
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+         xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+         xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+         xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+         IgnorableNamespaces="uap uap10 desktop rescap">
+  <Identity Name="@NAME@" Publisher="@PUBLISHER@" Version="@VERSION@" ProcessorArchitecture="x64" />
+  <Properties>
+    <DisplayName>Uni VPN</DisplayName>
+    <PublisherDisplayName>@PUBLISHER_NAME@</PublisherDisplayName>
+    <Logo>assets\StoreLogo.png</Logo>
+  </Properties>
+  <Dependencies>
+    <!-- 2004: uap10:Parameters. ARM processors run the x64 package emulated, as they do the setup. -->
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+  <Resources>
+    <Resource Language="en-us" />
+    <Resource Language="de-de" />
+    <Resource Language="fr-fr" />
+    <Resource Language="es-es" />
+    <Resource Language="ja-jp" />
+    <Resource Language="zh-cn" />
+    <Resource Language="zh-tw" />
+  </Resources>
+  <Applications>
+    <Application Id="App" Executable="desktop\Uni VPN.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements DisplayName="Uni VPN" Description="Uni VPN" BackgroundColor="transparent"
+                          Square150x150Logo="assets\Square150x150Logo.png" Square44x44Logo="assets\Square44x44Logo.png" />
+    </Application>
+    <!-- At login: the icon in the notification area without a window, which starts the core. -->
+    <Application Id="Tray" Executable="desktop\Uni VPN.exe" EntryPoint="Windows.FullTrustApplication" uap10:Parameters="--hidden">
+      <uap:VisualElements DisplayName="Uni VPN" Description="Uni VPN" BackgroundColor="transparent" AppListEntry="none"
+                          Square150x150Logo="assets\Square150x150Logo.png" Square44x44Logo="assets\Square44x44Logo.png" />
+      <Extensions>
+        <desktop:Extension Category="windows.startupTask" Executable="desktop\Uni VPN.exe" EntryPoint="Windows.FullTrustApplication">
+          <desktop:StartupTask TaskId="UniVPN" Enabled="true" DisplayName="Uni VPN" />
+        </desktop:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

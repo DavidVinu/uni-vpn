@@ -416,7 +416,8 @@ func New(cfg *config.Config, log *slog.Logger, opts Options) *Daemon {
 	}
 	if opts.Elevated == nil {
 		opts.Elevated = func() *bool {
-			if !platform.IsWindows {
+			// The tunnel inside the core needs no Wintun, so no administrator either.
+			if !platform.IsWindows || platform.InProcessOpenConnect {
 				return nil
 			}
 			admin := winsys.IsAdmin()
@@ -706,7 +707,7 @@ func (d *Daemon) Status() (pyjson.Object, error) {
 		"protocol", Protocol,
 		"version", Version,
 		"commit", nullable(d.opts.Updater.Installed()),
-		"auto_update", cfg.AutoUpdate,
+		"auto_update", autoUpdateShown(cfg.AutoUpdate),
 		"language", cfg.Language,
 		"update_pending", nullable(d.opts.Updater.Pending()),
 		"state", string(d.state),
@@ -1381,6 +1382,10 @@ func (d *Daemon) Run() {
 	d.http = server
 	d.mu.Unlock()
 	d.bindForwarder()
+	if platform.Packaged && server != nil {
+		// No setup runs in the Windows package: the rule for the websites goes on here.
+		d.opts.ProxyInstall(httpPort)
+	}
 	if ready := d.opts.ReadyFile; ready != "" {
 		// Left by a core that was killed (the iPhone ends an extension over its memory limit):
 		// the lock is ours, so it is no other core's file.

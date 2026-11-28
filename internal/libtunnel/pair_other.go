@@ -1,4 +1,4 @@
-//go:build !unix
+//go:build !unix && !windows
 
 package libtunnel
 
@@ -7,7 +7,7 @@ import (
 	"os"
 )
 
-// Windows runs the openconnect program with Wintun (internal/wintunnel).
+// No packet pipe here.
 func socketPair() (*os.File, int, error) {
 	return nil, -1, errors.New("no packet socketpair on this system")
 }
