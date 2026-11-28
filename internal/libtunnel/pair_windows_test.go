@@ -7,7 +7,6 @@ import (
 	"os"
 	"testing"
 	"time"
-
 )
 
 // The pipe keeps packet boundaries both ways, and closing the stack's end ends its read, as
