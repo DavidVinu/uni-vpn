@@ -73,8 +73,6 @@ func packageApp(root string) string {
 	return filepath.Join(PackageDir(root), "app")
 }
 
-// autoUpdate is _auto_update: it ends when the daemon stops, or after installing an update,
-// with RestartRequested set.
 // autoUpdateShown is the status' "auto_update": null in the Windows package, which the Store
 // updates (the app then shows no switch).
 func autoUpdateShown(enabled bool) any {
@@ -84,6 +82,8 @@ func autoUpdateShown(enabled bool) any {
 	return enabled
 }
 
+// autoUpdate is _auto_update: it ends when the daemon stops, or after installing an update,
+// with RestartRequested set.
 func (d *Daemon) autoUpdate() {
 	if platform.Packaged {
 		return
