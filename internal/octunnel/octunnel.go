@@ -34,7 +34,7 @@ type Session struct {
 	timeout int
 
 	mu      sync.Mutex
-	cmdFD   C.int // write end of the library's command pipe, -1 when gone
+	cmdFD   C.intptr_t // write end (a socket on Windows) of the library's command pipe, -1 when gone
 	freed   bool
 	addr    netip.Addr
 	changed bool // the gateway gave another address after reconnecting
@@ -223,7 +223,7 @@ func Connect(o Options) (*Session, error) {
 	C.openconnect_disable_dtls(vpn)
 	C.openconnect_set_dpd(vpn, 30)
 
-	fd := C.openconnect_setup_cmd_pipe(vpn)
+	fd := C.uni_vpn_setup_cmd_pipe(vpn)
 	if fd < 0 {
 		return fail(1, "command pipe")
 	}

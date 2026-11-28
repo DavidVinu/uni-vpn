@@ -1,10 +1,7 @@
 # What Windows, Edge and Chrome say about uni-vpn-setup.exe as the site serves it (SmartScreen,
 # Mark of the Web, Defender). Screenshots in the artifact. Run by hand from the Actions tab.
 name: warnings probe
-on:
-  workflow_dispatch:
-  push:
-    branches: [claude/project-thread-xwacuf]
+on: workflow_dispatch
 jobs:
   probe:
     strategy:

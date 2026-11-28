@@ -388,14 +388,20 @@ int uni_vpn_ip_info(struct uni_vpn *u, char *addr, int addrlen, char *dns, int d
 	return 0;
 }
 
-int uni_vpn_write_cmd(int fd, char cmd)
+int uni_vpn_write_cmd(intptr_t fd, char cmd)
 {
 #ifdef _WIN32
 	/* The library's command pipe is a socket there. */
 	return send((SOCKET)fd, &cmd, 1, 0) == 1 ? 0 : -EIO;
 #else
-	return write(fd, &cmd, 1) == 1 ? 0 : -errno;
+	return write((int)fd, &cmd, 1) == 1 ? 0 : -errno;
 #endif
+}
+
+intptr_t uni_vpn_setup_cmd_pipe(struct openconnect_info *vpninfo)
+{
+	/* An int, or on Windows a SOCKET; both negative (INVALID_SOCKET) on failure. */
+	return (intptr_t)openconnect_setup_cmd_pipe(vpninfo);
 }
 
 int uni_vpn_setup_tun(struct openconnect_info *vpninfo, intptr_t tun)
