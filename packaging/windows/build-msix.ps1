@@ -17,9 +17,7 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $stage = Join-Path $env:TEMP "uni-vpn-msix"
 Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force "$stage\bin" | Out-Null
-
-Copy-Item -Recurse $Support\* $stage
+Copy-Item -Recurse $Support $stage
 Remove-Item -Recurse -Force "$stage\desktop" -ErrorAction SilentlyContinue
 Copy-Item -Recurse $Desktop "$stage\desktop"
 Copy-Item "$Core\*.dll" "$stage\bin\"
