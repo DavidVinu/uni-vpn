@@ -66,6 +66,7 @@ EOF
 cat > "$work/server.tmpl" << 'EOF'
 cn = "127.0.0.1"
 ip_address = "127.0.0.1"
+dns_name = "localhost"
 tls_www_server
 signing_key
 encryption_key
@@ -142,7 +143,10 @@ for _ in $(seq 1 30); do
   sleep 0.5
 done
 
-profile='"university": "other", "profile": {"host": "127.0.0.1", "mfa": "none"}'
+# Wine's certificate check matches names, not addresses.
+gateway=127.0.0.1
+[ -n "${1:-}" ] && gateway=localhost
+profile='"university": "other", "profile": {"host": "'$gateway'", "mfa": "none"}'
 api /api/setup "{\"user\": \"test\", \"password\": \"secret\", $profile}"
 api /api/connect '{}'
 wait_state connected

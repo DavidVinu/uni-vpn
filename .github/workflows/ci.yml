@@ -964,16 +964,6 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq wine64 > /dev/null
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - name: TLS under Wine (diagnostic)
-        run: |
-          mkdir /tmp/wt && cp packaging/inprocess/tlsprobe.go.txt /tmp/wt/main.go
-          (cd /tmp/wt && printf 'module wt\ngo 1.26\n' > go.mod && GOOS=windows go build -o wt.exe .)
-          export WINEPREFIX=$HOME/.wtp WINEDEBUG=-all
-          wine wineboot --init > /dev/null 2>&1 || true
-          wine /tmp/wt/wt.exe github.com || true
       - name: End to end against ocserv
         run: packaging/inprocess/e2e.sh core-inprocess/uni-vpn-core.exe
 
